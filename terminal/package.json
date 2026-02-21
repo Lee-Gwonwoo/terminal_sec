@@ -3,17 +3,11 @@
   "private": true,
   "version": "0.1.0",
   "workspaces": [
-    "backend",
-    "frontend"
+    "backend"
   ],
   "scripts": {
-    "dev": "concurrently \"npm:dev:backend\" \"npm:dev:frontend\"",
-    "dev:backend": "npm run dev -w backend",
-    "dev:frontend": "npm run dev -w frontend",
-    "build": "npm run build -w backend && npm run build -w frontend",
-    "test": "npm run test -w backend && npm run test -w frontend"
-  },
-  "devDependencies": {
-    "concurrently": "^9.1.2"
+    "dev": "npm run dev -w backend",
+    "build": "npm run build -w backend",
+    "test": "npm run test -w backend"
   }
 }

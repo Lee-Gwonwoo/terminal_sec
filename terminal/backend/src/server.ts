@@ -16,8 +16,9 @@ import {
 import { listAlertRules, upsertAlertRule } from "./services/alertsRepository.js";
 import { StreamHub } from "./realtime/streamHub.js";
 import { ensureSeedData } from "./seed.js";
-import { startInProcessNewsIngestion } from "./services/newsIngestion.js";
 import { startCalendarIngestionWorkers } from "./services/calendarIngestion.js";
+import { pullEodhdNews, pullEodhdNewsAll } from "./services/eodhdNewsProvider.js";
+import { insertNewsItem } from "./services/newsRepository.js";
 import type { NewsQuery } from "./types.js";
 
 const app = express();
@@ -43,6 +44,7 @@ function parseNewsQuery(query: Record<string, unknown>): NewsQuery {
     keyword: typeof query.keyword === "string" ? query.keyword : undefined,
     tickers: parseList(query.tickers),
     sources: parseList(query.sources),
+    sourceNames: parseList(query.source_names),
     tags: parseList(query.tags),
     from: typeof query.from === "string" ? query.from : undefined,
     to: typeof query.to === "string" ? query.to : undefined,
@@ -81,6 +83,72 @@ app.get("/api/news/:id", async (req, res, next) => {
       return;
     }
     res.json(item);
+  } catch (error) {
+    next(error);
+  }
+});
+
+const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+const pullEodhdSchema = z
+  .object({
+    date: isoDateSchema.optional(),
+    from: isoDateSchema.optional(),
+    to: isoDateSchema.optional(),
+    symbol: z.string().optional().default("QQQ.US"),
+    limit: z.number().int().min(1).max(200).optional().default(200),
+    fetch_all: z.boolean().optional().default(false)
+  })
+  .refine(
+    (value) => {
+      const hasDate = typeof value.date === "string";
+      const hasRange = typeof value.from === "string" && typeof value.to === "string";
+      return hasDate !== hasRange; // exactly one mode
+    },
+    { message: "Provide either {date} or {from,to} (but not both)." }
+  );
+
+// One-shot import endpoint used for demos/backfills.
+// Reads token from repo-root EODHD/API TOKEN and inserts items into SQLite with DB-level dedupe.
+app.post("/api/news/pull-eodhd", async (req, res, next) => {
+  try {
+    const input = pullEodhdSchema.parse(req.body);
+
+    const from = input.date ?? input.from!;
+    const to = input.date ?? input.to!;
+
+    const providerResult = input.fetch_all
+      ? await pullEodhdNewsAll({ symbol: input.symbol, from, to, pageSize: input.limit })
+      : { items: await pullEodhdNews({ symbol: input.symbol, from, to, limit: input.limit }), truncated: false };
+
+    const providerItems = providerResult.items;
+
+    let insertedCount = 0;
+    for (const rawItem of providerItems) {
+      const inserted = await insertNewsItem({
+        publishedAt: rawItem.publishedAt,
+        source: rawItem.source,
+        sourceType: rawItem.sourceType,
+        title: rawItem.title,
+        body: rawItem.body,
+        url: rawItem.url,
+        tickers: rawItem.providerTickers,
+        tags: rawItem.tags
+      });
+      if (inserted) {
+        insertedCount += 1;
+        streamHub.publishNews(inserted);
+      }
+    }
+
+    res.json({
+      symbol: input.symbol,
+      from,
+      to,
+      fetched: providerItems.length,
+      inserted: insertedCount,
+      truncated: providerResult.truncated
+    });
   } catch (error) {
     next(error);
   }
@@ -303,7 +371,6 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
 async function start(): Promise<void> {
   await initDb();
   await ensureSeedData();
-  startInProcessNewsIngestion(streamHub);
   startCalendarIngestionWorkers();
 
   app.listen(config.port, () => {

@@ -21,6 +21,11 @@ pnpm-debug.log*
 !.env.example
 !**/.env.example
 
+# Repo-specific secrets (do not commit)
+EODHD/API TOKEN
+thetadata/credit.txt
+thetadata/creds.txt
+
 # --- Local databases (SQLite) ---
 *.sqlite
 *.sqlite3
@@ -32,6 +37,9 @@ pnpm-debug.log*
 
 # Known local runtime DB in this repo
 terminal/backend/backend/data/app.db
+
+# Local ad-hoc maintenance scripts
+terminal/backend/test_*.mjs
 
 # --- Python ---
 .venv/

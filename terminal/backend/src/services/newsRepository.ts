@@ -43,6 +43,12 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
     where.push(`source_type IN (${sourcePlaceholders})`);
   }
 
+  if (query.sourceNames?.length) {
+    const sourcePlaceholders = query.sourceNames.map(() => "?").join(",");
+    values.push(...query.sourceNames);
+    where.push(`source IN (${sourcePlaceholders})`);
+  }
+
   if (query.tags?.length) {
     const tagClauses = query.tags.map(() => "tags_csv LIKE ?");
     for (const tag of query.tags) {

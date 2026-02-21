@@ -1,0 +1,67 @@
+EODHD 작업 지시사항 (EODHD 폴더 기준)
+
+[목표]
+- EODHD API로 데이터를 받을 때, 결과의 Datetime은 반드시 미국(뉴욕) 시간대(America/New_York) 기준이어야 한다.
+- 코드/스크립트는 심볼별 하위 폴더에 둔다. 예) EODHD/qqq/
+- 토큰은 EODHD/API TOKEN 파일에서 읽는다.
+
+[필수 규칙]
+1) 시간대(Timezone)
+- intraday(예: 5m) 데이터는 "뉴욕 시간" 기준으로 조회 범위를 잡는다.
+  - 즉, from/to를 계산할 때 America/New_York 로컬 날짜 경계를 기준으로 UTC Unix timestamp로 변환해 API에 전달한다.
+  - 날짜 계산도 뉴욕 기준 "오늘"을 기준으로 지난 주(월~금)를 구한다.
+
+2) Timestamp 컬럼 제거
+- 결과 데이터 파일(저장본)에는 Timestamp 컬럼을 포함하지 않는다.
+  - EODHD 응답에 Timestamp가 포함되더라도, 저장하기 전에 반드시 drop 한다.
+  - Datetime 컬럼은 Timestamp를 기반으로 America/New_York 로 변환하여 만든 값을 사용한다.
+
+3) 폴더/파일 규칙
+- QQQ 관련 코드는 EODHD/qqq/ 폴더 안에 작성한다.
+- 다운로드 결과물(예: xlsx/csv)도 기본은 같은 심볼 폴더(EODHD/qqq/)에 저장한다.
+- (중요) 출력 폴더를 만들 때, “만들 폴더명”이 “저장되는 폴더명(경로의 마지막 폴더명)”과 같으면 중복 폴더가 생기지 않게 한다.
+  - 예: 저장 폴더가 `...\csv\` 이고 만들 폴더명이 `csv`이면 `...\csv\csv\`를 만들지 말고 `...\csv\`를 그대로 사용한다.
+  - 구현 규칙(권장): `target_dir = base_dir`에서 시작하고, `basename(target_dir)`(Windows는 대소문자 무시)이 `folder_name`과 다를 때만 `target_dir / folder_name`을 붙인다.
+
+4) 출력 컬럼 권장
+- intraday(5m) 저장 시 권장 컬럼: Datetime, Open, High, Low, Close, Volume
+- 필요시 기타 컬럼은 추가 가능하나 Timestamp는 금지.
+
+[참고]
+- timezone: ZoneInfo('America/New_York') 사용
+- timestamp 변환: pd.to_datetime(Timestamp, unit='s', utc=True).dt.tz_convert('America/New_York')
+
+
+============================================================
+EODHD WORK INSTRUCTIONS (English)
+
+[Goal]
+- When downloading data via the EODHD API, the saved output must use US New York time (America/New_York) for Datetime.
+- Put symbol-specific code under a symbol folder, e.g. EODHD/qqq/
+- Read the API token from EODHD/API TOKEN
+
+[Mandatory Rules]
+1) Timezone
+- For intraday (e.g. 5m) data, define the query date range using New York local dates.
+  - Compute the date boundaries in America/New_York, then convert to UTC Unix timestamps for the API (from/to).
+  - The reference “today” for computing last week must also be based on New York time.
+
+2) Drop the Timestamp column
+- Do NOT include the Timestamp column in any saved output file.
+  - If the EODHD response contains Timestamp, it must be dropped before saving.
+  - Use Timestamp only as an intermediate field to build a New York-local Datetime column.
+
+3) Folder / file conventions
+- QQQ-related scripts must live under EODHD/qqq/
+- Downloaded outputs (xlsx/csv) should be saved to the same symbol folder by default.
+- (Important) When constructing/creating an output folder, prevent duplicate folder names when the “folder to create” matches the last segment of the “save directory”.
+  - Example: if the save directory is `...\\csv\\` and the folder name is `csv`, do NOT create `...\\csv\\csv\\`; just use `...\\csv\\`.
+  - Recommended rule: start with `target_dir = base_dir`, and only append `/ folder_name` if `basename(target_dir)` (case-insensitive on Windows) is different from `folder_name`.
+
+4) Recommended output columns
+- For intraday (5m) saved outputs: Datetime, Open, High, Low, Close, Volume
+- Additional columns are allowed if needed, but Timestamp is forbidden.
+
+[Notes]
+- timezone: use ZoneInfo('America/New_York')
+- timestamp conversion: pd.to_datetime(Timestamp, unit='s', utc=True).dt.tz_convert('America/New_York')

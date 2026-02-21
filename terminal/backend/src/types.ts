@@ -4,6 +4,7 @@ export type NewsQuery = {
   keyword?: string;
   tickers?: string[];
   sources?: string[];
+  sourceNames?: string[];
   tags?: string[];
   from?: string;
   to?: string;

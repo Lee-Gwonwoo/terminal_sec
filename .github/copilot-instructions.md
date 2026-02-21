@@ -27,6 +27,12 @@
   - Do **not** blindly retry permanent failures (invalid paths/config, authentication/token errors, deterministic parsing/validation errors, disk full). Fail fast with a clear error message.
   - If a retry loop would significantly delay a long batch job, make retry counts/delays configurable (constants or CLI/GUI knobs).
 
+- **Mock data policy (must)**
+  - Do **not** add or reintroduce mock/synthetic data generators (timers, fake providers, seeded “demo news”, etc.) unless the user explicitly requests mock data.
+  - If mock generation exists in the repo/codepaths, remove it end-to-end (source code + docs that describe it + build artifacts such as stale `dist/` that can preserve deleted code).
+  - If mock rows already exist in a local DB/output (e.g., SQLite tables), proactively provide a cleanup step (delete rows by source/tag, or delete/recreate the DB) and verify the cleanup by querying counts.
+  - Keep terminology explicit: “remove generation” (future data) vs “clean existing stored mock rows” (historical data).
+
 - **Wrapper + base pattern (momentum)**
   - Base modules expose `Config` + `run_analysis` (see `momentum/tree_10_optionsell_base.py`, `momentum/tree_11_optionsell_reversal_base.py`).
   - Wrappers import the base and only define constants + `main()` (see `momentum/tree_10_1_optionsell_momentum_atm.py`).
@@ -254,6 +260,12 @@
   - 짧은 대기 + 백오프(예: 0.1~0.5초부터 시작해서 점점 증가)를 사용하고, 재시도 횟수/원인을 로그로 남깁니다.
   - 영구적인 실패(잘못된 경로/설정, 인증/토큰 오류, 결정적 파싱/검증 오류, 디스크 용량 부족 등)는 무작정 재시도하지 말고 즉시 실패시키되 오류 메시지를 명확히 합니다.
   - 배치 작업이 길어지는 경우 재시도 횟수/대기 시간은 상수 또는 CLI/GUI 옵션으로 조절 가능하게 합니다.
+
+- **Mock 데이터 정책(필수)**
+  - 사용자가 mock 데이터를 명시적으로 요청하지 않는 한, mock/가짜 데이터 생성기(타이머, fake provider, seeded “demo news” 등)를 추가하거나 다시 넣지 않습니다.
+  - 레포/코드 경로에 mock 생성이 존재한다면 end-to-end로 제거합니다(소스 코드 + 이를 설명하는 문서 + 삭제된 코드가 남아있을 수 있는 `dist/` 같은 빌드 산출물 포함).
+  - 로컬 DB/출력물에 mock row가 이미 저장돼 있다면(예: SQLite), 정리 절차(소스/태그 기준 삭제 또는 DB 삭제/재생성)를 선제적으로 제공하고, 정리 후에는 count 쿼리로 검증합니다.
+  - 용어를 구분해서 씁니다: “생성 로직 제거”(미래 유입 차단) vs “기존 저장 mock row 정리”(과거 데이터 청소).
 
 - **Wrapper + base 패턴 (momentum)**
   - Base 모듈은 `Config` + `run_analysis` 형태로 코어 로직을 제공합니다.

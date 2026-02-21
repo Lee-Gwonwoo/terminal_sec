@@ -149,19 +149,16 @@ Notes on `.env`:
 1. `start()` in `backend/src/server.ts` runs.
 2. `initDb()` creates/opens the SQLite file and ensures tables/indexes exist.
 3. `ensureSeedData()` ensures the demo user and initial Calendar rows exist.
-4. `startInProcessNewsIngestion(streamHub)` starts the news ingestion loop.
-5. `startCalendarIngestionWorkers()` starts per-type calendar ingestion loops.
-6. Express starts listening on `config.port`.
-7. A 20s interval triggers `streamHub.heartbeat()`.
+4. `startCalendarIngestionWorkers()` starts per-type calendar ingestion loops.
+5. Express starts listening on `config.port`.
+6. A 20s interval triggers `streamHub.heartbeat()`.
 
-### News ingestion + realtime delivery (SSE)
-- Every 5 seconds `startInProcessNewsIngestion()`:
-   1. Calls `pullMockNews()` (mock provider items).
-   2. Enriches items:
-       - ticker extraction: provider tickers + `$TICKER` regex in text
-       - tag classification: rule-based keywords (earnings/guidance/merger/etc.)
-   3. Inserts into SQLite via `insertNewsItem()` with DB-level dedupe: `UNIQUE(source, url)` and `INSERT OR IGNORE`.
-   4. If inserted, publishes to clients via `streamHub.publishNews(item)`.
+### News import (EODHD) + realtime delivery (SSE)
+- There is no in-process/mock news ingestion loop.
+- News is imported on-demand via `POST /api/news/pull-eodhd` (demo/backfill endpoint).
+   - The backend reads the EODHD token from `EODHD/API TOKEN`.
+   - Insert uses DB-level dedupe: `UNIQUE(source, url)` and `INSERT OR IGNORE`.
+   - If inserted, it is published to clients via `streamHub.publishNews(item)`.
 
 - `GET /api/news/stream`:
    - Keeps a long-lived connection (`text/event-stream`).
@@ -512,19 +509,16 @@ Notes:
 1. `backend/src/server.ts`의 `start()` 실행
 2. `initDb()`로 SQLite 파일 오픈 + 테이블/인덱스 보장
 3. `ensureSeedData()`로 데모 유저 및 초기 캘린더 seed
-4. `startInProcessNewsIngestion(streamHub)`로 뉴스 인제스트 루프 시작
-5. `startCalendarIngestionWorkers()`로 캘린더 타입별 워커 시작
-6. Express가 `config.port`에서 리슨
-7. 20초마다 `streamHub.heartbeat()` 실행
+4. `startCalendarIngestionWorkers()`로 캘린더 타입별 워커 시작
+5. Express가 `config.port`에서 리슨
+6. 20초마다 `streamHub.heartbeat()` 실행
 
-### 뉴스 인제스트 + 실시간(SSE)
-- 5초마다 `startInProcessNewsIngestion()`이:
-   1. `pullMockNews()` 호출(목 provider)
-   2. 보강 수행:
-       - 티커 추출: provider tickers + 본문 `$TICKER` 정규식
-       - 태그 분류: 키워드 룰(earnings/guidance/merger 등)
-   3. SQLite에 `insertNewsItem()`으로 저장(중복 방지: `UNIQUE(source, url)` + `INSERT OR IGNORE`)
-   4. 새로 삽입된 경우 `streamHub.publishNews(item)`으로 SSE 전파
+### 뉴스 Import(EODHD) + 실시간(SSE)
+- in-process/mock news ingestion 루프는 없습니다.
+- 뉴스는 필요할 때 `POST /api/news/pull-eodhd`(데모/백필 엔드포인트)로 가져옵니다.
+   - 백엔드는 `EODHD/API TOKEN`에서 토큰을 읽습니다.
+   - 저장은 DB 레벨 중복 제거(`UNIQUE(source, url)` + `INSERT OR IGNORE`)를 사용합니다.
+   - 새로 삽입된 경우 `streamHub.publishNews(item)`으로 SSE 전파합니다.
 
 - `GET /api/news/stream`:
    - 연결을 유지하는 `text/event-stream`

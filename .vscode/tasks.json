@@ -2,6 +2,34 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "backend: dev (npm.cmd)",
+      "type": "shell",
+      "command": "npm.cmd",
+      "args": ["run", "dev"],
+      "options": {
+        "cwd": "${workspaceFolder}\\terminal\\backend"
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "webui: dev (npm.cmd)",
+      "type": "shell",
+      "command": "npm.cmd",
+      "args": ["run", "dev"],
+      "options": {
+        "cwd": "${workspaceFolder}\\termina_web\\figma_code\\terminal ui"
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "webui: dev (all)",
+      "dependsOn": ["backend: dev (npm.cmd)", "webui: dev (npm.cmd)"],
+      "dependsOrder": "parallel",
+      "problemMatcher": []
+    },
+    {
       "label": "terminal: dev (npm.cmd)",
       "type": "shell",
       "command": "npm.cmd",
