@@ -4,6 +4,7 @@ export type WindowType = 'news' | 'watchlist' | 'calendar';
 
 export interface NewsItem {
   id: string;
+  publishedAt?: string;
   time: string;
   ticker: string[];
   title: string;

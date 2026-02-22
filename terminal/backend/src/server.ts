@@ -40,6 +40,8 @@ function parseList(input: unknown): string[] | undefined {
 }
 
 function parseNewsQuery(query: Record<string, unknown>): NewsQuery {
+  const parsedLimit = typeof query.limit === "string" ? Number(query.limit) : undefined;
+  const limit = Number.isFinite(parsedLimit as number) ? (parsedLimit as number) : undefined;
   return {
     keyword: typeof query.keyword === "string" ? query.keyword : undefined,
     tickers: parseList(query.tickers),
@@ -48,7 +50,7 @@ function parseNewsQuery(query: Record<string, unknown>): NewsQuery {
     tags: parseList(query.tags),
     from: typeof query.from === "string" ? query.from : undefined,
     to: typeof query.to === "string" ? query.to : undefined,
-    limit: typeof query.limit === "string" ? Number(query.limit) : undefined,
+    limit,
     cursor: typeof query.cursor === "string" ? query.cursor : undefined
   };
 }
@@ -97,6 +99,7 @@ const pullEodhdSchema = z
     to: isoDateSchema.optional(),
     symbol: z.string().optional().default("QQQ.US"),
     limit: z.number().int().min(1).max(200).optional().default(200),
+    offset: z.number().int().min(0).optional().default(0),
     fetch_all: z.boolean().optional().default(false)
   })
   .refine(
@@ -117,9 +120,13 @@ app.post("/api/news/pull-eodhd", async (req, res, next) => {
     const from = input.date ?? input.from!;
     const to = input.date ?? input.to!;
 
+    const offset = input.offset;
     const providerResult = input.fetch_all
       ? await pullEodhdNewsAll({ symbol: input.symbol, from, to, pageSize: input.limit })
-      : { items: await pullEodhdNews({ symbol: input.symbol, from, to, limit: input.limit }), truncated: false };
+      : {
+          items: await pullEodhdNews({ symbol: input.symbol, from, to, limit: input.limit, offset }),
+          truncated: false
+        };
 
     const providerItems = providerResult.items;
 
@@ -141,10 +148,16 @@ app.post("/api/news/pull-eodhd", async (req, res, next) => {
       }
     }
 
+    const done = !input.fetch_all && providerItems.length < input.limit;
+    const nextOffset = input.fetch_all ? undefined : done ? undefined : offset + providerItems.length;
+
     res.json({
       symbol: input.symbol,
       from,
       to,
+      offset: input.fetch_all ? undefined : offset,
+      nextOffset,
+      done: input.fetch_all ? undefined : done,
       fetched: providerItems.length,
       inserted: insertedCount,
       truncated: providerResult.truncated

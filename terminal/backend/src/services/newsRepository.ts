@@ -2,6 +2,36 @@ import { randomUUID } from "node:crypto";
 import { getDb } from "../db.js";
 import type { NewsItem, NewsQuery } from "../types.js";
 
+function clampInt(value: number, min: number, max: number): number {
+  return Math.min(Math.max(Math.trunc(value), min), max);
+}
+
+function capLimitByRangeDays(rangeDays?: number): number {
+  if (typeof rangeDays !== "number" || !Number.isFinite(rangeDays) || rangeDays <= 0) {
+    return 200;
+  }
+  if (rangeDays <= 7) {
+    return 200;
+  }
+  if (rangeDays <= 31) {
+    return 100;
+  }
+  return 50;
+}
+
+function computeRangeDays(from?: string, to?: string): number | undefined {
+  if (!from || !to) {
+    return undefined;
+  }
+  const fromMs = Date.parse(from);
+  const toMs = Date.parse(to);
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) {
+    return undefined;
+  }
+  const diffMs = Math.abs(toMs - fromMs);
+  return Math.floor(diffMs / 86_400_000) + 1;
+}
+
 function decodeCursor(cursor?: string): { publishedAt: string; id: string } | undefined {
   if (!cursor) {
     return undefined;
@@ -73,7 +103,10 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
     where.push(`(published_at < ? OR (published_at = ? AND id < ?))`);
   }
 
-  const limit = Math.min(Math.max(query.limit ?? 50, 1), 200);
+  const requestedLimit = typeof query.limit === "number" && Number.isFinite(query.limit) ? query.limit : 200;
+  const rangeDays = computeRangeDays(query.from, query.to);
+  const policyMax = capLimitByRangeDays(rangeDays);
+  const limit = clampInt(Math.min(requestedLimit, policyMax), 1, 200);
   values.push(limit + 1);
 
   const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";

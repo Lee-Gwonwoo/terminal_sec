@@ -1,25 +1,65 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, Save, ChevronDown, Filter, X } from 'lucide-react';
 import { NewsItem, NewsFilter, SavedSearch } from '../types';
 import { filterNewsByQuery, groupNewsByDate } from '../mockData';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
+import { VariableSizeList as List } from 'react-window';
+
+const STICKY_DATE_HEADER_HEIGHT = 36;
 
 interface NewsWindowProps {
   onTickerClick?: (ticker: string) => void;
   initialTicker?: string;
 }
 
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const handle = window.setTimeout(() => setDebounced(value), delayMs);
+    return () => window.clearTimeout(handle);
+  }, [value, delayMs]);
+  return debounced;
+}
+
+function formatYmdLocal(date: Date): string {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function toIsoRange(fromDate: Date | null, toDate: Date | null): { from?: string; to?: string } {
+  const fromYmd = fromDate ? formatYmdLocal(fromDate) : undefined;
+  const toYmd = toDate ? formatYmdLocal(toDate) : undefined;
+  const from = fromYmd ? `${fromYmd}T00:00:00.000Z` : undefined;
+  const to = toYmd ? `${toYmd}T23:59:59.999Z` : undefined;
+  return { from, to };
+}
+
 export function NewsWindow({ onTickerClick, initialTicker }: NewsWindowProps) {
   const [searchQuery, setSearchQuery] = useState(initialTicker || '');
-  const [remoteNews, setRemoteNews] = useState<NewsItem[]>([]);
-  const [filteredNews, setFilteredNews] = useState<NewsItem[]>([]);
+  const debouncedQuery = useDebouncedValue(searchQuery, 250);
+  const [newsPages, setNewsPages] = useState<NewsItem[][]>([]);
+  const [nextCursor, setNextCursor] = useState<string | undefined>(undefined);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isPulling, setIsPulling] = useState(false);
+  const [pullOffset, setPullOffset] = useState<number>(0);
+  const [pullDone, setPullDone] = useState<boolean>(false);
   const [showFilters, setShowFilters] = useState(false);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [saveName, setSaveName] = useState('');
   const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
   const [selectedSavedSearch, setSelectedSavedSearch] = useState<string>('');
   const [expandedNewsId, setExpandedNewsId] = useState<string | null>(null);
+
+  const listContainerRef = useRef<HTMLDivElement | null>(null);
+  const listRef = useRef<List>(null);
+  const [listHeight, setListHeight] = useState<number>(300);
+  const loadMoreInFlightRef = useRef(false);
+  const [stickyDate, setStickyDate] = useState<string>('');
   
   const [filters, setFilters] = useState<NewsFilter>({
     dateFrom: null,
@@ -32,7 +72,56 @@ export function NewsWindow({ onTickerClick, initialTicker }: NewsWindowProps) {
   useEffect(() => {
     let cancelled = false;
 
-    const mapBackendItem = (item: any): NewsItem | null => {
+    const pullToday = async () => {
+      // Lightweight refresh on startup: pull today's EODHD news into SQLite.
+      // UI always renders from SQLite via GET /api/news.
+      setIsPulling(true);
+      try {
+        const today = formatYmdLocal(new Date());
+        await fetch('/api/news/pull-eodhd', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ date: today, symbol: '', limit: 200, offset: 0, fetch_all: false })
+        });
+      } catch (e) {
+        console.warn('EODHD pull failed (check token/network).', e);
+      } finally {
+        if (!cancelled) {
+          setIsPulling(false);
+        }
+      }
+    };
+
+    void pullToday();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!listContainerRef.current) {
+      return;
+    }
+    const el = listContainerRef.current;
+    const update = () => setListHeight(Math.max(120, el.clientHeight));
+    update();
+
+    const ro = new ResizeObserver(() => update());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (initialTicker) {
+      setSearchQuery(initialTicker);
+    }
+  }, [initialTicker]);
+
+  const remoteNews = useMemo(() => newsPages.flat(), [newsPages]);
+
+  const mapBackendItem = useMemo(() => {
+    return (item: any): NewsItem | null => {
       const publishedAt = typeof item?.published_at === 'string' ? item.published_at : null;
       if (!publishedAt) {
         return null;
@@ -45,6 +134,7 @@ export function NewsWindow({ onTickerClick, initialTicker }: NewsWindowProps) {
 
       return {
         id: typeof item?.id === 'string' ? item.id : `${publishedAt}-${Math.random()}`,
+        publishedAt,
         time,
         ticker: Array.isArray(item?.tickers) ? item.tickers : [],
         title: typeof item?.title === 'string' ? item.title : '',
@@ -54,100 +144,247 @@ export function NewsWindow({ onTickerClick, initialTicker }: NewsWindowProps) {
         content: typeof item?.body === 'string' ? item.body : undefined
       };
     };
+  }, []);
 
-    const loadDemoDate = async () => {
-      // Demo/backfill: fetch and display 2026-02-15..2026-02-19 items.
-      // Backend will read token from repo-root EODHD/API TOKEN.
-      try {
-        await fetch('/api/news/pull-eodhd', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ from: '2026-02-15', to: '2026-02-19', symbol: '', limit: 200, fetch_all: true })
-        });
-      } catch (e) {
-        console.warn('EODHD pull failed (check token/network).', e);
+  const isRangeSelected = Boolean(filters.dateFrom && filters.dateTo);
+
+  const toYmdRange = useMemo(() => {
+    const fromYmd = filters.dateFrom ? formatYmdLocal(filters.dateFrom) : undefined;
+    const toYmd = filters.dateTo ? formatYmdLocal(filters.dateTo) : undefined;
+    return { fromYmd, toYmd };
+  }, [filters.dateFrom, filters.dateTo]);
+
+  const buildCursorFromItem = (item?: NewsItem): string | undefined => {
+    if (!item?.publishedAt || !item?.id) {
+      return undefined;
+    }
+    try {
+      return window.btoa(`${item.publishedAt}|${item.id}`);
+    } catch {
+      return undefined;
+    }
+  };
+
+  const pullNextEodhdChunk = async (): Promise<{ inserted: number; fetched: number; done: boolean }> => {
+    if (!isRangeSelected || !toYmdRange.fromYmd || !toYmdRange.toYmd || pullDone) {
+      return { inserted: 0, fetched: 0, done: pullDone };
+    }
+    if (isPulling) {
+      return { inserted: 0, fetched: 0, done: pullDone };
+    }
+
+    setIsPulling(true);
+    try {
+      const response = await fetch('/api/news/pull-eodhd', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ from: toYmdRange.fromYmd, to: toYmdRange.toYmd, symbol: '', limit: 200, offset: pullOffset, fetch_all: false })
+      });
+      const json = await response.json().catch(() => ({}));
+
+      const fetched = typeof json?.fetched === 'number' ? json.fetched : 0;
+      const inserted = typeof json?.inserted === 'number' ? json.inserted : 0;
+      const done = typeof json?.done === 'boolean' ? json.done : fetched < 200;
+      const nextOffset = typeof json?.nextOffset === 'number' ? json.nextOffset : pullOffset + Math.max(fetched, 0);
+
+      setPullDone(done);
+      if (!done && Number.isFinite(nextOffset) && nextOffset > pullOffset) {
+        setPullOffset(nextOffset);
       }
+      return { inserted, fetched, done };
+    } catch (e) {
+      console.warn('EODHD range pull chunk failed.', e);
+      return { inserted: 0, fetched: 0, done: false };
+    } finally {
+      setIsPulling(false);
+    }
+  };
+
+  const rangeKey = useMemo(() => {
+    const from = filters.dateFrom ? formatYmdLocal(filters.dateFrom) : '';
+    const to = filters.dateTo ? formatYmdLocal(filters.dateTo) : '';
+    return `${from}|${to}`;
+  }, [filters.dateFrom, filters.dateTo]);
+
+  useEffect(() => {
+    // Reset progressive pull state whenever the date range changes.
+    setPullOffset(0);
+    setPullDone(false);
+  }, [rangeKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadFirstPage = async () => {
+      setIsLoading(true);
+      setLoadError(null);
+      setExpandedNewsId(null);
+      setNewsPages([]);
+      setNextCursor(undefined);
 
       try {
-        const fromIso = '2026-02-15T00:00:00.000Z';
-        const toIso = '2026-02-19T23:59:59.999Z';
-        const mapped: NewsItem[] = [];
-        let cursor: string | undefined;
-        for (let page = 0; page < 100; page++) {
-          const url = new URL('/api/news', window.location.origin);
-          url.searchParams.set('from', fromIso);
-          url.searchParams.set('to', toIso);
-          url.searchParams.set('source_names', 'EODHD');
-          url.searchParams.set('limit', '200');
-          if (cursor) {
-            url.searchParams.set('cursor', cursor);
-          }
+        // If a date range is selected, pull the first upstream chunk in the background
+        // so the DB starts filling that range without blocking initial render.
+        void pullNextEodhdChunk();
 
-          const response = await fetch(url.toString());
-          if (!response.ok) {
-            throw new Error(`GET /api/news failed: ${response.status}`);
-          }
+        const { from, to } = toIsoRange(filters.dateFrom, filters.dateTo);
+        const url = new URL('/api/news', window.location.origin);
+        if (from) url.searchParams.set('from', from);
+        if (to) url.searchParams.set('to', to);
+        url.searchParams.set('source_names', 'EODHD');
+        url.searchParams.set('limit', '200');
 
-          const json = await response.json();
-          const items = Array.isArray(json?.items) ? json.items : [];
-          mapped.push(...(items.map(mapBackendItem).filter(Boolean) as NewsItem[]));
-
-          cursor = typeof json?.nextCursor === 'string' && json.nextCursor.trim() !== '' ? json.nextCursor : undefined;
-          if (!cursor) {
-            break;
-          }
+        const response = await fetch(url.toString());
+        if (!response.ok) {
+          throw new Error(`GET /api/news failed: ${response.status}`);
         }
+        const json = await response.json();
+        const items = Array.isArray(json?.items) ? json.items : [];
+        const mapped = items.map(mapBackendItem).filter(Boolean) as NewsItem[];
+        const cursor = typeof json?.nextCursor === 'string' && json.nextCursor.trim() !== '' ? json.nextCursor : undefined;
 
-        if (!cancelled && mapped.length > 0) {
-          setRemoteNews(mapped);
-          // Default the date filters to the loaded demo range so it shows immediately.
-          setFilters((prev) => ({
-            ...prev,
-            dateFrom: new Date('2026-02-15T00:00:00.000Z'),
-            dateTo: new Date('2026-02-19T23:59:59.999Z')
-          }));
+        if (!cancelled) {
+          setNewsPages(mapped.length > 0 ? [mapped] : []);
+          setNextCursor(cursor);
         }
-      } catch (e) {
-        console.warn('Failed to load /api/news.', e);
+      } catch (e: any) {
+        if (!cancelled) {
+          setLoadError(e?.message ? String(e.message) : 'Failed to load news');
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
       }
     };
 
-    void loadDemoDate();
-
+    void loadFirstPage();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [rangeKey, mapBackendItem]);
 
-  useEffect(() => {
-    if (initialTicker) {
-      setSearchQuery(initialTicker);
-    }
-  }, [initialTicker]);
+  const filteredNews = useMemo(() => {
+    let result = filterNewsByQuery(remoteNews, debouncedQuery);
 
-  useEffect(() => {
-    let result = filterNewsByQuery(remoteNews, searchQuery);
-    
-    // Apply date filters
-    if (filters.dateFrom) {
-      result = result.filter(item => new Date(item.date) >= filters.dateFrom!);
+    const fromYmd = filters.dateFrom ? formatYmdLocal(filters.dateFrom) : undefined;
+    const toYmd = filters.dateTo ? formatYmdLocal(filters.dateTo) : undefined;
+    if (fromYmd) {
+      result = result.filter((item) => item.date >= fromYmd);
     }
-    if (filters.dateTo) {
-      result = result.filter(item => new Date(item.date) <= filters.dateTo!);
+    if (toYmd) {
+      result = result.filter((item) => item.date <= toYmd);
     }
-    
-    // Apply source filter
+
     if (filters.source.length > 0) {
-      result = result.filter(item => filters.source.includes(item.source));
+      result = result.filter((item) => filters.source.includes(item.source));
     }
-    
-    setFilteredNews(result);
-  }, [searchQuery, filters, remoteNews]);
 
-  const groupedNews = groupNewsByDate(filteredNews);
-  const sortedDates = Array.from(groupedNews.keys()).sort((a, b) => 
-    new Date(b).getTime() - new Date(a).getTime()
-  );
+    return result;
+  }, [remoteNews, debouncedQuery, filters.dateFrom, filters.dateTo, filters.source]);
+
+  const groupedNews = useMemo(() => groupNewsByDate(filteredNews), [filteredNews]);
+  const sortedDates = useMemo(() => {
+    return Array.from(groupedNews.keys()).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+  }, [groupedNews]);
+
+  type NewsRow = { kind: 'date'; date: string } | { kind: 'item'; item: NewsItem };
+  const rows: NewsRow[] = useMemo(() => {
+    const out: NewsRow[] = [];
+    for (const date of sortedDates) {
+      out.push({ kind: 'date', date });
+      const items = groupedNews.get(date) ?? [];
+      for (const item of items) {
+        out.push({ kind: 'item', item });
+      }
+    }
+    return out;
+  }, [sortedDates, groupedNews]);
+
+  const findStickyDateForIndex = (index: number): string => {
+    for (let i = Math.min(index, rows.length - 1); i >= 0; i--) {
+      const row = rows[i];
+      if (row && row.kind === 'date') {
+        return row.date;
+      }
+    }
+    return rows.length > 0 && rows[0].kind === 'date' ? rows[0].date : '';
+  };
+
+  useEffect(() => {
+    listRef.current?.resetAfterIndex(0, true);
+  }, [expandedNewsId, rows.length]);
+
+  useEffect(() => {
+    // Initialize sticky header date on first render / dataset changes.
+    setStickyDate(findStickyDateForIndex(0));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows.length]);
+
+  const loadMore = async () => {
+    if (isLoadingMore || loadMoreInFlightRef.current) {
+      return;
+    }
+
+    const lastItem = remoteNews.length > 0 ? remoteNews[remoteNews.length - 1] : undefined;
+    const cursorToUse = nextCursor ?? buildCursorFromItem(lastItem);
+    if (!cursorToUse) {
+      // If we have a selected range and haven't finished pulling upstream yet, try to pull more.
+      if (isRangeSelected && !pullDone) {
+        await pullNextEodhdChunk();
+      }
+      return;
+    }
+
+    loadMoreInFlightRef.current = true;
+    setIsLoadingMore(true);
+    setLoadError(null);
+
+    const fetchPage = async (cursor: string) => {
+      const { from, to } = toIsoRange(filters.dateFrom, filters.dateTo);
+      const url = new URL('/api/news', window.location.origin);
+      if (from) url.searchParams.set('from', from);
+      if (to) url.searchParams.set('to', to);
+      url.searchParams.set('source_names', 'EODHD');
+      url.searchParams.set('limit', '200');
+      url.searchParams.set('cursor', cursor);
+
+      const response = await fetch(url.toString());
+      if (!response.ok) {
+        throw new Error(`GET /api/news failed: ${response.status}`);
+      }
+      const json = await response.json();
+      const items = Array.isArray(json?.items) ? json.items : [];
+      const mapped = items.map(mapBackendItem).filter(Boolean) as NewsItem[];
+      const next = typeof json?.nextCursor === 'string' && json.nextCursor.trim() !== '' ? json.nextCursor : undefined;
+      return { mapped, next };
+    };
+
+    try {
+      // Prefetch one upstream chunk when a date range is selected.
+      if (isRangeSelected && !pullDone) {
+        void pullNextEodhdChunk();
+      }
+
+      let { mapped, next } = await fetchPage(cursorToUse);
+
+      // If DB is exhausted but we're still pulling the upstream range, pull one chunk and retry once.
+      if (mapped.length === 0 && isRangeSelected && !pullDone) {
+        await pullNextEodhdChunk();
+        const retry = await fetchPage(cursorToUse);
+        mapped = retry.mapped;
+        next = retry.next;
+      }
+
+      setNewsPages((prev) => (mapped.length > 0 ? [...prev, mapped] : prev));
+      setNextCursor(next);
+    } catch (e: any) {
+      setLoadError(e?.message ? String(e.message) : 'Failed to load more news');
+    } finally {
+      setIsLoadingMore(false);
+      loadMoreInFlightRef.current = false;
+    }
+  };
 
   const handleSaveSearch = () => {
     if (saveName.trim()) {
@@ -340,75 +577,169 @@ export function NewsWindow({ onTickerClick, initialTicker }: NewsWindowProps) {
       </div>
 
       {/* News List */}
-      <div className="flex-1 overflow-auto">
-        {sortedDates.map(date => (
-          <div key={date}>
-            {/* Date Separator */}
-            <div className="sticky top-0 bg-gray-200 dark:bg-gray-700 px-4 py-2 text-sm font-medium z-10">
-              {new Date(date).toLocaleDateString('en-US', { 
-                year: 'numeric', 
-                month: 'long', 
-                day: 'numeric' 
-              })}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <div ref={listContainerRef} className="flex-1 overflow-hidden">
+          {loadError && (
+            <div className="px-4 py-3 text-sm text-red-600 dark:text-red-400">
+              {loadError}
             </div>
-            
-            {/* News Items for this date */}
-            {groupedNews.get(date)?.map(item => (
-              <React.Fragment key={item.id}>
-                <div className="grid grid-cols-12 gap-4 px-4 py-3 border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
-                  <div className="col-span-2 text-sm text-gray-600 dark:text-gray-400">{item.time}</div>
-                  <div className="col-span-2 flex gap-1 flex-wrap">
-                    {item.ticker.map((ticker) => (
-                      <button
-                        key={ticker}
-                        onClick={() => onTickerClick?.(ticker)}
-                        className="px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-200 dark:hover:bg-blue-800"
-                      >
-                        {ticker}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="col-span-5 text-sm">
-                    <button
-                      type="button"
-                      onClick={() => setExpandedNewsId((prev) => (prev === item.id ? null : item.id))}
-                      className="text-left hover:underline"
-                      title="Click to expand/collapse body"
+          )}
+
+          {isLoading && (
+            <div className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+              Loading...
+            </div>
+          )}
+
+          {!isLoading && rows.length === 0 && (
+            <div className="flex items-center justify-center h-40 text-gray-500">
+              No news items found
+            </div>
+          )}
+
+          {!isLoading && rows.length > 0 && (
+            <div className="relative">
+              {stickyDate && (
+                <div
+                  className="absolute top-0 left-0 right-0 z-10 bg-gray-200 dark:bg-gray-700 px-4 py-2 text-sm font-medium pointer-events-none"
+                  style={{ height: STICKY_DATE_HEADER_HEIGHT }}
+                >
+                  {new Date(stickyDate).toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                  })}
+                </div>
+              )}
+
+              <List
+                ref={listRef}
+                height={listHeight}
+                width="100%"
+                itemCount={rows.length}
+                itemSize={(index) => {
+                  const row = rows[index];
+                  if (row.kind === 'date') return 36;
+                  return expandedNewsId === row.item.id ? 420 : 64;
+                }}
+                innerElementType={React.forwardRef<HTMLDivElement, any>(function Inner({ style, ...rest }, ref) {
+                  const nextStyle = {
+                    ...style,
+                    height: (typeof style?.height === 'number' ? style.height : 0) + STICKY_DATE_HEADER_HEIGHT
+                  };
+                  return <div ref={ref} style={nextStyle} {...rest} />;
+                })}
+                overscanCount={8}
+                onItemsRendered={({ visibleStartIndex, visibleStopIndex }) => {
+                  const nextSticky = findStickyDateForIndex(visibleStartIndex);
+                  if (nextSticky && nextSticky !== stickyDate) {
+                    setStickyDate(nextSticky);
+                  }
+
+                  // Infinite scroll: when user reaches the bottom, automatically load the next page.
+                  if (visibleStopIndex >= rows.length - 8) {
+                    void loadMore();
+                  }
+                }}
+              >
+              {({ index, style }) => {
+                const row = rows[index];
+                const shiftedStyle = {
+                  ...style,
+                  top: typeof (style as any)?.top === 'number' ? (style as any).top + STICKY_DATE_HEADER_HEIGHT : (style as any)?.top
+                };
+                if (row.kind === 'date') {
+                  return (
+                    <div
+                      style={shiftedStyle}
+                      className="bg-gray-200 dark:bg-gray-700 px-4 py-2 text-sm font-medium"
                     >
-                      {item.title}
-                    </button>
-                  </div>
-                  <div className="col-span-3 text-sm text-gray-600 dark:text-gray-400">
-                    <div>{item.source}</div>
-                    {item.url && (
-                      <a
-                        href={item.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="block mt-1 text-xs underline break-all"
-                        title={item.url}
-                      >
-                        {item.url}
-                      </a>
+                      {new Date(row.date).toLocaleDateString('en-US', {
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric'
+                      })}
+                    </div>
+                  );
+                }
+
+                const item = row.item;
+                const isExpanded = expandedNewsId === item.id;
+                return (
+                  <div style={shiftedStyle} className="border-b border-gray-200 dark:border-gray-700">
+                    <div className="grid grid-cols-12 gap-4 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                      <div className="col-span-2 text-sm text-gray-600 dark:text-gray-400">{item.time}</div>
+                      <div className="col-span-2 min-w-0">
+                        <div className="flex gap-1 flex-nowrap overflow-x-auto whitespace-nowrap">
+                          {item.ticker.map((ticker) => (
+                            <button
+                              key={ticker}
+                              onClick={() => onTickerClick?.(ticker)}
+                              className="px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-200 dark:hover:bg-blue-800 shrink-0"
+                            >
+                              {ticker}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="col-span-5 min-w-0 text-sm">
+                        <button
+                          type="button"
+                          onClick={() => setExpandedNewsId((prev) => (prev === item.id ? null : item.id))}
+                          className="text-left hover:underline block w-full overflow-hidden text-ellipsis whitespace-nowrap"
+                          title="Click to expand/collapse body"
+                        >
+                          {item.title}
+                        </button>
+                      </div>
+                      <div className="col-span-3 min-w-0 text-sm text-gray-600 dark:text-gray-400">
+                        <div>{item.source}</div>
+                        {item.url && (
+                          <a
+                            href={item.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="block mt-1 text-xs underline truncate"
+                            title={item.url}
+                          >
+                            {item.url}
+                          </a>
+                        )}
+                      </div>
+                    </div>
+
+                    {isExpanded && item.content && (
+                      <div className="px-4 pb-3 bg-gray-50 dark:bg-gray-800">
+                        <div className="text-sm whitespace-pre-wrap break-words max-h-80 overflow-auto">
+                          {item.content}
+                        </div>
+                      </div>
                     )}
                   </div>
-                </div>
+                );
+              }}
+              </List>
+            </div>
+          )}
+        </div>
 
-                {expandedNewsId === item.id && item.content && (
-                  <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-                    <div className="text-sm whitespace-pre-wrap break-words">{item.content}</div>
-                  </div>
-                )}
-              </React.Fragment>
-            ))}
+        <div className="px-4 py-2 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3">
+          <div className="text-xs text-gray-600 dark:text-gray-400">
+            Loaded: {remoteNews.length} {isPulling ? '(pulling EODHD...)' : ''}
           </div>
-        ))}
-        
-        {filteredNews.length === 0 && (
-          <div className="flex items-center justify-center h-40 text-gray-500">
-            No news items found
-          </div>
-        )}
+          <button
+            onClick={loadMore}
+            disabled={!nextCursor || isLoadingMore}
+            className={`px-3 py-1 text-sm rounded ${
+              !nextCursor || isLoadingMore
+                ? 'bg-gray-200 dark:bg-gray-700 text-gray-500 cursor-not-allowed'
+                : 'bg-blue-500 text-white hover:bg-blue-600'
+            }`}
+            title={!nextCursor ? 'No more results' : 'Load next page'}
+          >
+            {isLoadingMore ? 'Loading...' : 'Load more'}
+          </button>
+        </div>
       </div>
     </div>
   );
