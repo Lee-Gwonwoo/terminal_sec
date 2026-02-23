@@ -1,3 +1,49 @@
+<!--
+========================================================================
+  HOW TO USE THIS FILE (AI AGENT — READ THIS FIRST)
+  This file is loaded in full as system context on every conversation.
+  Read the TABLE OF CONTENTS below, then read ONLY the relevant sections.
+  Do NOT read the whole file.
+========================================================================
+-->
+
+# ⚠️ AI AGENT OPERATING RULES (MUST READ BEFORE ANY TASK)
+
+## Plan & Agent Log
+- Create `plan.md` **only when the user explicitly requests it**.
+- Write/update `agent_log.md` **only when the user explicitly tells you to execute a specific plan**.
+- File storage: `C:\github_coding\terminal_sec\ai_agent_plan\<project_name>\`
+  - `plan.md`: detailed step-by-step plan before starting (goal, approach, files to create/modify, order, risks).
+  - `agent_log.md`: chronological record of every action taken (files created/modified, commands run, decisions, errors).
+- **Break large tasks into steps:** if a task is large or complex, decompose it into small, independently verifiable steps. Each step should have a clear deliverable.
+- **Intermediate review loop:** after each step, pause and verify the result (e.g., check file content, run a test, confirm output) before proceeding to the next step. Do not chain all steps blindly end-to-end.
+
+---
+
+## TABLE OF CONTENTS
+(Read only the section relevant to your current task)
+
+| # | Section | Key topics |
+|---|---------|------------|
+| 1 | [Big picture](#big-picture) | repo overview, key domains |
+| 2 | [Folder structure & data flow](#folder-structure--data-flow-high-level) | EODHD→original_data→learning_data flow |
+| 3 | [How to run (Windows)](#how-to-run-windows) | venv activation, absolute paths |
+| 4a | [Retries / robustness](#project-conventions-to-follow) | 10 retries, backoff, permanent failures |
+| 4b | [Capability limits / honesty](#project-conventions-to-follow) | missing API keys, no fake features |
+| 4c | [Mock data policy](#project-conventions-to-follow) | no mock data unless requested |
+| 4d | [Wrapper + base pattern](#project-conventions-to-follow) | momentum scripts, Config+run_analysis |
+| 4e | [Indicator calculators](#project-conventions-to-follow) | pandas append-only, logging pattern |
+| 4f | [Deep learning trainers](#project-conventions-to-follow) | dedup shared intermediates, presets |
+| 4g | [GUI scripts](#project-conventions-to-follow) | PyQt only, resizable, activity log |
+| 4h | [Web UI scripts](#project-conventions-to-follow) | bind policy, no CDN, debug visibility |
+| 4i | [Config template files (TOML)](#project-conventions-to-follow) | VALUES/EXPLANATIONS, bilingual, valid TOML |
+| 4j | [Docs / prompt Markdown files](#project-conventions-to-follow) | bilingual EN+KO, parity, output columns |
+| 4k | [EODHD rules](#project-conventions-to-follow) | NY timezone, no Timestamp col, token |
+| 4l | [ThetaData / ThetaTerminal](#project-conventions-to-follow) | run_theta_terminal.ps1 |
+| 5 | [Safety / repo hygiene](#safety--repo-hygiene) | path length ≤250, secrets, naming |
+
+---
+
 # Copilot instructions (python workspace)
 
 ## Big picture
@@ -158,8 +204,9 @@
   - Terminology: prefer “CLI options/flags (command-line options)” rather than “arguments” unless you specifically mean positional arguments.
 
 - **Docs and “prompt” Markdown files (important)**
-  - This repo uses `*.md` files as *prompt/spec/explanation companions* for some scripts (example: `deep_learning_data/indicator_calculator/stock2_indicator_calculator.md`).
-  - **Bilingual rule (English + Korean):** when creating or updating any `*.md` companion/spec/explanation doc in this repo, include **both** English and Korean.
+  - This repo uses `*.md` files as *prompt/spec/explanation companions* for some scripts (example: `deep_learning_data/indicator_calculator/stock2_indicator_calculator.md`).  - **Scope of the bilingual rule (must):** this EN/KO writing convention applies to **both** of the following:
+    1. Any `*.md` companion/spec/explanation doc in this repo.
+    2. `copilot-instructions.md` itself — whenever a section is added or edited, the corresponding section in the other language must be updated identically in the same change.  - **Bilingual rule (English + Korean):** when creating or updating any `*.md` companion/spec/explanation doc in this repo, include **both** English and Korean.
     - Write **English first**, then a clear separator (e.g., `---`), then **Korean**.
     - Keep the two sections strictly separated (do not mix languages within the same bullet/paragraph).
     - **Parity rule (must match):** the English and Korean sections must contain the **same information** and be kept in sync.
@@ -236,6 +283,47 @@
 - This repo contains many generated artifacts (`*.xlsx`, `*_raw.csv`, `*_raw.parquet`). When adding new scripts, follow the existing naming convention: `<script_name>.xlsx` + `<script_name>_raw.csv/parquet`, typically under the same folder as the script.
 
 ---
+
+<!--
+========================================================================
+  이 파일 사용 방법 (AI 에이전트)
+  이 파일은 매 대화마다 시스템 컨텍스트로 전체 로드됩니다.
+  아래는 한국어 참고용 섹션입니다 (사람이 읽는 용도).
+========================================================================
+-->
+
+# ⚠️ AI 에이전트 운영 규칙
+
+## 플랜 & 에이전트 로그
+- `plan.md`는 **사용자가 명시적으로 요청할 때만** 생성.
+- `agent_log.md`는 **사용자가 특정 plan을 수행하라고 지시할 때만** 작성/업데이트.
+- 저장 위치: `C:\github_coding\terminal_sec\ai_agent_plan\<project_name>\`
+  - `plan.md`: 작업 시작 전 상세 단계별 계획 (목표, 접근법, 생성/수정 파일, 순서, 위험 요소).
+  - `agent_log.md`: 수행한 모든 작업을 시간순으로 기록 (생성/수정 파일, 실행 명령어, 결정, 오류).
+- **큰 작업은 단계로 쪼개기:** 크고 복잡한 작업은 독립적으로 검증 가능한 작은 단계로 분해한다. 각 단계마다 명확한 산출물을 정의한다.
+- **중간 결과물 검토 루프:** 각 단계 완료 후 결과를 검증(파일 내용 확인, 테스트 실행, 출력 확인)한 뒤 다음 단계로 진행한다. 모든 단계를 맹목적으로 끝까지 연속 실행하지 않는다.
+
+## 목차
+(현재 작업과 관련된 섹션만 읽을 것)
+
+| # | 섹션 | 주요 내용 |
+|---|------|----------|
+| 1 | [큰 그림](#큰-그림) | 레포 개요, 주요 영역 |
+| 2 | [폴더 구조 & 데이터 흐름](#폴더-구조--데이터-흐름요약) | EODHD→original_data→learning_data 흐름 |
+| 3 | [실행 방법 (Windows)](#실행-방법-windows) | venv 활성화, 절대경로 |
+| 4a | [재시도 / 견고성](#프로젝트-컨벤션) | 10회 재시도, 백오프 |
+| 4b | [역량 한계 / 정직성](#프로젝트-컨벤션) | API 키 없을 때, 땜질 금지 |
+| 4c | [Mock 데이터 정책](#프로젝트-컨벤션) | mock 데이터 요청 없으면 사용 금지 |
+| 4d | [Wrapper + base 패턴](#프로젝트-컨벤션) | momentum 스크립트 구조 |
+| 4e | [Indicator calculators](#프로젝트-컨벤션) | pandas, 로깅 패턴 |
+| 4f | [딥러닝 트레이너](#프로젝트-컨벤션) | dedup, 프리셋, 문서 정합 |
+| 4g | [GUI 스크립트](#프로젝트-컨벤션) | PyQt, 크기조정, 로그 |
+| 4h | [Web UI 스크립트](#프로젝트-컨벤션) | 바인딩, CDN 금지 |
+| 4i | [설정 템플릿 파일 (TOML)](#프로젝트-컨벤션) | VALUES/EXPLANATIONS, 한/영, TOML 유효성 |
+| 4j | [Docs / prompt Markdown 규칙](#프로젝트-컨벤션) | 한/영 병기, 정합, 출력 컬럼 |
+| 4k | [EODHD 규칙](#프로젝트-컨벤션) | NY 시간대, Timestamp 컬럼 금지 |
+| 4l | [ThetaData / ThetaTerminal](#프로젝트-컨벤션) | run_theta_terminal.ps1 |
+| 5 | [보안 / 레포 위생](#보안--레포-위생) | 경로 250자 이하, 시크릿, 네이밍 |
 
 # Copilot 지침 (python 워크스페이스, 한국어)
 
@@ -391,8 +479,9 @@
   - 용어: “인자(arguments)”보다는 “CLI 옵션/플래그(커맨드라인 옵션)” 표현을 우선 사용합니다(특히 `--epochs` 같은 형태).
 
 - **Docs / “prompt” Markdown 규칙(중요)**
-  - 일부 스크립트는 같은 이름의 `*.md`를 “프롬프트/스펙/설명” 동반 문서로 사용합니다.
-  - **한/영 병기 규칙:** 이 레포에서 `*.md` 동반 문서를 새로 만들거나 수정할 때는 **영어와 한국어를 모두** 포함합니다.
+  - 일부 스크립트는 같은 이름의 `*.md`를 “프롬프트/스펙/설명” 동반 문서로 사용합니다.  - **한/영 병기 규칙 적용 범위(필수):** 이 한/영 작성 방식은 아래 **두 가지 모두**에 적용됩니다:
+    1. 이 레포의 모든 `*.md` 동반/스펙/설명 문서.
+    2. `copilot-instructions.md` 자체 — 섹션을 추가하거나 수정할 때, 반드시 같은 변경 작업 안에서 다른 언어의 대응 섹션도 동일하게 업데이트해야 합니다.  - **한/영 병기 규칙:** 이 레포에서 `*.md` 동반 문서를 새로 만들거나 수정할 때는 **영어와 한국어를 모두** 포함합니다.
     - **영어를 위**, 구분선(예: `---`)을 넣은 뒤 **한국어를 아래**에 작성합니다.
     - 두 영역은 섞지 않습니다(같은 문단/불릿에 언어 혼합 금지).
     - **동일 내용(정합) 규칙:** English/Korean 두 섹션은 **같은 정보**를 포함해야 하며 항상 동기화되어야 합니다.
