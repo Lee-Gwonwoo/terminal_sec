@@ -9,6 +9,39 @@
 
 # ⚠️ AI AGENT OPERATING RULES (MUST READ BEFORE ANY TASK)
 
+**Execution discipline (must):**
+- Before starting work, use the TABLE OF CONTENTS to identify the most relevant section(s) for this task and prioritize following those instructions.
+- Always state a detailed plan in chat before implementation.
+- For each plan step: implement → verify it is correct → explicitly report the verification + completion in chat → then continue to the next step.
+
+---
+
+## TABLE OF CONTENTS
+(Read only the section relevant to your current task)
+
+| Tier | Section | Key topics |
+|------|---------|------------|
+| **T1** | [Plan & Agent Log](#plan--agent-log) | plan.md, agent_log.md, step decomposition |
+| **T1** | [Capability limits / honesty](#project-conventions-to-follow) | no fake features, fail fast |
+| **T1** | [Mock data policy](#project-conventions-to-follow) | no mock unless requested |
+| **T1** | [Safety / repo hygiene](#safety--repo-hygiene) | path ≤250, secrets, naming |
+| **T1** | [Bilingual EN/KO sync](#docs-and-prompt-markdown-files) | *.md + copilot-instructions parity |
+| **T2** | [Big picture](#big-picture) | repo overview, key domains |
+| **T2** | [Folder structure & data flow](#folder-structure--data-flow-high-level) | EODHD→original_data→learning_data |
+| **T2** | [How to run (Windows)](#how-to-run-windows) | venv activation, absolute paths |
+| **T3-A** | [Retries / robustness](#project-conventions-to-follow) | 10 retries, backoff, permanent failures |
+| **T3-A** | [Wrapper + base pattern](#project-conventions-to-follow) | momentum scripts, Config+run_analysis |
+| **T3-A** | [Indicator calculators](#project-conventions-to-follow) | pandas append-only, logging pattern |
+| **T3-A** | [Deep learning trainers](#project-conventions-to-follow) | dedup shared intermediates, presets |
+| **T3-B** | [GUI scripts](#project-conventions-to-follow) | PyQt only, resizable, activity log |
+| **T3-B** | [Web UI scripts](#project-conventions-to-follow) | bind policy, no CDN, debug visibility |
+| **T3-C** | [Config template files (TOML)](#project-conventions-to-follow) | VALUES/EXPLANATIONS, valid TOML |
+| **T3-C** | [Docs / prompt Markdown files](#project-conventions-to-follow) | bilingual EN+KO, parity, output cols |
+| **T3-D** | [EODHD rules](#project-conventions-to-follow) | NY timezone, no Timestamp col, token |
+| **T3-D** | [ThetaData / ThetaTerminal](#project-conventions-to-follow) | run_theta_terminal.ps1 |
+
+> **T1** = Always apply every task &nbsp;·&nbsp; **T2** = Repo context (read when unfamiliar) &nbsp;·&nbsp; **T3-A** = Code patterns &nbsp;·&nbsp; **T3-B** = UI dev &nbsp;·&nbsp; **T3-C** = Config/Docs &nbsp;·&nbsp; **T3-D** = Data sources
+
 ## Plan & Agent Log
 - Create `plan.md` **only when the user explicitly requests it**.
 - Write/update `agent_log.md` **only when the user explicitly tells you to execute a specific plan**.
@@ -20,31 +53,29 @@
 
 ---
 
-## TABLE OF CONTENTS
-(Read only the section relevant to your current task)
-
-| # | Section | Key topics |
-|---|---------|------------|
-| 1 | [Big picture](#big-picture) | repo overview, key domains |
-| 2 | [Folder structure & data flow](#folder-structure--data-flow-high-level) | EODHD→original_data→learning_data flow |
-| 3 | [How to run (Windows)](#how-to-run-windows) | venv activation, absolute paths |
-| 4a | [Retries / robustness](#project-conventions-to-follow) | 10 retries, backoff, permanent failures |
-| 4b | [Capability limits / honesty](#project-conventions-to-follow) | missing API keys, no fake features |
-| 4c | [Mock data policy](#project-conventions-to-follow) | no mock data unless requested |
-| 4d | [Wrapper + base pattern](#project-conventions-to-follow) | momentum scripts, Config+run_analysis |
-| 4e | [Indicator calculators](#project-conventions-to-follow) | pandas append-only, logging pattern |
-| 4f | [Deep learning trainers](#project-conventions-to-follow) | dedup shared intermediates, presets |
-| 4g | [GUI scripts](#project-conventions-to-follow) | PyQt only, resizable, activity log |
-| 4h | [Web UI scripts](#project-conventions-to-follow) | bind policy, no CDN, debug visibility |
-| 4i | [Config template files (TOML)](#project-conventions-to-follow) | VALUES/EXPLANATIONS, bilingual, valid TOML |
-| 4j | [Docs / prompt Markdown files](#project-conventions-to-follow) | bilingual EN+KO, parity, output columns |
-| 4k | [EODHD rules](#project-conventions-to-follow) | NY timezone, no Timestamp col, token |
-| 4l | [ThetaData / ThetaTerminal](#project-conventions-to-follow) | run_theta_terminal.ps1 |
-| 5 | [Safety / repo hygiene](#safety--repo-hygiene) | path length ≤250, secrets, naming |
-
----
-
 # Copilot instructions (python workspace)
+
+<!-- ====================================================
+  TIER 1 — Always apply to every task
+  (Capability limits, Mock data, Safety, Bilingual sync)
+  These are pulled into the Project conventions section below.
+  See TABLE OF CONTENTS above for direct links.
+===================================================== -->
+
+<!-- T1: Safety / repo hygiene -->
+## Safety / repo hygiene
+- **Path length hygiene (Windows / tooling compatibility)**
+  - When creating new folders/files (especially generated outputs under deep subfolders), keep the **full absolute path length ≤ 250 characters**.
+  - Prefer shorter folder/file names over deeper nesting.
+  - Avoid repeating tokens (e.g., `csv/csv`, `parquet/parquet`) unless the surrounding codebase already requires it for backward compatibility.
+  - If a requested naming scheme risks exceeding the limit, shorten only the *non-semantic* parts (extra prefixes/suffixes), and keep the key identifiers (symbol, timeframe, expiry, year) intact.
+- Treat these as secrets and never print them to logs/output or commit derived values:
+  - `EODHD/API TOKEN`, `thetadata/credit.txt`, `thetadata/creds.txt`.
+- This repo contains many generated artifacts (`*.xlsx`, `*_raw.csv`, `*_raw.parquet`). When adding new scripts, follow the existing naming convention: `<script_name>.xlsx` + `<script_name>_raw.csv/parquet`, typically under the same folder as the script.
+
+<!-- ====================================================
+  TIER 2 — Repo context
+===================================================== -->
 
 ## Big picture
 - This repo is a collection of *script-first* research pipelines (not a packaged library). Most work is done by running individual `*.py` files that read local CSV/Parquet inputs and write Excel/CSV/Parquet outputs.
@@ -66,23 +97,36 @@
   - Run scripts directly: `python momentum\tree_10_1_optionsell_momentum_atm.py`
 - Many scripts hard-code absolute paths under `c:\\github_coding\\python\\...` (see `momentum/tree_10_1_optionsell_momentum_atm.py`). Preserve this convention when editing existing scripts unless you’re explicitly asked to make paths portable.
 
-## Project conventions to follow
-- **Retries / robustness (default policy)**
-  - When implementing operations that can fail transiently (network calls, file writes/renames on Windows, copy/move, reading remote resources), assume **up to 10 retries by default**.
-  - Prefer short waits with backoff (e.g., 0.1–0.5s initial delay, increasing) and log retry attempts clearly.
-  - Do **not** blindly retry permanent failures (invalid paths/config, authentication/token errors, deterministic parsing/validation errors, disk full). Fail fast with a clear error message.
-  - If a retry loop would significantly delay a long batch job, make retry counts/delays configurable (constants or CLI/GUI knobs).
+<!-- ====================================================
+  TIER 3 — Task-specific conventions
+  T3-A: Code patterns (Retries, Wrapper+base, Indicators, DL trainers)
+  T3-B: UI dev (GUI, Web UI)
+  T3-C: Config & Docs (TOML, Markdown)
+  T3-D: Data sources (EODHD, ThetaData)
+  T1 items embedded below: Capability limits (must), Mock data (must)
+===================================================== -->
 
+## Project conventions to follow
+
+<!-- T1: Capability limits / honesty -->
 - **Capability limits / honesty (must)**
   - If a user request cannot be completed with the available information, credentials, or tools (e.g., missing API key/endpoint, unknown provider spec), say so **explicitly and early**.
   - Do **not** “paper over” missing functionality with misleading UI-only changes (e.g., hiding source columns) or placeholder code that implies the feature works.
   - Provide the shortest unblock checklist (exact inputs needed, where to put secrets, and a minimal verification step).
 
+<!-- T1: Mock data policy -->
 - **Mock data policy (must)**
   - Do **not** add or reintroduce mock/synthetic data generators (timers, fake providers, seeded “demo news”, etc.) unless the user explicitly requests mock data.
   - If mock generation exists in the repo/codepaths, remove it end-to-end (source code + docs that describe it + build artifacts such as stale `dist/` that can preserve deleted code).
   - If mock rows already exist in a local DB/output (e.g., SQLite tables), proactively provide a cleanup step (delete rows by source/tag, or delete/recreate the DB) and verify the cleanup by querying counts.
   - Keep terminology explicit: “remove generation” (future data) vs “clean existing stored mock rows” (historical data).
+
+<!-- T3-A: Code patterns -->
+- **Retries / robustness (default policy)**
+  - When implementing operations that can fail transiently (network calls, file writes/renames on Windows, copy/move, reading remote resources), assume **up to 10 retries by default**.
+  - Prefer short waits with backoff (e.g., 0.1–0.5s initial delay, increasing) and log retry attempts clearly.
+  - Do **not** blindly retry permanent failures (invalid paths/config, authentication/token errors, deterministic parsing/validation errors, disk full). Fail fast with a clear error message.
+  - If a retry loop would significantly delay a long batch job, make retry counts/delays configurable (constants or CLI/GUI knobs).
 
 - **Wrapper + base pattern (momentum)**
   - Base modules expose `Config` + `run_analysis` (see `momentum/tree_10_optionsell_base.py`, `momentum/tree_11_optionsell_reversal_base.py`).
@@ -272,16 +316,6 @@
 - **ThetaData / ThetaTerminal**
   - Start the Java ThetaTerminal via `thetadata/run_theta_terminal.ps1` and keep `thetadata/credit.txt` next to the script.
 
-## Safety / repo hygiene
-- **Path length hygiene (Windows / tooling compatibility)**
-  - When creating new folders/files (especially generated outputs under deep subfolders), keep the **full absolute path length ≤ 250 characters**.
-  - Prefer shorter folder/file names over deeper nesting.
-  - Avoid repeating tokens (e.g., `csv/csv`, `parquet/parquet`) unless the surrounding codebase already requires it for backward compatibility.
-  - If a requested naming scheme risks exceeding the limit, shorten only the *non-semantic* parts (extra prefixes/suffixes), and keep the key identifiers (symbol, timeframe, expiry, year) intact.
-- Treat these as secrets and never print them to logs/output or commit derived values:
-  - `EODHD/API TOKEN`, `thetadata/credit.txt`, `thetadata/creds.txt`.
-- This repo contains many generated artifacts (`*.xlsx`, `*_raw.csv`, `*_raw.parquet`). When adding new scripts, follow the existing naming convention: `<script_name>.xlsx` + `<script_name>_raw.csv/parquet`, typically under the same folder as the script.
-
 ---
 
 <!--
@@ -294,6 +328,37 @@
 
 # ⚠️ AI 에이전트 운영 규칙
 
+**작업 수행 규율(필수):**
+- 작업 시작 전에 목차를 보고 이번 작업과 가장 연관된 섹션(들)을 먼저 확인하고, 해당 지침사항을 우선적으로 따른다.
+- 구현에 들어가기 전에 항상 “세부화된 계획”을 채팅에 먼저 명시한다.
+- 계획의 각 단계마다: 구현 → 제대로 됐는지 점검(검증) → 채팅에 검증/완료를 명확히 보고 → 다음 단계로 진행한다.
+
+## 목차
+(현재 작업과 관련된 섹션만 읽을 것)
+
+| Tier | 섹션 | 주요 내용 |
+|------|------|----------|
+| **T1** | [플랜 & 에이전트 로그](#플랜--에이전트-로그) | plan.md, agent_log.md, 단계 분해 |
+| **T1** | [역량 한계 / 정직성](#프로젝트-컨벤션) | API 키 없을 때, 땜질 금지 |
+| **T1** | [Mock 데이터 정책](#프로젝트-컨벤션) | mock 데이터 요청 없으면 사용 금지 |
+| **T1** | [보안 / 레포 위생](#보안--레포-위생) | 경로 250자 이하, 시크릿, 네이밍 |
+| **T1** | [한/영 동기화](#docs--prompt-markdown-규칙) | *.md + copilot-instructions 정합 |
+| **T2** | [큰 그림](#큰-그림) | 레포 개요, 주요 영역 |
+| **T2** | [폴더 구조 & 데이터 흐름](#폴더-구조--데이터-흐름요약) | EODHD→original_data→learning_data 흐름 |
+| **T2** | [실행 방법 (Windows)](#실행-방법-windows) | venv 활성화, 절대경로 |
+| **T3-A** | [재시도 / 견고성](#프로젝트-컨벤션) | 10회 재시도, 백오프, 영구 실패 처리 |
+| **T3-A** | [Wrapper + base 패턴](#프로젝트-컨벤션) | momentum 스크립트 구조 |
+| **T3-A** | [Indicator calculators](#프로젝트-컨벤션) | pandas, 로깅 패턴 |
+| **T3-A** | [딥러닝 트레이너](#프로젝트-컨벤션) | dedup, 프리셋, 문서 정합 |
+| **T3-B** | [GUI 스크립트](#프로젝트-컨벤션) | PyQt, 크기조정, 로그 |
+| **T3-B** | [Web UI 스크립트](#프로젝트-컨벤션) | 바인딩, CDN 금지 |
+| **T3-C** | [설정 템플릿 파일 (TOML)](#프로젝트-컨벤션) | VALUES/EXPLANATIONS, 한/영, TOML 유효성 |
+| **T3-C** | [Docs / prompt Markdown 규칙](#프로젝트-컨벤션) | 한/영 병기, 정합, 출력 컬럼 |
+| **T3-D** | [EODHD 규칙](#프로젝트-컨벤션) | NY 시간대, Timestamp 컬럼 금지 |
+| **T3-D** | [ThetaData / ThetaTerminal](#프로젝트-컨벤션) | run_theta_terminal.ps1 |
+
+> **T1** = 모든 작업에 항상 적용 &nbsp;·&nbsp; **T2** = 레포 컨텍스트 (처음이면 읽기) &nbsp;·&nbsp; **T3-A** = 코드 패턴 &nbsp;·&nbsp; **T3-B** = UI 개발 &nbsp;·&nbsp; **T3-C** = 설정/문서 &nbsp;·&nbsp; **T3-D** = 데이터 소스
+
 ## 플랜 & 에이전트 로그
 - `plan.md`는 **사용자가 명시적으로 요청할 때만** 생성.
 - `agent_log.md`는 **사용자가 특정 plan을 수행하라고 지시할 때만** 작성/업데이트.
@@ -303,29 +368,29 @@
 - **큰 작업은 단계로 쪼개기:** 크고 복잡한 작업은 독립적으로 검증 가능한 작은 단계로 분해한다. 각 단계마다 명확한 산출물을 정의한다.
 - **중간 결과물 검토 루프:** 각 단계 완료 후 결과를 검증(파일 내용 확인, 테스트 실행, 출력 확인)한 뒤 다음 단계로 진행한다. 모든 단계를 맹목적으로 끝까지 연속 실행하지 않는다.
 
-## 목차
-(현재 작업과 관련된 섹션만 읽을 것)
-
-| # | 섹션 | 주요 내용 |
-|---|------|----------|
-| 1 | [큰 그림](#큰-그림) | 레포 개요, 주요 영역 |
-| 2 | [폴더 구조 & 데이터 흐름](#폴더-구조--데이터-흐름요약) | EODHD→original_data→learning_data 흐름 |
-| 3 | [실행 방법 (Windows)](#실행-방법-windows) | venv 활성화, 절대경로 |
-| 4a | [재시도 / 견고성](#프로젝트-컨벤션) | 10회 재시도, 백오프 |
-| 4b | [역량 한계 / 정직성](#프로젝트-컨벤션) | API 키 없을 때, 땜질 금지 |
-| 4c | [Mock 데이터 정책](#프로젝트-컨벤션) | mock 데이터 요청 없으면 사용 금지 |
-| 4d | [Wrapper + base 패턴](#프로젝트-컨벤션) | momentum 스크립트 구조 |
-| 4e | [Indicator calculators](#프로젝트-컨벤션) | pandas, 로깅 패턴 |
-| 4f | [딥러닝 트레이너](#프로젝트-컨벤션) | dedup, 프리셋, 문서 정합 |
-| 4g | [GUI 스크립트](#프로젝트-컨벤션) | PyQt, 크기조정, 로그 |
-| 4h | [Web UI 스크립트](#프로젝트-컨벤션) | 바인딩, CDN 금지 |
-| 4i | [설정 템플릿 파일 (TOML)](#프로젝트-컨벤션) | VALUES/EXPLANATIONS, 한/영, TOML 유효성 |
-| 4j | [Docs / prompt Markdown 규칙](#프로젝트-컨벤션) | 한/영 병기, 정합, 출력 컬럼 |
-| 4k | [EODHD 규칙](#프로젝트-컨벤션) | NY 시간대, Timestamp 컬럼 금지 |
-| 4l | [ThetaData / ThetaTerminal](#프로젝트-컨벤션) | run_theta_terminal.ps1 |
-| 5 | [보안 / 레포 위생](#보안--레포-위생) | 경로 250자 이하, 시크릿, 네이밍 |
-
 # Copilot 지침 (python 워크스페이스, 한국어)
+
+<!-- ====================================================
+  TIER 1 — 모든 작업에 항상 적용
+  (역량 한계, Mock 데이터, 보안/위생, 한/영 동기화)
+  아래 프로젝트 컨벤션 섹션에 포함되어 있음.
+  목차의 직접 링크 참조.
+===================================================== -->
+
+<!-- T1: 보안 / 레포 위생 -->
+## 보안 / 레포 위생
+- **경로 길이 위생(Windows / 툴 호환성)**
+  - 새 폴더/파일을 만들 때(특히 깊은 하위 폴더에 생성 산출물을 쓸 때) **전체 절대 경로 길이를 250자 이하**로 유지하세요.
+  - 폴더를 깊게 중첩하기보다 폴더/파일 이름을 짧게 하는 쪽을 우선합니다.
+  - 코드베이스의 하위 호환 때문에 필요한 경우가 아니라면 `csv/csv`, `parquet/parquet`처럼 토큰을 반복하는 구조는 피하세요.
+  - 사용자가 요구한 네이밍 규칙이 제한을 넘길 위험이 있으면, 의미가 덜 중요한 접두/접미(불필요한 prefix/suffix)만 줄이고 핵심 식별자(symbol, timeframe, expiry, year)는 유지하세요.
+- 아래 파일들은 "시크릿"으로 취급하고, 로그/출력/커밋에 절대 노출하지 않습니다:
+  - `EODHD/API TOKEN`, `thetadata/credit.txt`, `thetadata/creds.txt`
+- 레포에는 생성 산출물(`*.xlsx`, `*_raw.csv`, `*_raw.parquet`)이 많습니다. 새 스크립트 추가 시 기존 네이밍 규칙(`<script_name>.xlsx` + `<script_name>_raw.csv/parquet`)을 따릅니다.
+
+<!-- ====================================================
+  TIER 2 — 레포 컨텍스트
+===================================================== -->
 
 ## 큰 그림
 - 이 레포는 “패키지 라이브러리”가 아니라 *스크립트 중심(script-first)* 연구/분석 파이프라인 모음입니다. 보통 개별 `*.py`를 직접 실행해서 로컬 CSV/Parquet 입력을 읽고 Excel/CSV/Parquet 출력물을 씁니다.
@@ -346,24 +411,35 @@
   - 활성화: `\.venv\Scripts\Activate.ps1`
   - 예시 실행: `python momentum\tree_10_1_optionsell_momentum_atm.py`
 - 많은 스크립트가 `c:\\github_coding\\python\\...` 절대경로를 하드코딩합니다(예: `momentum/tree_10_1_optionsell_momentum_atm.py`). “경로를 포터블하게 바꿔달라”는 요청이 없는 한, 기존 관례를 유지하세요.
-
+<!-- ====================================================
+  TIER 3 — 작업별 컨벤션
+  T3-A: 코드 패턴 (재시도, Wrapper+base, 지표 계산기, DL 트레이너)
+  T3-B: UI 개발 (GUI, Web UI)
+  T3-C: 설정 & 문서 (TOML, Markdown)
+  T3-D: 데이터 소스 (EODHD, ThetaData)
+  T1 항목 아래에 포함: 역량 한계(필수), Mock 데이터(필수)
+===================================================== -->
 ## 프로젝트 컨벤션
+
+<!-- T1: 역량 한계 / 정직성 -->
+- **역량 한계 / 정직성(필수)**
+  - 요청을 수행하는 데 필요한 정보/자격 증명/도구가 부족해 완료할 수 없는 경우(예: API 키/엔드포인트 미제공, provider 스펙 불명확)는 **초기에 명확히 "지금은 못 한다"**고 설명합니다.
+  - 기능이 되는 것처럼 보이게 만드는 땜질(예: source 컬럼 숨기기)이나, 동작을 암시하는 placeholder 코드를 추가하지 않습니다.
+  - 막히는 지점을 풀기 위한 최소 체크리스트(필요 입력값, 시크릿을 둘 위치, 최소 검증 방법)를 함께 제시합니다.
+
+<!-- T1: Mock 데이터 정책 -->
+- **Mock 데이터 정책(필수)**
+  - 사용자가 mock 데이터를 명시적으로 요청하지 않는 한, mock/가짜 데이터 생성기(타이머, fake provider, seeded "demo news" 등)를 추가하거나 다시 넣지 않습니다.
+  - 레포/코드 경로에 mock 생성이 존재한다면 end-to-end로 제거합니다(소스 코드 + 이를 설명하는 문서 + 삭제된 코드가 남아있을 수 있는 `dist/` 같은 빌드 산출물 포함).
+  - 로컬 DB/출력물에 mock row가 이미 저장돼 있다면(예: SQLite), 정리 절차(소스/태그 기준 삭제 또는 DB 삭제/재생성)를 선제적으로 제공하고, 정리 후에는 count 쿼리로 검증합니다.
+  - 용어를 구분해서 씁니다: "생성 로직 제거"(미래 유입 차단) vs "기존 저장 mock row 정리"(과거 데이터 청소).
+
+<!-- T3-A: 코드 패턴 -->
 - **재시도 / 견고성(기본 정책)**
   - 일시적으로 실패할 수 있는 작업(네트워크 호출, Windows에서 파일 쓰기/rename/os.replace, copy/move 등)은 기본적으로 **최대 10회 재시도**를 전제로 구현합니다.
   - 짧은 대기 + 백오프(예: 0.1~0.5초부터 시작해서 점점 증가)를 사용하고, 재시도 횟수/원인을 로그로 남깁니다.
   - 영구적인 실패(잘못된 경로/설정, 인증/토큰 오류, 결정적 파싱/검증 오류, 디스크 용량 부족 등)는 무작정 재시도하지 말고 즉시 실패시키되 오류 메시지를 명확히 합니다.
   - 배치 작업이 길어지는 경우 재시도 횟수/대기 시간은 상수 또는 CLI/GUI 옵션으로 조절 가능하게 합니다.
-
-- **역량 한계 / 정직성(필수)**
-  - 요청을 수행하는 데 필요한 정보/자격 증명/도구가 부족해 완료할 수 없는 경우(예: API 키/엔드포인트 미제공, provider 스펙 불명확)는 **초기에 명확히 “지금은 못 한다”**고 설명합니다.
-  - 기능이 되는 것처럼 보이게 만드는 땜질(예: source 컬럼 숨기기)이나, 동작을 암시하는 placeholder 코드를 추가하지 않습니다.
-  - 막히는 지점을 풀기 위한 최소 체크리스트(필요 입력값, 시크릿을 둘 위치, 최소 검증 방법)를 함께 제시합니다.
-
-- **Mock 데이터 정책(필수)**
-  - 사용자가 mock 데이터를 명시적으로 요청하지 않는 한, mock/가짜 데이터 생성기(타이머, fake provider, seeded “demo news” 등)를 추가하거나 다시 넣지 않습니다.
-  - 레포/코드 경로에 mock 생성이 존재한다면 end-to-end로 제거합니다(소스 코드 + 이를 설명하는 문서 + 삭제된 코드가 남아있을 수 있는 `dist/` 같은 빌드 산출물 포함).
-  - 로컬 DB/출력물에 mock row가 이미 저장돼 있다면(예: SQLite), 정리 절차(소스/태그 기준 삭제 또는 DB 삭제/재생성)를 선제적으로 제공하고, 정리 후에는 count 쿼리로 검증합니다.
-  - 용어를 구분해서 씁니다: “생성 로직 제거”(미래 유입 차단) vs “기존 저장 mock row 정리”(과거 데이터 청소).
 
 - **Wrapper + base 패턴 (momentum)**
   - Base 모듈은 `Config` + `run_analysis` 형태로 코어 로직을 제공합니다.
@@ -538,12 +614,3 @@
 - **ThetaData / ThetaTerminal**
   - `thetadata/run_theta_terminal.ps1`로 Java ThetaTerminal을 실행하고, `thetadata/credit.txt`는 스크립트 옆에 유지.
 
-## 보안 / 레포 위생
-- **경로 길이 위생(Windows / 툴 호환성)**
-  - 새 폴더/파일을 만들 때(특히 깊은 하위 폴더에 생성 산출물을 쓸 때) **전체 절대 경로 길이를 250자 이하**로 유지하세요.
-  - 폴더를 깊게 중첩하기보다 폴더/파일 이름을 짧게 하는 쪽을 우선합니다.
-  - 코드베이스의 하위 호환 때문에 필요한 경우가 아니라면 `csv/csv`, `parquet/parquet`처럼 토큰을 반복하는 구조는 피하세요.
-  - 사용자가 요구한 네이밍 규칙이 제한을 넘길 위험이 있으면, 의미가 덜 중요한 접두/접미(불필요한 prefix/suffix)만 줄이고 핵심 식별자(symbol, timeframe, expiry, year)는 유지하세요.
-- 아래 파일들은 “시크릿”으로 취급하고, 로그/출력/커밋에 절대 노출하지 않습니다:
-  - `EODHD/API TOKEN`, `thetadata/credit.txt`, `thetadata/creds.txt`
-- 레포에는 생성 산출물(`*.xlsx`, `*_raw.csv`, `*_raw.parquet`)이 많습니다. 새 스크립트 추가 시 기존 네이밍 규칙(`<script_name>.xlsx` + `<script_name>_raw.csv/parquet`)을 따릅니다.
