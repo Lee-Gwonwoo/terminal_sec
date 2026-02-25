@@ -1,3 +1,5 @@
+# Ignore any files with 'api_key' in the filename (case-sensitive)
+*api_key*
 # --- Node / TypeScript / Vite ---
 **/node_modules/
 **/dist/
@@ -25,6 +27,10 @@ pnpm-debug.log*
 EODHD/API TOKEN
 thetadata/credit.txt
 thetadata/creds.txt
+
+# Google API key files (do not commit)
+ai_agent_plan/**/google_api_key*
+ai_agent_plan/**/google_api_key/**
 
 # --- Local databases (SQLite) ---
 *.sqlite
