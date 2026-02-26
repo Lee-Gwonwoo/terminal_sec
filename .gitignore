@@ -28,6 +28,12 @@ EODHD/API TOKEN
 thetadata/credit.txt
 thetadata/creds.txt
 
+# Local credentials (do not commit)
+mcp_servers/bitwarden/figma_id_password
+
+# Playwright persisted auth/session state (do not commit)
+mcp_servers/playwright_mcp/.auth/
+
 # Google API key files (do not commit)
 ai_agent_plan/**/google_api_key*
 ai_agent_plan/**/google_api_key/**
@@ -61,3 +67,6 @@ __pycache__/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# --- Local scratch / generated artifacts ---
+tmp/

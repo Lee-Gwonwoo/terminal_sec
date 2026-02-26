@@ -113,6 +113,7 @@
   - If a user request cannot be completed with the available information, credentials, or tools (e.g., missing API key/endpoint, unknown provider spec), say so **explicitly and early**.
   - Do **not** “paper over” missing functionality with misleading UI-only changes (e.g., hiding source columns) or placeholder code that implies the feature works.
   - Provide the shortest unblock checklist (exact inputs needed, where to put secrets, and a minimal verification step).
+  - If you are stuck (e.g., the same approach fails 2–3 times without new information), do **not** force-repeat the same steps. Summarize what you tried and use **Bing web search** (Copilot web search / “Copilot access to Bing”, if available) to find likely causes and a practical workaround, then proceed with the most credible fix.
 
 <!-- T1: Mock data policy -->
 - **Mock data policy (must)**
@@ -426,6 +427,7 @@
   - 요청을 수행하는 데 필요한 정보/자격 증명/도구가 부족해 완료할 수 없는 경우(예: API 키/엔드포인트 미제공, provider 스펙 불명확)는 **초기에 명확히 "지금은 못 한다"**고 설명합니다.
   - 기능이 되는 것처럼 보이게 만드는 땜질(예: source 컬럼 숨기기)이나, 동작을 암시하는 placeholder 코드를 추가하지 않습니다.
   - 막히는 지점을 풀기 위한 최소 체크리스트(필요 입력값, 시크릿을 둘 위치, 최소 검증 방법)를 함께 제시합니다.
+  - 막혔을 때(예: 같은 접근이 새로운 정보 없이 2~3번 실패) 억지로 같은 단계를 반복하지 말고, 지금까지 시도한 내용을 요약한 뒤 **Bing 웹검색**(Copilot web search / “Copilot access to Bing” 기능이 가능하면)을 통해 원인 후보와 실용적인 해결책을 찾아 가장 가능성 높은 수정안을 적용합니다.
 
 <!-- T1: Mock 데이터 정책 -->
 - **Mock 데이터 정책(필수)**
