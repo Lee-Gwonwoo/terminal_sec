@@ -1,0 +1,10 @@
+{
+  "servers": {
+    "playwright": {
+      "type": "stdio",
+      "command": "node",
+      "cwd": "${workspaceFolder}/mcp_servers/playwright_mcp",
+      "args": ["server.js"]
+    }
+  }
+}
