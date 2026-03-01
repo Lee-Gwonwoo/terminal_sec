@@ -44,6 +44,12 @@
 
 ## Plan & Agent Log
 - Create `plan.md` **only when the user explicitly requests it**.
+- Treat any direct request for a plan as “explicit” (examples: “plan을 세워라”, “계획 세워줘”, “플랜 만들어”, “plan 작성”, “plan.md 만들어”).
+- When a user requests a plan, do BOTH:
+  - Write the detailed step-by-step plan in chat (required by Execution discipline)
+  - Create `C:\github_coding\terminal_sec\ai_agent_plan\<project_name>\plan.md` (unless the user explicitly forbids file changes)
+- If the user says “don’t execute/run” (e.g., “실행하지 말고”) and it’s ambiguous whether file writes are allowed, use the hook question flow (`ask_questions`) to confirm before creating/modifying files.
+  - Default interpretation (unless the user says otherwise): “don’t execute/run” = no code execution (no tests/dev server/scripts), but creating/updating `plan.md` is allowed.
 - Write/update `agent_log.md` **only when the user explicitly tells you to execute a specific plan**.
 - File storage: `C:\github_coding\terminal_sec\ai_agent_plan\<project_name>\`
   - `plan.md`: detailed step-by-step plan before starting (goal, approach, files to create/modify, order, risks).
@@ -363,6 +369,12 @@
 
 ## 플랜 & 에이전트 로그
 - `plan.md`는 **사용자가 명시적으로 요청할 때만** 생성.
+- “plan/계획을 세워달라”는 직접 요청은 모두 “명시적 요청”으로 취급한다(예: “plan을 세워라”, “계획 세워줘”, “플랜 만들어”, “plan 작성”, “plan.md 만들어”).
+- 사용자가 plan을 요청하면 아래 둘 다 수행한다:
+  - 채팅에 상세 단계별 계획을 작성(작업 수행 규율의 요구사항)
+  - `C:\github_coding\terminal_sec\ai_agent_plan\<project_name>\plan.md` 파일을 생성(단, 사용자가 ‘파일 변경 금지’를 명시한 경우 제외)
+- 사용자가 “실행하지 말고”(예: “실행하지 말고”)라고 말했을 때, 파일 작성까지 금지인지 애매하면 파일을 만들기/수정하기 전에 hook 질문 플로우(`ask_questions`)로 확인한다.
+  - 기본 해석(사용자가 별도 명시하지 않는 한): “실행하지 말고” = 코드 실행 금지(테스트/서버/스크립트 실행 금지)이며, `plan.md` 작성/갱신은 허용.
 - `agent_log.md`는 **사용자가 특정 plan을 수행하라고 지시할 때만** 작성/업데이트.
 - 저장 위치: `C:\github_coding\terminal_sec\ai_agent_plan\<project_name>\`
   - `plan.md`: 작업 시작 전 상세 단계별 계획 (목표, 접근법, 생성/수정 파일, 순서, 위험 요소).
