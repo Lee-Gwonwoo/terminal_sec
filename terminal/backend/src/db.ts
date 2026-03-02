@@ -95,6 +95,13 @@ export async function initDb(): Promise<void> {
     );
 
     CREATE INDEX IF NOT EXISTS idx_alert_rules_user_tool ON alert_rules (user_id, tool);
+
+    CREATE TABLE IF NOT EXISTS update_status (
+      source_key TEXT PRIMARY KEY,
+      last_success_at TEXT,
+      details_json TEXT NOT NULL DEFAULT '{}',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   await ensureColumn("calendar_events", "source", "TEXT NOT NULL DEFAULT 'mock_provider'");

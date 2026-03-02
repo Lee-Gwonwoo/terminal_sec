@@ -19,6 +19,7 @@ import { ensureSeedData } from "./seed.js";
 import { startCalendarIngestionWorkers } from "./services/calendarIngestion.js";
 import { pullEodhdNews, pullEodhdNewsAll } from "./services/eodhdNewsProvider.js";
 import { insertNewsItem } from "./services/newsRepository.js";
+import { listUpdateStatuses } from "./services/updateStatusRepository.js";
 import type { NewsQuery } from "./types.js";
 
 const app = express();

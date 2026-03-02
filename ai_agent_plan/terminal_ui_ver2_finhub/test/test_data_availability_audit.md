@@ -34,50 +34,127 @@ We audit fields implied by these UI surfaces:
 
 ---
 
-## Capability Matrix (template)
-Fill every row with one of: `IBKR`, `Finnhub`, `Computed (OHLC)`, `Not available`.
+## Capability Matrix (CONFIRMED — 2026-03-02)
+Each row filled with probe results. Status: ✅ Confirmed | ⚠️ Conditional | ❌ Not probed yet
 
 ### News Feed: finhub api
-| UI Field | Required? | Source | Provider field(s) / Computation | Notes / Probe |
-|---|---:|---|---|---|
-| Date | Required | Finnhub | news datetime → formatted date | Confirm timezone + field name |
-| Time | Required | Finnhub | news datetime → formatted time | Confirm timezone + field name |
-| Title | Required | Finnhub | headline/title |  |
-| Sources | Required | Finnhub | source/domain field | Confirm exact field name |
-| Changes%: `Chg` | Required | Computed (OHLC) | $(Close_t/Close_{t-1}-1)\times 100$ | Needs prior bar; else render `-` |
-| Changes%: `fr.Open` | Required | Computed (OHLC) | $(Close_t/Open_t-1)\times 100$ | Needs Open/Close; else `-` |
-| Changes%: `+7D` | Required | Computed (OHLC) | $(Close_t/Close_{t-7}-1)\times 100$ (trading bars) | Needs 7 bars; else `-` |
-| Changes%: `+14D` | Required | Computed (OHLC) | $(Close_t/Close_{t-14}-1)\times 100$ (trading bars) | Needs 14 bars; else `-` |
-| Changes%: `+30D` | Required | Computed (OHLC) | $(Close_t/Close_{t-30}-1)\times 100$ (trading bars) | Needs 30 bars; else `-` |
-| Earning: `<date>` line | Optional | Finnhub or Not available | Finnhub earnings date endpoint | If unavailable: render nothing |
-| Market cap | Optional (filter) | Finnhub or Not available | company profile market cap field | Confirm units (USD) |
-| Industry | Optional (filter) | Finnhub or Not available | company profile industry field | Confirm field name |
+| UI Field | Required? | Source | Provider field(s) / Computation | Status | Probe evidence |
+|---|---:|---|---|---|---|
+| Date | Required | **Finnhub** | `datetime` (Unix epoch seconds) → NY date | ✅ Confirmed | `finnhub_company_news_AAPL.json`: `"datetime": 1772441102` (epoch sec) |
+| Time | Required | **Finnhub** | `datetime` (Unix epoch seconds) → NY time | ✅ Confirmed | Same field as Date |
+| Title | Required | **Finnhub** | `headline` | ✅ Confirmed | `"headline": "Broadcom, Target Earnings and Jobs Report..."` |
+| Sources | Required | **Finnhub** | `source` | ✅ Confirmed | `"source": "Yahoo"` |
+| Changes%: `Chg` | Required | **Computed (OHLC)** | $(Close_t/Close_{t-1}-1)\times 100$ | ✅ DB exists | `ohlc_1d_watchlist.sqlite` table `ohlc_1d` has Close column |
+| Changes%: `fr.Open` | Required | **Computed (OHLC)** | $(Close_t/Open_t-1)\times 100$ | ✅ DB exists | `ohlc_1d` has Open + Close columns |
+| Changes%: `+7D` | Required | **Computed (OHLC)** | $(Close_t/Close_{t-7}-1)\times 100$ (trading bars) | ✅ DB exists | Needs ≥7 prior bars; else render `-` |
+| Changes%: `+14D` | Required | **Computed (OHLC)** | $(Close_t/Close_{t-14}-1)\times 100$ (trading bars) | ✅ DB exists | Needs ≥14 prior bars; else render `-` |
+| Changes%: `+30D` | Required | **Computed (OHLC)** | $(Close_t/Close_{t-30}-1)\times 100$ (trading bars) | ✅ DB exists | Needs ≥30 prior bars; else render `-` |
+| Earning: `<date>` line | Optional | **Finnhub** (conditional) | `/calendar/earnings` endpoint | ⚠️ Empty array | All 3 symbols returned `{"earningsCalendar": []}`. Likely no upcoming earnings at probe time, or free-tier limit. Render nothing when empty. |
+| Market cap | Optional (filter) | **Finnhub** | `marketCapitalization` (millions USD) | ✅ Confirmed | AAPL: `3878463.65` (≈$3.88T), MSFT: `2916341.51` (≈$2.92T) |
+| Industry | Optional (filter) | **Finnhub** | `finnhubIndustry` | ✅ Confirmed | AAPL: `"Technology"`, MSFT: `"Technology"` |
 
 ### /calendar (IBKR-only)
-| UI Tab | UI Field | Required? | Source | Provider field(s) | Notes / Probe |
-|---|---|---:|---|---|---|
-| Earnings | Date Announcement | Required | IBKR |  | Confirm event time semantics |
-| Earnings | Time | Required | IBKR |  |  |
-| Earnings | Symbol | Required | IBKR |  |  |
-| Earnings | Session | Required | IBKR |  | If IBKR lacks: decide mapping |
-| Earnings | Period | Optional | IBKR or Not available |  |  |
-| Earnings | Confirmed | Optional | IBKR or Not available |  |  |
-| Earnings | EPS / Est. EPS / Surprise % | Optional | IBKR or Not available |  | High-risk: likely missing |
-| Earnings | Revenue / Est. Revenue | Optional | IBKR or Not available |  | High-risk: likely missing |
-| Conference | Date/Time/Symbol/Session/Confirmed | Required | IBKR |  | Confirm IBKR event types |
-| Dividend | Date/Time/Symbol/Session/Confirmed | Required | IBKR |  |  |
-| Analyst Rating | All columns | Optional | IBKR or Not available |  | Very high-risk: likely missing |
+| UI Tab | UI Field | Required? | Source | Provider field(s) | Status | Probe evidence |
+|---|---|---:|---|---|---|---|
+| Earnings | Date Announcement | Required | IBKR | TBD | ❌ Not probed | IBKR Gateway/TWS not available in current env |
+| Earnings | Time | Required | IBKR | TBD | ❌ Not probed | |
+| Earnings | Symbol | Required | IBKR | TBD | ❌ Not probed | |
+| Earnings | Session | Required | IBKR | TBD | ❌ Not probed | If IBKR lacks: decide mapping |
+| Earnings | Period | Optional | IBKR or Not available | TBD | ❌ Not probed | |
+| Earnings | Confirmed | Optional | IBKR or Not available | TBD | ❌ Not probed | |
+| Earnings | EPS / Est. EPS / Surprise % | Optional | IBKR or Not available | TBD | ❌ Not probed | HIGH RISK: likely missing |
+| Earnings | Revenue / Est. Revenue | Optional | IBKR or Not available | TBD | ❌ Not probed | HIGH RISK: likely missing |
+| Conference | Date/Time/Symbol/Session/Confirmed | Required | IBKR | TBD | ❌ Not probed | Confirm IBKR event types |
+| Dividend | Date/Time/Symbol/Session/Confirmed | Required | IBKR | TBD | ❌ Not probed | |
+| Analyst Rating | All columns | Optional | IBKR or Not available | TBD | ❌ Not probed | VERY HIGH RISK: likely missing |
 
 ### Watchlist
-| UI Field | Required? | Source | Provider field(s) / Computation | Notes / Probe |
-|---|---:|---|---|---|
-| Ticker | Required | CSV | read from configured CSV | CSV column rule must be defined |
-| Name | Optional | Finnhub or Not available | company profile name | If missing, show `-` |
-| Mkt Cap | Optional | Finnhub or Not available | company profile market cap |  |
-| Industry | Optional | Finnhub or Not available | company profile industry |  |
-| Price | Required | Computed (OHLC) | latest Close | Use per-symbol latest bar |
-| Change | Required | Computed (OHLC) | Close_t - Close_{t-1} | Needs prior bar; else `-` |
-| % | Required | Computed (OHLC) | (Close_t/Close_{t-1}-1)\times 100 | Needs prior bar; else `-` |
+| UI Field | Required? | Source | Provider field(s) / Computation | Status | Probe evidence |
+|---|---:|---|---|---|---|
+| Ticker | Required | **CSV** | read from configured CSV | ✅ Confirmed | File exists: `tradigview_screener/original_data/watch lists2_2026-02-22.csv` |
+| Name | Optional | **Finnhub** | `name` from `/stock/profile2` | ✅ Confirmed | AAPL: `"name": "Apple Inc"`, MSFT: `"name": "Microsoft Corp"` |
+| Mkt Cap | Optional | **Finnhub** | `marketCapitalization` (millions USD) | ✅ Confirmed | Same as News Feed market cap field |
+| Industry | Optional | **Finnhub** | `finnhubIndustry` | ✅ Confirmed | Same as News Feed industry field |
+| Price | Required | **Computed (OHLC)** | latest Close | ✅ DB exists | `ohlc_1d` latest `Datetime` = 2026-02-20 |
+| Change | Required | **Computed (OHLC)** | Close_t - Close_{t-1} | ✅ DB exists | Needs prior bar; else `-` |
+| % | Required | **Computed (OHLC)** | (Close_t/Close_{t-1}-1)\times 100 | ✅ DB exists | Needs prior bar; else `-` |
+
+---
+
+## Finnhub Probe — Raw Field Reference (confirmed 2026-03-02)
+
+Probe symbols: AAPL, MSFT, TSLA. Raw JSON saved to `tmp/probes/`.
+
+### `/stock/profile2` — confirmed fields
+```json
+// Example: finnhub_profile2_AAPL.json
+{
+  "country": "US",
+  "currency": "USD",
+  "exchange": "NASDAQ NMS - GLOBAL MARKET",
+  "finnhubIndustry": "Technology",      // ← Industry field
+  "marketCapitalization": 3878463.6457,  // ← millions USD
+  "name": "Apple Inc",                   // ← Company name
+  "ticker": "AAPL",
+  "shareOutstanding": 14702.7,
+  "ipo": "1980-12-12",
+  "weburl": "https://www.apple.com/"
+}
+```
+
+### `/company-news` — confirmed fields
+```json
+// Example: finnhub_company_news_AAPL.json (first item)
+{
+  "category": "company",
+  "datetime": 1772441102,       // ← Unix epoch SECONDS (not ms)
+  "headline": "Broadcom, Target Earnings...",  // ← Title
+  "id": 139274820,              // ← Finnhub internal ID
+  "image": "https://...",
+  "related": "AAPL",            // ← Ticker (symbol)
+  "source": "Yahoo",            // ← Source name
+  "summary": "A heavy slate...",
+  "url": "https://finnhub.io/api/news?id=..."
+}
+```
+
+### `/calendar/earnings` — conditional
+```json
+// All 3 symbols returned empty:
+{ "earningsCalendar": [] }
+// Interpretation: no upcoming earnings at probe time, or free-tier limit.
+// Action: treat as Optional — render nothing when empty.
+```
+
+---
+
+## IBKR Probe — NOT YET PERFORMED
+
+Reason: IBKR Gateway/TWS is not configured in current development environment.
+
+Blocked items:
+- All `/calendar` UI fields (Earnings/Conference/Dividend/Analyst Rating)
+- IBKR 1D OHLCV fetch
+
+Recommendation: proceed with Steps 1–5 (non-IBKR parts) first, perform IBKR probe when Gateway/TWS is available.
+
+---
+
+## Overall Audit Verdict (2026-03-02)
+
+### Finnhub: PASS (for News Feed + Watchlist)
+- All required fields confirmed via raw JSON probes.
+- Earnings calendar: empty but Optional → no blocker.
+
+### IBKR: BLOCKED (for /calendar + OHLC update)
+- Cannot be probed without Gateway/TWS.
+- `/calendar` remains at risk until IBKR probe is done.
+- Decision needed: proceed with non-IBKR steps first, or wait?
+
+### OHLC (existing DB): PASS
+- `ohlc_1d_watchlist.sqlite` confirmed: table `ohlc_1d` with columns `Symbol, Datetime, Open, High, Low, Close, Volume`.
+- Latest data: 2026-02-20.
+- Sufficient for all "Changes %" computations.
 
 ---
 
@@ -144,6 +221,11 @@ Fail (stop for decision)
 - `/calendar` required fields cannot be sourced from IBKR.
 - News Feed required fields cannot be sourced from Finnhub or computed from OHLC.
 
+### Current verdict (2026-03-02)
+- **Finnhub (News Feed + Watchlist): PASS** — all required fields confirmed.
+- **IBKR (/calendar + OHLC update): BLOCKED** — needs Gateway/TWS to probe.
+- **OHLC DB (Changes %): PASS** — DB schema and data confirmed.
+
 
 ---
 
@@ -180,50 +262,127 @@ Fail (stop for decision)
 
 ---
 
-## Capability Matrix (템플릿)
-각 행의 Source는 반드시 다음 중 하나로 채운다: `IBKR`, `Finnhub`, `Computed (OHLC)`, `Not available`.
+## Capability Matrix (확정 — 2026-03-02)
+각 행은 프로브 결과로 채움. 상태: ✅ 확인됨 | ⚠️ 조건부 | ❌ 미프로브
 
 ### News Feed: finhub api
-| UI 필드 | 필수? | Source | 공급자 필드 / 계산식 | 비고 / 프로브 |
-|---|---:|---|---|---|
-| Date | 필수 | Finnhub | 뉴스 datetime → 날짜 포맷 | timezone/필드명 확인 |
-| Time | 필수 | Finnhub | 뉴스 datetime → 시간 포맷 | timezone/필드명 확인 |
-| Title | 필수 | Finnhub | headline/title |  |
-| Sources | 필수 | Finnhub | source/domain 필드 | 필드명 확인 |
-| Changes%: `Chg` | 필수 | Computed (OHLC) | $(Close_t/Close_{t-1}-1)\times 100$ | 전일 bar 없으면 `-` |
-| Changes%: `fr.Open` | 필수 | Computed (OHLC) | $(Close_t/Open_t-1)\times 100$ | Open/Close 없으면 `-` |
-| Changes%: `+7D` | 필수 | Computed (OHLC) | $(Close_t/Close_{t-7}-1)\times 100$ (거래일 bar 기준) | 7 bar 없으면 `-` |
-| Changes%: `+14D` | 필수 | Computed (OHLC) | $(Close_t/Close_{t-14}-1)\times 100$ (거래일 bar 기준) | 14 bar 없으면 `-` |
-| Changes%: `+30D` | 필수 | Computed (OHLC) | $(Close_t/Close_{t-30}-1)\times 100$ (거래일 bar 기준) | 30 bar 없으면 `-` |
-| Earning: `<date>` 라인 | 선택 | Finnhub 또는 Not available | Finnhub 실적일자 엔드포인트 | 불가하면 렌더하지 않음 |
-| Market cap | 선택(필터) | Finnhub 또는 Not available | company profile 시총 필드 | 단위(USD) 확인 |
-| Industry | 선택(필터) | Finnhub 또는 Not available | company profile 산업 필드 | 필드명 확인 |
+| UI 필드 | 필수? | Source | 공급자 필드 / 계산식 | 상태 | 프로브 근거 |
+|---|---:|---|---|---|---|
+| Date | 필수 | **Finnhub** | `datetime` (Unix epoch 초단위) → NY 날짜 | ✅ 확인 | `finnhub_company_news_AAPL.json`: `"datetime": 1772441102` |
+| Time | 필수 | **Finnhub** | `datetime` (Unix epoch 초단위) → NY 시간 | ✅ 확인 | Date와 동일 필드 |
+| Title | 필수 | **Finnhub** | `headline` | ✅ 확인 | `"headline": "Broadcom, Target Earnings and Jobs Report..."` |
+| Sources | 필수 | **Finnhub** | `source` | ✅ 확인 | `"source": "Yahoo"` |
+| Changes%: `Chg` | 필수 | **Computed (OHLC)** | $(Close_t/Close_{t-1}-1)\times 100$ | ✅ DB 확인 | `ohlc_1d` 테이블에 Close 컬럼 존재 |
+| Changes%: `fr.Open` | 필수 | **Computed (OHLC)** | $(Close_t/Open_t-1)\times 100$ | ✅ DB 확인 | Open + Close 컬럼 존재 |
+| Changes%: `+7D` | 필수 | **Computed (OHLC)** | $(Close_t/Close_{t-7}-1)\times 100$ (거래일) | ✅ DB 확인 | ≥7 prior bars 필요; 없으면 `-` |
+| Changes%: `+14D` | 필수 | **Computed (OHLC)** | $(Close_t/Close_{t-14}-1)\times 100$ (거래일) | ✅ DB 확인 | ≥14 prior bars 필요; 없으면 `-` |
+| Changes%: `+30D` | 필수 | **Computed (OHLC)** | $(Close_t/Close_{t-30}-1)\times 100$ (거래일) | ✅ DB 확인 | ≥30 prior bars 필요; 없으면 `-` |
+| Earning: `<date>` 라인 | 선택 | **Finnhub** (조건부) | `/calendar/earnings` 엔드포인트 | ⚠️ 빈 배열 | 3개 심볼 모두 `{"earningsCalendar": []}`. 빈 경우 표시하지 않음. |
+| Market cap | 선택(필터) | **Finnhub** | `marketCapitalization` (백만 USD) | ✅ 확인 | AAPL: `3878463.65` (≈$3.88T) |
+| Industry | 선택(필터) | **Finnhub** | `finnhubIndustry` | ✅ 확인 | AAPL: `"Technology"` |
 
 ### /calendar (IBKR-only)
-| 탭 | UI 필드 | 필수? | Source | 공급자 필드 | 비고 / 프로브 |
-|---|---|---:|---|---|---|
-| Earnings | Date Announcement | 필수 | IBKR |  | 시간 의미 확인 |
-| Earnings | Time | 필수 | IBKR |  |  |
-| Earnings | Symbol | 필수 | IBKR |  |  |
-| Earnings | Session | 필수 | IBKR |  | 없으면 매핑 결정 |
-| Earnings | Period | 선택 | IBKR 또는 Not available |  |  |
-| Earnings | Confirmed | 선택 | IBKR 또는 Not available |  |  |
-| Earnings | EPS / Est. EPS / Surprise % | 선택 | IBKR 또는 Not available |  | 고리스크: 없을 가능성 큼 |
-| Earnings | Revenue / Est. Revenue | 선택 | IBKR 또는 Not available |  | 고리스크: 없을 가능성 큼 |
-| Conference | Date/Time/Symbol/Session/Confirmed | 필수 | IBKR |  | 이벤트 타입 확인 |
-| Dividend | Date/Time/Symbol/Session/Confirmed | 필수 | IBKR |  |  |
-| Analyst Rating | 모든 컬럼 | 선택 | IBKR 또는 Not available |  | 최고 리스크: 없을 가능성 큼 |
+| 탭 | UI 필드 | 필수? | Source | 공급자 필드 | 상태 | 프로브 근거 |
+|---|---|---:|---|---|---|---|
+| Earnings | Date Announcement | 필수 | IBKR | TBD | ❌ 미프로브 | IBKR Gateway/TWS 미설정 |
+| Earnings | Time | 필수 | IBKR | TBD | ❌ 미프로브 | |
+| Earnings | Symbol | 필수 | IBKR | TBD | ❌ 미프로브 | |
+| Earnings | Session | 필수 | IBKR | TBD | ❌ 미프로브 | 없으면 매핑 결정 필요 |
+| Earnings | Period | 선택 | IBKR 또는 Not available | TBD | ❌ 미프로브 | |
+| Earnings | Confirmed | 선택 | IBKR 또는 Not available | TBD | ❌ 미프로브 | |
+| Earnings | EPS / Est. EPS / Surprise % | 선택 | IBKR 또는 Not available | TBD | ❌ 미프로브 | 고리스크 |
+| Earnings | Revenue / Est. Revenue | 선택 | IBKR 또는 Not available | TBD | ❌ 미프로브 | 고리스크 |
+| Conference | Date/Time/Symbol/Session/Confirmed | 필수 | IBKR | TBD | ❌ 미프로브 | 이벤트 타입 확인 필요 |
+| Dividend | Date/Time/Symbol/Session/Confirmed | 필수 | IBKR | TBD | ❌ 미프로브 | |
+| Analyst Rating | 모든 컬럼 | 선택 | IBKR 또는 Not available | TBD | ❌ 미프로브 | 최고 리스크 |
 
 ### Watchlist
-| UI 필드 | 필수? | Source | 공급자 필드 / 계산식 | 비고 / 프로브 |
-|---|---:|---|---|---|
-| Ticker | 필수 | CSV | 설정된 CSV에서 읽기 | CSV 컬럼 규칙 확정 필요 |
-| Name | 선택 | Finnhub 또는 Not available | company profile name | 없으면 `-` |
-| Mkt Cap | 선택 | Finnhub 또는 Not available | company profile market cap |  |
-| Industry | 선택 | Finnhub 또는 Not available | company profile industry |  |
-| Price | 필수 | Computed (OHLC) | 최신 Close | 심볼별 latest bar |
-| Change | 필수 | Computed (OHLC) | Close_t - Close_{t-1} | 전일 bar 없으면 `-` |
-| % | 필수 | Computed (OHLC) | (Close_t/Close_{t-1}-1)\times 100 | 전일 bar 없으면 `-` |
+| UI 필드 | 필수? | Source | 공급자 필드 / 계산식 | 상태 | 프로브 근거 |
+|---|---:|---|---|---|---|
+| Ticker | 필수 | **CSV** | 설정된 CSV에서 읽기 | ✅ 확인 | 파일 존재: `tradigview_screener/original_data/watch lists2_2026-02-22.csv` |
+| Name | 선택 | **Finnhub** | `/stock/profile2` → `name` | ✅ 확인 | AAPL: `"Apple Inc"`, MSFT: `"Microsoft Corp"` |
+| Mkt Cap | 선택 | **Finnhub** | `marketCapitalization` (백만 USD) | ✅ 확인 | News Feed market cap과 동일 |
+| Industry | 선택 | **Finnhub** | `finnhubIndustry` | ✅ 확인 | News Feed industry와 동일 |
+| Price | 필수 | **Computed (OHLC)** | 최신 Close | ✅ DB 확인 | `ohlc_1d` 최신 `Datetime` = 2026-02-20 |
+| Change | 필수 | **Computed (OHLC)** | Close_t - Close_{t-1} | ✅ DB 확인 | 전일 bar 없으면 `-` |
+| % | 필수 | **Computed (OHLC)** | (Close_t/Close_{t-1}-1)\times 100 | ✅ DB 확인 | 전일 bar 없으면 `-` |
+
+---
+
+## Finnhub 프로브 — 확인된 데이터 필드 레퍼런스 (2026-03-02)
+
+프로브 심볼: AAPL, MSFT, TSLA. 원시 JSON은 `tmp/probes/`에 저장.
+
+### `/stock/profile2` — 확인된 필드
+```json
+// 예시: finnhub_profile2_AAPL.json
+{
+  "country": "US",
+  "currency": "USD",
+  "exchange": "NASDAQ NMS - GLOBAL MARKET",
+  "finnhubIndustry": "Technology",      // ← Industry
+  "marketCapitalization": 3878463.6457,  // ← 백만 USD
+  "name": "Apple Inc",                   // ← 회사명
+  "ticker": "AAPL",
+  "shareOutstanding": 14702.7,
+  "ipo": "1980-12-12",
+  "weburl": "https://www.apple.com/"
+}
+```
+
+### `/company-news` — 확인된 필드
+```json
+// 예시: finnhub_company_news_AAPL.json (첫 항목)
+{
+  "category": "company",
+  "datetime": 1772441102,       // ← Unix epoch 초(ms 아님)
+  "headline": "Broadcom, Target Earnings...",  // ← 제목
+  "id": 139274820,              // ← Finnhub 내부 ID
+  "image": "https://...",
+  "related": "AAPL",            // ← 티커(심볼)
+  "source": "Yahoo",            // ← 출처
+  "summary": "A heavy slate...",
+  "url": "https://finnhub.io/api/news?id=..."
+}
+```
+
+### `/calendar/earnings` — 조건부
+```json
+// 3개 심볼 모두 빈 배열:
+{ "earningsCalendar": [] }
+// 해석: 프로브 시점에 예정 실적 없음, 또는 무료 등급 제한.
+// 처리: Optional → 빈 경우 표시하지 않음.
+```
+
+---
+
+## IBKR 프로브 — 미수행
+
+사유: 현재 개발 환경에 IBKR Gateway/TWS가 설정되어 있지 않음.
+
+차단된 항목:
+- `/calendar` UI 필드 전체(Earnings/Conference/Dividend/Analyst Rating)
+- IBKR 1D OHLCV 수집
+
+권장: Steps 1–5(비-IBKR 파트)를 먼저 진행하고, IBKR 환경 준비 후 Steps 6–8 진행.
+
+---
+
+## 전체 감사 결론 (2026-03-02)
+
+### Finnhub: PASS (News Feed + Watchlist)
+- 필수 필드 모두 원시 JSON 프로브로 확인됨.
+- Earnings calendar: 빈 배열이지만 Optional → 블로커 아님.
+
+### IBKR: BLOCKED (/calendar + OHLC 업데이트)
+- Gateway/TWS 없이는 프로브 불가.
+- `/calendar` 필드는 IBKR 프로브 완료까지 리스크 유지.
+- 결정 필요: 비-IBKR 단계를 먼저 진행할지, 대기할지?
+
+### OHLC (기존 DB): PASS
+- `ohlc_1d_watchlist.sqlite` 확인: 테이블 `ohlc_1d`, 컬럼 `Symbol, Datetime, Open, High, Low, Close, Volume`.
+- 최신 데이터: 2026-02-20.
+- "Changes %" 계산에 충분.
 
 ---
 
@@ -289,3 +448,8 @@ API 키를 이 파일들에 포함시키지 않는다.
 실패(의사결정 전까지 중단)
 - `/calendar`의 필수 필드를 IBKR에서 소싱할 수 없다.
 - News Feed의 필수 필드를 Finnhub에서 소싱할 수 없고, OHLC로도 계산 불가능하다.
+
+### 현재 결론 (2026-03-02)
+- **Finnhub (News Feed + Watchlist): PASS** — 필수 필드 전부 확인됨.
+- **IBKR (/calendar + OHLC 업데이트): BLOCKED** — Gateway/TWS 필요.
+- **OHLC DB (Changes %): PASS** — DB 스키마 및 데이터 확인됨.
