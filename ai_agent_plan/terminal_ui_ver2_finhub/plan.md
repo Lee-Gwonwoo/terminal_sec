@@ -802,28 +802,107 @@ Verification
 ### Execution dependency graph
 
 ```
-Step 0 (audit) ──confirmed──→ Step 1 (foundations)
-                                  │
-                          ┌───────┴───────┐
-                          ▼               ▼
-                   Step 2 (CSV API)    Step 4 (Finnhub backend)
-                          │               │
-                          ▼               ▼
-                   Step 3 (Ticker UI)  Step 5 (News UI)
-                          │               │
-                          └───────┬───────┘
-                                  ▼
-              ┌── Step 6 (Calendar) ◄── BLOCKED (decision #5)
-              │
-              ├── Step 7 (OHLC)     ◄── BLOCKED (decision #6)
-              │
-              └──→ Step 8 (Data Control UI) ◄── needs Steps 6 + 7
-                          │
-                          ▼
-                   Step 9 (Tests + final)
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                        EXECUTION DEPENDENCY GRAPH                          ║
+║  Legend: ✅ Done  ⏳ Awaiting user  🚫 BLOCKED  ⬜ Not started             ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+✅ Step 0 (Data availability audit)
+│   ├─ 0-1 Finnhub probes ........................... ✅ Done
+│   ├─ 0-2 IBKR TWS probe .......................... ✅ Done
+│   ├─ 0-3 Capability matrix ........................ ✅ Done
+│   └─ 0-4 Pending IBKR decisions (#5, #6) ......... ⏳ Awaiting user
+│         (does NOT block Steps 1-5)
+│
+▼
+⬜ Step 1 (Foundations: update_status + API)
+│   ├─ 1-1 update_status table ...................... pre-written (needs verify)
+│   ├─ 1-2 updateStatusRepository.ts ................ pre-written (needs verify)
+│   ├─ 1-3 Wire GET /api/updates/status ............. ⬜ Not started
+│   └─ 1-4 Persistence test ......................... ⬜ Not started
+│
+├──────────────────────┬──────────────────────────────┐
+│    TRACK A           │         TRACK B              │
+│    (CSV / Ticker)    │         (Finnhub News)       │
+│    No IBKR needed    │         No IBKR needed       │
+│                      │                              │
+▼                      ▼                              │
+⬜ Step 2               ⬜ Step 4                      │
+(CSV read+append API)  (Finnhub ingestion backend)    │
+│ 2-1 tickerCsvSvc     │ 4-1 finnhubApiKey config     │
+│ 2-2 appendTicker     │ 4-2 finnhubNewsProvider      │
+│ 2-3 atomic write     │ 4-3 POST /news/pull-finhub   │
+│ 2-4 GET /tickers     │ 4-4 update finhub_news       │
+│ 2-5 POST /tickers    │ 4-5 verify queryable         │
+│ 2-6 update status    │                              │
+│                      │                              │
+▼                      ▼                              │
+⬜ Step 3               ⬜ Step 5                      │
+(Default Ticker UI)    (News Feed: finhub api UI)     │
+│ 3-1 window type      │ 5-1 remove brave-news        │
+│ 3-2 component        │ 5-2 rename → FinnhubNews     │
+│ 3-3 DraggableWindow  │ 5-3 remove mock data         │
+│ 3-4 AddTabModal      │ 5-4 real fetch               │
+│ 3-5 App.tsx title    │ 5-5 "Update" button          │
+│ 3-6 smoke test       │ 5-6 AddTabModal label        │
+│                      │ 5-7 App.tsx title            │
+│                      │ 5-8 DraggableWindow switch   │
+│                      │                              │
+└──────────┬───────────┘                              │
+           │                                          │
+           ▼                                          │
+   ╔═══════════════════════════════════════╗           │
+   ║  🚫 IBKR-DEPENDENT STEPS             ║           │
+   ║  Blocked until decisions #5, #6      ║           │
+   ╚═══════════════════════════════════════╝           │
+           │                                          │
+           ├─► 🚫 Step 6 (Calendar ingestion + mock cleanup)
+           │      ◄── BLOCKED on decision #5: /calendar data source
+           │      6-1 remove mock workers
+           │      6-2 remove startCalendarIngestionWorkers
+           │      6-3 implement calendar pull (source TBD)
+           │      6-4 wire POST /ibkr/calendar/update
+           │      6-5 delete mock_provider rows
+           │      6-6 update ibkr_calendar status
+           │
+           ├─► 🚫 Step 7 (IBKR 1D OHLC ingestion)
+           │      ◄── BLOCKED on decision #6: Node↔IBKR method
+           │      7-1 ohlcWatchlistRepository
+           │      7-2 ensureDerivedColumns migration
+           │      7-3 ibkrOhlc1dProvider
+           │      7-4 ohlcDerivedMetrics
+           │      7-5 GET /ibkr/ohlc1d/status
+           │      7-6 POST /ibkr/ohlc1d/update
+           │      7-7 spot-check derived columns
+           │
+           ▼
+   ⬜ Step 8 (Data Control Window UI)
+   │  ◄── requires Steps 6 + 7 completed
+   │  8-1 window type + component
+   │  8-2 status fetch from /api/updates/status
+   │  8-3 update buttons per source
+   │  8-4 progress/error display
+   │  8-5 smoke test
+   │
+   ▼
+   ⬜ Step 9 (Tests + acceptance checks)
+      9-1 backend unit tests (services)
+      9-2 API integration smoke test
+      9-3 mock cleanup verification
+      9-4 ACCEPTANCE_TESTS.md update
+      9-5 final agent_log review
 ```
 
-**Parallel track (no IBKR dependency):** Steps 1 → 2 → 3 and Steps 1 → 4 → 5 can proceed in parallel, independently of IBKR decisions.
+**Parallel tracks (no IBKR dependency):**
+- Track A: Steps 1 → 2 → 3 (CSV/Ticker) — can start immediately
+- Track B: Steps 1 → 4 → 5 (Finnhub News) — can start immediately, in parallel with Track A
+- Both tracks converge before the IBKR-dependent block (Steps 6-7-8)
+
+**Blocker summary:**
+| Decision | Blocks | Options |
+|----------|--------|---------|
+| #5: /calendar data source | Step 6 | A: Finnhub, B: Client Portal, C: Fundamental sub, D: scope cut |
+| #6: Node↔IBKR method | Step 7 | A: @stoqey/ib, B: Python child_process, C: Python microservice |
 
 ---
 
@@ -1622,25 +1701,104 @@ UI 동작(최소)
 ### 실행 의존성 그래프
 
 ```
-Step 0 (감사) ──확인──→ Step 1 (기반)
-                             │
-                     ┌───────┴───────┐
-                     ▼               ▼
-              Step 2 (CSV API)    Step 4 (Finnhub 백엔드)
-                     │               │
-                     ▼               ▼
-              Step 3 (Ticker UI)  Step 5 (News UI)
-                     │               │
-                     └───────┬───────┘
-                             ▼
-           ┌── Step 6 (캘린더) ◄── 차단됨 (결정 #5)
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                          실행 의존성 그래프                                  ║
+║  범례: ✅ 완료  ⏳ 사용자 확인 대기  🚫 차단됨  ⬜ 미시작                    ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+✅ Step 0 (데이터 가용성 감사)
+│   ├─ 0-1 Finnhub 프로브 .......................... ✅ 완료
+│   ├─ 0-2 IBKR TWS 프로브 ......................... ✅ 완료
+│   ├─ 0-3 능력 매트릭스 ............................ ✅ 완료
+│   └─ 0-4 IBKR 미결정 사항 (#5, #6) ............... ⏳ 사용자 확인 대기
+│         (Steps 1-5는 차단하지 않음)
+│
+▼
+⬜ Step 1 (기반: update_status + API)
+│   ├─ 1-1 update_status 테이블 ..................... 사전 작성됨 (검증 필요)
+│   ├─ 1-2 updateStatusRepository.ts ................ 사전 작성됨 (검증 필요)
+│   ├─ 1-3 GET /api/updates/status 연결 ............. ⬜ 미시작
+│   └─ 1-4 영속성 테스트 ............................ ⬜ 미시작
+│
+├──────────────────────┬──────────────────────────────┐
+│    트랙 A            │         트랙 B               │
+│    (CSV / Ticker)    │         (Finnhub News)       │
+│    IBKR 불필요       │         IBKR 불필요          │
+│                      │                              │
+▼                      ▼                              │
+⬜ Step 2               ⬜ Step 4                      │
+(CSV 읽기+추가 API)    (Finnhub 수집 백엔드)          │
+│ 2-1 tickerCsvSvc     │ 4-1 finnhubApiKey 설정       │
+│ 2-2 appendTicker     │ 4-2 finnhubNewsProvider      │
+│ 2-3 atomic write     │ 4-3 POST /news/pull-finhub   │
+│ 2-4 GET /tickers     │ 4-4 finhub_news 상태 갱신    │
+│ 2-5 POST /tickers    │ 4-5 조회 검증                │
+│ 2-6 상태 갱신        │                              │
+│                      │                              │
+▼                      ▼                              │
+⬜ Step 3               ⬜ Step 5                      │
+(Default Ticker UI)    (News Feed: finhub api UI)     │
+│ 3-1 window type      │ 5-1 brave-news 제거          │
+│ 3-2 컴포넌트         │ 5-2 FinnhubNews로 이름변경   │
+│ 3-3 DraggableWindow  │ 5-3 mock 데이터 제거         │
+│ 3-4 AddTabModal      │ 5-4 실제 fetch               │
+│ 3-5 App.tsx 제목     │ 5-5 "Update" 버튼            │
+│ 3-6 스모크 테스트    │ 5-6 AddTabModal 라벨         │
+│                      │ 5-7 App.tsx 제목             │
+│                      │ 5-8 DraggableWindow switch   │
+│                      │                              │
+└──────────┬───────────┘                              │
+           │                                          │
+           ▼                                          │
+   ╔═══════════════════════════════════════╗           │
+   ║  🚫 IBKR 의존 단계                    ║           │
+   ║  결정 #5, #6 해결 전까지 차단됨       ║           │
+   ╚═══════════════════════════════════════╝           │
+           │                                          │
+           ├─► 🚫 Step 6 (캘린더 수집 + mock 정리)
+           │      ◄── 결정 #5 대기: /calendar 데이터 소스
+           │      6-1 mock worker 제거
+           │      6-2 startCalendarIngestionWorkers 제거
+           │      6-3 캘린더 데이터 pull 구현 (소스 미정)
+           │      6-4 POST /ibkr/calendar/update 연결
+           │      6-5 mock_provider 행 삭제
+           │      6-6 ibkr_calendar 상태 갱신
            │
-           ├── Step 7 (OHLC)     ◄── 차단됨 (결정 #6)
+           ├─► 🚫 Step 7 (IBKR 1D OHLC 수집)
+           │      ◄── 결정 #6 대기: Node↔IBKR 연동 방식
+           │      7-1 ohlcWatchlistRepository
+           │      7-2 ensureDerivedColumns 마이그레이션
+           │      7-3 ibkrOhlc1dProvider
+           │      7-4 ohlcDerivedMetrics
+           │      7-5 GET /ibkr/ohlc1d/status
+           │      7-6 POST /ibkr/ohlc1d/update
+           │      7-7 파생 컬럼 검증
            │
-           └──→ Step 8 (Data Control UI) ◄── Steps 6 + 7 필요
-                         │
-                         ▼
-                  Step 9 (테스트 + 최종)
+           ▼
+   ⬜ Step 8 (Data Control Window UI)
+   │  ◄── Steps 6 + 7 완료 필요
+   │  8-1 window type + 컴포넌트
+   │  8-2 /api/updates/status에서 상태 fetch
+   │  8-3 소스별 update 버튼
+   │  8-4 진행률/에러 표시
+   │  8-5 스모크 테스트
+   │
+   ▼
+   ⬜ Step 9 (테스트 + 수락 검사)
+      9-1 백엔드 유닛 테스트 (서비스)
+      9-2 API 통합 스모크 테스트
+      9-3 mock 정리 검증
+      9-4 ACCEPTANCE_TESTS.md 갱신
+      9-5 최종 agent_log 검토
 ```
 
-**병렬 트랙 (IBKR 의존 없음):** Steps 1 → 2 → 3 과 Steps 1 → 4 → 5 는 IBKR 결정과 무관하게 병렬 진행 가능.
+**병렬 트랙 (IBKR 의존 없음):**
+- 트랙 A: Steps 1 → 2 → 3 (CSV/Ticker) — 즉시 시작 가능
+- 트랙 B: Steps 1 → 4 → 5 (Finnhub News) — 트랙 A와 병렬로 즉시 시작 가능
+- 두 트랙은 IBKR 의존 블록(Steps 6-7-8) 전에 합류
+
+**차단 요약:**
+| 결정 | 차단 대상 | 선택지 |
+|------|-----------|--------|
+| #5: /calendar 데이터 소스 | Step 6 | A: Finnhub, B: Client Portal, C: Fundamental 구독, D: 범위 축소 |
+| #6: Node↔IBKR 연동 방식 | Step 7 | A: @stoqey/ib, B: Python child_process, C: Python 마이크로서비스 |

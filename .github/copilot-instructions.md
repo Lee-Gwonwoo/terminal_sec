@@ -61,9 +61,10 @@
 - If the user says “don’t execute/run” (e.g., “실행하지 말고”) and it’s ambiguous whether file writes are allowed, use the hook question flow (`ask_questions`) to confirm before creating/modifying files.
   - Default interpretation (unless the user says otherwise): “don’t execute/run” = no code execution (no tests/dev server/scripts), but creating/updating `plan.md` is allowed.
 - Write/update `agent_log.md` **only when the user explicitly tells you to execute a specific plan**.
+- **`agent_log.md` language rule (must):** `agent_log.md` is written in **Korean only** (한국어 단독). Do NOT write bilingual EN/KO sections in the log — Korean is sufficient.
 - File storage: `C:\github_coding\terminal_sec\ai_agent_plan\<project_name>\`
-  - `plan.md`: detailed step-by-step plan before starting (goal, approach, files to create/modify, order, risks).
-  - `agent_log.md`: chronological record of every action taken (files created/modified, commands run, decisions, errors).
+  - `plan.md`: detailed step-by-step plan before starting (goal, approach, files to create/modify, order, risks). Bilingual EN+KO.
+  - `agent_log.md`: chronological record of every action taken (files created/modified, commands run, decisions, errors). **Korean only.**
 - **Break large tasks into steps:** if a task is large or complex, decompose it into small, independently verifiable steps. Each step should have a clear deliverable.
 - **Plan changes (mid-stream):** keep history intact.
   - Do not rewrite or delete previously recorded log entries.
@@ -112,13 +113,53 @@ When a plan has multiple major Steps (e.g., Step 0, Step 1, …, Step N), **each
 
 - **Sequential within a Step, gated between Steps:**
   - Sub-steps within the same Step are executed sequentially.
-  - Steps themselves may be parallelizable — document this with an **Execution dependency graph** (a simple ASCII/Markdown diagram showing which Steps depend on which).
-  - Example:
+  - Steps themselves may be parallelizable — document this with an **Execution dependency graph** (a detailed ASCII/Markdown diagram showing which Steps depend on which).
+
+- **Execution dependency graph requirements (must):**
+  - Include a **legend** at the top showing all status emojis.
+  - Show **every sub-step** listed under its parent Step (one line each, with its current status emoji).
+  - Label **parallel tracks** clearly (e.g., Track A / Track B) and state what each track covers.
+  - Show **blocked sections** with a boxed banner explaining the blocker.
+  - After the graph, include:
+    - A **Parallel tracks summary** listing which Steps run in parallel and any prerequisites.
+    - A **Blocker summary table** (`Decision | Blocks | Options`) if there are pending decisions.
+  - Example (detailed):
     ```
-    Step 0 (audit)
-      └─► Step 1 (foundations)
-            ├─► Step 2 → Step 3  (track A: can run in parallel with track B)
-            └─► Step 4 → Step 5  (track B)
+    ╔═══════════════════════════════════════════════════════╗
+    ║            EXECUTION DEPENDENCY GRAPH                 ║
+    ║  Legend: ✅ Done  ⏳ Awaiting  🚫 BLOCKED  ⬜ Todo    ║
+    ╚═══════════════════════════════════════════════════════╝
+
+    ✅ Step 0 (audit)
+    │   ├─ 0-1 probe API .............. ✅ Done
+    │   └─ 0-2 capability matrix ...... ✅ Done
+    │
+    ▼
+    ⬜ Step 1 (foundations)
+    │   ├─ 1-1 create table ........... ⬜
+    │   └─ 1-2 wire endpoint .......... ⬜
+    │
+    ├───────────────┬──────────────────┐
+    │  TRACK A      │  TRACK B         │
+    ▼               ▼                  │
+    ⬜ Step 2        ⬜ Step 4           │
+    │               │                  │
+    ▼               ▼                  │
+    ⬜ Step 3        ⬜ Step 5           │
+    │               │                  │
+    └───────┬───────┘                  │
+            ▼                          │
+    ╔═══════════════════════════╗       │
+    ║ 🚫 BLOCKED SECTION       ║       │
+    ║ Needs decision X         ║       │
+    ╚═══════════════════════════╝       │
+            │                          │
+            ├─► 🚫 Step 6             │
+            ├─► 🚫 Step 7             │
+            ▼                          │
+    ⬜ Step 8 ◄── needs 6+7            │
+            ▼                          │
+    ⬜ Step 9 (final)                   │
     ```
 
 - **Blocked Steps:** if a Step depends on an unresolved decision or external blocker, mark it with `⚠️ BLOCKED` and state the prerequisite. Do not start blocked Steps.
@@ -127,7 +168,19 @@ When a plan has multiple major Steps (e.g., Step 0, Step 1, …, Step N), **each
   - `✅ Done` — completed and verified
   - `⏳ Awaiting user` — done but waiting for user confirmation
   - `🚫 BLOCKED` — cannot start due to unresolved dependency
-  - (empty) — not started
+  - `⬜` — not started
+
+- **plan.md writing conventions (must follow when creating/updating plan.md):**
+  - **Structure order:** Goal → Approach overview → Step list (each with sub-step table + verification hook) → Execution dependency graph → Open questions / blockers.
+  - **Bilingual:** EN section first, `---` separator, then KO section (same content, translated).
+  - **Every Step heading** must include its number and a short descriptive name: `#### Step N — Short name`.
+  - **Sub-step tables** are mandatory for every Step (see sub-step table format above).
+  - **Verification hook blocks** are mandatory for every Step closeout.
+  - **Execution dependency graph** must be detailed (see graph requirements above) — not a simplified tree.
+  - **Emoji status markers** must be used consistently in both the sub-step tables and the dependency graph to provide at-a-glance progress visibility.
+  - **Blocker tracking:** blocked Steps must be visually distinct (boxed section in graph, `⚠️ BLOCKED` label, prerequisite stated).
+  - **Pre-written code notes:** if code was written before formal plan execution, note it explicitly under the relevant sub-step (e.g., "pre-written (needs verify)").
+  - **Open questions section:** list pending decisions with numbered IDs, options, and which Steps they block.
 ---
 
 # Copilot instructions (python workspace)
@@ -457,9 +510,10 @@ When a plan has multiple major Steps (e.g., Step 0, Step 1, …, Step N), **each
 - 사용자가 “실행하지 말고”(예: “실행하지 말고”)라고 말했을 때, 파일 작성까지 금지인지 애매하면 파일을 만들기/수정하기 전에 hook 질문 플로우(`ask_questions`)로 확인한다.
   - 기본 해석(사용자가 별도 명시하지 않는 한): “실행하지 말고” = 코드 실행 금지(테스트/서버/스크립트 실행 금지)이며, `plan.md` 작성/갱신은 허용.
 - `agent_log.md`는 **사용자가 특정 plan을 수행하라고 지시할 때만** 작성/업데이트.
+- **`agent_log.md` 언어 규칙(필수):** `agent_log.md`는 **한국어 단독**으로 작성한다. 영/한 병기 불필요 — 한국어만으로 충분.
 - 저장 위치: `C:\github_coding\terminal_sec\ai_agent_plan\<project_name>\`
-  - `plan.md`: 작업 시작 전 상세 단계별 계획 (목표, 접근법, 생성/수정 파일, 순서, 위험 요소).
-  - `agent_log.md`: 수행한 모든 작업을 시간순으로 기록 (생성/수정 파일, 실행 명령어, 결정, 오류).
+  - `plan.md`: 작업 시작 전 상세 단계별 계획 (목표, 접근법, 생성/수정 파일, 순서, 위험 요소). 영/한 병기.
+  - `agent_log.md`: 수행한 모든 작업을 시간순으로 기록 (생성/수정 파일, 실행 명령어, 결정, 오류). **한국어 단독.**
 - **큰 작업은 단계로 쪼개기:** 크고 복잡한 작업은 독립적으로 검증 가능한 작은 단계로 분해한다. 각 단계마다 명확한 산출물을 정의한다.
 - **플랜 중간 변경(리비전):** 기록 히스토리를 유지한다.
   - 이미 기록된 로그를 재작성하거나 삭제하지 않는다.
@@ -508,13 +562,53 @@ plan에 여러 대단계(Step 0, Step 1, …, Step N)가 있을 때, **각 Step�
 
 - **Step 내부는 순차, Step 간에는 게이트:**
   - 같은 Step 내의 세부 단계는 순차적으로 실행합니다.
-  - Step 자체는 병렬 실행 가능할 수 있으며, 이를 **실행 의존성 그래프**(간단한 ASCII/Markdown 다이어그램)로 문서화합니다.
-  - 예시:
+  - Step 자체는 병렬 실행 가능할 수 있으며, 이를 **실행 의존성 그래프**(상세한 ASCII/Markdown 다이어그램)로 문서화합니다.
+
+- **실행 의존성 그래프 요구사항(필수):**
+  - 상단에 모든 상태 이모지를 보여주는 **범례(Legend)**를 포함합니다.
+  - **모든 세부 단계**를 부모 Step 아래에 한 줄씩 나열하고, 현재 상태 이모지를 표시합니다.
+  - **병렬 트랙**을 명확히 라벨링합니다(예: 트랙 A / 트랙 B) + 각 트랙이 다루는 내용을 명시합니다.
+  - **차단 구간**은 박스형 배너로 차단 사유를 설명합니다.
+  - 그래프 다음에 포함:
+    - **병렬 트랙 요약** — 어떤 Steps가 병렬로 가능한지, 선행 조건은 무엇인지.
+    - **차단 요약 테이블** (`결정 | 차단 대상 | 선택지`) — 미결정 사항이 있을 때.
+  - 예시 (상세):
     ```
-    Step 0 (감사)
-      └─► Step 1 (기반)
-            ├─► Step 2 → Step 3  (트랙 A: 트랙 B와 병렬 가능)
-            └─► Step 4 → Step 5  (트랙 B)
+    ╔═══════════════════════════════════════════════════════╗
+    ║              실행 의존성 그래프                         ║
+    ║  범례: ✅ 완료  ⏳ 대기  🚫 차단됨  ⬜ 미시작          ║
+    ╚═══════════════════════════════════════════════════════╝
+
+    ✅ Step 0 (감사)
+    │   ├─ 0-1 API 프로브 ............. ✅ 완료
+    │   └─ 0-2 능력 매트릭스 .......... ✅ 완료
+    │
+    ▼
+    ⬜ Step 1 (기반)
+    │   ├─ 1-1 테이블 생성 ............ ⬜
+    │   └─ 1-2 엔드포인트 연결 ........ ⬜
+    │
+    ├───────────────┬──────────────────┐
+    │  트랙 A       │  트랙 B          │
+    ▼               ▼                  │
+    ⬜ Step 2        ⬜ Step 4           │
+    │               │                  │
+    ▼               ▼                  │
+    ⬜ Step 3        ⬜ Step 5           │
+    │               │                  │
+    └───────┬───────┘                  │
+            ▼                          │
+    ╔═══════════════════════════╗       │
+    ║ 🚫 차단 구간              ║       │
+    ║ 결정 X 필요              ║       │
+    ╚═══════════════════════════╝       │
+            │                          │
+            ├─► 🚫 Step 6             │
+            ├─► 🚫 Step 7             │
+            ▼                          │
+    ⬜ Step 8 ◄── 6+7 필요             │
+            ▼                          │
+    ⬜ Step 9 (최종)                    │
     ```
 
 - **차단된 Step:** 미결정 사항이나 외부 차단 요소에 의존하는 Step은 `⚠️ BLOCKED`로 표시하고 선행 조건을 명시합니다. 차단된 Step은 시작하지 않습니다.
@@ -523,7 +617,19 @@ plan에 여러 대단계(Step 0, Step 1, …, Step N)가 있을 때, **각 Step�
   - `✅ Done` — 완료 및 검증됨
   - `⏳ Awaiting user` — 완료했으나 사용자 확인 대기 중
   - `🚫 BLOCKED` — 미해결 의존성으로 시작 불가
-  - (비어있음) — 미시작
+  - `⬜` — 미시작
+
+- **plan.md 작성 규칙(plan.md 생성/수정 시 반드시 준수):**
+  - **구조 순서:** 목표 → 접근법 개요 → Step 목록(각 Step에 세부 단계 테이블 + 검증 훅) → 실행 의존성 그래프 → 미결정 사항/차단 요소.
+  - **한/영 병기:** EN 섹션을 먼저, `---` 구분선, 그 다음 KO 섹션(동일 내용 번역).
+  - **모든 Step 제목**에는 번호와 짧은 설명을 포함: `#### Step N — 짧은 이름`.
+  - **세부 단계 테이블**은 모든 Step에 필수(위의 세부 단계 테이블 형식 참조).
+  - **검증 훅 블록**은 모든 Step 마감 시 필수.
+  - **실행 의존성 그래프**는 상세하게 작성(위의 그래프 요구사항 참조) — 단순 트리가 아닌 상세 그래프.
+  - **이모지 상태 마커**를 세부 단계 테이블과 의존성 그래프 모두에서 일관되게 사용하여 한눈에 진행 상황을 파악할 수 있게 합니다.
+  - **차단 추적:** 차단된 Step은 시각적으로 뚜렷하게 구분(그래프에서 박스 구간, `⚠️ BLOCKED` 라벨, 선행 조건 명시).
+  - **사전 작성 코드 표기:** 정식 plan 실행 전에 코드가 작성된 경우, 해당 세부 단계에 명시적으로 기록(예: "사전 작성됨 (검증 필요)").
+  - **미결정 사항 섹션:** 번호 ID, 선택지, 차단 대상 Step을 포함한 미결정 사항 목록 유지.
 # Copilot 지침 (python 워크스페이스, 한국어)
 
 <!-- ====================================================
