@@ -63,8 +63,75 @@ Implement the following changes using `termina_web/figma_code/terminal_ui_ver2_f
    - Recommended: convert the existing `brave-news` window to Finnhub-backed (and rename UI label).
    - Optional decision: whether to also migrate the existing `news` window (currently pulls EODHD on startup) to Finnhub to avoid multiple sources.
 
+### Mandatory mid-plan verification: “Data availability audit” (IBKR + Finnhub)
+This project has UI columns that imply specific data fields (market cap, turnover, earnings calendar fields, etc.). Before committing to implementation, we must confirm what each provider can actually deliver, and what must be computed from OHLC.
+
+Audit deliverables
+- A written “capability matrix” mapping each UI column → source (IBKR / Finnhub / computed from `ohlc_1d` / not available).
+- A small set of probe scripts/endpoints that return raw samples (for developer verification only; do not expose externally; do not log secrets).
+
+Columns to audit (minimum, based on current UI)
+- “News Feed: finhub api” window (currently implemented as `BraveNewsWindow` mock):
+  - Table columns: `Date`, `Time`, `Title`, `Sources`, `Changes %`
+  - `Changes %` sub-fields rendered inside the cell:
+    - `Chg` (1D % change)
+    - `fr.Open` (% change from open)
+    - `+7D`, `+14D`, `+30D` (% change vs N trading bars ago)
+    - Optional line: `Earning: <date>` (next earnings date)
+  - Filter UI implies additional per-ticker fields:
+    - Market cap (for market-cap presets)
+    - Industry (multi-select)
+- Calendar window (`/calendar` must be IBKR-only):
+  - Earnings tab visible columns:
+    - `Date Announcement`, `Time`, `Symbol`, `Session`, `Period`, `Confirmed`, `EPS`, `Est. EPS`, `Surprise %`, `Revenue`, `Est. Revenue`
+  - Conference tab visible columns:
+    - `Date Announcement`, `Time`, `Symbol`, `Session`, `Confirmed`
+  - Dividend tab visible columns:
+    - `Date Announcement`, `Time`, `Symbol`, `Session`, `Confirmed`
+  - Analyst Rating tab visible columns:
+    - `Date Announcement`, `Time`, `Symbol`, `Analyst Firm`, `Analyst Name`, `Action`, `Prior Rating`, `Rating`, `Prior PT`, `Price Target`, `Confirmed`
+- Watchlist window (currently mock):
+  - Table columns: `Ticker`, `Name`, `Mkt Cap`, `Industry`, `Price`, `Change`, `%`
+
+Working definitions for “Changes %” (to avoid ambiguity)
+- Use the latest available trading bar in `ohlc_1d` for the symbol (per-symbol latest `Datetime`).
+- `Chg` := $(\frac{Close_t}{Close_{t-1}} - 1) \times 100$
+- `fr.Open` := $(\frac{Close_t}{Open_t} - 1) \times 100$
+- `+7D/+14D/+30D` := $(\frac{Close_t}{Close_{t-N}} - 1) \times 100$ where $N$ is trading bars (not calendar days).
+
+Draft capability matrix template (fill during audit)
+
+| UI Surface | UI field | Proposed source | Notes / probe |
+|---|---|---|---|
+| News Feed | Date/Time | Finnhub company news publish time | Confirm timezone and field availability. |
+| News Feed | Title | Finnhub |  |
+| News Feed | Sources | Finnhub | Confirm field name (`source` or equivalent). |
+| News Feed | Ticker | Finnhub (symbol parameter) | News API is usually requested per symbol; confirm. |
+| News Feed | Changes: `Chg` / `fr.Open` / `+7D` / `+14D` / `+30D` | Computed from `OHLC_data/ohlc_1d_watchlist.sqlite` (`ohlc_1d`) | Requires Volume+OHLC completeness; define behavior when insufficient history (render `-`). |
+| News Feed | Earning date line | Finnhub earnings/calendar (preferred) | If unavailable, do **not** fake; render nothing. |
+| News Feed | Market cap | Finnhub company profile (preferred) | Confirm units; store numeric USD and format. |
+| News Feed | Industry | Finnhub company profile (preferred) | Confirm field (`finnhubIndustry` or similar). |
+| Calendar | Earnings fields (EPS/Revenue/etc.) | IBKR (TBD) | Highest risk: verify IBKR actually provides these fields; if not, stop for decision. |
+| Calendar | Conference/Dividend | IBKR (TBD) | Verify event types/fields exist in IBKR APIs. |
+| Calendar | Analyst rating fields | IBKR (TBD) | Very likely not available via IBKR; must be confirmed. |
+| Watchlist | Price/Change/% | Computed from `ohlc_1d` latest close vs prior close | Also needs backfill of derived metrics for latest rows. |
+| Watchlist | Name/Mkt Cap/Industry | Finnhub company profile (preferred) | If unavailable, show `-` (real “unknown”), not fake. |
+
+Probe approach (implementation guidance)
+- Finnhub probes (backend-only):
+  - Confirm which endpoints/fields are available for: company profile (market cap), candles (OHLCV), earnings calendar/earnings dates, and company news.
+  - Validate rate limits and date ranges (how far back you can pull, and whether intraday is needed).
+- IBKR probes (TWS/IB Gateway):
+  - Confirm that daily OHLCV can be fetched reliably for your symbol universe.
+  - Confirm whether “calendar” data exists in IBKR APIs in a way that matches UI requirements; if not, explicitly document the gap.
+
+Fail-fast rules
+- Do not implement UI columns with fake placeholders.
+- If a required column cannot be sourced or computed with available data, record it in the capability matrix and stop for a user decision.
+
 ### Proposed implementation order (rationale)
 IBKR integration is the highest-uncertainty dependency; CSV + Finnhub are lower risk and unblock visible progress. So the order below:
+0) Data availability audit (IBKR + Finnhub vs UI columns)
 1) Foundations (DB table + status API)
 2) Default Ticker CSV APIs + window
 3) Finnhub ingestion + migrate “news feed” window (and remove mock)
@@ -72,6 +139,18 @@ IBKR integration is the highest-uncertainty dependency; CSV + Finnhub are lower 
 5) Cleanup + tests
 
 ### Step-by-step plan (implement → verify each step)
+
+#### Step 0 — Data availability audit (IBKR + Finnhub vs UI columns)
+Deliverables
+- Fill the capability matrix above with definitive “Yes/No/Computed” outcomes.
+- Produce probe outputs (raw JSON samples) for a small set of symbols (e.g., AAPL, MSFT, TSLA) to confirm:
+  - Finnhub company news fields, company profile fields (market cap, industry), and next earnings date availability.
+  - IBKR daily OHLCV retrieval works end-to-end (connection + pacing + permissions).
+  - IBKR calendar capability for the UI-required fields (earnings EPS/revenue and analyst rating in particular).
+
+Verification
+- Written matrix is complete for every UI column listed above.
+- Probes are reproducible without leaking secrets (no API keys in logs).
 
 #### Step 1 — Foundations: update status storage + API
 Backend files:
@@ -331,8 +410,75 @@ Verification
    - 권장: 기존 `brave-news`를 Finnhub 기반으로 교체 + 라벨 변경.
    - 선택: 기존 `news` 윈도우(EODHD 자동 pull 포함)도 Finnhub로 같이 옮길지 여부.
 
+### 계획 중간 필수 확인: “데이터 수집 가능 범위 점검(감사)” (IBKR + Finnhub)
+UI 컬럼이 요구하는 데이터(예: market cap, turnover, earnings calendar 필드 등)가 실제로 IBKR/Finnhub에서 제공되는지, 또는 OHLC로 계산 가능한지 구현 전에 확인해야 한다.
+
+점검 산출물
+- “capability matrix(가능 범위 매트릭스)” 문서: 각 UI 컬럼 → 데이터 소스(IBKR / Finnhub / `ohlc_1d`로 계산 / 불가)를 명확히 매핑
+- 원시 샘플을 확인할 수 있는 최소 probe 스크립트/엔드포인트(개발자 확인용)
+  - 외부 노출 금지, 시크릿 로그 금지
+
+점검 대상 컬럼(최소, 현재 UI 기준)
+- “News Feed: finhub api” 윈도우(현재 `BraveNewsWindow`가 mock으로 구현된 부분):
+  - 표 컬럼: `Date`, `Time`, `Title`, `Sources`, `Changes %`
+  - `Changes %` 셀 내부에 렌더되는 하위 항목:
+    - `Chg` (1D % change)
+    - `fr.Open` (오픈 대비 % change)
+    - `+7D`, `+14D`, `+30D` (N 거래일(트레이딩 바) 전 대비 % change)
+    - 선택 라인: `Earning: <date>` (다음 실적 발표일)
+  - 필터 UI가 암시하는 추가 필드:
+    - Market cap(시가총액, market-cap preset용)
+    - Industry(산업, multi-select)
+- Calendar window (`/calendar`는 IBKR-only 요구사항):
+  - Earnings 탭(표에 기본으로 보이는 컬럼):
+    - `Date Announcement`, `Time`, `Symbol`, `Session`, `Period`, `Confirmed`, `EPS`, `Est. EPS`, `Surprise %`, `Revenue`, `Est. Revenue`
+  - Conference 탭(표에 기본으로 보이는 컬럼):
+    - `Date Announcement`, `Time`, `Symbol`, `Session`, `Confirmed`
+  - Dividend 탭(표에 기본으로 보이는 컬럼):
+    - `Date Announcement`, `Time`, `Symbol`, `Session`, `Confirmed`
+  - Analyst Rating 탭(표에 기본으로 보이는 컬럼):
+    - `Date Announcement`, `Time`, `Symbol`, `Analyst Firm`, `Analyst Name`, `Action`, `Prior Rating`, `Rating`, `Prior PT`, `Price Target`, `Confirmed`
+- Watchlist 윈도우(현재 mock):
+  - 표 컬럼: `Ticker`, `Name`, `Mkt Cap`, `Industry`, `Price`, `Change`, `%`
+
+“Changes %” 동작 정의(모호성 제거)
+- 심볼별로 `ohlc_1d`에서 최신 `Datetime`(심볼별 latest bar)을 기준으로 계산한다.
+- `Chg` := $(\frac{Close_t}{Close_{t-1}} - 1) \times 100$
+- `fr.Open` := $(\frac{Close_t}{Open_t} - 1) \times 100$
+- `+7D/+14D/+30D` := $(\frac{Close_t}{Close_{t-N}} - 1) \times 100$ (여기서 $N$은 캘린더일이 아니라 트레이딩 바 기준)
+
+capability matrix 초안 템플릿(감사 단계에서 채움)
+
+| UI 영역 | UI 필드 | 제안 소스 | 비고/프로브 |
+|---|---|---|---|
+| News Feed | Date/Time | Finnhub company news publish time | timezone/필드 가용성 확인 필요 |
+| News Feed | Title | Finnhub |  |
+| News Feed | Sources | Finnhub | 필드명(`source` 등) 확인 |
+| News Feed | Ticker | Finnhub(심볼 파라미터) | 보통 심볼별로 요청; 실제 동작 확인 |
+| News Feed | Changes: `Chg` / `fr.Open` / `+7D` / `+14D` / `+30D` | `OHLC_data/ohlc_1d_watchlist.sqlite`의 `ohlc_1d` 기반 계산 | 히스토리 부족 시 `-`로 렌더(가짜 금지) |
+| News Feed | Earning date 라인 | Finnhub earnings/calendar(우선) | 불가하면 렌더하지 않음(가짜 금지) |
+| News Feed | Market cap | Finnhub company profile(우선) | 단위 확인, numeric USD 저장 + 포맷 |
+| News Feed | Industry | Finnhub company profile(우선) | 필드(`finnhubIndustry` 등) 확인 |
+| Calendar | Earnings(EPS/Revenue 등) | IBKR (미확정) | 가장 리스크 큼: 제공 안 되면 즉시 의사결정 필요 |
+| Calendar | Conference/Dividend | IBKR (미확정) | 이벤트 타입/필드 존재 여부 확인 |
+| Calendar | Analyst rating 필드 | IBKR (미확정) | IBKR에 없을 가능성 큼(반드시 확인) |
+| Watchlist | Price/Change/% | `ohlc_1d` 최신 close vs 이전 close로 계산 | 최신 rows에 derived metrics backfill 필요 |
+| Watchlist | Name/Mkt Cap/Industry | Finnhub company profile(우선) | 불가하면 `-` 표시(진짜 unknown), 가짜 금지 |
+
+프로빙 접근(구현 가이드)
+- Finnhub 프로브(백엔드에서만):
+  - company profile(시장가치), candles(OHLCV), earnings calendar/earnings date, company news의 필드/기간/레이트리밋을 확인
+- IBKR 프로브(TWS/IB Gateway):
+  - 일봉 OHLCV 수집 신뢰성 확인(심볼 범위/기간)
+  - IBKR “캘린더” 데이터가 UI 요구사항에 맞게 존재하는지 확인하고, 없으면 gap을 명시
+
+Fail-fast 규칙
+- UI 컬럼에 fake placeholder를 넣지 않는다.
+- 필수 컬럼이 소싱/계산 불가능하면 capability matrix에 기록하고 사용자 결정 없이는 진행하지 않는다.
+
 ### 제안하는 구현 순서(이유)
 IBKR 연동이 가장 불확실(환경/자격증명/게이트웨이 의존)이므로, 먼저 DB/CSV/Finnhub 같은 저위험 요소로 기반을 만들고, IBKR는 별도 단계로 분리한다.
+0) 데이터 수집 가능 범위 점검(IBKR + Finnhub vs UI 컬럼)
 1) 기반(DB + status API)
 2) Default Ticker CSV API + 윈도우
 3) Finnhub 인제션 + “News Feed” 윈도우를 Finnhub로 교체(그리고 mock 제거)
@@ -340,6 +486,18 @@ IBKR 연동이 가장 불확실(환경/자격증명/게이트웨이 의존)이�
 5) mock 정리 + 테스트
 
 ### 단계별 계획(각 단계: 구현 → 검증)
+
+#### 0단계 — 데이터 수집 가능 범위 점검(감사) (IBKR + Finnhub vs UI 컬럼)
+산출물
+- 위 capability matrix를 “각 UI 컬럼마다” Yes/No/Computed로 확정해 채운다.
+- 소수 심볼(AAPL/MSFT/TSLA 등)로 프로브를 실행해 원시 JSON 샘플을 확보한다.
+  - Finnhub: company news 필드, company profile(시총/산업), next earnings date 가용성
+  - IBKR: 일봉 OHLCV end-to-end(연결/권한/페이싱)
+  - IBKR: UI가 요구하는 캘린더 필드(특히 EPS/Revenue/Analyst Rating) 제공 여부
+
+검증
+- capability matrix가 위에 나열된 “모든 UI 컬럼”을 빠짐없이 커버한다.
+- 시크릿이 로그에 찍히지 않고(키/토큰), 동일 조건에서 재현 가능하다.
 
 #### 1단계 — 기반: update status 저장 + API
 백엔드 파일:
