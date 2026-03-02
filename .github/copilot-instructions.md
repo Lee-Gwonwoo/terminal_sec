@@ -12,7 +12,16 @@
 **Execution discipline (must):**
 - Before starting work, use the TABLE OF CONTENTS to identify the most relevant section(s) for this task and prioritize following those instructions.
 - Always state a detailed plan in chat before implementation.
-- For each plan step: implement → verify it is correct → explicitly report the verification + completion in chat → then continue to the next step.
+- For each plan step:
+  - Implement the step.
+  - Verify it is correct (tests/build/run, file inspection, or other appropriate checks).
+  - Report in chat:
+    - What changed (files/scope).
+    - How the user can verify (exact commands and/or what to look for).
+    - Any issues/risks discovered + 1–3 concrete mitigation options.
+  - If the step has a meaningful “done/not done” checkpoint, explicitly ask the user to confirm completion.
+    - Only after the user explicitly confirms, record the step in `agent_log.md` as “completed (user-confirmed)”.
+    - If the user has not confirmed yet, record it as “done (awaiting user confirmation)” and update later when confirmation arrives.
 
 ---
 
@@ -55,7 +64,13 @@
   - `plan.md`: detailed step-by-step plan before starting (goal, approach, files to create/modify, order, risks).
   - `agent_log.md`: chronological record of every action taken (files created/modified, commands run, decisions, errors).
 - **Break large tasks into steps:** if a task is large or complex, decompose it into small, independently verifiable steps. Each step should have a clear deliverable.
-- **Intermediate review loop:** after each step, pause and verify the result (e.g., check file content, run a test, confirm output) before proceeding to the next step. Do not chain all steps blindly end-to-end.
+- **Plan changes (mid-stream):** keep history intact.
+  - Do not rewrite or delete previously recorded log entries.
+  - Treat plan updates as revisions: append a short “PLAN CHANGE” note (what/why/impact) and continue from the new plan.
+- **Intermediate review loop:** after each step, verify the result (e.g., check file content, run a test, confirm output) and provide a user-checkable verification procedure.
+  - If user confirmation is required for that step, ask for it explicitly.
+  - In `agent_log.md`, mark step completion as “user-confirmed” only after the user confirms; otherwise mark “awaiting user confirmation”.
+  - If issues are discovered, record them and propose concrete next actions/options.
 
 ---
 
@@ -339,7 +354,16 @@
 **작업 수행 규율(필수):**
 - 작업 시작 전에 목차를 보고 이번 작업과 가장 연관된 섹션(들)을 먼저 확인하고, 해당 지침사항을 우선적으로 따른다.
 - 구현에 들어가기 전에 항상 “세부화된 계획”을 채팅에 먼저 명시한다.
-- 계획의 각 단계마다: 구현 → 제대로 됐는지 점검(검증) → 채팅에 검증/완료를 명확히 보고 → 다음 단계로 진행한다.
+- 계획의 각 단계마다 다음을 반드시 수행한다:
+  - 해당 단계를 구현한다.
+  - 제대로 동작하는지 검증한다(테스트/빌드/실행, 파일 확인, 필요한 기타 검사 등).
+  - 채팅에 다음을 명확히 보고한다:
+    - 무엇이 바뀌었는지(변경 파일/영역).
+    - 사용자가 직접 확인할 수 있는 검증 방법(정확한 명령어, 또는 무엇을 봐야 하는지).
+    - 발견된 문제점/리스크 + 완화 방안 1–3개(구체적 선택지).
+  - 해당 단계에 명확한 “완료/미완료” 체크포인트가 있으면, 사용자에게 완료 확인을 명시적으로 요청한다.
+    - 사용자가 명시적으로 확인했다고 말한 뒤에만 `agent_log.md`에 “사용자 확인 후 완료(user-confirmed)”로 기록한다.
+    - 사용자 확인이 아직 없으면, 로그에는 “확인 대기(awaiting user confirmation)”로 기록하고 확인이 오면 업데이트한다.
 
 ## 목차
 (현재 작업과 관련된 섹션만 읽을 것)
@@ -380,7 +404,13 @@
   - `plan.md`: 작업 시작 전 상세 단계별 계획 (목표, 접근법, 생성/수정 파일, 순서, 위험 요소).
   - `agent_log.md`: 수행한 모든 작업을 시간순으로 기록 (생성/수정 파일, 실행 명령어, 결정, 오류).
 - **큰 작업은 단계로 쪼개기:** 크고 복잡한 작업은 독립적으로 검증 가능한 작은 단계로 분해한다. 각 단계마다 명확한 산출물을 정의한다.
-- **중간 결과물 검토 루프:** 각 단계 완료 후 결과를 검증(파일 내용 확인, 테스트 실행, 출력 확인)한 뒤 다음 단계로 진행한다. 모든 단계를 맹목적으로 끝까지 연속 실행하지 않는다.
+- **플랜 중간 변경(리비전):** 기록 히스토리를 유지한다.
+  - 이미 기록된 로그를 재작성하거나 삭제하지 않는다.
+  - plan 수정은 변경 이력으로 처리한다: “PLAN CHANGE” 노트를 짧게 추가(무엇/왜/영향)하고 새 plan 기준으로 진행한다.
+- **중간 결과물 검토 루프:** 각 단계 완료 후 결과를 검증(파일 내용 확인, 테스트 실행, 출력 확인)하고, 사용자가 직접 확인할 수 있는 검증 절차를 함께 제공한 뒤 다음 단계로 진행한다.
+  - 해당 단계에 사용자 확인이 필요하면, 채팅에서 명확히 확인을 요청한다.
+  - `agent_log.md`에서는 사용자 확인 전에는 “확인 대기”로 표시하고, 확인 후에만 “사용자 확인 후 완료”로 업데이트한다.
+  - 문제점이 발견되면 로그에 기록하고, 다음 행동/선택지를 구체적으로 제안한다.
 
 # Copilot 지침 (python 워크스페이스, 한국어)
 

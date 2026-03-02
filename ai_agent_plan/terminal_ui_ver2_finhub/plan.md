@@ -37,6 +37,36 @@ Implement the following changes using `termina_web/figma_code/terminal_ui_ver2_f
 - Do not log secrets (API keys/tokens).
 - Browser cannot directly write local files; CSV read/append must be done via backend API.
 
+### Process templates (plan changes + step confirmation)
+
+#### Plan change protocol (when the plan must be revised mid-stream)
+- Do **not** rewrite or delete prior log entries.
+- Record a short revision note and continue with the revised plan.
+
+Template — PLAN CHANGE note (add to chat, and to agent_log.md only if agent_log is being maintained for this plan)
+```text
+PLAN CHANGE (YYYY-MM-DD)
+- Why: <reason>
+- What changed: <steps added/removed/reordered>
+- Impact: <scope/risks/ETA change>
+```
+
+#### Per-step verification + user confirmation (gates “user-confirmed” in logs)
+- After each step, include a user-checkable verification procedure (exact command(s) and/or what to inspect).
+- If the step has a meaningful checkpoint, explicitly ask the user to confirm completion.
+- Logging convention:
+  - If user has not confirmed yet: mark as `done (awaiting user confirmation)`.
+  - Only after the user explicitly confirms: update to `completed (user-confirmed)`.
+
+Template — step closeout block (chat)
+```text
+Step N — <title>
+- What changed: <files/scope>
+- How to verify: <commands / checklist>
+- Issues/risks: <issue> → Mitigation options: (1) ... (2) ... (3) ...
+- User confirmation needed?: Yes/No (if Yes: please confirm)
+```
+
 ### High-level architecture
 - Frontend (Vite/React) calls backend (Node/TS under `terminal/backend`) APIs.
 - Backend owns:
@@ -47,21 +77,21 @@ Implement the following changes using `termina_web/figma_code/terminal_ui_ver2_f
 
 ### Decisions / prerequisites (must confirm early)
 1) **IBKR integration method**
-   - Decide which IBKR interface we will use and how the backend can access it:
-     - Option A: IBKR Client Portal Web API (local gateway) over HTTP
-     - Option B: TWS/Gateway API (socket-based)
-   - Plan assumes the backend can reach an IBKR service from the same machine/VM that runs `terminal/backend`.
+  - Decide which IBKR interface we will use and how the backend can access it:
+    - Option A: IBKR Client Portal Web API (local gateway) over HTTP
+    - Option B: TWS/Gateway API (socket-based)
+  - Plan assumes the backend can reach an IBKR service from the same machine/VM that runs `terminal/backend`.
 2) **IBKR “price data” scope** (minimal definition for v1)
   - Required: update **daily 1D OHLCV** and persist by appending into the existing SQLite DB:
     - `OHLC_data/ohlc_1d_watchlist.sqlite` → table `ohlc_1d`
     - Columns: `Symbol`, `Datetime` (YYYY-MM-DD), `Open`, `High`, `Low`, `Close`, `Volume`
   - “Latest available date” is determined from this DB via `MAX(Datetime)`.
 3) **Finnhub API key source**
-   - Recommended: environment variable `FINNHUB_API_KEY` loaded via `.env`.
-   - Alternative: read from existing file `finhub/finhub_api_key/finhub_api_key` (but still keep it secret and never log it).
+  - Recommended: environment variable `FINNHUB_API_KEY` loaded via `.env`.
+  - Alternative: read from existing file `finhub/finhub_api_key/finhub_api_key` (but still keep it secret and never log it).
 4) **News window behavior**
-   - Recommended: convert the existing `brave-news` window to Finnhub-backed (and rename UI label).
-   - Optional decision: whether to also migrate the existing `news` window (currently pulls EODHD on startup) to Finnhub to avoid multiple sources.
+  - Recommended: convert the existing `brave-news` window to Finnhub-backed (and rename UI label).
+  - Optional decision: whether to also migrate the existing `news` window (currently pulls EODHD on startup) to Finnhub to avoid multiple sources.
 
 ### Mandatory mid-plan verification: “Data availability audit” (IBKR + Finnhub)
 This project has UI columns that imply specific data fields (market cap, turnover, earnings calendar fields, etc.). Before committing to implementation, we must confirm what each provider can actually deliver, and what must be computed from OHLC.
@@ -384,6 +414,36 @@ Verification
 - mock/가짜 뉴스 데이터는 추가하지 않는다.
 - 시크릿(API 키/토큰)은 로그에 남기지 않는다.
 - 브라우저에서 로컬 파일 직접 쓰기 불가 → CSV 읽기/append는 백엔드 API가 담당한다.
+
+### 프로세스 템플릿(plan 변경 + 단계 완료 확인)
+
+#### plan 중간 변경 프로토콜(리비전)
+- 이미 기록된 로그를 재작성하거나 삭제하지 않는다.
+- 변경 사유와 영향을 짧게 기록하고, 새 plan 기준으로 진행한다.
+
+템플릿 — PLAN CHANGE 노트(채팅에 추가, agent_log를 작성 중일 때만 agent_log.md에도 같이 추가)
+```text
+PLAN CHANGE (YYYY-MM-DD)
+- 왜: <사유>
+- 무엇이 바뀌었나: <추가/삭제/순서 변경된 step>
+- 영향: <범위/리스크/예상 일정 변경>
+```
+
+#### 단계별 검증 + 사용자 확인(로그 user-confirmed의 조건)
+- 각 단계 완료 후에는 사용자가 직접 확인할 수 있는 검증 절차를 반드시 포함한다(정확한 명령어, 또는 무엇을 봐야 하는지).
+- 해당 단계에 명확한 체크포인트가 있으면, 사용자에게 완료 확인을 명시적으로 요청한다.
+- 로그 표기 규칙:
+  - 사용자 확인 전: `done (awaiting user confirmation)`
+  - 사용자가 명시적으로 확인한 후: `completed (user-confirmed)`로 업데이트
+
+템플릿 — 단계 마감 부분(채팅)
+```text
+Step N — <제목>
+- 변경 내용: <변경 파일/영역>
+- 검증 방법: <명령어 / 체크리스트>
+- 문제점/리스크: <문제> → 완화 방안: (1) ... (2) ... (3) ...
+- 사용자 확인 필요?: Yes/No (Yes이면: 완료 확인 부탁)
+```
 
 ### 아키텍처(상위)
 - 프론트(Vite/React)가 백엔드(Node/TS, `terminal/backend`) API 호출.
