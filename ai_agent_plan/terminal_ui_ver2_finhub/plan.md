@@ -20,6 +20,10 @@ Implement the following changes using `termina_web/figma_code/terminal_ui_ver2_f
 - Frontend already has a dedicated window type `brave-news` implemented in:
   - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/BraveNewsWindow.tsx`
   - It currently uses `generateMockData()` (synthetic news) → must be removed (repo policy + requirement).
+- Canonical 1D OHLC price store already exists as a single SQLite DB:
+  - `OHLC_data/ohlc_1d_watchlist.sqlite`
+  - Tables: `ohlc_1d` (PK `(Symbol, Datetime)`), `symbols`
+  - Current newest `Datetime` in `ohlc_1d` is `2026-02-20` (verified locally)
 - Backend currently serves news from SQLite and has an ingestion endpoint for **EODHD**:
   - `terminal/backend/src/server.ts` exposes `POST /api/news/pull-eodhd` and `GET /api/news`
 - Backend calendar ingestion is currently **pure mock generation**:
@@ -48,8 +52,10 @@ Implement the following changes using `termina_web/figma_code/terminal_ui_ver2_f
      - Option B: TWS/Gateway API (socket-based)
    - Plan assumes the backend can reach an IBKR service from the same machine/VM that runs `terminal/backend`.
 2) **IBKR “price data” scope** (minimal definition for v1)
-   - Recommended: “snapshot last price per ticker” for the tickers loaded from the Default Ticker CSV.
-   - Stored in SQLite so the update button is real (no UI-only fake).
+  - Required: update **daily 1D OHLCV** and persist by appending into the existing SQLite DB:
+    - `OHLC_data/ohlc_1d_watchlist.sqlite` → table `ohlc_1d`
+    - Columns: `Symbol`, `Datetime` (YYYY-MM-DD), `Open`, `High`, `Low`, `Close`, `Volume`
+  - “Latest available date” is determined from this DB via `MAX(Datetime)`.
 3) **Finnhub API key source**
    - Recommended: environment variable `FINNHUB_API_KEY` loaded via `.env`.
    - Alternative: read from existing file `finhub/finhub_api_key/finhub_api_key` (but still keep it secret and never log it).
@@ -72,7 +78,7 @@ Backend files:
 - `terminal/backend/src/db.ts`
   - Add table `update_status` (or similar) to persist per-source timestamps.
     - Suggested schema:
-      - `source_key TEXT PRIMARY KEY` (e.g., `ibkr_price`, `ibkr_calendar`, `finhub_news`, `tickers_csv`)
+      - `source_key TEXT PRIMARY KEY` (e.g., `ibkr_ohlc_1d`, `ibkr_calendar`, `finhub_news`, `tickers_csv`)
       - `last_success_at TEXT` (ISO string)
       - `details_json TEXT NOT NULL DEFAULT '{}'`
       - `updated_at TEXT NOT NULL DEFAULT (datetime('now'))`
@@ -176,29 +182,63 @@ Backend files:
 Verification
 - After update, `/api/calendar/events` shows only `source = IBKR`.
 
-#### Step 7 — IBKR price snapshot ingestion (backend)
-Backend additions:
-- Decide storage:
-  - Add SQLite table `ibkr_price_snapshots`:
-    - `id TEXT PK`, `ticker TEXT`, `asof_at TEXT`, `last_price REAL`, `raw_json TEXT`, `created_at TEXT`
-    - Index on `(ticker, asof_at DESC)`
-- Add endpoint `POST /api/ibkr/price/update`:
-  - Read tickers from the configured CSV (reuse tickerCsvService)
-  - Pull snapshot prices from IBKR
-  - Insert snapshots + update `update_status` for `ibkr_price`
+#### Step 7 — IBKR 1D OHLC ingestion into `ohlc_1d_watchlist.sqlite` (backend)
+Backend goal
+- “IBKR Price Data” means: fetch **1D OHLCV** for each ticker and append into:
+  - `OHLC_data/ohlc_1d_watchlist.sqlite` table `ohlc_1d` (PK `(Symbol, Datetime)`)
+
+Also required (derived columns used by News Feed)
+- During the same “price update” process, compute and persist derived metrics from OHLC into **additional columns** on `ohlc_1d`.
+- These are displayed in the News Feed window (e.g., day change, change-from-open%, +7d, etc.), so the backend must compute them (no fake/UI-only).
+
+Proposed new columns (stored per Symbol+Datetime)
+- `Change_1d_Pct` : close-to-previous-close percent change
+- `Change_From_Open_Pct` : (Close / Open - 1) * 100
+- `Change_7d_Pct` : (Close / Close[t-7 trading bars] - 1) * 100
+- `Change_14d_Pct` : (Close / Close[t-14 trading bars] - 1) * 100
+- `Change_30d_Pct` : (Close / Close[t-30 trading bars] - 1) * 100
+- `Derived_Updated_At` : ISO timestamp when derived columns were last computed for this row (optional but recommended for debugging)
+
+Backend files
+- Add service `terminal/backend/src/services/ohlcWatchlistRepository.ts`
+  - Opens `OHLC_data/ohlc_1d_watchlist.sqlite` (path fixed or env-configured but default to this exact file)
+  - `getOverallMaxDate()` → returns `MAX(Datetime)`
+  - `getSymbolMaxDate(symbol)` (optional)
+  - `upsertBars(symbol, bars)` using `INSERT ... ON CONFLICT(Symbol, Datetime) DO UPDATE` (or ignore)
+  - Add migration helper `ensureDerivedColumns()` that runs `ALTER TABLE ohlc_1d ADD COLUMN ...` for each missing derived column.
+- Add service `terminal/backend/src/services/ibkrOhlc1dProvider.ts`
+  - Pulls daily bars from IBKR for a symbol in a date range.
+  - Range rule (minimal): start from `MAX(Datetime) + 1 day` and go to “today (NY)”.
+- Add derived calculator `terminal/backend/src/services/ohlcDerivedMetrics.ts`
+  - For a given symbol/date range, loads the necessary historical window (>= 30 prior trading bars) from `ohlc_1d` and writes derived columns back.
+  - Incremental correctness rule: when new bars arrive for a symbol, recompute derived metrics for a safety window:
+    - from `(min_new_date - 40 trading bars)` to `max_new_date` (to cover 7/14/30 trading-day lookbacks).
+- `terminal/backend/src/server.ts`
+  - Add `GET /api/ibkr/ohlc1d/status` returning:
+    - `dbPath`, `overallMaxDate`, and `lastSuccessAt` (from `update_status`)
+  - Add `POST /api/ibkr/ohlc1d/update`:
+    - Read tickers from the configured CSV (reuse tickerCsvService)
+    - Fetch missing 1D bars per ticker and upsert into `ohlc_1d`
+    - Recompute and persist derived columns for affected symbols/dates
+    - Update `update_status` key `ibkr_ohlc_1d` with details `{ overallMaxDate, tickersUpdated, rowsUpserted }`
 
 Verification
-- Endpoint stores real rows; last-success timestamp updates.
+- `GET /api/ibkr/ohlc1d/status` reflects the DB’s `MAX(Datetime)`.
+- After update, `MAX(Datetime)` advances (when new market days exist).
+- Spot-check a few rows in `ohlc_1d` to confirm derived columns are filled (not all NULL) for recent dates.
 
 #### Step 8 — Data Control Window (frontend)
 Frontend files:
 - `src/app/types.ts` add window type `data-control`.
 - Add `src/app/components/DataControlWindow.tsx`:
   - Two sections:
-    - IBKR Price Data: Update button + last updated text
+    - IBKR Price Data (OHLC 1D): Update button + last updated text + latest DB date
     - IBKR Calendar Data: Update button + last updated text
   - On load: `GET /api/updates/status`
-  - On click: call `POST /api/ibkr/price/update` or `POST /api/ibkr/calendar/update`, then refresh status.
+  - On click:
+    - Price: `POST /api/ibkr/ohlc1d/update`
+    - Calendar: `POST /api/ibkr/calendar/update`
+    - Refresh both `GET /api/updates/status` and `GET /api/ibkr/ohlc1d/status`.
 - Wire in:
   - `AddTabModal.tsx` add checkbox
   - `App.tsx` title mapping
@@ -249,6 +289,10 @@ Verification
 - 프론트에는 이미 `brave-news` 윈도우 타입이 존재하며 구현 파일은 아래와 같다.
   - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/BraveNewsWindow.tsx`
   - 현재 `generateMockData()`로 synthetic 뉴스 데이터를 생성함 → 정책/요구사항상 제거가 필요.
+- 1D OHLC 가격 데이터의 단일 저장소(SQLite)가 이미 존재한다.
+  - `OHLC_data/ohlc_1d_watchlist.sqlite`
+  - 테이블: `ohlc_1d`(PK `(Symbol, Datetime)`), `symbols`
+  - `ohlc_1d`의 최신 `Datetime`은 현재 `2026-02-20`까지 들어있음(로컬에서 확인됨)
 - 백엔드는 SQLite에서 뉴스를 제공하며, EODHD 인제션 엔드포인트가 존재한다.
   - `terminal/backend/src/server.ts`: `POST /api/news/pull-eodhd`, `GET /api/news`
 - 백엔드 캘린더 인제션은 현재 **완전 mock 생성**이다.
@@ -276,8 +320,10 @@ Verification
      - 옵션 A: IBKR Client Portal Web API(로컬 게이트웨이) HTTP
      - 옵션 B: TWS/Gateway API(소켓)
 2) **IBKR “price data” 범위(v1 최소 정의)**
-   - 권장: Default Ticker CSV에 있는 티커들에 대해 “스냅샷 last price” 저장.
-   - 버튼이 실제로 데이터를 저장해야 하므로(SQLite) UI만 만들고 끝내는 방식은 금지.
+  - 필수: **일봉(1D) OHLCV**를 받아 기존 SQLite DB에 “이어서 append 저장”한다.
+    - 저장 파일: `OHLC_data/ohlc_1d_watchlist.sqlite`
+    - 테이블/컬럼: `ohlc_1d(Symbol, Datetime, Open, High, Low, Close, Volume)`
+    - 최신 데이터 date 확인은 이 DB의 `MAX(Datetime)`로 한다.
 3) **Finnhub API 키 제공 방식**
    - 권장: `.env`의 `FINNHUB_API_KEY`.
    - 대안: `finhub/finhub_api_key/finhub_api_key` 파일에서 읽기(시크릿 로그 금지).
@@ -300,7 +346,7 @@ IBKR 연동이 가장 불확실(환경/자격증명/게이트웨이 의존)이�
 - `terminal/backend/src/db.ts`
   - 소스별 업데이트 시각 저장 테이블 `update_status` 추가(또는 동등 테이블).
     - 권장 스키마:
-      - `source_key TEXT PRIMARY KEY` (예: `ibkr_price`, `ibkr_calendar`, `finhub_news`, `tickers_csv`)
+      - `source_key TEXT PRIMARY KEY` (예: `ibkr_ohlc_1d`, `ibkr_calendar`, `finhub_news`, `tickers_csv`)
       - `last_success_at TEXT`
       - `details_json TEXT NOT NULL DEFAULT '{}'`
       - `updated_at TEXT NOT NULL DEFAULT (datetime('now'))`
@@ -402,28 +448,62 @@ IBKR 연동이 가장 불확실(환경/자격증명/게이트웨이 의존)이�
 검증
 - 업데이트 이후 캘린더 조회 결과가 `source = IBKR`만 포함
 
-#### 7단계 — IBKR 가격 스냅샷 인제션(백엔드)
-백엔드 추가:
-- SQLite 테이블 `ibkr_price_snapshots` 추가(권장)
-  - `id TEXT PK`, `ticker TEXT`, `asof_at TEXT`, `last_price REAL`, `raw_json TEXT`, `created_at TEXT`
-  - 인덱스 `(ticker, asof_at DESC)`
-- `POST /api/ibkr/price/update` 추가
-  - Default Ticker CSV에서 티커 로드(tickerCsvService 재사용)
-  - IBKR에서 스냅샷 가격 fetch
-  - DB insert + `update_status`의 `ibkr_price` 갱신
+#### 7단계 — IBKR 1D OHLC를 `ohlc_1d_watchlist.sqlite`에 저장(백엔드)
+백엔드 목표
+- “IBKR Price Data”는 각 티커의 **1D OHLCV**를 받아 아래 DB에 이어서 저장하는 것을 의미한다.
+  - `OHLC_data/ohlc_1d_watchlist.sqlite` 테이블 `ohlc_1d` (PK `(Symbol, Datetime)`)
+
+추가 필수(News Feed에 표시되는 파생 컬럼)
+- 동일한 “가격 업데이트” 과정에서, OHLC로부터 파생 지표(당일 change, open 대비 %, +7d 등)를 계산해 `ohlc_1d` 테이블의 **추가 컬럼**으로 저장해야 한다.
+- 프론트에서 표시되는 컬럼이므로, UI-only 계산/가짜 데이터는 금지.
+
+추가 컬럼 제안(Symbol+Datetime 단위로 저장)
+- `Change_1d_Pct` : 전일 종가 대비 당일 종가 % 변화
+- `Change_From_Open_Pct` : 시가 대비 종가 % 변화 = (Close / Open - 1) * 100
+- `Change_7d_Pct` : 7거래일 전 종가 대비 % 변화
+- `Change_14d_Pct` : 14거래일 전 종가 대비 % 변화
+- `Change_30d_Pct` : 30거래일 전 종가 대비 % 변화
+- `Derived_Updated_At` : 파생 컬럼 계산/갱신 시각(디버깅용, 권장)
+
+백엔드 파일
+- 서비스 `terminal/backend/src/services/ohlcWatchlistRepository.ts` 추가
+  - `OHLC_data/ohlc_1d_watchlist.sqlite`를 열고 쿼리/업서트 수행(기본값은 이 파일로 고정)
+  - `getOverallMaxDate()` → `MAX(Datetime)` 조회
+  - `upsertBars(symbol, bars)` → `INSERT ... ON CONFLICT(Symbol, Datetime) DO UPDATE`(또는 ignore)
+  - 마이그레이션 헬퍼 `ensureDerivedColumns()` 추가: 누락된 컬럼에 대해 `ALTER TABLE ohlc_1d ADD COLUMN ...` 실행
+- 서비스 `terminal/backend/src/services/ibkrOhlc1dProvider.ts` 추가
+  - IBKR에서 지정 기간의 일봉 OHLCV를 가져오는 로직
+  - 최소 룰: 시작일은 `MAX(Datetime) + 1일`, 종료일은 “오늘(NY)”
+- 파생 계산기 `terminal/backend/src/services/ohlcDerivedMetrics.ts` 추가
+  - 특정 심볼/기간에 대해 필요한 과거 구간(최소 30거래일 이전까지)을 로드한 뒤 파생 컬럼을 계산/업데이트
+  - 증분 정확성 룰: 새 바가 들어온 심볼에 대해서는 안전 구간을 재계산
+    - `(min_new_date - 40거래일)` ~ `max_new_date` (7/14/30 lookback 커버 목적)
+- `terminal/backend/src/server.ts`
+  - `GET /api/ibkr/ohlc1d/status` 추가
+    - `dbPath`, `overallMaxDate`, `lastSuccessAt(update_status)` 반환
+  - `POST /api/ibkr/ohlc1d/update` 추가
+    - Default Ticker CSV에서 티커 로드(tickerCsvService 재사용)
+    - 누락된 일봉을 받아 `ohlc_1d`에 업서트
+    - 영향받은 심볼/기간에 대해 파생 컬럼 계산 후 `ohlc_1d`에 업데이트
+    - 성공 시 `update_status`의 `ibkr_ohlc_1d` 갱신(details에 `overallMaxDate` 등 포함)
 
 검증
-- endpoint가 실제 row를 저장하고, last updated가 갱신된다.
+- status API가 DB 최신 날짜(`MAX(Datetime)`)를 정확히 반영한다.
+- 업데이트 후(새 거래일이 존재하면) DB의 `MAX(Datetime)`가 증가한다.
+- `ohlc_1d`에서 최근 날짜의 파생 컬럼이 실제 값으로 채워졌는지(전부 NULL이 아닌지) 샘플 확인
 
 #### 8단계 — Data Control Window(프론트)
 프론트 파일:
 - `src/app/types.ts`에 `data-control` 윈도우 타입 추가
 - `src/app/components/DataControlWindow.tsx` 신규
   - 섹션 2개
-    - IBKR Price Data: Update 버튼 + last updated
+    - IBKR Price Data(OHLC 1D): Update 버튼 + last updated + DB 최신 날짜
     - IBKR Calendar Data: Update 버튼 + last updated
   - 초기 로드: `GET /api/updates/status`
-  - 버튼 클릭: 각각 POST 호출 후 status 재조회
+  - 버튼 클릭:
+    - 가격: `POST /api/ibkr/ohlc1d/update`
+    - 캘린더: `POST /api/ibkr/calendar/update`
+    - 이후 `GET /api/updates/status` + `GET /api/ibkr/ohlc1d/status` 재조회
 - 등록:
   - `AddTabModal.tsx` 체크박스 추가
   - `App.tsx` title 매핑
