@@ -53,20 +53,30 @@ Each row filled with probe results. Status: ✅ Confirmed | ⚠️ Conditional |
 | Market cap | Optional (filter) | **Finnhub** | `marketCapitalization` (millions USD) | ✅ Confirmed | AAPL: `3878463.65` (≈$3.88T), MSFT: `2916341.51` (≈$2.92T) |
 | Industry | Optional (filter) | **Finnhub** | `finnhubIndustry` | ✅ Confirmed | AAPL: `"Technology"`, MSFT: `"Technology"` |
 
-### /calendar (IBKR-only)
+### /calendar (originally IBKR-only — DECISION NEEDED)
+
+**IBKR TWS Probe Result (2026-03-02):**
+- TWS Socket API (port 4001) connected successfully ✅
+- `reqFundamentalData("CalendarReport")` → `available: false` ❌
+- `reqFundamentalData("ReportsFinSummary")` → `available: false` ❌
+- TWS Socket API has NO direct calendar events endpoint
+- Likely cause: no Fundamental Data subscription, or TWS Socket limitations
+
 | UI Tab | UI Field | Required? | Source | Provider field(s) | Status | Probe evidence |
 |---|---|---:|---|---|---|---|
-| Earnings | Date Announcement | Required | IBKR | TBD | ❌ Not probed | IBKR Gateway/TWS not available in current env |
-| Earnings | Time | Required | IBKR | TBD | ❌ Not probed | |
-| Earnings | Symbol | Required | IBKR | TBD | ❌ Not probed | |
-| Earnings | Session | Required | IBKR | TBD | ❌ Not probed | If IBKR lacks: decide mapping |
-| Earnings | Period | Optional | IBKR or Not available | TBD | ❌ Not probed | |
-| Earnings | Confirmed | Optional | IBKR or Not available | TBD | ❌ Not probed | |
-| Earnings | EPS / Est. EPS / Surprise % | Optional | IBKR or Not available | TBD | ❌ Not probed | HIGH RISK: likely missing |
-| Earnings | Revenue / Est. Revenue | Optional | IBKR or Not available | TBD | ❌ Not probed | HIGH RISK: likely missing |
-| Conference | Date/Time/Symbol/Session/Confirmed | Required | IBKR | TBD | ❌ Not probed | Confirm IBKR event types |
-| Dividend | Date/Time/Symbol/Session/Confirmed | Required | IBKR | TBD | ❌ Not probed | |
-| Analyst Rating | All columns | Optional | IBKR or Not available | TBD | ❌ Not probed | VERY HIGH RISK: likely missing |
+| Earnings | Date Announcement | Required | ❌ IBKR unavailable | CalendarReport not returned | ❌ **FAIL** | `reqFundamentalData("CalendarReport")` → `available: false`. Need alternative source. |
+| Earnings | Time | Required | ❌ IBKR unavailable | — | ❌ **FAIL** | Same as above |
+| Earnings | Symbol | Required | ❌ IBKR unavailable | — | ❌ **FAIL** | Same as above |
+| Earnings | Session | Required | ❌ IBKR unavailable | — | ❌ **FAIL** | Same as above |
+| Earnings | Period | Optional | ❌ IBKR unavailable | — | ❌ **FAIL** | |
+| Earnings | Confirmed | Optional | ❌ IBKR unavailable | — | ❌ **FAIL** | |
+| Earnings | EPS / Est. EPS / Surprise % | Optional | ❌ IBKR unavailable | — | ❌ **FAIL** | No fundamental data subscription |
+| Earnings | Revenue / Est. Revenue | Optional | ❌ IBKR unavailable | — | ❌ **FAIL** | No fundamental data subscription |
+| Conference | Date/Time/Symbol/Session/Confirmed | Required | ❌ IBKR unavailable | No calendar endpoint in TWS Socket API | ❌ **FAIL** | TWS Socket has no calendar event concept |
+| Dividend | Date/Time/Symbol/Session/Confirmed | Required | ❌ IBKR unavailable | — | ❌ **FAIL** | Same |
+| Analyst Rating | All columns | Optional | ❌ IBKR unavailable | — | ❌ **FAIL** | TWS Socket has no analyst rating API |
+
+**⚠️ Decision required:** All /calendar fields FAIL from IBKR TWS Socket API. See "Decision needed" section below.
 
 ### Watchlist
 | UI Field | Required? | Source | Provider field(s) / Computation | Status | Probe evidence |
@@ -128,33 +138,84 @@ Probe symbols: AAPL, MSFT, TSLA. Raw JSON saved to `tmp/probes/`.
 
 ---
 
-## IBKR Probe — NOT YET PERFORMED
+## IBKR Probe — COMPLETED (TWS Socket API, port 4001, 2026-03-02)
 
-Reason: IBKR Gateway/TWS is not configured in current development environment.
+Connection: TWS Socket API via `ib_insync` 0.9.86, port 4001, clientId=99
+Probe script: `tmp/test_ibkr_tws_probe.py`
 
-Blocked items:
-- All `/calendar` UI fields (Earnings/Conference/Dividend/Analyst Rating)
-- IBKR 1D OHLCV fetch
+### Results Summary
+| Capability | Status | Evidence |
+|---|---|---|
+| Connect to TWS | ✅ PASS | `ib.isConnected() = True` |
+| Historical 1D OHLCV (AAPL) | ✅ PASS | 5 bars (2026-02-23~27), all OHLCV fields present. File: `ibkr_historical_1d_AAPL.json` |
+| Contract Details (AAPL) | ✅ PASS | longName="APPLE INC", industry="Technology", category="Computers". File: `ibkr_contract_details_AAPL.json` |
+| CalendarReport fundamental | ❌ FAIL | `reqFundamentalData("CalendarReport")` → `available: false` |
+| FinSummary fundamental | ❌ FAIL | `reqFundamentalData("ReportsFinSummary")` → `available: false` |
+| Calendar events endpoint | ❌ N/A | TWS Socket API has no dedicated calendar endpoint (Client Portal only) |
 
-Recommendation: proceed with Steps 1–5 (non-IBKR parts) first, perform IBKR probe when Gateway/TWS is available.
+### Raw field reference: Historical 1D bars
+```json
+// ibkr_historical_1d_AAPL.json (sample)
+{
+  "date": "2026-02-27",
+  "open": 272.77,
+  "high": 272.81,
+  "low": 262.89,
+  "close": 264.18,
+  "volume": 26235914
+}
+```
+
+### Raw field reference: Contract Details
+```json
+// ibkr_contract_details_AAPL.json
+{
+  "longName": "APPLE INC",
+  "industry": "Technology",
+  "category": "Computers",
+  "subcategory": "Computers",
+  "marketName": "NMS",
+  "stockType": "COMMON"
+}
+```
+
+### Conclusion
+- **IBKR OHLC 1D: ✅ PASS** — can fetch daily bars via `reqHistoricalData`
+- **IBKR Contract Details: ✅ PASS** — name, industry available via `reqContractDetails`
+- **IBKR Calendar/Fundamental: ❌ FAIL** — not available without Fundamental Data subscription or Client Portal Gateway
 
 ---
 
-## Overall Audit Verdict (2026-03-02)
+## Overall Audit Verdict (2026-03-02, UPDATED after IBKR probe)
 
-### Finnhub: PASS (for News Feed + Watchlist)
+### Finnhub: ✅ PASS (for News Feed + Watchlist)
 - All required fields confirmed via raw JSON probes.
 - Earnings calendar: empty but Optional → no blocker.
 
-### IBKR: BLOCKED (for /calendar + OHLC update)
-- Cannot be probed without Gateway/TWS.
-- `/calendar` remains at risk until IBKR probe is done.
-- Decision needed: proceed with non-IBKR steps first, or wait?
+### IBKR OHLC 1D: ✅ PASS
+- TWS Socket API (port 4001) connection confirmed.
+- `reqHistoricalData` returns correct OHLCV bars (tested: AAPL, 5 bars).
+- Can be used for Step 7 (IBKR 1D OHLC ingestion).
 
-### OHLC (existing DB): PASS
+### IBKR Calendar/Fundamental: ❌ FAIL
+- `reqFundamentalData("CalendarReport")` → not available
+- `reqFundamentalData("ReportsFinSummary")` → not available
+- TWS Socket API has no direct calendar events endpoint
+- **All /calendar UI fields cannot be sourced from IBKR TWS Socket API**
+
+### OHLC (existing DB): ✅ PASS
 - `ohlc_1d_watchlist.sqlite` confirmed: table `ohlc_1d` with columns `Symbol, Datetime, Open, High, Low, Close, Volume`.
 - Latest data: 2026-02-20.
 - Sufficient for all "Changes %" computations.
+
+### ⚠️ Decision needed: /calendar data source
+The plan states "/calendar must use IBKR calendar data only" but IBKR TWS Socket API cannot provide this data.
+
+Options:
+1. **Use Finnhub earnings calendar** as primary source for /calendar (relaxes IBKR-only requirement)
+2. **Install Client Portal Gateway** separately (HTTP REST has `/iserver/account/pnl` and calendar endpoints, but requires separate auth flow)
+3. **Subscribe to IBKR Fundamental Data** (enables `reqFundamentalData` CalendarReport in TWS)
+4. **Scope reduction** — reduce /calendar UI to only what's available (OHLC-derived data only, no earnings/analyst)
 
 ---
 
@@ -221,10 +282,16 @@ Fail (stop for decision)
 - `/calendar` required fields cannot be sourced from IBKR.
 - News Feed required fields cannot be sourced from Finnhub or computed from OHLC.
 
-### Current verdict (2026-03-02)
-- **Finnhub (News Feed + Watchlist): PASS** — all required fields confirmed.
-- **IBKR (/calendar + OHLC update): BLOCKED** — needs Gateway/TWS to probe.
-- **OHLC DB (Changes %): PASS** — DB schema and data confirmed.
+### Current verdict (2026-03-02, UPDATED after IBKR TWS probe)
+- **Finnhub (News Feed + Watchlist): ✅ PASS** — all required fields confirmed.
+- **IBKR OHLC 1D: ✅ PASS** — `reqHistoricalData` confirmed via TWS Socket API (port 4001).
+- **IBKR Calendar/Fundamental: ❌ FAIL** — CalendarReport/FinSummary unavailable. Decision needed.
+- **OHLC DB (Changes %): ✅ PASS** — DB schema and data confirmed.
+
+Probe files:
+- `tmp/probes/ibkr_historical_1d_AAPL.json`
+- `tmp/probes/ibkr_contract_details_AAPL.json`
+- `tmp/probes/ibkr_probe_summary.json`
 
 
 ---
@@ -281,20 +348,30 @@ Fail (stop for decision)
 | Market cap | 선택(필터) | **Finnhub** | `marketCapitalization` (백만 USD) | ✅ 확인 | AAPL: `3878463.65` (≈$3.88T) |
 | Industry | 선택(필터) | **Finnhub** | `finnhubIndustry` | ✅ 확인 | AAPL: `"Technology"` |
 
-### /calendar (IBKR-only)
+### /calendar (원래 IBKR-only — 의사결정 필요)
+
+**IBKR TWS 프로브 결과 (2026-03-02):**
+- TWS Socket API (port 4001) 연결 성공 ✅
+- `reqFundamentalData("CalendarReport")` → `available: false` ❌
+- `reqFundamentalData("ReportsFinSummary")` → `available: false` ❌
+- TWS Socket API에는 calendar events 엔드포인트 없음
+- 원인 추정: Fundamental Data 구독 미보유 또는 TWS Socket 제한
+
 | 탭 | UI 필드 | 필수? | Source | 공급자 필드 | 상태 | 프로브 근거 |
 |---|---|---:|---|---|---|---|
-| Earnings | Date Announcement | 필수 | IBKR | TBD | ❌ 미프로브 | IBKR Gateway/TWS 미설정 |
-| Earnings | Time | 필수 | IBKR | TBD | ❌ 미프로브 | |
-| Earnings | Symbol | 필수 | IBKR | TBD | ❌ 미프로브 | |
-| Earnings | Session | 필수 | IBKR | TBD | ❌ 미프로브 | 없으면 매핑 결정 필요 |
-| Earnings | Period | 선택 | IBKR 또는 Not available | TBD | ❌ 미프로브 | |
-| Earnings | Confirmed | 선택 | IBKR 또는 Not available | TBD | ❌ 미프로브 | |
-| Earnings | EPS / Est. EPS / Surprise % | 선택 | IBKR 또는 Not available | TBD | ❌ 미프로브 | 고리스크 |
-| Earnings | Revenue / Est. Revenue | 선택 | IBKR 또는 Not available | TBD | ❌ 미프로브 | 고리스크 |
-| Conference | Date/Time/Symbol/Session/Confirmed | 필수 | IBKR | TBD | ❌ 미프로브 | 이벤트 타입 확인 필요 |
-| Dividend | Date/Time/Symbol/Session/Confirmed | 필수 | IBKR | TBD | ❌ 미프로브 | |
-| Analyst Rating | 모든 컬럼 | 선택 | IBKR 또는 Not available | TBD | ❌ 미프로브 | 최고 리스크 |
+| Earnings | Date Announcement | 필수 | ❌ IBKR 불가 | CalendarReport 미반환 | ❌ **FAIL** | `reqFundamentalData("CalendarReport")` → `available: false`. 대안 소스 필요. |
+| Earnings | Time | 필수 | ❌ IBKR 불가 | — | ❌ **FAIL** | 동일 |
+| Earnings | Symbol | 필수 | ❌ IBKR 불가 | — | ❌ **FAIL** | 동일 |
+| Earnings | Session | 필수 | ❌ IBKR 불가 | — | ❌ **FAIL** | 동일 |
+| Earnings | Period | 선택 | ❌ IBKR 불가 | — | ❌ **FAIL** | |
+| Earnings | Confirmed | 선택 | ❌ IBKR 불가 | — | ❌ **FAIL** | |
+| Earnings | EPS / Est. EPS / Surprise % | 선택 | ❌ IBKR 불가 | — | ❌ **FAIL** | Fundamental data 구독 없음 |
+| Earnings | Revenue / Est. Revenue | 선택 | ❌ IBKR 불가 | — | ❌ **FAIL** | Fundamental data 구독 없음 |
+| Conference | Date/Time/Symbol/Session/Confirmed | 필수 | ❌ IBKR 불가 | TWS Socket에 calendar endpoint 없음 | ❌ **FAIL** | TWS Socket에는 calendar 개념 없음 |
+| Dividend | Date/Time/Symbol/Session/Confirmed | 필수 | ❌ IBKR 불가 | — | ❌ **FAIL** | 동일 |
+| Analyst Rating | 모든 컴럼 | 선택 | ❌ IBKR 불가 | — | ❌ **FAIL** | TWS Socket에 analyst rating API 없음 |
+
+**⚠️ 의사결정 필요:** /calendar 필드 전체가 IBKR TWS Socket API에서 FAIL. 아래 "의사결정 필요" 섹션 참조.
 
 ### Watchlist
 | UI 필드 | 필수? | Source | 공급자 필드 / 계산식 | 상태 | 프로브 근거 |
@@ -356,33 +433,84 @@ Fail (stop for decision)
 
 ---
 
-## IBKR 프로브 — 미수행
+## IBKR 프로브 — 완료 (TWS Socket API, port 4001, 2026-03-02)
 
-사유: 현재 개발 환경에 IBKR Gateway/TWS가 설정되어 있지 않음.
+연결: TWS Socket API, `ib_insync` 0.9.86, port 4001, clientId=99
+프로브 스크립트: `tmp/test_ibkr_tws_probe.py`
 
-차단된 항목:
-- `/calendar` UI 필드 전체(Earnings/Conference/Dividend/Analyst Rating)
-- IBKR 1D OHLCV 수집
+### 결과 요약
+| 기능 | 상태 | 근거 |
+|---|---|---|
+| TWS 연결 | ✅ PASS | `ib.isConnected() = True` |
+| Historical 1D OHLCV (AAPL) | ✅ PASS | 5 bars (2026-02-23~27), OHLCV 전체 필드. 파일: `ibkr_historical_1d_AAPL.json` |
+| Contract Details (AAPL) | ✅ PASS | longName="APPLE INC", industry="Technology". 파일: `ibkr_contract_details_AAPL.json` |
+| CalendarReport fundamental | ❌ FAIL | `reqFundamentalData("CalendarReport")` → `available: false` |
+| FinSummary fundamental | ❌ FAIL | `reqFundamentalData("ReportsFinSummary")` → `available: false` |
+| Calendar events endpoint | ❌ N/A | TWS Socket API에는 calendar endpoint 없음 (Client Portal만 가능) |
 
-권장: Steps 1–5(비-IBKR 파트)를 먼저 진행하고, IBKR 환경 준비 후 Steps 6–8 진행.
+### 원시 필드 레퍼런스: Historical 1D bars
+```json
+// ibkr_historical_1d_AAPL.json (샘플)
+{
+  "date": "2026-02-27",
+  "open": 272.77,
+  "high": 272.81,
+  "low": 262.89,
+  "close": 264.18,
+  "volume": 26235914
+}
+```
+
+### 원시 필드 레퍼런스: Contract Details
+```json
+// ibkr_contract_details_AAPL.json
+{
+  "longName": "APPLE INC",
+  "industry": "Technology",
+  "category": "Computers",
+  "subcategory": "Computers",
+  "marketName": "NMS",
+  "stockType": "COMMON"
+}
+```
+
+### 결론
+- **IBKR OHLC 1D: ✅ PASS** — `reqHistoricalData`로 일봉 수신 가능
+- **IBKR Contract Details: ✅ PASS** — 회사명, 산업 취득 가능
+- **IBKR Calendar/Fundamental: ❌ FAIL** — Fundamental Data 구독 또는 Client Portal Gateway 없이는 불가
 
 ---
 
-## 전체 감사 결론 (2026-03-02)
+## 전체 감사 결론 (2026-03-02, IBKR 프로브 후 업데이트)
 
-### Finnhub: PASS (News Feed + Watchlist)
+### Finnhub: ✅ PASS (News Feed + Watchlist)
 - 필수 필드 모두 원시 JSON 프로브로 확인됨.
 - Earnings calendar: 빈 배열이지만 Optional → 블로커 아님.
 
-### IBKR: BLOCKED (/calendar + OHLC 업데이트)
-- Gateway/TWS 없이는 프로브 불가.
-- `/calendar` 필드는 IBKR 프로브 완료까지 리스크 유지.
-- 결정 필요: 비-IBKR 단계를 먼저 진행할지, 대기할지?
+### IBKR OHLC 1D: ✅ PASS
+- TWS Socket API (port 4001) 연결 확인.
+- `reqHistoricalData` 정상 OHLCV bars 반환 (테스트: AAPL, 5 bars).
+- Step 7 (IBKR 1D OHLC 인제스트)에 사용 가능.
 
-### OHLC (기존 DB): PASS
-- `ohlc_1d_watchlist.sqlite` 확인: 테이블 `ohlc_1d`, 컬럼 `Symbol, Datetime, Open, High, Low, Close, Volume`.
+### IBKR Calendar/Fundamental: ❌ FAIL
+- `reqFundamentalData("CalendarReport")` → 불가
+- `reqFundamentalData("ReportsFinSummary")` → 불가
+- TWS Socket API에 calendar events 엔드포인트 없음
+- **/calendar UI 필드 전체를 IBKR TWS Socket API에서 가져올 수 없음**
+
+### OHLC (기존 DB): ✅ PASS
+- `ohlc_1d_watchlist.sqlite` 확인: 테이블 `ohlc_1d`, 컴럼 `Symbol, Datetime, Open, High, Low, Close, Volume`.
 - 최신 데이터: 2026-02-20.
 - "Changes %" 계산에 충분.
+
+### ⚠️ 의사결정 필요: /calendar 데이터 소스
+plan.md에서 "/calendar은 IBKR 데이터만 사용"이라 했는데, IBKR TWS Socket API로는 이 데이터를 가져올 수 없음.
+
+선택지:
+1. **Finnhub earnings calendar 대체** — /calendar의 기본 데이터 소스를 Finnhub로 (IBKR-only 요구사항 완화)
+2. **Client Portal Gateway 추가 설치** — HTTP REST calendar endpoint 사용 (별도 인증/설치 필요)
+3. **IBKR Fundamental Data 구독** — TWS에서 CalendarReport 활성화
+4. **스코프 축소** — 가능한 필드만으로 /calendar UI 제한 (OHLC 파생 데이터만)
 
 ---
 
@@ -449,7 +577,13 @@ API 키를 이 파일들에 포함시키지 않는다.
 - `/calendar`의 필수 필드를 IBKR에서 소싱할 수 없다.
 - News Feed의 필수 필드를 Finnhub에서 소싱할 수 없고, OHLC로도 계산 불가능하다.
 
-### 현재 결론 (2026-03-02)
-- **Finnhub (News Feed + Watchlist): PASS** — 필수 필드 전부 확인됨.
-- **IBKR (/calendar + OHLC 업데이트): BLOCKED** — Gateway/TWS 필요.
-- **OHLC DB (Changes %): PASS** — DB 스키마 및 데이터 확인됨.
+### 현재 결론 (2026-03-02, IBKR TWS 프로브 후 업데이트)
+- **Finnhub (News Feed + Watchlist): ✅ PASS** — 필수 필드 전부 확인됨.
+- **IBKR OHLC 1D: ✅ PASS** — TWS Socket API (port 4001)로 `reqHistoricalData` 확인.
+- **IBKR Calendar/Fundamental: ❌ FAIL** — CalendarReport/FinSummary 불가. 의사결정 필요.
+- **OHLC DB (Changes %): ✅ PASS** — DB 스키마 및 데이터 확인됨.
+
+프로브 파일:
+- `tmp/probes/ibkr_historical_1d_AAPL.json`
+- `tmp/probes/ibkr_contract_details_AAPL.json`
+- `tmp/probes/ibkr_probe_summary.json`

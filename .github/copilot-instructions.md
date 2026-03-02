@@ -31,6 +31,7 @@
 | Tier | Section | Key topics |
 |------|---------|------------|
 | **T1** | [Plan & Agent Log](#plan--agent-log) | plan.md, agent_log.md, step decomposition |
+| **T1** | [Plan sub-step methodology](#plan-sub-step-methodology) | sub-step tables, verification hooks, user-gate |
 | **T1** | [Capability limits / honesty](#project-conventions-to-follow) | no fake features, fail fast |
 | **T1** | [Mock data policy](#project-conventions-to-follow) | no mock unless requested |
 | **T1** | [Safety / repo hygiene](#safety--repo-hygiene) | path ≤250, secrets, naming |
@@ -71,7 +72,62 @@
   - If user confirmation is required for that step, ask for it explicitly.
   - In `agent_log.md`, mark step completion as “user-confirmed” only after the user confirms; otherwise mark “awaiting user confirmation”.
   - If issues are discovered, record them and propose concrete next actions/options.
+## Plan sub-step methodology
+When a plan has multiple major Steps (e.g., Step 0, Step 1, …, Step N), **each Step must be further decomposed into numbered sub-steps** following this structure:
 
+- **Sub-step numbering:** use `<Step>-<seq>` format (e.g., `1-1`, `1-2`, `2-1`).
+- **Sub-step table (required for each Step):**
+
+  | Column | Purpose |
+  |--------|---------|
+  | Sub-step | ID (e.g., `1-1`) |
+  | Task | One-sentence description of what to do |
+  | Files | Which files are created/modified |
+  | Verification | Exact command or check to confirm the sub-step is done correctly |
+
+  Example:
+  ```
+  | Sub-step | Task | Files | Verification |
+  |----------|------|-------|--------------|
+  | 1-1 | Add `foo` table CREATE in `initDb()` | `src/db.ts` | Start backend → table exists (`SELECT name FROM sqlite_master WHERE name='foo'`) |
+  | 1-2 | Create `fooRepository.ts` service | `src/services/fooRepository.ts` | `npx tsc --noEmit` → 0 errors |
+  ```
+
+- **Verification hook block (required for each Step closeout):**
+  - After all sub-steps within a Step are completed, include a fenced code block listing the exact verification commands (build, test, curl, DB query, etc.).
+  - End with: `User confirmation needed: **Yes**`.
+  - Example:
+    ```
+    Verification hook (Step 1 closeout):
+    1. cd project && npx tsc --noEmit   → 0 errors
+    2. npm run test                     → all tests pass
+    3. curl http://localhost:8080/api/foo → returns expected JSON
+    ```
+
+- **User-gate rule (must):**
+  - After completing a Step's verification hook, present the results to the user via `ask_questions`.
+  - Do **not** proceed to the next Step until the user explicitly confirms the current Step.
+  - If the user rejects or finds issues → fix, re-verify, re-ask.
+  - Only after user confirms → mark `completed (user-confirmed)` in `agent_log.md`.
+
+- **Sequential within a Step, gated between Steps:**
+  - Sub-steps within the same Step are executed sequentially.
+  - Steps themselves may be parallelizable — document this with an **Execution dependency graph** (a simple ASCII/Markdown diagram showing which Steps depend on which).
+  - Example:
+    ```
+    Step 0 (audit)
+      └─► Step 1 (foundations)
+            ├─► Step 2 → Step 3  (track A: can run in parallel with track B)
+            └─► Step 4 → Step 5  (track B)
+    ```
+
+- **Blocked Steps:** if a Step depends on an unresolved decision or external blocker, mark it with `⚠️ BLOCKED` and state the prerequisite. Do not start blocked Steps.
+
+- **Status tracking in sub-step tables:** use these status markers:
+  - `✅ Done` — completed and verified
+  - `⏳ Awaiting user` — done but waiting for user confirmation
+  - `🚫 BLOCKED` — cannot start due to unresolved dependency
+  - (empty) — not started
 ---
 
 # Copilot instructions (python workspace)
@@ -371,6 +427,7 @@
 | Tier | 섹션 | 주요 내용 |
 |------|------|----------|
 | **T1** | [플랜 & 에이전트 로그](#플랜--에이전트-로그) | plan.md, agent_log.md, 단계 분해 |
+| **T1** | [플랜 세부 단계 작성법](#플랜-세부-단계-작성법) | 세부단계 테이블, 검증 훅, 사용자 게이트 |
 | **T1** | [역량 한계 / 정직성](#프로젝트-컨벤션) | API 키 없을 때, 땜질 금지 |
 | **T1** | [Mock 데이터 정책](#프로젝트-컨벤션) | mock 데이터 요청 없으면 사용 금지 |
 | **T1** | [보안 / 레포 위생](#보안--레포-위생) | 경로 250자 이하, 시크릿, 네이밍 |
@@ -411,7 +468,62 @@
   - 해당 단계에 사용자 확인이 필요하면, 채팅에서 명확히 확인을 요청한다.
   - `agent_log.md`에서는 사용자 확인 전에는 “확인 대기”로 표시하고, 확인 후에만 “사용자 확인 후 완료”로 업데이트한다.
   - 문제점이 발견되면 로그에 기록하고, 다음 행동/선택지를 구체적으로 제안한다.
+## 플랜 세부 단계 작성법
+plan에 여러 대단계(Step 0, Step 1, …, Step N)가 있을 때, **각 Step을 반드시 번호 매긴 세부 단계(sub-step)로 추가 분해**해야 합니다.
 
+- **세부 단계 번호 형식:** `<Step>-<순번>` (예: `1-1`, `1-2`, `2-1`).
+- **세부 단계 테이블(각 Step마다 필수):**
+
+  | 컬럼 | 목적 |
+  |------|------|
+  | Sub-step | ID (예: `1-1`) |
+  | Task | 무엇을 하는지 한 문장 |
+  | Files | 생성/수정하는 파일 |
+  | Verification | 해당 세부 단계가 올바르게 완료됐는지 확인하는 정확한 명령/체크 |
+
+  예시:
+  ```
+  | Sub-step | Task | Files | Verification |
+  |----------|------|-------|--------------|
+  | 1-1 | `initDb()`에 `foo` 테이블 CREATE 추가 | `src/db.ts` | 백엔드 시작 → 테이블 존재 확인 (`SELECT name FROM sqlite_master WHERE name='foo'`) |
+  | 1-2 | `fooRepository.ts` 서비스 생성 | `src/services/fooRepository.ts` | `npx tsc --noEmit` → 에러 0개 |
+  ```
+
+- **검증 훅 블록(각 Step 마감 시 필수):**
+  - Step 내 모든 세부 단계가 완료된 후, 검증 명령어(빌드, 테스트, curl, DB 쿼리 등)를 나열하는 코드 블록을 포함합니다.
+  - 마지막에: `사용자 확인 필요: **예**`를 명시합니다.
+  - 예시:
+    ```
+    검증 훅 (Step 1 마감):
+    1. cd project && npx tsc --noEmit   → 에러 0개
+    2. npm run test                     → 모든 테스트 통과
+    3. curl http://localhost:8080/api/foo → 예상 JSON 반환
+    ```
+
+- **사용자 게이트 규칙(필수):**
+  - Step의 검증 훅 결과를 `ask_questions`를 통해 사용자에게 제시합니다.
+  - 사용자가 현재 Step을 명시적으로 확인할 때까지 다음 Step으로 **진행하지 않습니다**.
+  - 사용자가 거절하거나 문제를 발견하면 → 수정, 재검증, 재질문.
+  - 사용자 확인 후에만 → `agent_log.md`에 `completed (user-confirmed)` 기록.
+
+- **Step 내부는 순차, Step 간에는 게이트:**
+  - 같은 Step 내의 세부 단계는 순차적으로 실행합니다.
+  - Step 자체는 병렬 실행 가능할 수 있으며, 이를 **실행 의존성 그래프**(간단한 ASCII/Markdown 다이어그램)로 문서화합니다.
+  - 예시:
+    ```
+    Step 0 (감사)
+      └─► Step 1 (기반)
+            ├─► Step 2 → Step 3  (트랙 A: 트랙 B와 병렬 가능)
+            └─► Step 4 → Step 5  (트랙 B)
+    ```
+
+- **차단된 Step:** 미결정 사항이나 외부 차단 요소에 의존하는 Step은 `⚠️ BLOCKED`로 표시하고 선행 조건을 명시합니다. 차단된 Step은 시작하지 않습니다.
+
+- **세부 단계 테이블 상태 표기:** 아래 마커를 사용합니다:
+  - `✅ Done` — 완료 및 검증됨
+  - `⏳ Awaiting user` — 완료했으나 사용자 확인 대기 중
+  - `🚫 BLOCKED` — 미해결 의존성으로 시작 불가
+  - (비어있음) — 미시작
 # Copilot 지침 (python 워크스페이스, 한국어)
 
 <!-- ====================================================
