@@ -354,7 +354,7 @@ events = ib.getWshEventData(WshEventData(conId=con_id, startDate="20260302", end
 
 | Terminal Feature | Primary Source | Fallback | Status |
 |------------------|---------------|----------|--------|
-| **News Feed** | Finnhub `/company-news` (free, 1yr history) | Finnhub `/news` (general market) | ✅ Ready |
+| **News Feed** | Finnhub `/company-news` (Free tier EP, ~5yr history w/ paid sub; oldest verified: 2021-03-29) | Finnhub `/news` (general market) | ✅ Ready |
 | **Press Releases** | Finnhub `/press-releases` (premium, accessible) | — | ✅ Ready |
 | **News Sentiment** | Finnhub `/news-sentiment` (premium, accessible) | — | ✅ Ready |
 | **1D OHLCV price** | EODHD (existing `ohlc_1d_watchlist.sqlite`) | IBKR TWS `reqHistoricalData` | ✅ Ready |
@@ -373,11 +373,199 @@ events = ib.getWshEventData(WshEventData(conId=con_id, startDate="20260302", end
 | **Earnings Transcripts** | — | — | ❌ DENIED |
 | **ESG Scores** | — | — | ❌ DENIED |
 
+### 4.1 `/news` (General Market News) vs `/company-news` (Ticker-Specific News)
+
+**`/company-news`** (Primary Source — ticker-specific):
+- Requires `symbol`, `from`, `to` params → returns news **for a specific ticker**
+- `related` field = always populated with the ticker symbol (e.g., `"AAPL"`)
+- Sources: Yahoo, Benzinga, CNBC, SeekingAlpha
+- ~5yr history with paid subscription (oldest verified: 2021-03-29)
+- ~250 articles per request (narrow date range for more granular results)
+
+**`/news`** (Fallback — general market headlines):
+- No ticker filter — returns **market-wide** top headlines
+- `related` field = always **empty** (not linked to any specific ticker)
+- Category filter: `general` (default), `forex`, `crypto`, `merger`
+- Sources by category:
+  - `general`: MarketWatch(70%), CNBC(19%), Bloomberg(11%)
+  - `crypto`: Cointelegraph, CoinDesk
+  - `merger`: GlobalNewswire, SeekingAlpha
+  - `forex`: Forexlive (very sparse)
+- Returns latest ~100 articles, spanning ~3 days (no date range param)
+- Pagination via `minId` param (pass lowest `id` from previous batch to load older)
+- Tested 2026-03-03: 100 articles, oldest = 2026-02-27
+
+**Use case in terminal:** `/company-news` is the main per-ticker news source. `/news` serves as a general market context feed (e.g., homepage market headlines widget) when no specific ticker is selected.
+
+### 4.2 `/press-releases` (Company Press Releases / Major Developments)
+
+- **Tier:** Premium (accessible with current subscription)
+- **Params:** `symbol` (required), `from`, `to` (date range)
+- **Response structure:** `{ symbol, majorDevelopment[] }` — each item:
+  - `symbol` — ticker
+  - `datetime` — e.g., `"2026-03-02 09:00:00"`
+  - `headline` — press release title
+  - `description` — first ~300 chars of press release body
+  - `url` — link to full text
+  - `image` — thumbnail URL
+- **Source:** exclusively `www.nasdaq.com` press releases (all URLs point to nasdaq.com)
+- **Content type:** official company announcements — product launches, earnings results, executive appointments, manufacturing updates, partnerships, etc.
+- **History depth:** ~4+ years (AAPL: oldest = 2021-11-17 with `from=2020-01-01`; 2018-2019 = 0 results)
+- **Volume:** AAPL ~57/year, MSFT ~47/year (moderate — these are major press releases, not all news)
+- **Max per request:** 200 items observed
+- **Difference from `/company-news`:** `/press-releases` = official company-issued announcements via Nasdaq; `/company-news` = third-party media coverage (Yahoo, Benzinga, CNBC). Minimal overlap.
+
+**Use case in terminal:** "Press Releases" tab or section within ticker detail — shows official company announcements separate from media coverage.
+
+### 4.3 `/news-sentiment` (Company News Sentiment Scores)
+
+- **Tier:** Premium (accessible with current subscription)
+- **Params:** `symbol` (required) — no date range (returns current snapshot)
+- **Response structure:**
+  ```json
+  {
+    "buzz": {
+      "articlesInLastWeek": 71,     // articles mentioning this ticker in past 7 days
+      "buzz": 0.7634,               // ratio: articlesInLastWeek / weeklyAverage
+      "weeklyAverage": 93           // historical average articles/week
+    },
+    "companyNewsScore": 0.9658,     // 0-1, relative media coverage vs sector (1 = highest)
+    "sectorAverageBullishPercent": 0.5841,  // sector average bullish %
+    "sectorAverageNewsScore": 0.5208,       // sector average news score
+    "sentiment": {
+      "bearishPercent": 0,           // % of articles classified bearish
+      "bullishPercent": 1            // % of articles classified bullish
+    },
+    "symbol": "AAPL"
+  }
+  ```
+- **Nature:** aggregated **snapshot** (not time-series) — reflects current week's sentiment
+- **Tested 2026-03-03:**
+  - AAPL: buzz=0.76 (71 articles, avg 93), 100% bullish, score=0.97
+  - MSFT: buzz=0.93 (131 articles, avg 141), 93% bullish, score=0.90
+  - TSLA: buzz=0.74 (63 articles, avg 85), 100% bullish, score=0.89
+  - SPY: buzz=0.65 (345 articles, avg 7→abnormal), 59% bullish, score=0.50
+- **No historical data:** each call returns current-week snapshot only. For historical sentiment tracking, cache results periodically.
+
+**Use case in terminal:** sentiment badge/gauge on ticker detail page — shows bullish/bearish %, media buzz level, and how it compares to sector average.
+
+### 4.4 `/stock/profile2` (Company Profile)
+
+- **Tier:** Free
+- **Params:** `symbol` (required)
+- **Response structure:** single flat object with company overview:
+  ```json
+  {
+    "country": "US",
+    "currency": "USD",
+    "estimateCurrency": "USD",
+    "exchange": "NASDAQ NMS - GLOBAL MARKET",
+    "finnhubIndustry": "Technology",
+    "floatingShare": 14430.98,        // millions
+    "ipo": "1980-12-12",
+    "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/AAPL.png",
+    "marketCapitalization": 3886391.18, // millions USD
+    "name": "Apple Inc",
+    "phone": "14089961010",
+    "shareOutstanding": 14702.7,        // millions
+    "ticker": "AAPL",
+    "weburl": "https://www.apple.com/"
+  }
+  ```
+- **Fields:** 14 fields — country, currency, exchange, industry classification, float shares, IPO date, logo URL, market cap, company name, phone, shares outstanding, ticker, website
+- **Note:** `marketCapitalization` and `shareOutstanding` are in **millions**. `floatingShare` is also in millions.
+- **Industry examples:** Technology (AAPL, MSFT), Automobiles (TSLA), Banking (JPM)
+- **Logo URL:** hosted on Finnhub static CDN — usable as `<img>` source directly
+
+**Use case in terminal:** company header/banner on ticker detail page — logo, name, exchange, industry, market cap, IPO date.
+
+### 4.5 `/stock/financials` + `/stock/financials-reported` (Financial Statements)
+
+Two separate endpoints for financial data:
+
+**A) `/stock/financials` (Premium, accessible)**
+- **Params:** `symbol`, `statement` (`bs`/`ic`/`cf`), `freq` (`annual`/`quarterly`)
+- **Returns:** `{ symbol, financials[] }` — standardized/normalized financial items
+- **Statement types:**
+  - `bs` (Balance Sheet): 36 fields — `totalAssets`, `totalLiabilities`, `totalEquity`, `cash`, `longTermDebt`, `inventory`, `accountsReceivables`, `retainedEarnings`, `sharesOutstanding`, etc.
+  - `ic` (Income Statement): 14 fields — `revenue`, `costOfGoodsSold`, `grossIncome`, `ebit`, `netIncome`, `dilutedEPS`, `researchDevelopment`, `sgaExpense`, etc.
+  - `cf` (Cash Flow): 18 fields — `netOperatingCashFlow`, `capex`, `fcf`, `cashDividendsPaid`, `stockBasedCompensation`, `depreciationAmortization`, etc.
+- **History depth:**
+  - Annual: 10 years (AAPL: 2016–2025)
+  - Quarterly: 40 quarters (~10 years, AAPL: 2016-Q2–2025-Q1)
+- **Values:** in **millions** (e.g., AAPL revenue=416161 = $416.2B)
+
+**B) `/stock/financials-reported` (Free)**
+- **Params:** `symbol` (no statement/freq filter)
+- **Returns:** `{ cik, symbol, data[] }` — raw SEC filing data (as-reported, not normalized)
+- **Each item:** `form` (10-K/10-Q), `filedDate`, `startDate`, `endDate`, `year`, `quarter`, plus `report: { bs[], ic[], cf[] }`
+- **Report items:** each is `{ concept, unit, label, value }` using XBRL concept names (e.g., `us-gaap_RevenueFromContractWithCustomerExcludingAssessedTax`)
+- **History:** 16 filings for AAPL (10-K only observed — 2010–2025)
+- **Values:** in **raw units** (not millions — e.g., AAPL revenue=416161000000 = $416.2B)
+- **Use case:** detailed SEC data when normalized `/stock/financials` is insufficient
+
+**Comparison:**
+| | `/stock/financials` (Premium) | `/stock/financials-reported` (Free) |
+|---|---|---|
+| Data source | Standardized/normalized | Raw SEC XBRL as-reported |
+| Statement filter | `bs`/`ic`/`cf` separately | All 3 in one response |
+| Frequency | `annual`/`quarterly` | Annual filings (10-K) observed |
+| Value units | Millions | Raw (full numbers) |
+| Field names | camelCase English | XBRL concept codes |
+| Ease of use | ✅ Easy | Requires XBRL mapping |
+
+**Use case in terminal:** Financial statements tab — use Premium endpoint for clean display (tables/charts). Free endpoint as fallback or for raw SEC data drill-down.
+
+### 4.6 `/stock/ownership` + `/stock/fund-ownership` (Ownership Structure)
+
+Two separate endpoints for institutional and fund holdings:
+
+**A) `/stock/ownership` (Premium) — Institutional Holders**
+- **Params:** `symbol`, optional `limit` (default: all)
+- **Returns:** `{ symbol, ownership[] }` — each item:
+  - `name` — institution name (e.g., "The Vanguard Group, Inc.")
+  - `share` — number of shares held
+  - `change` — share change from previous filing
+  - `filingDate` — most recent filing date
+- **Volume:** AAPL has **8,077** institutional holders (massive dataset)
+- **Top 5 (AAPL, 2025-12-31):**
+  1. Vanguard Group: 1.42B shares
+  2. BlackRock: 735M shares
+  3. State Street: 604M shares
+  4. Geode Capital: 358M shares
+  5. Fidelity: 280M shares
+- **`limit` param:** use `limit=50` or similar to get top holders only (default returns all 8K+)
+- **Note:** `percentage` field exists in schema but returns `undefined` — need to calculate manually from `share / sharesOutstanding`
+
+**B) `/stock/fund-ownership` (Premium) — Fund/ETF Holders**
+- **Params:** `symbol`, optional `limit`
+- **Returns:** `{ symbol, ownership[] }` — each item:
+  - `name` — fund name (e.g., "Vanguard Total Stock Market Index Fund")
+  - `share` — shares held by this fund
+  - `change` — share change
+  - `portfolioPercent` — % of the **fund's** portfolio this stock represents
+  - `filingDate` — filing date
+- **Volume:** AAPL has **8,571** fund holders
+- **Top 5 (AAPL):**
+  1. Vanguard Total Stock Market: 467M shares (5.91% of fund)
+  2. Vanguard 500 Index: 366M (6.64%)
+  3. Fidelity 500 Index: 188M (6.62%)
+  4. Norway Pension Fund (Statens Pensjonsfond): 187M (2.78%)
+  5. iShares Core S&P 500 ETF: 182M (7.01%)
+
+**Comparison:**
+| | `/stock/ownership` | `/stock/fund-ownership` |
+|---|---|---|
+| Scope | Institutional investors (firms) | Individual funds/ETFs |
+| Unique field | — | `portfolioPercent` (% of fund's portfolio) |
+| Count (AAPL) | 8,077 | 8,571 |
+| Filing dates | Latest: 2025-12-31 | Mixed: 2025-06–10 |
+
+**Use case in terminal:** "Ownership" tab on ticker detail — top institutional holders table + top fund/ETF holders table. Use `limit=20-50` to avoid massive payloads.
+
 ---
 
-## 5. Decisions Needed
-
-### Decision #1 — /calendar data source (REVISED after WSH v3 field probe)
+### Decision #1 — /calendar data source ✅ DECIDED (2026-03-03)
 IBKR WSH API is **AVAILABLE** ✅ with **EPS financial data**. WSH provides:
 - ✅ EPS actual (`wshe_eps.amount_oc`) + estimate (`wshe_eps.estimated_eps`) + surprise (`change_amount`/`change_percent`)
 - ✅ Earnings dates (`wshe_ed`) — date, time (BMO/AMC), status (CONFIRMED/UNCONFIRMED)
@@ -385,24 +573,19 @@ IBKR WSH API is **AVAILABLE** ✅ with **EPS financial data**. WSH provides:
 - ✅ Conference calls, investor conferences, M&A, option expirations, etc.
 - ❌ **Revenue NOT in WSH** — no revenue actual/estimate/surprise fields
 
-Options:
-1. ✅ **Use IBKR WSH as primary calendar+EPS source** + Finnhub `/stock/earnings` for Revenue only (RECOMMENDED)
-2. Use Finnhub only (simpler but less event types, may duplicate EPS data)
-3. WSH for EPS+events, Finnhub for Revenue (best coverage, no duplication)
+**→ CHOSEN: Option 1** — IBKR WSH as primary calendar+EPS source + Finnhub `/stock/earnings` for Revenue only.
 
 **Note**: Revenue is the only major financial metric missing from WSH. Finnhub `/stock/earnings` provides `{actual, estimate, period, quarter, surprise, surprisePercent, symbol, year}` which includes revenue.
 
-### Decision #5 — IBKR ↔ Node communication
-IBKR TWS is Python-only (`ib_insync`). WSH + OHLCV both confirmed working. Options:
-1. Python subprocess from Node backend (simplest)
-2. Separate Python microservice + HTTP bridge (cleanest separation)
-3. Node.js native `@stoqey/ib` library (avoids Python dependency but less mature)
+### Decision #5 — IBKR ↔ Node communication ✅ DECIDED (2026-03-03)
+IBKR TWS is Python-only (`ib_insync`). WSH + OHLCV both confirmed working.
 
-### Decision #6 — Intraday OHLCV source
-Finnhub `/stock/candle` is denied. Options:
-1. EODHD intraday data (existing `EODHD/` pipeline)
-2. IBKR TWS `reqHistoricalData` with shorter bars
-3. Skip intraday for now, 1D only
+**→ CHOSEN: Option 1** — Python subprocess from Node backend (simplest).
+
+### Decision #6 — Intraday OHLCV source ✅ DECIDED (2026-03-03)
+Finnhub `/stock/candle` is denied.
+
+**→ CHOSEN: Skip intraday for now (1D only).** When intraday is needed later, use IBKR TWS `reqHistoricalData`.
 
 ---
 
@@ -738,7 +921,7 @@ AAPL (기본), SPY/JPM (ETF/은행 지점 확인)
 
 | 터미널 기능 | 기본 소스 | 대체 소스 | 상태 |
 |------------|----------|----------|------|
-| **뉴스 피드** | Finnhub `/company-news` (무료, 1년 히스토리) | Finnhub `/news` (일반 시장) | ✅ 준비됨 |
+| **뉴스 피드** | Finnhub `/company-news` (Free 티어 EP, 유료 구독 시 ~5년 히스토리; 확인된 최고(古) 데이터: 2021-03-29) | Finnhub `/news` (일반 시장) | ✅ 준비됨 |
 | **보도자료** | Finnhub `/press-releases` (프리미엄, 접근 가능) | — | ✅ 준비됨 |
 | **뉴스 감성** | Finnhub `/news-sentiment` (프리미엄, 접근 가능) | — | ✅ 준비됨 |
 | **1일 OHLCV** | EODHD (기존 `ohlc_1d_watchlist.sqlite`) | IBKR TWS `reqHistoricalData` | ✅ 준비됨 |
@@ -757,11 +940,201 @@ AAPL (기본), SPY/JPM (ETF/은행 지점 확인)
 | **실적 트랜스크립트** | — | — | ❌ 거부 |
 | **ESG 점수** | — | — | ❌ 거부 |
 
+### 4.1 `/news` (일반 시장 뉴스) vs `/company-news` (종목별 뉴스) 비교
+
+**`/company-news`** (기본 소스 — 종목 특정):
+- `symbol`, `from`, `to` 파라미터 필수 → **특정 종목의 뉴스**만 반환
+- `related` 필드 = 항상 해당 종목 심볼로 채워져 있음 (e.g., `"AAPL"`)
+- 소스: Yahoo, Benzinga, CNBC, SeekingAlpha
+- 유료 구독 시 ~5년 히스토리 (확인된 최고(古) 데이터: 2021-03-29)
+- 요청당 최대 ~250건 (날짜 범위를 좁히면 더 정밀한 결과)
+
+**`/news`** (대체 소스 — 일반 시장 헤드라인):
+- 종목 필터 없음 → **시장 전체** 톱 헤드라인을 반환
+- `related` 필드 = 항상 **비어 있음** (특정 종목과 연결되지 않음)
+- 카테고리 필터: `general` (기본), `forex`, `crypto`, `merger`
+- 카테고리별 소스:
+  - `general`: MarketWatch(70%), CNBC(19%), Bloomberg(11%)
+  - `crypto`: Cointelegraph, CoinDesk
+  - `merger`: GlobalNewswire, SeekingAlpha
+  - `forex`: Forexlive (매우 적음)
+- 최신 ~100건 반환, 약 3일간 범위 (날짜 범위 파라미터 없음)
+- `minId` 파라미터로 페이지네이션 (이전 배치의 최소 `id`를 전달하면 더 오래된 기사 로드)
+- 2026-03-03 테스트: 100건, 가장 오래된 기사 = 2026-02-27
+
+**터미널 활용:** `/company-news`가 종목별 뉴스의 주 소스. `/news`는 특정 종목을 선택하지 않았을 때 일반 시장 컨텍스트 피드로 사용 (예: 홈페이지 시장 헤드라인 위젯).
+
+### 4.2 `/press-releases` (회사 보도자료 / 주요 발표)
+
+- **티어:** Premium (현재 구독으로 접근 가능)
+- **파라미터:** `symbol` (필수), `from`, `to` (날짜 범위)
+- **응답 구조:** `{ symbol, majorDevelopment[] }` — 각 항목:
+  - `symbol` — 종목 코드
+  - `datetime` — 예: `"2026-03-02 09:00:00"`
+  - `headline` — 보도자료 제목
+  - `description` — 보도자료 본문 처음 ~300자
+  - `url` — 전문 링크
+  - `image` — 썸네일 URL
+- **소스:** 전량 `www.nasdaq.com` 보도자료 (모든 URL이 nasdaq.com을 가리킴)
+- **콘텐츠 유형:** 공식 회사 발표 — 제품 출시, 실적 발표, 임원 선임, 제조 업데이트, 파트너십 등
+- **히스토리 깊이:** ~4년+ (AAPL: `from=2020-01-01`일 때 최고(古) = 2021-11-17; 2018-2019 = 0건)
+- **물량:** AAPL ~57건/년, MSFT ~47건/년 (중간 — 주요 보도자료만, 모든 뉴스 아님)
+- **요청당 최대:** 200건 관찰됨
+- **`/company-news`와 차이:** `/press-releases` = Nasdaq 경유 공식 회사 발표; `/company-news` = 외부 미디어 보도 (Yahoo, Benzinga, CNBC). 겹침 거의 없음.
+
+**터미널 활용:** 종목 상세 페이지 내 "보도자료" 탭/섹션 — 미디어 보도와 분리된 공식 회사 발표를 표시.
+
+### 4.3 `/news-sentiment` (회사 뉴스 감성 점수)
+
+- **티어:** Premium (현재 구독으로 접근 가능)
+- **파라미터:** `symbol` (필수) — 날짜 범위 없음 (현재 스냅샷 반환)
+- **응답 구조:**
+  ```json
+  {
+    "buzz": {
+      "articlesInLastWeek": 71,     // 지난 7일간 이 종목을 언급한 기사 수
+      "buzz": 0.7634,               // 비율: articlesInLastWeek / weeklyAverage
+      "weeklyAverage": 93           // 주간 평균 기사 수 (역사적)
+    },
+    "companyNewsScore": 0.9658,     // 0-1, 섹터 대비 미디어 커버리지 (1 = 최고)
+    "sectorAverageBullishPercent": 0.5841,  // 섹터 평균 강세 %
+    "sectorAverageNewsScore": 0.5208,       // 섹터 평균 뉴스 점수
+    "sentiment": {
+      "bearishPercent": 0,           // 약세로 분류된 기사 %
+      "bullishPercent": 1            // 강세로 분류된 기사 %
+    },
+    "symbol": "AAPL"
+  }
+  ```
+- **성격:** 집계된 **스냅샷** (시계열 아님) — 현재 주간의 감성을 반영
+- **2026-03-03 테스트:**
+  - AAPL: buzz=0.76 (71건, 평균 93), 100% 강세, score=0.97
+  - MSFT: buzz=0.93 (131건, 평균 141), 93% 강세, score=0.90
+  - TSLA: buzz=0.74 (63건, 평균 85), 100% 강세, score=0.89
+  - SPY: buzz=0.65 (345건, 평균 7→비정상), 59% 강세, score=0.50
+- **히스토리 데이터 없음:** 매 호출 시 현재 주간 스냅샷만 반환. 과거 감성 추적이 필요하면 주기적으로 캐시 필요.
+
+**터미널 활용:** 종목 상세 페이지의 감성 배지/게이지 — 강세/약세 %, 미디어 버즈 수준, 섹터 평균 대비 표시.
+
+### 4.4 `/stock/profile2` (회사 프로필)
+
+- **티어:** Free (무료)
+- **파라미터:** `symbol` (필수)
+- **응답 구조:** 회사 개요의 평면(flat) 객체:
+  ```json
+  {
+    "country": "US",
+    "currency": "USD",
+    "estimateCurrency": "USD",
+    "exchange": "NASDAQ NMS - GLOBAL MARKET",
+    "finnhubIndustry": "Technology",
+    "floatingShare": 14430.98,        // 백만 주
+    "ipo": "1980-12-12",
+    "logo": "https://static2.finnhub.io/...AAPL.png",
+    "marketCapitalization": 3886391.18, // 백만 USD
+    "name": "Apple Inc",
+    "phone": "14089961010",
+    "shareOutstanding": 14702.7,        // 백만 주
+    "ticker": "AAPL",
+    "weburl": "https://www.apple.com/"
+  }
+  ```
+- **필드:** 14개 — 국가, 통화, 거래소, 업종 분류, 유통주수, IPO일, 로고 URL, 시가총액, 회사명, 전화번호, 발행주식수, 티커, 웹사이트
+- **참고:** `marketCapitalization`과 `shareOutstanding`은 **백만(million)** 단위. `floatingShare`도 백만 단위.
+- **업종 예시:** Technology (AAPL, MSFT), Automobiles (TSLA), Banking (JPM)
+- **로고 URL:** Finnhub 정적 CDN — `<img>` 태그에 직접 사용 가능
+
+**터미널 활용:** 종목 상세 페이지 헤더/배너 — 로고, 회사명, 거래소, 업종, 시가총액, IPO일 표시.
+
+### 4.5 `/stock/financials` + `/stock/financials-reported` (재무제표)
+
+재무 데이터용 두 개의 별도 엔드포인트:
+
+**A) `/stock/financials` (Premium, 접근 가능)**
+- **파라미터:** `symbol`, `statement` (`bs`/`ic`/`cf`), `freq` (`annual`/`quarterly`)
+- **반환:** `{ symbol, financials[] }` — 표준화/정규화된 재무 항목
+- **재무제표 종류:**
+  - `bs` (대차대조표): 36개 필드 — `totalAssets`, `totalLiabilities`, `totalEquity`, `cash`, `longTermDebt`, `inventory`, `accountsReceivables`, `retainedEarnings`, `sharesOutstanding` 등
+  - `ic` (손익계산서): 14개 필드 — `revenue`, `costOfGoodsSold`, `grossIncome`, `ebit`, `netIncome`, `dilutedEPS`, `researchDevelopment`, `sgaExpense` 등
+  - `cf` (현금흐름표): 18개 필드 — `netOperatingCashFlow`, `capex`, `fcf`, `cashDividendsPaid`, `stockBasedCompensation`, `depreciationAmortization` 등
+- **히스토리:**
+  - 연간: 10년 (AAPL: 2016–2025)
+  - 분기: 40분기 (~10년, AAPL: 2016-Q2–2025-Q1)
+- **값 단위:** **백만(million)** (AAPL revenue=416161 = $4,161.6억 = $416.2B)
+
+**B) `/stock/financials-reported` (Free, 무료)**
+- **파라미터:** `symbol` (재무제표/빈도 필터 없음)
+- **반환:** `{ cik, symbol, data[] }` — SEC 제출 원본 데이터 (정규화 안 됨)
+- **각 항목:** `form` (10-K/10-Q), `filedDate`, `startDate`, `endDate`, `year`, `quarter`, + `report: { bs[], ic[], cf[] }`
+- **보고서 항목:** `{ concept, unit, label, value }` — XBRL 컨셉 명 사용 (예: `us-gaap_RevenueFromContractWithCustomerExcludingAssessedTax`)
+- **히스토리:** AAPL 16건 (10-K만 관찰, 2010–2025)
+- **값 단위:** **원래 단위** (백만 아님 — AAPL revenue=416161000000 = $416.2B)
+- **용도:** 정규화된 `/stock/financials`로 부족할 때 SEC 원본 데이터 확인
+
+**비교:**
+| | `/stock/financials` (Premium) | `/stock/financials-reported` (Free) |
+|---|---|---|
+| 데이터 소스 | 표준화/정규화 | SEC XBRL 원본 (as-reported) |
+| 제표 필터 | `bs`/`ic`/`cf` 별도 | 한 응답에 3개 모두 |
+| 빈도 | `annual`/`quarterly` | 연간 공시(10-K) 관찰 |
+| 값 단위 | 백만(million) | 원래 단위(전체 숫자) |
+| 필드명 | camelCase 영어 | XBRL 컨셉 코드 |
+| 사용 편의성 | ✅ 쉽음 | XBRL 매핑 필요 |
+
+**터미널 활용:** 재무제표 탭 — Premium EP로 깔끔하게 표시(테이블/차트). Free EP는 대체 또는 SEC 원본 드릴다운용.
+
+### 4.6 `/stock/ownership` + `/stock/fund-ownership` (지분구조)
+
+기관 보유 및 펀드 보유 데이터용 두 개의 별도 엔드포인트:
+
+**A) `/stock/ownership` (Premium) — 기관 보유자**
+- **파라미터:** `symbol`, 선택적 `limit` (기본: 전체)
+- **반환:** `{ symbol, ownership[] }` — 각 항목:
+  - `name` — 기관명 (예: "The Vanguard Group, Inc.")
+  - `share` — 보유 주식 수
+  - `change` — 이전 공시 대비 변동 수
+  - `filingDate` — 최신 공시일
+- **물량:** AAPL 기준 **8,077개** 기관 (대규모 데이터셋)
+- **Top 5 (AAPL, 2025-12-31):**
+  1. Vanguard Group: 14.2억 주
+  2. BlackRock: 7.35억 주
+  3. State Street: 6.04억 주
+  4. Geode Capital: 3.58억 주
+  5. Fidelity: 2.80억 주
+- **`limit` 파라미터:** `limit=50` 등으로 상위 보유자만 가져오기 (기본값이면 8,000+건 전체 반환)
+- **참고:** `percentage` 필드가 스키마에 있지만 `undefined` 반환 — `share / sharesOutstanding`으로 직접 계산 필요
+
+**B) `/stock/fund-ownership` (Premium) — 펀드/ETF 보유자**
+- **파라미터:** `symbol`, 선택적 `limit`
+- **반환:** `{ symbol, ownership[] }` — 각 항목:
+  - `name` — 펀드명 (예: "Vanguard Total Stock Market Index Fund")
+  - `share` — 보유 주식 수
+  - `change` — 변동 수
+  - `portfolioPercent` — 해당 펀드 포트폴리오에서 이 종목이 차지하는 %
+  - `filingDate` — 공시일
+- **물량:** AAPL 기준 **8,571개** 펀드
+- **Top 5 (AAPL):**
+  1. Vanguard Total Stock Market: 4.67억 주 (펀드의 5.91%)
+  2. Vanguard 500 Index: 3.66억 주 (6.64%)
+  3. Fidelity 500 Index: 1.88억 주 (6.62%)
+  4. 노르웨이 국부펀드: 1.87억 주 (2.78%)
+  5. iShares Core S&P 500 ETF: 1.82억 주 (7.01%)
+
+**비교:**
+| | `/stock/ownership` | `/stock/fund-ownership` |
+|---|---|---|
+| 범위 | 기관 투자자 (회사) | 개별 펀드/ETF |
+| 고유 필드 | — | `portfolioPercent` (펀드 포트폴리오 내 비중) |
+| 건수 (AAPL) | 8,077 | 8,571 |
+| 공시일 | 최신: 2025-12-31 | 혼재: 2025-06~10 |
+
+**터미널 활용:** "지분구조" 탭 — 상위 기관 보유자 테이블 + 상위 펀드/ETF 보유자 테이블. 대량 페이로드 방지를 위해 `limit=20-50` 사용 권장.
+
 ---
 
 ## 5. 결정 필요 사항
 
-### 결정 #1 — /calendar 데이터 소스 (WSH v3 필드 프로브 후 수정)
+### 결정 #1 — /calendar 데이터 소스 ✅ 결정됨 (2026-03-03)
 IBKR WSH API가 **이용 가능** ✅ — **EPS 재무 수치까지 포함**. WSH 제공 범위:
 - ✅ EPS actual (`wshe_eps.amount_oc`) + estimate (`wshe_eps.estimated_eps`) + surprise (`change_amount`/`change_percent`)
 - ✅ 실적 발표일 (`wshe_ed`) — 날짜, 시간 (BMO/AMC), 상태 (CONFIRMED/UNCONFIRMED)
@@ -769,24 +1142,19 @@ IBKR WSH API가 **이용 가능** ✅ — **EPS 재무 수치까지 포함**. WS
 - ✅ 컨퍼런스콜, 투자자 컨퍼런스, M&A, 옵션 만기 등
 - ❌ **Revenue(매출)는 WSH에 없음** — 어떤 이벤트 타입에도 매출 필드 없음
 
-옵션:
-1. ✅ **IBKR WSH를 캘린더+EPS 주 소스로 사용** + Finnhub `/stock/earnings`로 Revenue만 보충 (권장)
-2. Finnhub만 사용 (더 단순하지만 이벤트 타입 제한, EPS 중복)
-3. WSH=EPS+이벤트, Finnhub=Revenue (최고 커버리지, 중복 없음)
+**→ 선택: 옵션 1** — IBKR WSH를 캘린더+EPS 주 소스로 사용 + Finnhub `/stock/earnings`로 Revenue만 보충.
 
 **참고**: Revenue만이 WSH에서 빠진 주요 재무 지표. Finnhub `/stock/earnings`는 `{actual, estimate, period, quarter, surprise, surprisePercent, symbol, year}` 제공(Revenue 포함).
 
-### 결정 #5 — IBKR ↔ Node 통신
-IBKR TWS는 Python 전용 (`ib_insync`). WSH + OHLCV 모두 동작 확인됨. 옵션:
-1. Node 백엔드에서 Python 서브프로세스 (가장 단순)
-2. 별도 Python 마이크로서비스 + HTTP 브릿지 (가장 깔끔한 분리)
-3. Node.js 네이티브 `@stoqey/ib` 라이브러리 (Python 의존성 제거하지만 덜 성숙)
+### 결정 #5 — IBKR ↔ Node 통신 ✅ 결정됨 (2026-03-03)
+IBKR TWS는 Python 전용 (`ib_insync`). WSH + OHLCV 모두 동작 확인됨.
 
-### 결정 #6 — 인트라데이 OHLCV 소스
-Finnhub `/stock/candle` 거부:
-1. EODHD 인트라데이 데이터 (기존 `EODHD/` 파이프라인)
-2. IBKR TWS `reqHistoricalData` 단기 바
-3. 인트라데이 건너뛰기, 1일봉만
+**→ 선택: 옵션 1** — Node 백엔드에서 Python 서브프로세스 호출 (가장 단순).
+
+### 결정 #6 — 인트라데이 OHLCV 소스 ✅ 결정됨 (2026-03-03)
+Finnhub `/stock/candle` 거부.
+
+**→ 선택: 인트라데이 당장 불필요 (1일봉만).** 추후 인트라데이 필요 시 IBKR TWS `reqHistoricalData` 사용 예정.
 
 ---
 
