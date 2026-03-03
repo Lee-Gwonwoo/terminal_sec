@@ -68,6 +68,15 @@ app.get("/api/config", (_req, res) => {
   });
 });
 
+app.get("/api/updates/status", async (_req, res, next) => {
+  try {
+    const sources = await listUpdateStatuses();
+    res.json({ sources });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/news", async (req, res, next) => {
   try {
     const parsedQuery = parseNewsQuery(req.query as Record<string, unknown>);

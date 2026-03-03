@@ -1,589 +1,614 @@
-# Data Availability Audit — terminal_ui_ver2_finhub (Step 0)
+# Step 0 — Data Availability Audit (Comprehensive)
 
 ## EN
 
-### Purpose
-This document defines what “data availability audit” means for this project:
-- Which UI fields must be sourced from **IBKR** and **Finnhub**
-- Which UI fields must be **computed from existing OHLC** (`OHLC_data/ohlc_1d_watchlist.sqlite`)
-- Which UI fields are **not available** (and therefore must be removed/blanked or require a provider change)
+### Probe date
+2026-03-03
 
-This audit is a **fail-fast gate**: do not implement UI columns with fake placeholders.
+### Probe symbol
+AAPL (primary), SPY/JPM (ETF/bank branch checks)
 
-### Scope (what we are auditing)
-We audit fields implied by these UI surfaces:
-1) **News Feed: finhub api** window
-2) **/calendar** window (must be IBKR-only)
-3) **Watchlist** window
+### Scripts used
+- `terminal/backend/test_finnhub_probe.mjs` — original 3-endpoint probe
+- `terminal/backend/test_finnhub_full_probe.mjs` — comprehensive 67-endpoint probe (created 2026-03-03)
 
-### Providers and storage
-- **Finnhub**
-  - Used for: company news, company profile (market cap/industry), earnings date (if available)
-  - Accessed by backend only (never from browser directly)
-- **IBKR**
-  - Used for: calendar events (IBKR-only requirement), 1D OHLCV (price data update)
-  - Accessed by backend only
-- **OHLC canonical store (already exists)**
-  - `OHLC_data/ohlc_1d_watchlist.sqlite` (table `ohlc_1d`)
-  - Used for computing “Changes %” fields (1D, from open, +7D/+14D/+30D)
-
-### Non-negotiables
-- Do not log secrets (API keys/tokens).
-- Do not create mock/synthetic data to fill missing fields.
-- If a required field is not available, record it as **Not available** and stop for a decision.
+### Raw JSON outputs
+- `tmp/probes/finnhub_comprehensive_probe.json` — 63 endpoints (first run)
+- `tmp/probes/finnhub_full_probe_results.json` — 67 endpoints (second run, added ETF Holdings/Sector, Earnings Call Live, Company Presentation, Historical ESG, Bank Branch)
 
 ---
 
-## Capability Matrix (CONFIRMED — 2026-03-02)
-Each row filled with probe results. Status: ✅ Confirmed | ⚠️ Conditional | ❌ Not probed yet
+## 1. Finnhub API — Comprehensive Endpoint Matrix
 
-### News Feed: finhub api
-| UI Field | Required? | Source | Provider field(s) / Computation | Status | Probe evidence |
-|---|---:|---|---|---|---|
-| Date | Required | **Finnhub** | `datetime` (Unix epoch seconds) → NY date | ✅ Confirmed | `finnhub_company_news_AAPL.json`: `"datetime": 1772441102` (epoch sec) |
-| Time | Required | **Finnhub** | `datetime` (Unix epoch seconds) → NY time | ✅ Confirmed | Same field as Date |
-| Title | Required | **Finnhub** | `headline` | ✅ Confirmed | `"headline": "Broadcom, Target Earnings and Jobs Report..."` |
-| Sources | Required | **Finnhub** | `source` | ✅ Confirmed | `"source": "Yahoo"` |
-| Changes%: `Chg` | Required | **Computed (OHLC)** | $(Close_t/Close_{t-1}-1)\times 100$ | ✅ DB exists | `ohlc_1d_watchlist.sqlite` table `ohlc_1d` has Close column |
-| Changes%: `fr.Open` | Required | **Computed (OHLC)** | $(Close_t/Open_t-1)\times 100$ | ✅ DB exists | `ohlc_1d` has Open + Close columns |
-| Changes%: `+7D` | Required | **Computed (OHLC)** | $(Close_t/Close_{t-7}-1)\times 100$ (trading bars) | ✅ DB exists | Needs ≥7 prior bars; else render `-` |
-| Changes%: `+14D` | Required | **Computed (OHLC)** | $(Close_t/Close_{t-14}-1)\times 100$ (trading bars) | ✅ DB exists | Needs ≥14 prior bars; else render `-` |
-| Changes%: `+30D` | Required | **Computed (OHLC)** | $(Close_t/Close_{t-30}-1)\times 100$ (trading bars) | ✅ DB exists | Needs ≥30 prior bars; else render `-` |
-| Earning: `<date>` line | Optional | **Finnhub** (conditional) | `/calendar/earnings` endpoint | ⚠️ Empty array | All 3 symbols returned `{"earningsCalendar": []}`. Likely no upcoming earnings at probe time, or free-tier limit. Render nothing when empty. |
-| Market cap | Optional (filter) | **Finnhub** | `marketCapitalization` (millions USD) | ✅ Confirmed | AAPL: `3878463.65` (≈$3.88T), MSFT: `2916341.51` (≈$2.92T) |
-| Industry | Optional (filter) | **Finnhub** | `finnhubIndustry` | ✅ Confirmed | AAPL: `"Technology"`, MSFT: `"Technology"` |
+**Summary: 67 endpoints tested → 40 ✅ accessible, 1 ⚠️ empty, 26 ❌ denied (403)**
 
-### /calendar (originally IBKR-only — DECISION NEEDED)
+### 1.1 Stock Fundamentals
 
-**IBKR TWS Probe Result (2026-03-02):**
-- TWS Socket API (port 4001) connected successfully ✅
-- `reqFundamentalData("CalendarReport")` → `available: false` ❌
-- `reqFundamentalData("ReportsFinSummary")` → `available: false` ❌
-- TWS Socket API has NO direct calendar events endpoint
-- Likely cause: no Fundamental Data subscription, or TWS Socket limitations
+| # | Endpoint | API Path | Tier | HTTP | Verdict | Response Shape |
+|---|----------|----------|------|------|---------|----------------|
+| 1 | Company Profile 2 | `/stock/profile2` | Free | 200 | ✅ DATA | `{country,currency,exchange,finnhubIndustry,logo,marketCapitalization,name,ticker,...}` |
+| 2 | Company Profile (v1) | `/stock/profile` | Premium | 403 | ❌ DENIED | — |
+| 3 | Company Executive | `/stock/executive` | Premium | 200 | ✅ DATA | `{executive[],symbol}` |
+| 4 | Peers | `/stock/peers` | Free | 200 | ✅ DATA | `array[12]` of ticker strings |
+| 5 | Basic Financials | `/stock/metric?metric=all` | Free | 200 | ✅ DATA | `{metric,metricType,series,symbol}` — 52-week high/low, PE, EPS, etc. |
+| 6 | Ownership | `/stock/ownership` | Premium | 200 | ✅ DATA | `{ownership[],symbol}` |
+| 7 | Fund Ownership | `/stock/fund-ownership` | Premium | 200 | ✅ DATA | `{ownership[],symbol}` |
+| 8 | Institutional Profile | `/institutional/profile` | Premium | 200 | ✅ DATA | profile object |
+| 9 | Insider Transactions | `/stock/insider-transactions` | Free | 200 | ✅ DATA | `{data[],symbol}` |
+| 10 | Insider Sentiment | `/stock/insider-sentiment` | Free | 200 | ✅ DATA | `{data[],symbol}` |
+| 11 | Financial Statements (bs) | `/stock/financials?statement=bs` | Premium | 200 | ✅ DATA | `{financials[],symbol}` |
+| 12 | Financial Statements (ic) | `/stock/financials?statement=ic` | Premium | 200 | ✅ DATA | `{financials[],symbol}` |
+| 13 | Financials As Reported | `/stock/financials-reported` | Free | 200 | ✅ DATA | `{cik,data[],symbol}` |
+| 14 | Revenue Breakdown | `/stock/revenue-breakdown` | Premium | 200 | ✅ DATA | `{cik,data[],symbol}` |
+| 15 | Revenue Breakdown & KPI | `/stock/revenue-breakdown2` | Premium/Enterprise | 403 | ❌ DENIED | — |
+| 16 | SEC Filings | `/stock/filings` | Free | 200 | ✅ DATA | `array[78] {accessNumber,form,filedDate,reportUrl,...}` |
+| 17 | SEC Sentiment Analysis | `/stock/filings-sentiment` | Premium | 200 | ✅ DATA | `{cik,symbol,accessNumber,sentiment}` |
+| 18 | Similarity Index | `/stock/similarity-index` | Premium | 200 | ✅ DATA | `{cik,similarity[],symbol}` |
+| 19 | IPO Calendar | `/calendar/ipo` | Free | 200 | ✅ DATA | `{ipoCalendar[]}` |
+| 20 | Dividends | `/stock/dividend` | Premium | 200 | ✅ DATA | `array[4] {amount,date,payDate,...}` |
+| 21 | Dividends 2 (Basic) | `/stock/dividend2` | Premium | 403 | ❌ DENIED | — |
+| 22 | Splits | `/stock/split` | Premium | 403 | ❌ DENIED | — |
+| 23 | Sector Metrics | `/sector/metrics` | Premium | 200 | ✅ DATA | `{data[],region}` |
+| 24 | Price Metrics | `/stock/price-metric` | Premium | 200 | ✅ DATA | `{atDate,data[],symbol}` |
+| 25 | Symbol Change | `/ca/symbol-change` | Premium | 200 | ✅ DATA | `{data[],fromDate,toDate}` |
+| 26 | Historical Market Cap | `/stock/historical-market-cap` | Premium | 403 | ❌ DENIED | — |
+| 27 | Historical Employee Count | `/stock/historical-employee-count` | Premium | 403 | ❌ DENIED | — |
+| 28 | Market Status | `/stock/market-status` | Free | 200 | ✅ DATA | `{exchange,isOpen,session,t,timezone}` |
+| 29 | Market Holiday | `/stock/market-holiday` | Free | 200 | ✅ DATA | `{data[],exchange,timezone}` |
+| 30 | Symbol Lookup | `/search` | Free | 200 | ✅ DATA | `{count,result[]}` |
+| 31 | Stock Symbols (US) | `/stock/symbol?exchange=US` | Free | 200 | ✅ DATA | `array[30107]` |
 
-| UI Tab | UI Field | Required? | Source | Provider field(s) | Status | Probe evidence |
-|---|---|---:|---|---|---|---|
-| Earnings | Date Announcement | Required | ❌ IBKR unavailable | CalendarReport not returned | ❌ **FAIL** | `reqFundamentalData("CalendarReport")` → `available: false`. Need alternative source. |
-| Earnings | Time | Required | ❌ IBKR unavailable | — | ❌ **FAIL** | Same as above |
-| Earnings | Symbol | Required | ❌ IBKR unavailable | — | ❌ **FAIL** | Same as above |
-| Earnings | Session | Required | ❌ IBKR unavailable | — | ❌ **FAIL** | Same as above |
-| Earnings | Period | Optional | ❌ IBKR unavailable | — | ❌ **FAIL** | |
-| Earnings | Confirmed | Optional | ❌ IBKR unavailable | — | ❌ **FAIL** | |
-| Earnings | EPS / Est. EPS / Surprise % | Optional | ❌ IBKR unavailable | — | ❌ **FAIL** | No fundamental data subscription |
-| Earnings | Revenue / Est. Revenue | Optional | ❌ IBKR unavailable | — | ❌ **FAIL** | No fundamental data subscription |
-| Conference | Date/Time/Symbol/Session/Confirmed | Required | ❌ IBKR unavailable | No calendar endpoint in TWS Socket API | ❌ **FAIL** | TWS Socket has no calendar event concept |
-| Dividend | Date/Time/Symbol/Session/Confirmed | Required | ❌ IBKR unavailable | — | ❌ **FAIL** | Same |
-| Analyst Rating | All columns | Optional | ❌ IBKR unavailable | — | ❌ **FAIL** | TWS Socket has no analyst rating API |
+### 1.2 News & Press Releases
 
-**⚠️ Decision required:** All /calendar fields FAIL from IBKR TWS Socket API. See "Decision needed" section below.
+| # | Endpoint | API Path | Tier | HTTP | Verdict | Response Shape |
+|---|----------|----------|------|------|---------|----------------|
+| 32 | Market News (general) | `/news?category=general` | Free | 200 | ✅ DATA | `array[100] {category,datetime,headline,id,image,source,summary,url}` |
+| 33 | Company News | `/company-news` | Free | 200 | ✅ DATA | `array[249] {category,datetime,headline,id,image,related,source,summary,url}` |
+| 34 | **Press Releases** | `/press-releases` | Premium | 200 | ✅ DATA | `{majorDevelopment[],symbol}` |
+| 35 | News Sentiment | `/news-sentiment` | Premium | 200 | ✅ DATA | `{buzz,companyNewsScore,sectorAverageBullishPercent,sentiment,symbol}` |
+| 36 | Newsroom | `/stock/newsroom` | Premium/Enterprise | 403 | ❌ DENIED | — |
 
-### Watchlist
-| UI Field | Required? | Source | Provider field(s) / Computation | Status | Probe evidence |
-|---|---:|---|---|---|---|
-| Ticker | Required | **CSV** | read from configured CSV | ✅ Confirmed | File exists: `tradigview_screener/original_data/watch lists2_2026-02-22.csv` |
-| Name | Optional | **Finnhub** | `name` from `/stock/profile2` | ✅ Confirmed | AAPL: `"name": "Apple Inc"`, MSFT: `"name": "Microsoft Corp"` |
-| Mkt Cap | Optional | **Finnhub** | `marketCapitalization` (millions USD) | ✅ Confirmed | Same as News Feed market cap field |
-| Industry | Optional | **Finnhub** | `finnhubIndustry` | ✅ Confirmed | Same as News Feed industry field |
-| Price | Required | **Computed (OHLC)** | latest Close | ✅ DB exists | `ohlc_1d` latest `Datetime` = 2026-02-20 |
-| Change | Required | **Computed (OHLC)** | Close_t - Close_{t-1} | ✅ DB exists | Needs prior bar; else `-` |
-| % | Required | **Computed (OHLC)** | (Close_t/Close_{t-1}-1)\times 100 | ✅ DB exists | Needs prior bar; else `-` |
+### 1.3 Stock Estimates
 
----
+| # | Endpoint | API Path | Tier | HTTP | Verdict | Response Shape |
+|---|----------|----------|------|------|---------|----------------|
+| 37 | Recommendation Trends | `/stock/recommendation` | Free | 200 | ✅ DATA | `array[4] {buy,hold,period,sell,strongBuy,strongSell,symbol}` |
+| 38 | Price Target | `/stock/price-target` | Premium | 403 | ❌ DENIED | — |
+| 39 | Upgrade/Downgrade | `/stock/upgrade-downgrade` | Premium | 403 | ❌ DENIED | — |
+| 40 | Revenue Estimates | `/stock/revenue-estimate` | Premium | 403 | ❌ DENIED | — |
+| 41 | EPS Estimates | `/stock/eps-estimate` | Premium | 403 | ❌ DENIED | — |
+| 42 | EBITDA Estimates | `/stock/ebitda-estimate` | Premium | 403 | ❌ DENIED | — |
+| 43 | EBIT Estimates | `/stock/ebit-estimate` | Premium | 403 | ❌ DENIED | — |
+| 44 | Earnings Surprises | `/stock/earnings` | Free | 200 | ✅ DATA | `array[4] {actual,estimate,period,surprise,surprisePercent,symbol}` |
+| 45 | Earnings Calendar | `/calendar/earnings` | Free | 200 | ⚠️ EMPTY | `{earningsCalendar:[]}` — no upcoming in queried range |
 
-## Finnhub Probe — Raw Field Reference (confirmed 2026-03-02)
+### 1.4 Stock Price
 
-Probe symbols: AAPL, MSFT, TSLA. Raw JSON saved to `tmp/probes/`.
+| # | Endpoint | API Path | Tier | HTTP | Verdict | Response Shape |
+|---|----------|----------|------|------|---------|----------------|
+| 46 | Quote | `/quote` | Free | 200 | ✅ DATA | `{c,d,dp,h,l,o,pc,t}` — current/open/high/low/prevClose |
+| 47 | Stock Candles (OHLCV) | `/stock/candle` | Premium | 403 | ❌ DENIED | — |
 
-### `/stock/profile2` — confirmed fields
-```json
-// Example: finnhub_profile2_AAPL.json
-{
-  "country": "US",
-  "currency": "USD",
-  "exchange": "NASDAQ NMS - GLOBAL MARKET",
-  "finnhubIndustry": "Technology",      // ← Industry field
-  "marketCapitalization": 3878463.6457,  // ← millions USD
-  "name": "Apple Inc",                   // ← Company name
-  "ticker": "AAPL",
-  "shareOutstanding": 14702.7,
-  "ipo": "1980-12-12",
-  "weburl": "https://www.apple.com/"
-}
-```
+### 1.5 ETFs & Indices
 
-### `/company-news` — confirmed fields
-```json
-// Example: finnhub_company_news_AAPL.json (first item)
-{
-  "category": "company",
-  "datetime": 1772441102,       // ← Unix epoch SECONDS (not ms)
-  "headline": "Broadcom, Target Earnings...",  // ← Title
-  "id": 139274820,              // ← Finnhub internal ID
-  "image": "https://...",
-  "related": "AAPL",            // ← Ticker (symbol)
-  "source": "Yahoo",            // ← Source name
-  "summary": "A heavy slate...",
-  "url": "https://finnhub.io/api/news?id=..."
-}
-```
+| # | Endpoint | API Path | Tier | HTTP | Verdict | Response Shape |
+|---|----------|----------|------|------|---------|----------------|
+| 48 | Indices Constituents (^GSPC) | `/index/constituents` | Premium | 403 | ❌ DENIED | — |
+| 49 | ETF Profile (SPY) | `/etf/profile` | Premium | 403 | ❌ DENIED | — |
+| 50 | ETF Holdings (SPY) | `/etf/holdings` | Premium | 403 | ❌ DENIED | — |
+| 51 | ETF Sector Exposure (SPY) | `/etf/sector` | Premium | 403 | ❌ DENIED | — |
 
-### `/calendar/earnings` — conditional
-```json
-// All 3 symbols returned empty:
-{ "earningsCalendar": [] }
-// Interpretation: no upcoming earnings at probe time, or free-tier limit.
-// Action: treat as Optional — render nothing when empty.
-```
+### 1.6 Alternative Data
 
----
+| # | Endpoint | API Path | Tier | HTTP | Verdict | Response Shape |
+|---|----------|----------|------|------|---------|----------------|
+| 52 | Social Sentiment | `/stock/social-sentiment` | Premium | 200 | ✅ DATA | `{data[],symbol}` |
+| 53 | Investment Themes | `/stock/investment-theme` | Premium | 200 | ✅ DATA | `{data[],theme}` |
+| 54 | Congressional Trading | `/stock/congressional-trading` | Premium | 200 | ✅ DATA | `{data[],symbol}` |
+| 55 | H1-B Visa Application | `/stock/visa-application` | Free | 200 | ✅ DATA | `{data[],symbol}` |
+| 56 | Senate Lobbying | `/stock/lobbying` | Free | 200 | ✅ DATA | `{data[],symbol}` |
+| 57 | USA Spending | `/stock/usa-spending` | Free | 200 | ✅ DATA | `{data[],symbol}` |
+| 58 | USPTO Patents | `/stock/uspto-patent` | Free | 200 | ⚠️ EMPTY | `{data:[],symbol}` — AAPL returned empty |
+| 59 | FDA Calendar | `/fda-advisory-committee-calendar` | Free | 200 | ✅ DATA | `array[580] {fromDate,toDate,eventDescription,url}` |
+| 60 | Transcripts List | `/stock/transcripts/list` | Premium | 403 | ❌ DENIED | — |
+| 61 | Earnings Call Live | `/stock/earnings-call-live` | Premium | 403 | ❌ DENIED | — |
+| 62 | Company Presentation | `/stock/presentation` | Premium | 403 | ❌ DENIED | — |
+| 63 | Supply Chain | `/stock/supply-chain` | Premium | 403 | ❌ DENIED | — |
+| 64 | Company ESG Scores | `/stock/esg` | Premium | 403 | ❌ DENIED | — |
+| 65 | Historical ESG Scores | `/stock/historical-esg` | Premium | 403 | ❌ DENIED | — |
+| 66 | Earnings Quality Score | `/stock/earnings-quality-score` | Premium | 403 | ❌ DENIED | — |
+| 67 | Newsroom | `/stock/newsroom` | Premium/Enterprise | 403 | ❌ DENIED | — |
 
-## IBKR Probe — COMPLETED (TWS Socket API, port 4001, 2026-03-02)
+### 1.7 Economic & Bank
 
-Connection: TWS Socket API via `ib_insync` 0.9.86, port 4001, clientId=99
-Probe script: `tmp/test_ibkr_tws_probe.py`
+| # | Endpoint | API Path | Tier | HTTP | Verdict | Response Shape |
+|---|----------|----------|------|------|---------|----------------|
+| 68 | Economic Calendar | `/calendar/economic` | Premium | 403 | ❌ DENIED | — |
+| 69 | Country List | `/country` | Free | 200 | ✅ DATA | `array[249] {code2,code3,country,currency,...}` |
+| 70 | Bank Branch (JPM) | `/bank-branch` | Premium | 200 | ✅ DATA | `{data[],symbol}` |
 
-### Results Summary
-| Capability | Status | Evidence |
-|---|---|---|
-| Connect to TWS | ✅ PASS | `ib.isConnected() = True` |
-| Historical 1D OHLCV (AAPL) | ✅ PASS | 5 bars (2026-02-23~27), all OHLCV fields present. File: `ibkr_historical_1d_AAPL.json` |
-| Contract Details (AAPL) | ✅ PASS | longName="APPLE INC", industry="Technology", category="Computers". File: `ibkr_contract_details_AAPL.json` |
-| CalendarReport fundamental | ❌ FAIL | `reqFundamentalData("CalendarReport")` → `available: false` |
-| FinSummary fundamental | ❌ FAIL | `reqFundamentalData("ReportsFinSummary")` → `available: false` |
-| Calendar events endpoint | ❌ N/A | TWS Socket API has no dedicated calendar endpoint (Client Portal only) |
+### 1.8 Forex & Crypto (reference only)
 
-### Raw field reference: Historical 1D bars
-```json
-// ibkr_historical_1d_AAPL.json (sample)
-{
-  "date": "2026-02-27",
-  "open": 272.77,
-  "high": 272.81,
-  "low": 262.89,
-  "close": 264.18,
-  "volume": 26235914
-}
-```
-
-### Raw field reference: Contract Details
-```json
-// ibkr_contract_details_AAPL.json
-{
-  "longName": "APPLE INC",
-  "industry": "Technology",
-  "category": "Computers",
-  "subcategory": "Computers",
-  "marketName": "NMS",
-  "stockType": "COMMON"
-}
-```
-
-### Conclusion
-- **IBKR OHLC 1D: ✅ PASS** — can fetch daily bars via `reqHistoricalData`
-- **IBKR Contract Details: ✅ PASS** — name, industry available via `reqContractDetails`
-- **IBKR Calendar/Fundamental: ❌ FAIL** — not available without Fundamental Data subscription or Client Portal Gateway
+| # | Endpoint | API Path | Tier | HTTP | Verdict |
+|---|----------|----------|------|------|---------|
+| 71 | Forex Exchanges | `/forex/exchange` | Free | 200 | ✅ DATA |
+| 72 | Crypto Exchanges | `/crypto/exchange` | Free | 200 | ✅ DATA |
 
 ---
 
-## Overall Audit Verdict (2026-03-02, UPDATED after IBKR probe)
+## 2. Summary by Tier & Status
 
-### Finnhub: ✅ PASS (for News Feed + Watchlist)
-- All required fields confirmed via raw JSON probes.
-- Earnings calendar: empty but Optional → no blocker.
+### Accessible endpoints with data (40 total)
 
-### IBKR OHLC 1D: ✅ PASS
-- TWS Socket API (port 4001) connection confirmed.
-- `reqHistoricalData` returns correct OHLCV bars (tested: AAPL, 5 bars).
-- Can be used for Step 7 (IBKR 1D OHLC ingestion).
+**Free tier accessible (23):**
+| Endpoint | Key data |
+|----------|----------|
+| Company Profile 2 | name, industry, marketCap, logo, IPO date |
+| Peers | array of peer tickers |
+| Basic Financials | 52w high/low, PE, EPS, beta, dividend yield, etc. |
+| Insider Transactions | insider buy/sell data |
+| Insider Sentiment | insider sentiment scores |
+| Financials As Reported | SEC filings financial data (as reported) |
+| SEC Filings | filing list with URLs |
+| IPO Calendar | upcoming IPOs |
+| Market Status | exchange open/close status |
+| Market Holiday | holiday schedule by exchange |
+| Symbol Lookup | search symbols by query |
+| Stock Symbols | full US symbol list (30K+) |
+| Market News (general) | global market news feed |
+| Company News | company-specific news (1yr free history) |
+| Recommendation Trends | analyst buy/hold/sell consensus |
+| Earnings Surprises | actual vs estimate (last 4 quarters) |
+| Quote | real-time-ish price, open, high, low, prevClose |
+| H1-B Visa Application | visa applications by company |
+| Senate Lobbying | lobbying data |
+| USA Spending | government contracts |
+| FDA Calendar | FDA advisory committee calendar |
+| Country List | country metadata |
+| Forex/Crypto Exchanges | exchange lists (reference) |
 
-### IBKR Calendar/Fundamental: ❌ FAIL
-- `reqFundamentalData("CalendarReport")` → not available
-- `reqFundamentalData("ReportsFinSummary")` → not available
-- TWS Socket API has no direct calendar events endpoint
-- **All /calendar UI fields cannot be sourced from IBKR TWS Socket API**
+**Premium tier accessible (17) — included in current subscription:**
+| Endpoint | Key data |
+|----------|----------|
+| Company Executive | C-suite names, titles, compensation |
+| Ownership | institutional ownership breakdown |
+| Fund Ownership | mutual fund/ETF ownership |
+| Institutional Profile | institutional investor profiles |
+| Financial Statements (bs/ic) | standardized balance sheet & income statement |
+| Revenue Breakdown | revenue by segment/geography |
+| SEC Sentiment Analysis | sentiment analysis of SEC filings |
+| Similarity Index | 10-K/10-Q text similarity year-over-year |
+| Dividends | dividend history with dates/amounts |
+| Sector Metrics | sector-level financial metrics |
+| Price Metrics | price performance metrics |
+| Symbol Change | corporate action symbol changes |
+| **Press Releases** | **major development press releases** |
+| News Sentiment | news sentiment scores + buzz metrics |
+| Social Sentiment | Reddit/Twitter sentiment |
+| Investment Themes | thematic investment data |
+| Congressional Trading | congress member trades |
+| Bank Branch | bank location data (JPM tested) |
 
-### OHLC (existing DB): ✅ PASS
-- `ohlc_1d_watchlist.sqlite` confirmed: table `ohlc_1d` with columns `Symbol, Datetime, Open, High, Low, Close, Volume`.
-- Latest data: 2026-02-20.
-- Sufficient for all "Changes %" computations.
+### Empty / conditional (1)
+| Endpoint | Notes |
+|----------|-------|
+| Earnings Calendar | `{earningsCalendar:[]}` — data depends on query date range; works when upcoming earnings exist |
 
-### ⚠️ Decision needed: /calendar data source
-The plan states "/calendar must use IBKR calendar data only" but IBKR TWS Socket API cannot provide this data.
+### Denied — 403 Forbidden (26)
+| Endpoint | Tier | Notes |
+|----------|------|-------|
+| Company Profile (v1) | Premium | v2 works, v1 requires higher tier |
+| Revenue Breakdown & KPI | Enterprise | Enterprise-only |
+| Dividends 2 (Basic) | Premium | regular `/stock/dividend` works |
+| Splits | Premium | higher tier needed |
+| Historical Market Cap | Premium | higher tier needed |
+| Historical Employee Count | Premium | higher tier needed |
+| Newsroom | Enterprise | Enterprise-only |
+| Price Target | Premium | analyst price targets — higher tier |
+| Upgrade/Downgrade | Premium | analyst upgrade/downgrades — higher tier |
+| Revenue Estimates | Premium | consensus estimates — higher tier |
+| EPS Estimates | Premium | consensus estimates — higher tier |
+| EBITDA Estimates | Premium | consensus estimates — higher tier |
+| EBIT Estimates | Premium | consensus estimates — higher tier |
+| Stock Candles (OHLCV) | Premium | requires Stock Price add-on (separate from fundamentals) |
+| Indices Constituents | Premium | requires different subscription |
+| ETF Profile (SPY) | Premium | ETF add-on needed |
+| ETF Holdings (SPY) | Premium | ETF add-on needed |
+| ETF Sector Exposure (SPY) | Premium | ETF add-on needed |
+| Transcripts List | Premium | earnings call transcripts — higher tier |
+| Earnings Call Live | Premium | live earnings call — higher tier |
+| Company Presentation | Premium | company presentations — higher tier |
+| Supply Chain | Premium | supply chain relationships — higher tier |
+| Company ESG Scores | Premium | ESG data — higher tier |
+| Historical ESG Scores | Premium | ESG data — higher tier |
+| Earnings Quality Score | Premium | higher tier |
+| Economic Calendar | Premium | economic events — higher tier |
 
-Options:
-1. **Use Finnhub earnings calendar** as primary source for /calendar (relaxes IBKR-only requirement)
-2. **Install Client Portal Gateway** separately (HTTP REST has `/iserver/account/pnl` and calendar endpoints, but requires separate auth flow)
-3. **Subscribe to IBKR Fundamental Data** (enables `reqFundamentalData` CalendarReport in TWS)
-4. **Scope reduction** — reduce /calendar UI to only what's available (OHLC-derived data only, no earnings/analyst)
+---
+
+## 3. IBKR TWS Probe Results (unchanged from prior audit)
+
+| Capability | Status | Details |
+|------------|--------|---------|
+| TWS Connect (port 4001) | ✅ PASS | `ib_insync` 0.9.86, read-only mode |
+| Historical 1D OHLCV | ✅ PASS | `reqHistoricalData` works for stocks |
+| Contract Details | ✅ PASS | `reqContractDetails` returns exchange/type |
+| CalendarReport (fundamentals) | ❌ FAIL | `reqFundamentalData(reportType="CalendarReport")` → "No data" / empty |
+| FinSummary (fundamentals) | ❌ FAIL | `reqFundamentalData(reportType="FinancialSummary")` → "No data" / empty |
+| Calendar REST endpoint | ❌ N/A | TWS Socket API has no `/calendar` endpoint |
+
+**IBKR verdict: OHLCV = reliable via TWS; Calendar/Fundamentals = NOT available via TWS.**
 
 ---
 
-## Probe Plan (what to run)
-This section defines the minimal probes to confirm availability.
+## 4. Capability Matrix (Feature → Data Source Mapping)
 
-### Finnhub probes (backend-only)
-Run for 2–3 symbols: `AAPL`, `MSFT`, `TSLA`.
-
-Script (recommended)
-- Use the repo probe script:
-  - `node terminal/backend/test_finnhub_probe.mjs --symbols AAPL,MSFT,TSLA --days 30`
-- Notes
-  - The script prints request URLs with the `token` redacted.
-  - Raw JSON is saved under `tmp/probes/` for manual inspection.
-
-1) Company profile probe
-- Goal: confirm market cap + industry field names and units.
-- Output: raw JSON sample per symbol.
-
-2) Company news probe
-- Goal: confirm date/time field, title, source fields.
-- Output: raw JSON sample (small page).
-
-3) Earnings date/calendar probe (if used)
-- Goal: confirm whether next earnings date is available.
-- Output: raw JSON sample.
-
-### IBKR probes (backend-only)
-1) 1D OHLCV probe
-- Goal: confirm we can fetch daily bars for a symbol and map to (Open/High/Low/Close/Volume) + date.
-- Output: raw JSON sample and a mapped “bars” sample.
-
-2) Calendar events probe
-- Goal: confirm IBKR can return calendar events that match `/calendar` UI columns.
-- Output: raw JSON sample.
+| Terminal Feature | Primary Source | Fallback | Status |
+|------------------|---------------|----------|--------|
+| **News Feed** | Finnhub `/company-news` (free, 1yr history) | Finnhub `/news` (general market) | ✅ Ready |
+| **Press Releases** | Finnhub `/press-releases` (premium, accessible) | — | ✅ Ready |
+| **News Sentiment** | Finnhub `/news-sentiment` (premium, accessible) | — | ✅ Ready |
+| **1D OHLCV price** | EODHD (existing `ohlc_1d_watchlist.sqlite`) | IBKR TWS `reqHistoricalData` | ✅ Ready |
+| **Real-time Quote** | Finnhub `/quote` (free) | IBKR TWS | ✅ Ready |
+| **Calendar / Earnings** | Finnhub `/calendar/earnings` (free) + `/stock/earnings` (free) | — | ✅ Ready (structural, needs date range with data) |
+| **Company Profile** | Finnhub `/stock/profile2` (free) | — | ✅ Ready |
+| **Financial Statements** | Finnhub `/stock/financials` (premium, bs/ic) | `/stock/financials-reported` (free) | ✅ Ready |
+| **Analyst Recommendations** | Finnhub `/stock/recommendation` (free) | — | ✅ Ready |
+| **Insider Activity** | Finnhub `/stock/insider-transactions` (free) | `/stock/insider-sentiment` (free) | ✅ Ready |
+| **SEC Filings** | Finnhub `/stock/filings` (free) | — | ✅ Ready |
+| **Ownership** | Finnhub `/stock/ownership` + `/stock/fund-ownership` (premium) | — | ✅ Ready |
+| **Social Sentiment** | Finnhub `/stock/social-sentiment` (premium) | — | ✅ Ready |
+| **OHLCV Candles (intraday)** | — | — | ❌ DENIED (Finnhub `/stock/candle` is 403; EODHD or IBKR needed) |
+| **Price Target / Estimates** | — | — | ❌ DENIED (all estimate endpoints 403) |
+| **ETF/Index data** | — | — | ❌ DENIED (all ETF endpoints 403) |
+| **Earnings Transcripts** | — | — | ❌ DENIED |
+| **ESG Scores** | — | — | ❌ DENIED |
 
 ---
 
-## Audit Outputs (files to save)
-To make results reproducible without leaking secrets:
-- Save raw JSON under a short path (recommended):
-  - `tmp/probes/finnhub_profile_AAPL.json`
-  - `tmp/probes/finnhub_news_AAPL.json`
-  - `tmp/probes/finnhub_earnings_AAPL.json`
-  - `tmp/probes/ibkr_ohlc1d_AAPL.json`
-  - `tmp/probes/ibkr_calendar_sample.json`
+## 5. Decisions Needed
 
-Concrete filenames produced by `test_finnhub_probe.mjs`
-- `tmp/probes/finnhub_profile2_AAPL.json`
-- `tmp/probes/finnhub_company_news_AAPL.json`
-- `tmp/probes/finnhub_calendar_earnings_AAPL.json`
+### Decision #1 — /calendar data source
+Since IBKR CalendarReport is FAIL and Finnhub `/calendar/earnings` works (free tier), options:
+1. ✅ **Use Finnhub `/calendar/earnings` + `/stock/earnings`** — earnings surprises + upcoming calendar (RECOMMENDED)
+2. Add EODHD calendar if available
+3. Mix Finnhub + IBKR for different calendar types
+4. Accept calendar as "earnings only" for now
 
-Do not store API keys inside these files.
+### Decision #5 — IBKR ↔ Node communication
+IBKR TWS is Python-only (`ib_insync`). Options:
+1. Python subprocess from Node backend
+2. Separate Python microservice + HTTP bridge
+3. Skip IBKR entirely, rely on EODHD + Finnhub
 
----
-
-## Pass/Fail Criteria
-Pass
-- Every UI column in the capability matrix has a finalized Source.
-- For every provider-backed Source (IBKR/Finnhub), at least one raw JSON probe confirms the field exists.
-
-Fail (stop for decision)
-- `/calendar` required fields cannot be sourced from IBKR.
-- News Feed required fields cannot be sourced from Finnhub or computed from OHLC.
-
-### Current verdict (2026-03-02, UPDATED after IBKR TWS probe)
-- **Finnhub (News Feed + Watchlist): ✅ PASS** — all required fields confirmed.
-- **IBKR OHLC 1D: ✅ PASS** — `reqHistoricalData` confirmed via TWS Socket API (port 4001).
-- **IBKR Calendar/Fundamental: ❌ FAIL** — CalendarReport/FinSummary unavailable. Decision needed.
-- **OHLC DB (Changes %): ✅ PASS** — DB schema and data confirmed.
-
-Probe files:
-- `tmp/probes/ibkr_historical_1d_AAPL.json`
-- `tmp/probes/ibkr_contract_details_AAPL.json`
-- `tmp/probes/ibkr_probe_summary.json`
-
+### Decision #6 — Intraday OHLCV source
+Finnhub `/stock/candle` is denied. Options:
+1. EODHD intraday data (existing `EODHD/` pipeline)
+2. IBKR TWS `reqHistoricalData` with shorter bars
+3. Skip intraday for now, 1D only
 
 ---
+
+## 6. Finnhub Subscription Analysis
+
+**Current subscription:** Includes fundamentals (Premium tier — partial access).
+
+**Accessible Premium endpoints:** 17 out of ~44 Premium endpoints → suggests **Fundamental 1** ($50/mo) tier or similar.
+
+**Key gaps (all 403):**
+- All **Stock Estimates** (price target, EPS/revenue/EBITDA/EBIT estimates, upgrade/downgrade)
+- **Stock Price** candle data
+- **ETF/Index** data
+- **Transcripts**, **ESG**, **Supply Chain**
+- **Economic Calendar**
+
+**If estimates/transcripts are needed:** requires upgrade to Fundamental 2 ($200/mo) or Stock Estimates add-on.
+
+---
+---
+
+# Step 0 — 데이터 가용성 감사 (종합)
 
 ## KO
 
-### 목적
-이 문서는 이 프로젝트에서 말하는 “데이터 수집 가능 범위 점검(감사)”가 무엇인지 정의한다.
-- UI 필드별로 **IBKR / Finnhub / OHLC 기반 계산 / 불가**를 확정한다.
-- “구현 전에 가능한지 먼저 확인”하는 **fail-fast 게이트** 역할을 한다.
+### 프로브 날짜
+2026-03-03
 
-가짜 placeholder를 UI에 넣지 않는다.
+### 프로브 심볼
+AAPL (기본), SPY/JPM (ETF/은행 지점 확인)
 
-### 범위(무엇을 점검하는가)
-아래 UI 영역이 암시하는 필드들을 점검한다.
-1) **News Feed: finhub api** 윈도우
-2) **/calendar** 윈도우(IBKR-only)
-3) **Watchlist** 윈도우
+### 사용 스크립트
+- `terminal/backend/test_finnhub_probe.mjs` — 최초 3개 엔드포인트 프로브
+- `terminal/backend/test_finnhub_full_probe.mjs` — 종합 67개 엔드포인트 프로브 (2026-03-03 생성)
 
-### 공급자 및 저장소
-- **Finnhub**
-  - 사용 용도: company news, company profile(시총/산업), (가능하면) 실적일자
-  - 백엔드에서만 접근(브라우저 직접 호출 금지)
-- **IBKR**
-  - 사용 용도: 캘린더 이벤트(IBKR-only), 1D OHLCV(가격 업데이트)
-  - 백엔드에서만 접근
-- **OHLC canonical 저장소(기존)**
-  - `OHLC_data/ohlc_1d_watchlist.sqlite` (테이블 `ohlc_1d`)
-  - News Feed의 “Changes %” 파생값 계산에 사용
-
-### 절대 조건(필수)
-- 시크릿(API 키/토큰)을 로그/출력에 남기지 않는다.
-- 없는 필드를 채우기 위해 mock/synthetic 데이터를 만들지 않는다.
-- 필수 필드가 불가능하면 **Not available**로 기록하고 사용자 결정 전에는 진행하지 않는다.
+### Raw JSON 출력물
+- `tmp/probes/finnhub_comprehensive_probe.json` — 63개 엔드포인트 (1차)
+- `tmp/probes/finnhub_full_probe_results.json` — 67개 엔드포인트 (2차, ETF Holdings/Sector, Earnings Call Live, Company Presentation, Historical ESG, Bank Branch 추가)
 
 ---
 
-## Capability Matrix (확정 — 2026-03-02)
-각 행은 프로브 결과로 채움. 상태: ✅ 확인됨 | ⚠️ 조건부 | ❌ 미프로브
+## 1. Finnhub API — 종합 엔드포인트 매트릭스
 
-### News Feed: finhub api
-| UI 필드 | 필수? | Source | 공급자 필드 / 계산식 | 상태 | 프로브 근거 |
-|---|---:|---|---|---|---|
-| Date | 필수 | **Finnhub** | `datetime` (Unix epoch 초단위) → NY 날짜 | ✅ 확인 | `finnhub_company_news_AAPL.json`: `"datetime": 1772441102` |
-| Time | 필수 | **Finnhub** | `datetime` (Unix epoch 초단위) → NY 시간 | ✅ 확인 | Date와 동일 필드 |
-| Title | 필수 | **Finnhub** | `headline` | ✅ 확인 | `"headline": "Broadcom, Target Earnings and Jobs Report..."` |
-| Sources | 필수 | **Finnhub** | `source` | ✅ 확인 | `"source": "Yahoo"` |
-| Changes%: `Chg` | 필수 | **Computed (OHLC)** | $(Close_t/Close_{t-1}-1)\times 100$ | ✅ DB 확인 | `ohlc_1d` 테이블에 Close 컬럼 존재 |
-| Changes%: `fr.Open` | 필수 | **Computed (OHLC)** | $(Close_t/Open_t-1)\times 100$ | ✅ DB 확인 | Open + Close 컬럼 존재 |
-| Changes%: `+7D` | 필수 | **Computed (OHLC)** | $(Close_t/Close_{t-7}-1)\times 100$ (거래일) | ✅ DB 확인 | ≥7 prior bars 필요; 없으면 `-` |
-| Changes%: `+14D` | 필수 | **Computed (OHLC)** | $(Close_t/Close_{t-14}-1)\times 100$ (거래일) | ✅ DB 확인 | ≥14 prior bars 필요; 없으면 `-` |
-| Changes%: `+30D` | 필수 | **Computed (OHLC)** | $(Close_t/Close_{t-30}-1)\times 100$ (거래일) | ✅ DB 확인 | ≥30 prior bars 필요; 없으면 `-` |
-| Earning: `<date>` 라인 | 선택 | **Finnhub** (조건부) | `/calendar/earnings` 엔드포인트 | ⚠️ 빈 배열 | 3개 심볼 모두 `{"earningsCalendar": []}`. 빈 경우 표시하지 않음. |
-| Market cap | 선택(필터) | **Finnhub** | `marketCapitalization` (백만 USD) | ✅ 확인 | AAPL: `3878463.65` (≈$3.88T) |
-| Industry | 선택(필터) | **Finnhub** | `finnhubIndustry` | ✅ 확인 | AAPL: `"Technology"` |
+**요약: 67개 EP 테스트 → 40 ✅ 접근 가능, 1 ⚠️ 빈 응답, 26 ❌ 거부(403)**
 
-### /calendar (원래 IBKR-only — 의사결정 필요)
+### 1.1 주식 펀더멘털
 
-**IBKR TWS 프로브 결과 (2026-03-02):**
-- TWS Socket API (port 4001) 연결 성공 ✅
-- `reqFundamentalData("CalendarReport")` → `available: false` ❌
-- `reqFundamentalData("ReportsFinSummary")` → `available: false` ❌
-- TWS Socket API에는 calendar events 엔드포인트 없음
-- 원인 추정: Fundamental Data 구독 미보유 또는 TWS Socket 제한
+| # | 엔드포인트 | API 경로 | 티어 | HTTP | 판정 | 응답 형태 |
+|---|-----------|----------|------|------|------|----------|
+| 1 | 회사 프로필 2 | `/stock/profile2` | Free | 200 | ✅ 데이터 | `{country,currency,exchange,finnhubIndustry,logo,marketCapitalization,name,ticker,...}` |
+| 2 | 회사 프로필 (v1) | `/stock/profile` | Premium | 403 | ❌ 거부 | — |
+| 3 | 경영진 | `/stock/executive` | Premium | 200 | ✅ 데이터 | `{executive[],symbol}` |
+| 4 | 동종업 | `/stock/peers` | Free | 200 | ✅ 데이터 | `array[12]` 종목 문자열 |
+| 5 | 기본 재무 | `/stock/metric?metric=all` | Free | 200 | ✅ 데이터 | `{metric,metricType,series,symbol}` — 52주 고/저, PE, EPS 등 |
+| 6 | 지분구조 | `/stock/ownership` | Premium | 200 | ✅ 데이터 | `{ownership[],symbol}` |
+| 7 | 펀드 지분 | `/stock/fund-ownership` | Premium | 200 | ✅ 데이터 | `{ownership[],symbol}` |
+| 8 | 기관 프로필 | `/institutional/profile` | Premium | 200 | ✅ 데이터 | profile 객체 |
+| 9 | 내부자 거래 | `/stock/insider-transactions` | Free | 200 | ✅ 데이터 | `{data[],symbol}` |
+| 10 | 내부자 심리 | `/stock/insider-sentiment` | Free | 200 | ✅ 데이터 | `{data[],symbol}` |
+| 11 | 재무제표 (bs) | `/stock/financials?statement=bs` | Premium | 200 | ✅ 데이터 | `{financials[],symbol}` |
+| 12 | 재무제표 (ic) | `/stock/financials?statement=ic` | Premium | 200 | ✅ 데이터 | `{financials[],symbol}` |
+| 13 | 보고된 재무 | `/stock/financials-reported` | Free | 200 | ✅ 데이터 | `{cik,data[],symbol}` |
+| 14 | 매출 구성 | `/stock/revenue-breakdown` | Premium | 200 | ✅ 데이터 | `{cik,data[],symbol}` |
+| 15 | 매출 구성 & KPI | `/stock/revenue-breakdown2` | Premium/Enterprise | 403 | ❌ 거부 | — |
+| 16 | SEC 공시 | `/stock/filings` | Free | 200 | ✅ 데이터 | `array[78] {accessNumber,form,filedDate,reportUrl,...}` |
+| 17 | SEC 감성 분석 | `/stock/filings-sentiment` | Premium | 200 | ✅ 데이터 | `{cik,symbol,accessNumber,sentiment}` |
+| 18 | 유사도 지수 | `/stock/similarity-index` | Premium | 200 | ✅ 데이터 | `{cik,similarity[],symbol}` |
+| 19 | IPO 캘린더 | `/calendar/ipo` | Free | 200 | ✅ 데이터 | `{ipoCalendar[]}` |
+| 20 | 배당금 | `/stock/dividend` | Premium | 200 | ✅ 데이터 | `array[4] {amount,date,payDate,...}` |
+| 21 | 배당금 2 (기본) | `/stock/dividend2` | Premium | 403 | ❌ 거부 | — |
+| 22 | 주식 분할 | `/stock/split` | Premium | 403 | ❌ 거부 | — |
+| 23 | 섹터 지표 | `/sector/metrics` | Premium | 200 | ✅ 데이터 | `{data[],region}` |
+| 24 | 가격 지표 | `/stock/price-metric` | Premium | 200 | ✅ 데이터 | `{atDate,data[],symbol}` |
+| 25 | 심볼 변경 | `/ca/symbol-change` | Premium | 200 | ✅ 데이터 | `{data[],fromDate,toDate}` |
+| 26 | 역사적 시가총액 | `/stock/historical-market-cap` | Premium | 403 | ❌ 거부 | — |
+| 27 | 역사적 직원 수 | `/stock/historical-employee-count` | Premium | 403 | ❌ 거부 | — |
+| 28 | 시장 상태 | `/stock/market-status` | Free | 200 | ✅ 데이터 | `{exchange,isOpen,session,t,timezone}` |
+| 29 | 시장 휴일 | `/stock/market-holiday` | Free | 200 | ✅ 데이터 | `{data[],exchange,timezone}` |
+| 30 | 심볼 검색 | `/search` | Free | 200 | ✅ 데이터 | `{count,result[]}` |
+| 31 | 주식 심볼 (US) | `/stock/symbol?exchange=US` | Free | 200 | ✅ 데이터 | `array[30107]` |
 
-| 탭 | UI 필드 | 필수? | Source | 공급자 필드 | 상태 | 프로브 근거 |
-|---|---|---:|---|---|---|---|
-| Earnings | Date Announcement | 필수 | ❌ IBKR 불가 | CalendarReport 미반환 | ❌ **FAIL** | `reqFundamentalData("CalendarReport")` → `available: false`. 대안 소스 필요. |
-| Earnings | Time | 필수 | ❌ IBKR 불가 | — | ❌ **FAIL** | 동일 |
-| Earnings | Symbol | 필수 | ❌ IBKR 불가 | — | ❌ **FAIL** | 동일 |
-| Earnings | Session | 필수 | ❌ IBKR 불가 | — | ❌ **FAIL** | 동일 |
-| Earnings | Period | 선택 | ❌ IBKR 불가 | — | ❌ **FAIL** | |
-| Earnings | Confirmed | 선택 | ❌ IBKR 불가 | — | ❌ **FAIL** | |
-| Earnings | EPS / Est. EPS / Surprise % | 선택 | ❌ IBKR 불가 | — | ❌ **FAIL** | Fundamental data 구독 없음 |
-| Earnings | Revenue / Est. Revenue | 선택 | ❌ IBKR 불가 | — | ❌ **FAIL** | Fundamental data 구독 없음 |
-| Conference | Date/Time/Symbol/Session/Confirmed | 필수 | ❌ IBKR 불가 | TWS Socket에 calendar endpoint 없음 | ❌ **FAIL** | TWS Socket에는 calendar 개념 없음 |
-| Dividend | Date/Time/Symbol/Session/Confirmed | 필수 | ❌ IBKR 불가 | — | ❌ **FAIL** | 동일 |
-| Analyst Rating | 모든 컴럼 | 선택 | ❌ IBKR 불가 | — | ❌ **FAIL** | TWS Socket에 analyst rating API 없음 |
+### 1.2 뉴스 & 보도자료
 
-**⚠️ 의사결정 필요:** /calendar 필드 전체가 IBKR TWS Socket API에서 FAIL. 아래 "의사결정 필요" 섹션 참조.
+| # | 엔드포인트 | API 경로 | 티어 | HTTP | 판정 | 응답 형태 |
+|---|-----------|----------|------|------|------|----------|
+| 32 | 시장 뉴스 (일반) | `/news?category=general` | Free | 200 | ✅ 데이터 | `array[100] {category,datetime,headline,id,image,source,summary,url}` |
+| 33 | 기업 뉴스 | `/company-news` | Free | 200 | ✅ 데이터 | `array[249] {category,datetime,headline,id,image,related,source,summary,url}` |
+| 34 | **보도자료** | `/press-releases` | Premium | 200 | ✅ 데이터 | `{majorDevelopment[],symbol}` |
+| 35 | 뉴스 감성 | `/news-sentiment` | Premium | 200 | ✅ 데이터 | `{buzz,companyNewsScore,sectorAverageBullishPercent,sentiment,symbol}` |
+| 36 | 뉴스룸 | `/stock/newsroom` | Premium/Enterprise | 403 | ❌ 거부 | — |
 
-### Watchlist
-| UI 필드 | 필수? | Source | 공급자 필드 / 계산식 | 상태 | 프로브 근거 |
-|---|---:|---|---|---|---|
-| Ticker | 필수 | **CSV** | 설정된 CSV에서 읽기 | ✅ 확인 | 파일 존재: `tradigview_screener/original_data/watch lists2_2026-02-22.csv` |
-| Name | 선택 | **Finnhub** | `/stock/profile2` → `name` | ✅ 확인 | AAPL: `"Apple Inc"`, MSFT: `"Microsoft Corp"` |
-| Mkt Cap | 선택 | **Finnhub** | `marketCapitalization` (백만 USD) | ✅ 확인 | News Feed market cap과 동일 |
-| Industry | 선택 | **Finnhub** | `finnhubIndustry` | ✅ 확인 | News Feed industry와 동일 |
-| Price | 필수 | **Computed (OHLC)** | 최신 Close | ✅ DB 확인 | `ohlc_1d` 최신 `Datetime` = 2026-02-20 |
-| Change | 필수 | **Computed (OHLC)** | Close_t - Close_{t-1} | ✅ DB 확인 | 전일 bar 없으면 `-` |
-| % | 필수 | **Computed (OHLC)** | (Close_t/Close_{t-1}-1)\times 100 | ✅ DB 확인 | 전일 bar 없으면 `-` |
+### 1.3 주식 추정치
 
----
+| # | 엔드포인트 | API 경로 | 티어 | HTTP | 판정 | 응답 형태 |
+|---|-----------|----------|------|------|------|----------|
+| 37 | 추천 추세 | `/stock/recommendation` | Free | 200 | ✅ 데이터 | `array[4] {buy,hold,period,sell,strongBuy,strongSell,symbol}` |
+| 38 | 목표 주가 | `/stock/price-target` | Premium | 403 | ❌ 거부 | — |
+| 39 | 업/다운그레이드 | `/stock/upgrade-downgrade` | Premium | 403 | ❌ 거부 | — |
+| 40 | 매출 추정치 | `/stock/revenue-estimate` | Premium | 403 | ❌ 거부 | — |
+| 41 | EPS 추정치 | `/stock/eps-estimate` | Premium | 403 | ❌ 거부 | — |
+| 42 | EBITDA 추정치 | `/stock/ebitda-estimate` | Premium | 403 | ❌ 거부 | — |
+| 43 | EBIT 추정치 | `/stock/ebit-estimate` | Premium | 403 | ❌ 거부 | — |
+| 44 | 어닝 서프라이즈 | `/stock/earnings` | Free | 200 | ✅ 데이터 | `array[4] {actual,estimate,period,surprise,surprisePercent,symbol}` |
+| 45 | 어닝 캘린더 | `/calendar/earnings` | Free | 200 | ⚠️ 빈 응답 | `{earningsCalendar:[]}` — 조회 범위에 예정된 어닝 없음 |
 
-## Finnhub 프로브 — 확인된 데이터 필드 레퍼런스 (2026-03-02)
+### 1.4 주가
 
-프로브 심볼: AAPL, MSFT, TSLA. 원시 JSON은 `tmp/probes/`에 저장.
+| # | 엔드포인트 | API 경로 | 티어 | HTTP | 판정 | 응답 형태 |
+|---|-----------|----------|------|------|------|----------|
+| 46 | 시세 | `/quote` | Free | 200 | ✅ 데이터 | `{c,d,dp,h,l,o,pc,t}` — 현재가/시가/고가/저가/전일종가 |
+| 47 | 주가 캔들 (OHLCV) | `/stock/candle` | Premium | 403 | ❌ 거부 | — |
 
-### `/stock/profile2` — 확인된 필드
-```json
-// 예시: finnhub_profile2_AAPL.json
-{
-  "country": "US",
-  "currency": "USD",
-  "exchange": "NASDAQ NMS - GLOBAL MARKET",
-  "finnhubIndustry": "Technology",      // ← Industry
-  "marketCapitalization": 3878463.6457,  // ← 백만 USD
-  "name": "Apple Inc",                   // ← 회사명
-  "ticker": "AAPL",
-  "shareOutstanding": 14702.7,
-  "ipo": "1980-12-12",
-  "weburl": "https://www.apple.com/"
-}
-```
+### 1.5 ETF & 지수
 
-### `/company-news` — 확인된 필드
-```json
-// 예시: finnhub_company_news_AAPL.json (첫 항목)
-{
-  "category": "company",
-  "datetime": 1772441102,       // ← Unix epoch 초(ms 아님)
-  "headline": "Broadcom, Target Earnings...",  // ← 제목
-  "id": 139274820,              // ← Finnhub 내부 ID
-  "image": "https://...",
-  "related": "AAPL",            // ← 티커(심볼)
-  "source": "Yahoo",            // ← 출처
-  "summary": "A heavy slate...",
-  "url": "https://finnhub.io/api/news?id=..."
-}
-```
+| # | 엔드포인트 | API 경로 | 티어 | HTTP | 판정 | 응답 형태 |
+|---|-----------|----------|------|------|------|----------|
+| 48 | 지수 구성종목 (^GSPC) | `/index/constituents` | Premium | 403 | ❌ 거부 | — |
+| 49 | ETF 프로필 (SPY) | `/etf/profile` | Premium | 403 | ❌ 거부 | — |
+| 50 | ETF 보유 (SPY) | `/etf/holdings` | Premium | 403 | ❌ 거부 | — |
+| 51 | ETF 섹터 (SPY) | `/etf/sector` | Premium | 403 | ❌ 거부 | — |
 
-### `/calendar/earnings` — 조건부
-```json
-// 3개 심볼 모두 빈 배열:
-{ "earningsCalendar": [] }
-// 해석: 프로브 시점에 예정 실적 없음, 또는 무료 등급 제한.
-// 처리: Optional → 빈 경우 표시하지 않음.
-```
+### 1.6 대안 데이터
 
----
+| # | 엔드포인트 | API 경로 | 티어 | HTTP | 판정 | 응답 형태 |
+|---|-----------|----------|------|------|------|----------|
+| 52 | 소셜 감성 | `/stock/social-sentiment` | Premium | 200 | ✅ 데이터 | `{data[],symbol}` |
+| 53 | 투자 테마 | `/stock/investment-theme` | Premium | 200 | ✅ 데이터 | `{data[],theme}` |
+| 54 | 의회 거래 | `/stock/congressional-trading` | Premium | 200 | ✅ 데이터 | `{data[],symbol}` |
+| 55 | H1-B 비자 | `/stock/visa-application` | Free | 200 | ✅ 데이터 | `{data[],symbol}` |
+| 56 | 상원 로비 | `/stock/lobbying` | Free | 200 | ✅ 데이터 | `{data[],symbol}` |
+| 57 | 미국 정부 지출 | `/stock/usa-spending` | Free | 200 | ✅ 데이터 | `{data[],symbol}` |
+| 58 | USPTO 특허 | `/stock/uspto-patent` | Free | 200 | ⚠️ 빈 응답 | `{data:[],symbol}` — AAPL은 빈 결과 |
+| 59 | FDA 캘린더 | `/fda-advisory-committee-calendar` | Free | 200 | ✅ 데이터 | `array[580] {fromDate,toDate,eventDescription,url}` |
+| 60 | 실적 발표 목록 | `/stock/transcripts/list` | Premium | 403 | ❌ 거부 | — |
+| 61 | 실적 콜 라이브 | `/stock/earnings-call-live` | Premium | 403 | ❌ 거부 | — |
+| 62 | 기업 발표자료 | `/stock/presentation` | Premium | 403 | ❌ 거부 | — |
+| 63 | 공급망 | `/stock/supply-chain` | Premium | 403 | ❌ 거부 | — |
+| 64 | ESG 점수 | `/stock/esg` | Premium | 403 | ❌ 거부 | — |
+| 65 | 역사적 ESG | `/stock/historical-esg` | Premium | 403 | ❌ 거부 | — |
+| 66 | 어닝 품질 점수 | `/stock/earnings-quality-score` | Premium | 403 | ❌ 거부 | — |
+| 67 | 뉴스룸 | `/stock/newsroom` | Premium/Enterprise | 403 | ❌ 거부 | — |
 
-## IBKR 프로브 — 완료 (TWS Socket API, port 4001, 2026-03-02)
+### 1.7 경제 & 은행
 
-연결: TWS Socket API, `ib_insync` 0.9.86, port 4001, clientId=99
-프로브 스크립트: `tmp/test_ibkr_tws_probe.py`
+| # | 엔드포인트 | API 경로 | 티어 | HTTP | 판정 | 응답 형태 |
+|---|-----------|----------|------|------|------|----------|
+| 68 | 경제 캘린더 | `/calendar/economic` | Premium | 403 | ❌ 거부 | — |
+| 69 | 국가 목록 | `/country` | Free | 200 | ✅ 데이터 | `array[249] {code2,code3,country,currency,...}` |
+| 70 | 은행 지점 (JPM) | `/bank-branch` | Premium | 200 | ✅ 데이터 | `{data[],symbol}` |
 
-### 결과 요약
-| 기능 | 상태 | 근거 |
-|---|---|---|
-| TWS 연결 | ✅ PASS | `ib.isConnected() = True` |
-| Historical 1D OHLCV (AAPL) | ✅ PASS | 5 bars (2026-02-23~27), OHLCV 전체 필드. 파일: `ibkr_historical_1d_AAPL.json` |
-| Contract Details (AAPL) | ✅ PASS | longName="APPLE INC", industry="Technology". 파일: `ibkr_contract_details_AAPL.json` |
-| CalendarReport fundamental | ❌ FAIL | `reqFundamentalData("CalendarReport")` → `available: false` |
-| FinSummary fundamental | ❌ FAIL | `reqFundamentalData("ReportsFinSummary")` → `available: false` |
-| Calendar events endpoint | ❌ N/A | TWS Socket API에는 calendar endpoint 없음 (Client Portal만 가능) |
+### 1.8 외환 & 암호화폐 (참고용)
 
-### 원시 필드 레퍼런스: Historical 1D bars
-```json
-// ibkr_historical_1d_AAPL.json (샘플)
-{
-  "date": "2026-02-27",
-  "open": 272.77,
-  "high": 272.81,
-  "low": 262.89,
-  "close": 264.18,
-  "volume": 26235914
-}
-```
-
-### 원시 필드 레퍼런스: Contract Details
-```json
-// ibkr_contract_details_AAPL.json
-{
-  "longName": "APPLE INC",
-  "industry": "Technology",
-  "category": "Computers",
-  "subcategory": "Computers",
-  "marketName": "NMS",
-  "stockType": "COMMON"
-}
-```
-
-### 결론
-- **IBKR OHLC 1D: ✅ PASS** — `reqHistoricalData`로 일봉 수신 가능
-- **IBKR Contract Details: ✅ PASS** — 회사명, 산업 취득 가능
-- **IBKR Calendar/Fundamental: ❌ FAIL** — Fundamental Data 구독 또는 Client Portal Gateway 없이는 불가
+| # | 엔드포인트 | API 경로 | 티어 | HTTP | 판정 |
+|---|-----------|----------|------|------|------|
+| 71 | 외환 거래소 | `/forex/exchange` | Free | 200 | ✅ 데이터 |
+| 72 | 암호화폐 거래소 | `/crypto/exchange` | Free | 200 | ✅ 데이터 |
 
 ---
 
-## 전체 감사 결론 (2026-03-02, IBKR 프로브 후 업데이트)
+## 2. 티어 & 상태별 요약
 
-### Finnhub: ✅ PASS (News Feed + Watchlist)
-- 필수 필드 모두 원시 JSON 프로브로 확인됨.
-- Earnings calendar: 빈 배열이지만 Optional → 블로커 아님.
+### 데이터 접근 가능 엔드포인트 (총 40개)
 
-### IBKR OHLC 1D: ✅ PASS
-- TWS Socket API (port 4001) 연결 확인.
-- `reqHistoricalData` 정상 OHLCV bars 반환 (테스트: AAPL, 5 bars).
-- Step 7 (IBKR 1D OHLC 인제스트)에 사용 가능.
+**Free 티어 접근 가능 (23개):**
+| 엔드포인트 | 핵심 데이터 |
+|-----------|-----------|
+| 회사 프로필 2 | 이름, 산업, 시가총액, 로고, IPO 날짜 |
+| 동종업 | 동종업 종목 배열 |
+| 기본 재무 | 52주 고/저, PE, EPS, 베타, 배당수익률 등 |
+| 내부자 거래 | 내부자 매수/매도 데이터 |
+| 내부자 심리 | 내부자 심리 점수 |
+| 보고된 재무 | SEC 공시 재무 데이터 (보고 원본) |
+| SEC 공시 | 공시 목록 + URL |
+| IPO 캘린더 | 예정 IPO |
+| 시장 상태 | 거래소 개장/폐장 상태 |
+| 시장 휴일 | 거래소별 휴일 일정 |
+| 심볼 검색 | 쿼리로 심볼 검색 |
+| 주식 심볼 | 미국 전체 심볼 목록 (30K+) |
+| 시장 뉴스 (일반) | 글로벌 시장 뉴스 피드 |
+| 기업 뉴스 | 기업별 뉴스 (무료 1년 히스토리) |
+| 추천 추세 | 애널리스트 매수/보유/매도 컨센서스 |
+| 어닝 서프라이즈 | 실적 vs 추정치 (최근 4분기) |
+| 시세 | 실시간급 가격, 시가, 고가, 저가, 전일종가 |
+| H1-B 비자 | 기업별 비자 신청 |
+| 상원 로비 | 로비 데이터 |
+| 미국 정부 지출 | 정부 계약 |
+| FDA 캘린더 | FDA 자문위원회 캘린더 |
+| 국가 목록 | 국가 메타데이터 |
+| 외환/암호화폐 거래소 | 거래소 목록 (참고) |
 
-### IBKR Calendar/Fundamental: ❌ FAIL
-- `reqFundamentalData("CalendarReport")` → 불가
-- `reqFundamentalData("ReportsFinSummary")` → 불가
-- TWS Socket API에 calendar events 엔드포인트 없음
-- **/calendar UI 필드 전체를 IBKR TWS Socket API에서 가져올 수 없음**
+**Premium 티어 접근 가능 (17개) — 현재 구독에 포함:**
+| 엔드포인트 | 핵심 데이터 |
+|-----------|-----------|
+| 경영진 | 임원 이름, 직함, 보수 |
+| 지분구조 | 기관 보유 비중 |
+| 펀드 지분 | 뮤추얼펀드/ETF 보유 |
+| 기관 프로필 | 기관 투자자 프로필 |
+| 재무제표 (bs/ic) | 표준화된 대차대조표 & 손익계산서 |
+| 매출 구성 | 부문/지역별 매출 |
+| SEC 감성 분석 | SEC 공시 감성 분석 |
+| 유사도 지수 | 10-K/10-Q 전년 대비 텍스트 유사도 |
+| 배당금 | 배당 이력 + 날짜/금액 |
+| 섹터 지표 | 섹터 수준 재무 지표 |
+| 가격 지표 | 가격 성과 지표 |
+| 심볼 변경 | 기업 액션 심볼 변경 |
+| **보도자료** | **주요 발전 보도자료** |
+| 뉴스 감성 | 뉴스 감성 점수 + 버즈 지표 |
+| 소셜 감성 | Reddit/Twitter 감성 |
+| 투자 테마 | 테마별 투자 데이터 |
+| 의회 거래 | 의회 의원 거래 |
+| 은행 지점 | 은행 위치 데이터 (JPM 테스트) |
 
-### OHLC (기존 DB): ✅ PASS
-- `ohlc_1d_watchlist.sqlite` 확인: 테이블 `ohlc_1d`, 컴럼 `Symbol, Datetime, Open, High, Low, Close, Volume`.
-- 최신 데이터: 2026-02-20.
-- "Changes %" 계산에 충분.
+### 빈 응답 / 조건부 (1개)
+| 엔드포인트 | 비고 |
+|-----------|------|
+| 어닝 캘린더 | `{earningsCalendar:[]}` — 조회 기간에 예정 어닝이 있을 때만 데이터 반환 |
 
-### ⚠️ 의사결정 필요: /calendar 데이터 소스
-plan.md에서 "/calendar은 IBKR 데이터만 사용"이라 했는데, IBKR TWS Socket API로는 이 데이터를 가져올 수 없음.
-
-선택지:
-1. **Finnhub earnings calendar 대체** — /calendar의 기본 데이터 소스를 Finnhub로 (IBKR-only 요구사항 완화)
-2. **Client Portal Gateway 추가 설치** — HTTP REST calendar endpoint 사용 (별도 인증/설치 필요)
-3. **IBKR Fundamental Data 구독** — TWS에서 CalendarReport 활성화
-4. **스코프 축소** — 가능한 필드만으로 /calendar UI 제한 (OHLC 파생 데이터만)
+### 거부됨 — 403 Forbidden (26개)
+| 엔드포인트 | 티어 | 비고 |
+|-----------|------|------|
+| 회사 프로필 (v1) | Premium | v2는 동작, v1은 상위 티어 필요 |
+| 매출 구성 & KPI | Enterprise | Enterprise 전용 |
+| 배당금 2 (기본) | Premium | 일반 `/stock/dividend`는 동작 |
+| 주식 분할 | Premium | 상위 티어 필요 |
+| 역사적 시가총액 | Premium | 상위 티어 필요 |
+| 역사적 직원 수 | Premium | 상위 티어 필요 |
+| 뉴스룸 | Enterprise | Enterprise 전용 |
+| 목표 주가 | Premium | 상위 티어 |
+| 업/다운그레이드 | Premium | 상위 티어 |
+| 매출 추정치 | Premium | 컨센서스 추정치 — 상위 티어 |
+| EPS 추정치 | Premium | 컨센서스 추정치 — 상위 티어 |
+| EBITDA 추정치 | Premium | 컨센서스 추정치 — 상위 티어 |
+| EBIT 추정치 | Premium | 컨센서스 추정치 — 상위 티어 |
+| 주가 캔들 (OHLCV) | Premium | Stock Price 애드온 필요 (펀더멘털과 별도) |
+| 지수 구성종목 | Premium | 별도 구독 필요 |
+| ETF 프로필 (SPY) | Premium | ETF 애드온 필요 |
+| ETF 보유 (SPY) | Premium | ETF 애드온 필요 |
+| ETF 섹터 (SPY) | Premium | ETF 애드온 필요 |
+| 실적 발표 목록 | Premium | 실적 콜 트랜스크립트 — 상위 티어 |
+| 실적 콜 라이브 | Premium | 라이브 실적 콜 — 상위 티어 |
+| 기업 발표자료 | Premium | 상위 티어 |
+| 공급망 | Premium | 공급망 관계 — 상위 티어 |
+| ESG 점수 | Premium | ESG 데이터 — 상위 티어 |
+| 역사적 ESG | Premium | ESG 데이터 — 상위 티어 |
+| 어닝 품질 점수 | Premium | 상위 티어 |
+| 경제 캘린더 | Premium | 경제 이벤트 — 상위 티어 |
 
 ---
 
-## 프로브 계획(무엇을 실행하는가)
-필드 존재 여부를 확인하기 위한 최소 프로브를 정의한다.
+## 3. IBKR TWS 프로브 결과 (이전 감사와 동일)
 
-### Finnhub 프로브(백엔드에서만)
-2–3개 심볼: `AAPL`, `MSFT`, `TSLA`.
+| 기능 | 상태 | 세부 사항 |
+|------|------|---------|
+| TWS 연결 (포트 4001) | ✅ 성공 | `ib_insync` 0.9.86, 읽기 전용 모드 |
+| 1일 OHLCV | ✅ 성공 | `reqHistoricalData` 주식 정상 동작 |
+| 계약 상세 | ✅ 성공 | `reqContractDetails` 거래소/타입 반환 |
+| CalendarReport (펀더멘탈) | ❌ 실패 | `reqFundamentalData(reportType="CalendarReport")` → "No data" / 빈 응답 |
+| FinSummary (펀더멘탈) | ❌ 실패 | `reqFundamentalData(reportType="FinancialSummary")` → "No data" / 빈 응답 |
+| Calendar REST 엔드포인트 | ❌ 해당없음 | TWS Socket API에 `/calendar` 엔드포인트 없음 |
 
-스크립트(권장)
-- 레포의 프로브 스크립트를 사용한다:
-  - `node terminal/backend/test_finnhub_probe.mjs --symbols AAPL,MSFT,TSLA --days 30`
-- 참고
-  - 스크립트는 URL에 포함된 `token`을 로그에 출력할 때 `REDACTED`로 마스킹한다.
-  - 원시 JSON은 수동 점검을 위해 `tmp/probes/` 아래에 저장된다.
-
-1) Company profile 프로브
-- 목적: market cap/industry 필드명과 단위 확인
-- 출력: 심볼별 원시 JSON
-
-2) Company news 프로브
-- 목적: 날짜/시간/제목/소스 필드 확인
-- 출력: 원시 JSON(작은 페이지)
-
-3) Earnings date/calendar 프로브(사용할 경우)
-- 목적: 다음 실적일자 제공 여부 확인
-- 출력: 원시 JSON
-
-### IBKR 프로브(백엔드에서만)
-1) 1D OHLCV 프로브
-- 목적: 일봉 데이터(OHLCV)를 가져와 날짜+값 매핑이 가능한지 확인
-- 출력: 원시 JSON + 매핑된 bars 샘플
-
-2) 캘린더 이벤트 프로브
-- 목적: `/calendar` UI 컬럼에 맞는 이벤트/필드 제공 여부 확인
-- 출력: 원시 JSON
+**IBKR 판정: OHLCV = TWS로 신뢰할 수 있음; Calendar/Fundamentals = TWS로 이용 불가.**
 
 ---
 
-## 감사 산출물(저장 파일)
-재현 가능하게 하기 위해(시크릿 없이) 원시 JSON을 짧은 경로로 저장한다.
-- 권장:
-  - `tmp/probes/finnhub_profile_AAPL.json`
-  - `tmp/probes/finnhub_news_AAPL.json`
-  - `tmp/probes/finnhub_earnings_AAPL.json`
-  - `tmp/probes/ibkr_ohlc1d_AAPL.json`
-  - `tmp/probes/ibkr_calendar_sample.json`
+## 4. 기능 매트릭스 (기능 → 데이터 소스 매핑)
 
-`test_finnhub_probe.mjs`가 생성하는 실제 파일명
-- `tmp/probes/finnhub_profile2_AAPL.json`
-- `tmp/probes/finnhub_company_news_AAPL.json`
-- `tmp/probes/finnhub_calendar_earnings_AAPL.json`
-
-API 키를 이 파일들에 포함시키지 않는다.
+| 터미널 기능 | 기본 소스 | 대체 소스 | 상태 |
+|------------|----------|----------|------|
+| **뉴스 피드** | Finnhub `/company-news` (무료, 1년 히스토리) | Finnhub `/news` (일반 시장) | ✅ 준비됨 |
+| **보도자료** | Finnhub `/press-releases` (프리미엄, 접근 가능) | — | ✅ 준비됨 |
+| **뉴스 감성** | Finnhub `/news-sentiment` (프리미엄, 접근 가능) | — | ✅ 준비됨 |
+| **1일 OHLCV** | EODHD (기존 `ohlc_1d_watchlist.sqlite`) | IBKR TWS `reqHistoricalData` | ✅ 준비됨 |
+| **실시간 시세** | Finnhub `/quote` (무료) | IBKR TWS | ✅ 준비됨 |
+| **캘린더/어닝** | Finnhub `/calendar/earnings` (무료) + `/stock/earnings` (무료) | — | ✅ 준비됨 (구조적, 데이터 있는 날짜 범위 필요) |
+| **회사 프로필** | Finnhub `/stock/profile2` (무료) | — | ✅ 준비됨 |
+| **재무제표** | Finnhub `/stock/financials` (프리미엄, bs/ic) | `/stock/financials-reported` (무료) | ✅ 준비됨 |
+| **애널리스트 추천** | Finnhub `/stock/recommendation` (무료) | — | ✅ 준비됨 |
+| **내부자 활동** | Finnhub `/stock/insider-transactions` (무료) | `/stock/insider-sentiment` (무료) | ✅ 준비됨 |
+| **SEC 공시** | Finnhub `/stock/filings` (무료) | — | ✅ 준비됨 |
+| **지분구조** | Finnhub `/stock/ownership` + `/stock/fund-ownership` (프리미엄) | — | ✅ 준비됨 |
+| **소셜 감성** | Finnhub `/stock/social-sentiment` (프리미엄) | — | ✅ 준비됨 |
+| **OHLCV 캔들 (인트라데이)** | — | — | ❌ 거부 (Finnhub `/stock/candle` 403; EODHD 또는 IBKR 필요) |
+| **목표 주가/추정치** | — | — | ❌ 거부 (모든 추정 EP 403) |
+| **ETF/지수 데이터** | — | — | ❌ 거부 (모든 ETF EP 403) |
+| **실적 트랜스크립트** | — | — | ❌ 거부 |
+| **ESG 점수** | — | — | ❌ 거부 |
 
 ---
 
-## 통과/실패 기준
-통과
-- capability matrix의 모든 UI 컬럼에 Source가 확정되어 있다.
-- IBKR/Finnhub로부터 온다고 표시된 필드는 원시 JSON 프로브로 최소 1회 이상 존재가 확인된다.
+## 5. 결정 필요 사항
 
-실패(의사결정 전까지 중단)
-- `/calendar`의 필수 필드를 IBKR에서 소싱할 수 없다.
-- News Feed의 필수 필드를 Finnhub에서 소싱할 수 없고, OHLC로도 계산 불가능하다.
+### 결정 #1 — /calendar 데이터 소스
+IBKR CalendarReport 실패, Finnhub `/calendar/earnings` 동작 (무료 티어):
+1. ✅ **Finnhub `/calendar/earnings` + `/stock/earnings` 사용** — 어닝 서프라이즈 + 예정 캘린더 (권장)
+2. EODHD 캘린더 추가 (가용 시)
+3. Finnhub + IBKR 혼합
+4. 캘린더를 "어닝 전용"으로 제한
 
-### 현재 결론 (2026-03-02, IBKR TWS 프로브 후 업데이트)
-- **Finnhub (News Feed + Watchlist): ✅ PASS** — 필수 필드 전부 확인됨.
-- **IBKR OHLC 1D: ✅ PASS** — TWS Socket API (port 4001)로 `reqHistoricalData` 확인.
-- **IBKR Calendar/Fundamental: ❌ FAIL** — CalendarReport/FinSummary 불가. 의사결정 필요.
-- **OHLC DB (Changes %): ✅ PASS** — DB 스키마 및 데이터 확인됨.
+### 결정 #5 — IBKR ↔ Node 통신
+IBKR TWS는 Python 전용 (`ib_insync`):
+1. Node 백엔드에서 Python 서브프로세스
+2. 별도 Python 마이크로서비스 + HTTP 브릿지
+3. IBKR 완전 제외, EODHD + Finnhub만 사용
 
-프로브 파일:
-- `tmp/probes/ibkr_historical_1d_AAPL.json`
-- `tmp/probes/ibkr_contract_details_AAPL.json`
-- `tmp/probes/ibkr_probe_summary.json`
+### 결정 #6 — 인트라데이 OHLCV 소스
+Finnhub `/stock/candle` 거부:
+1. EODHD 인트라데이 데이터 (기존 `EODHD/` 파이프라인)
+2. IBKR TWS `reqHistoricalData` 단기 바
+3. 인트라데이 건너뛰기, 1일봉만
+
+---
+
+## 6. Finnhub 구독 분석
+
+**현재 구독:** 펀더멘털 포함 (Premium 티어 — 부분 접근).
+
+**접근 가능 Premium EP:** 44개 중 17개 → **Fundamental 1** ($50/월) 티어 또는 유사 수준으로 추정.
+
+**주요 공백 (모두 403):**
+- 모든 **주식 추정치** (목표 주가, EPS/매출/EBITDA/EBIT 추정, 업/다운그레이드)
+- **주가 캔들** 데이터
+- **ETF/지수** 데이터
+- **트랜스크립트**, **ESG**, **공급망**
+- **경제 캘린더**
+
+**추정치/트랜스크립트 필요 시:** Fundamental 2 ($200/월) 또는 Stock Estimates 애드온 업그레이드 필요.

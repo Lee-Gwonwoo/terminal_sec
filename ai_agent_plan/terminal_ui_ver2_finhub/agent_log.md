@@ -116,3 +116,46 @@
 **Status**: done (awaiting user confirmation)
 
 ---
+
+### Step 0 종합 재감사 — Finnhub 전체 엔드포인트 프로브 (2026-03-03)
+
+**배경**: 사용자가 기존 Step 0 감사가 불완전함을 지적.
+- 기존에는 Finnhub 3개 엔드포인트만 테스트 (`/company-news`, `/stock/profile2`, `/calendar/earnings`)
+- Press Releases (`/press-releases`) 등 80개 이상의 엔드포인트를 확인하지 않았음
+- "https://finnhub.io/pricing-fundamental-data 사용 가능한 모든 데이터를 확인하고 기록을 남기라 했을 텐데"
+
+**수행 내역**:
+
+1. **종합 프로브 스크립트 작성**
+   - 파일: `terminal/backend/test_finnhub_full_probe.mjs`
+   - 67개 엔드포인트를 카테고리별로 정의 (Stock Fundamentals, News, Estimates, Price, ETFs, Alternative Data, Economic, Bank)
+   - 350ms 딜레이로 rate limit 준수
+   - 결과를 JSON + 콘솔 요약으로 출력
+
+2. **프로브 실행 완료**
+   - 결과: 67개 EP → 40 ✅ 접근 가능, 1 ⚠️ 빈 응답, 26 ❌ 403 거부
+   - 결과 파일: `tmp/probes/finnhub_comprehensive_probe.json` (63개, 1차), `tmp/probes/finnhub_full_probe_results.json` (67개, 2차)
+   - 핵심 발견:
+     - **Press Releases** (`/press-releases`): ✅ 접근 가능 (Premium) — `{majorDevelopment[],symbol}`
+     - **News Sentiment** (`/news-sentiment`): ✅ 접근 가능
+     - **Financial Statements** (`/stock/financials` bs/ic): ✅ 접근 가능
+     - 모든 **Stock Estimates** (Price Target, EPS/Revenue/EBITDA/EBIT): ❌ 403
+     - **Stock Candles**: ❌ 403 (Stock Price 애드온 필요)
+     - 모든 **ETF/Index**: ❌ 403
+     - **Economic Calendar**: ❌ 403
+     - 총 17개 Premium EP 접근 가능 → Fundamental 1 ($50/월) 티어로 추정
+
+3. **감사 문서 전면 개정**
+   - 파일: `ai_agent_plan/terminal_ui_ver2_finhub/test/test_data_availability_audit.md`
+   - 기존 590줄 → 새로 작성 (EN/KO 완전 병기)
+   - 섹션 구성:
+     - 1. Finnhub API 종합 엔드포인트 매트릭스 (1.1~1.8 카테고리별)
+     - 2. 티어 & 상태별 요약 (Free 23개, Premium 17개, Empty 1개, Denied 26개)
+     - 3. IBKR TWS 프로브 결과 (이전과 동일)
+     - 4. 기능 매트릭스 (터미널 기능 → 데이터 소스 매핑)
+     - 5. 결정 필요 사항 (#1, #5, #6)
+     - 6. Finnhub 구독 분석
+
+**Step 0 상태**: done (awaiting user confirmation) — Finnhub 종합 감사 완료, IBKR 결정은 여전히 보류
+
+---

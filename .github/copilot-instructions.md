@@ -35,7 +35,8 @@
 | **T1** | [Capability limits / honesty](#project-conventions-to-follow) | no fake features, fail fast |
 | **T1** | [Mock data policy](#project-conventions-to-follow) | no mock unless requested |
 | **T1** | [Safety / repo hygiene](#safety--repo-hygiene) | path ≤250, secrets, naming |
-| **T1** | [Bilingual EN/KO sync](#docs-and-prompt-markdown-files) | *.md + copilot-instructions parity |
+| **T1** | [Agent-specific language override](#agent-specific-language-override) | Claude → Korean only |
+| **T1** | [Bilingual EN/KO sync](#docs-and-prompt-markdown-files) | *.md + copilot-instructions parity, Korean-first reading |
 | **T2** | [Big picture](#big-picture) | repo overview, key domains |
 | **T2** | [Folder structure & data flow](#folder-structure--data-flow-high-level) | EODHD→original_data→learning_data |
 | **T2** | [How to run (Windows)](#how-to-run-windows) | venv activation, absolute paths |
@@ -63,7 +64,7 @@
 - Write/update `agent_log.md` **only when the user explicitly tells you to execute a specific plan**.
 - **`agent_log.md` language rule (must):** `agent_log.md` is written in **Korean only** (한국어 단독). Do NOT write bilingual EN/KO sections in the log — Korean is sufficient.
 - File storage: `C:\github_coding\terminal_sec\ai_agent_plan\<project_name>\`
-  - `plan.md`: detailed step-by-step plan before starting (goal, approach, files to create/modify, order, risks). Bilingual EN+KO.
+  - `plan.md`: detailed step-by-step plan before starting (goal, approach, files to create/modify, order, risks). Bilingual EN+KO (but see [Agent-specific language override](#agent-specific-language-override) — Claude writes Korean only).
   - `agent_log.md`: chronological record of every action taken (files created/modified, commands run, decisions, errors). **Korean only.**
 - **Break large tasks into steps:** if a task is large or complex, decompose it into small, independently verifiable steps. Each step should have a clear deliverable.
 - **Plan changes (mid-stream):** keep history intact.
@@ -172,7 +173,7 @@ When a plan has multiple major Steps (e.g., Step 0, Step 1, …, Step N), **each
 
 - **plan.md writing conventions (must follow when creating/updating plan.md):**
   - **Structure order:** Goal → Approach overview → Step list (each with sub-step table + verification hook) → Execution dependency graph → Open questions / blockers.
-  - **Bilingual:** EN section first, `---` separator, then KO section (same content, translated).
+  - **Bilingual:** EN section first, `---` separator, then KO section (same content, translated). *(Override: Claude agents write Korean only — see [Agent-specific language override](#agent-specific-language-override).)*
   - **Every Step heading** must include its number and a short descriptive name: `#### Step N — Short name`.
   - **Sub-step tables** are mandatory for every Step (see sub-step table format above).
   - **Verification hook blocks** are mandatory for every Step closeout.
@@ -202,6 +203,13 @@ When a plan has multiple major Steps (e.g., Step 0, Step 1, …, Step N), **each
 - Treat these as secrets and never print them to logs/output or commit derived values:
   - `EODHD/API TOKEN`, `thetadata/credit.txt`, `thetadata/creds.txt`.
 - This repo contains many generated artifacts (`*.xlsx`, `*_raw.csv`, `*_raw.parquet`). When adding new scripts, follow the existing naming convention: `<script_name>.xlsx` + `<script_name>_raw.csv/parquet`, typically under the same folder as the script.
+
+<!-- T1: Agent-specific language override -->
+## Agent-specific language override (must)
+- **When the executing AI agent is Claude (any version/model):** all `*.md` documentation — companion docs, `plan.md`, config `EXPLANATIONS`, `copilot-instructions.md` edits — must be written in **Korean only** (한국어 단독). The bilingual EN/KO requirement is waived for Claude agents.
+- **For all other agents (e.g., GPT, Gemini):** follow the standard bilingual EN/KO rules described in each section below.
+- This override applies to every place in these instructions that says "bilingual EN+KO" or "English first, then Korean."
+- `agent_log.md` is already Korean-only regardless of agent — this rule does not change that.
 
 <!-- ====================================================
   TIER 2 — Repo context
@@ -374,7 +382,7 @@ When a plan has multiple major Steps (e.g., Step 0, Step 1, …, Step N), **each
     - After writing/editing a `.toml` config template, run a quick parse sanity-check (preferred):
       - `python -c "import tomllib, pathlib; tomllib.loads(pathlib.Path('path/to/config.toml').read_text(encoding='utf-8'))"`
       - If Python < 3.11, use `tomli`.
-  - The `EXPLANATIONS` section must be bilingual:
+  - The `EXPLANATIONS` section must be bilingual *(Override: Claude agents write Korean only — see [Agent-specific language override](#agent-specific-language-override))*:
     - English first, then a separator line `---`, then Korean.
     - Keep the two language blocks strictly separated and content-matched (same headings, same options, same defaults).
   - Terminology: prefer “CLI options/flags (command-line options)” rather than “arguments” unless you specifically mean positional arguments.
@@ -382,7 +390,10 @@ When a plan has multiple major Steps (e.g., Step 0, Step 1, …, Step N), **each
 - **Docs and “prompt” Markdown files (important)**
   - This repo uses `*.md` files as *prompt/spec/explanation companions* for some scripts (example: `deep_learning_data/indicator_calculator/stock2_indicator_calculator.md`).  - **Scope of the bilingual rule (must):** this EN/KO writing convention applies to **both** of the following:
     1. Any `*.md` companion/spec/explanation doc in this repo.
-    2. `copilot-instructions.md` itself — whenever a section is added or edited, the corresponding section in the other language must be updated identically in the same change.  - **Bilingual rule (English + Korean):** when creating or updating any `*.md` companion/spec/explanation doc in this repo, include **both** English and Korean.
+    2. `copilot-instructions.md` itself — whenever a section is added or edited, the corresponding section in the other language must be updated identically in the same change.
+  - **Agent-specific override:** Claude agents are exempt from the bilingual requirement — see [Agent-specific language override](#agent-specific-language-override). Claude writes Korean only.
+  - **Korean-first reading priority (must — all agents):** when an AI agent reads a bilingual `*.md` file (EN section + KO section), it must **read the Korean section first** and treat it as the primary source of truth. Only fall back to the English section if the Korean section is missing, incomplete, or ambiguous. This applies to **all** AI agents (Claude, GPT, Gemini, etc.), not just Claude.
+  - **Bilingual rule (English + Korean):** when creating or updating any `*.md` companion/spec/explanation doc in this repo, include **both** English and Korean *(unless overridden by the Agent-specific language override)*.
     - Write **English first**, then a clear separator (e.g., `---`), then **Korean**.
     - Keep the two sections strictly separated (do not mix languages within the same bullet/paragraph).
     - **Parity rule (must match):** the English and Korean sections must contain the **same information** and be kept in sync.
@@ -484,7 +495,8 @@ When a plan has multiple major Steps (e.g., Step 0, Step 1, …, Step N), **each
 | **T1** | [역량 한계 / 정직성](#프로젝트-컨벤션) | API 키 없을 때, 땜질 금지 |
 | **T1** | [Mock 데이터 정책](#프로젝트-컨벤션) | mock 데이터 요청 없으면 사용 금지 |
 | **T1** | [보안 / 레포 위생](#보안--레포-위생) | 경로 250자 이하, 시크릿, 네이밍 |
-| **T1** | [한/영 동기화](#docs--prompt-markdown-규칙) | *.md + copilot-instructions 정합 |
+| **T1** | [에이전트별 언어 오버라이드](#에이전트별-언어-오버라이드) | Claude → 한국어 단독 |
+| **T1** | [한/영 동기화](#docs--prompt-markdown-규칙) | *.md + copilot-instructions 정합, 한국어 우선 읽기 |
 | **T2** | [큰 그림](#큰-그림) | 레포 개요, 주요 영역 |
 | **T2** | [폴더 구조 & 데이터 흐름](#폴더-구조--데이터-흐름요약) | EODHD→original_data→learning_data 흐름 |
 | **T2** | [실행 방법 (Windows)](#실행-방법-windows) | venv 활성화, 절대경로 |
@@ -512,7 +524,7 @@ When a plan has multiple major Steps (e.g., Step 0, Step 1, …, Step N), **each
 - `agent_log.md`는 **사용자가 특정 plan을 수행하라고 지시할 때만** 작성/업데이트.
 - **`agent_log.md` 언어 규칙(필수):** `agent_log.md`는 **한국어 단독**으로 작성한다. 영/한 병기 불필요 — 한국어만으로 충분.
 - 저장 위치: `C:\github_coding\terminal_sec\ai_agent_plan\<project_name>\`
-  - `plan.md`: 작업 시작 전 상세 단계별 계획 (목표, 접근법, 생성/수정 파일, 순서, 위험 요소). 영/한 병기.
+  - `plan.md`: 작업 시작 전 상세 단계별 계획 (목표, 접근법, 생성/수정 파일, 순서, 위험 요소). 영/한 병기 (단, [에이전트별 언어 오버라이드](#에이전트별-언어-오버라이드) 참고 — Claude는 한국어 단독).
   - `agent_log.md`: 수행한 모든 작업을 시간순으로 기록 (생성/수정 파일, 실행 명령어, 결정, 오류). **한국어 단독.**
 - **큰 작업은 단계로 쪼개기:** 크고 복잡한 작업은 독립적으로 검증 가능한 작은 단계로 분해한다. 각 단계마다 명확한 산출물을 정의한다.
 - **플랜 중간 변경(리비전):** 기록 히스토리를 유지한다.
@@ -621,7 +633,7 @@ plan에 여러 대단계(Step 0, Step 1, …, Step N)가 있을 때, **각 Step�
 
 - **plan.md 작성 규칙(plan.md 생성/수정 시 반드시 준수):**
   - **구조 순서:** 목표 → 접근법 개요 → Step 목록(각 Step에 세부 단계 테이블 + 검증 훅) → 실행 의존성 그래프 → 미결정 사항/차단 요소.
-  - **한/영 병기:** EN 섹션을 먼저, `---` 구분선, 그 다음 KO 섹션(동일 내용 번역).
+  - **한/영 병기:** EN 섹션을 먼저, `---` 구분선, 그 다음 KO 섹션(동일 내용 번역). *(오버라이드: Claude는 한국어 단독 — [에이전트별 언어 오버라이드](#에이전트별-언어-오버라이드) 참고.)*
   - **모든 Step 제목**에는 번호와 짧은 설명을 포함: `#### Step N — 짧은 이름`.
   - **세부 단계 테이블**은 모든 Step에 필수(위의 세부 단계 테이블 형식 참조).
   - **검증 훅 블록**은 모든 Step 마감 시 필수.
@@ -649,6 +661,13 @@ plan에 여러 대단계(Step 0, Step 1, …, Step N)가 있을 때, **각 Step�
 - 아래 파일들은 "시크릿"으로 취급하고, 로그/출력/커밋에 절대 노출하지 않습니다:
   - `EODHD/API TOKEN`, `thetadata/credit.txt`, `thetadata/creds.txt`
 - 레포에는 생성 산출물(`*.xlsx`, `*_raw.csv`, `*_raw.parquet`)이 많습니다. 새 스크립트 추가 시 기존 네이밍 규칙(`<script_name>.xlsx` + `<script_name>_raw.csv/parquet`)을 따릅니다.
+
+<!-- T1: 에이전트별 언어 오버라이드 -->
+## 에이전트별 언어 오버라이드 (필수)
+- **실행하는 AI 에이전트가 Claude(모든 버전/모델)인 경우:** 모든 `*.md` 문서 — 동반 문서, `plan.md`, 설정 `EXPLANATIONS`, `copilot-instructions.md` 수정 — 를 **한국어 단독**으로 작성합니다. Claude 에이전트에 대해서는 한/영 병기 요구사항이 면제됩니다.
+- **그 외 에이전트(예: GPT, Gemini):** 아래 각 섹션에 명시된 기존 한/영 병기 규칙을 따릅니다.
+- 이 오버라이드는 이 지침서에서 "한/영 병기" 또는 "영어 먼저, 한국어 뒤에"라고 표기된 모든 곳에 적용됩니다.
+- `agent_log.md`는 에이전트와 무관하게 이미 한국어 단독 — 이 규칙으로 달라지는 것 없음.
 
 <!-- ====================================================
   TIER 2 — 레포 컨텍스트
@@ -813,7 +832,7 @@ plan에 여러 대단계(Step 0, Step 1, …, Step N)가 있을 때, **각 Step�
     - `.toml` 설정 템플릿을 만들/수정한 직후에는 간단히 파싱 확인을 수행합니다(권장):
       - `python -c "import tomllib, pathlib; tomllib.loads(pathlib.Path('path/to/config.toml').read_text(encoding='utf-8'))"`
       - Python 3.11 미만이면 `tomli` 사용.
-  - `EXPLANATIONS` 구간은 한/영 2개 블록으로 작성합니다:
+  - `EXPLANATIONS` 구간은 한/영 2개 블록으로 작성합니다 *(오버라이드: Claude는 한국어 단독 — [에이전트별 언어 오버라이드](#에이전트별-언어-오버라이드) 참고)*:
     - 영어를 먼저 쓰고, 구분선 `---` 뒤에 한국어를 씁니다.
     - 두 언어 블록은 섞지 말고, 내용은 반드시 동일하게 맞춥니다(제목/옵션/기본값/예시 커맨드 동일).
   - 용어: “인자(arguments)”보다는 “CLI 옵션/플래그(커맨드라인 옵션)” 표현을 우선 사용합니다(특히 `--epochs` 같은 형태).
@@ -821,7 +840,10 @@ plan에 여러 대단계(Step 0, Step 1, …, Step N)가 있을 때, **각 Step�
 - **Docs / “prompt” Markdown 규칙(중요)**
   - 일부 스크립트는 같은 이름의 `*.md`를 “프롬프트/스펙/설명” 동반 문서로 사용합니다.  - **한/영 병기 규칙 적용 범위(필수):** 이 한/영 작성 방식은 아래 **두 가지 모두**에 적용됩니다:
     1. 이 레포의 모든 `*.md` 동반/스펙/설명 문서.
-    2. `copilot-instructions.md` 자체 — 섹션을 추가하거나 수정할 때, 반드시 같은 변경 작업 안에서 다른 언어의 대응 섹션도 동일하게 업데이트해야 합니다.  - **한/영 병기 규칙:** 이 레포에서 `*.md` 동반 문서를 새로 만들거나 수정할 때는 **영어와 한국어를 모두** 포함합니다.
+    2. `copilot-instructions.md` 자체 — 섹션을 추가하거나 수정할 때, 반드시 같은 변경 작업 안에서 다른 언어의 대응 섹션도 동일하게 업데이트해야 합니다.
+  - **에이전트별 오버라이드:** Claude 에이전트는 한/영 병기 요구사항이 면제됩니다 — [에이전트별 언어 오버라이드](#에이전트별-언어-오버라이드) 참고. Claude는 한국어 단독으로 작성합니다.
+  - **한국어 우선 읽기 규칙(필수 — 모든 에이전트):** AI 에이전트가 한/영 병기 `*.md` 파일을 읽을 때는 **한국어 섹션을 먼저 읽고**, 한국어를 기준(primary source of truth)으로 사용합니다. 한국어 섹션이 누락·불완전·모호한 경우에만 영어 섹션을 참조합니다. 이 규칙은 Claude만이 아니라 **모든 AI 에이전트**(Claude, GPT, Gemini 등)에 적용됩니다.
+  - **한/영 병기 규칙:** 이 레포에서 `*.md` 동반 문서를 새로 만들거나 수정할 때는 **영어와 한국어를 모두** 포함합니다 *(에이전트별 언어 오버라이드에 의해 면제 가능)*.
     - **영어를 위**, 구분선(예: `---`)을 넣은 뒤 **한국어를 아래**에 작성합니다.
     - 두 영역은 섞지 않습니다(같은 문단/불릿에 언어 혼합 금지).
     - **동일 내용(정합) 규칙:** English/Korean 두 섹션은 **같은 정보**를 포함해야 하며 항상 동기화되어야 합니다.
