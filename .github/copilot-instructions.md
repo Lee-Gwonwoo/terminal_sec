@@ -210,6 +210,19 @@ When a plan has multiple major Steps (e.g., Step 0, Step 1, …, Step N), **each
 - **For all other agents (e.g., GPT, Gemini):** follow the standard bilingual EN/KO rules described in each section below.
 - This override applies to every place in these instructions that says "bilingual EN+KO" or "English first, then Korean."
 - `agent_log.md` is already Korean-only regardless of agent — this rule does not change that.
+- **Claude editing existing EN+KO docs (parity exemption):**
+  - When Claude edits an existing bilingual (EN+KO) `*.md` file, update **only the KO section**. Do **not** update the EN section to maintain parity.
+  - Instead, if the EN section does not already have a staleness warning, insert the following banner at the very top of the EN region (immediately after the `## EN` heading or at the start of the EN content):
+    ```
+    > ⚠️ EN section may be outdated — KO section is the authoritative source.
+    ```
+  - Also, if the KO section does not already have a sync-guide banner, insert the following banner at the very top of the KO region (immediately after the `## KO` heading or at the start of the KO content):
+    ```
+    > ℹ️ KO 섹션이 최신 기준(authoritative source)입니다. EN 섹션 정합이 필요하면 KO를 기준으로 EN을 업데이트하세요.
+    ```
+  - Both banners only need to be inserted **once per document**. If they already exist, do not duplicate them.
+  - Rationale: the "Korean-first reading priority" rule (all agents) already ensures AI readers use KO as the primary source, so EN parity is not required when Claude is the writer. The KO banner guides future non-Claude agents to sync EN from KO.
+  - **When Claude creates a new `*.md` file:** write KO only. Do not create an EN section at all.
 
 <!-- ====================================================
   TIER 2 — Repo context
@@ -400,6 +413,7 @@ When a plan has multiple major Steps (e.g., Step 0, Step 1, …, Step N), **each
       - Same headings in the same order.
       - Same numbered steps, option lists, default values, file paths, and example commands.
       - Same tables/columns (only the language changes).
+      - **Claude exemption:** Claude agents are exempt from this parity rule — see [Agent-specific language override](#agent-specific-language-override). Claude updates KO only and inserts a staleness warning in EN.
     - **Detail rule (do not be brief):** docs should fully explain the behavior.
       - Describe the full computation/aggregation process step-by-step (inputs → normalization → core calculation → outputs).
       - Explain the code’s logic structure clearly (major modules/functions, stage order, and data flow).
@@ -668,6 +682,19 @@ plan에 여러 대단계(Step 0, Step 1, …, Step N)가 있을 때, **각 Step�
 - **그 외 에이전트(예: GPT, Gemini):** 아래 각 섹션에 명시된 기존 한/영 병기 규칙을 따릅니다.
 - 이 오버라이드는 이 지침서에서 "한/영 병기" 또는 "영어 먼저, 한국어 뒤에"라고 표기된 모든 곳에 적용됩니다.
 - `agent_log.md`는 에이전트와 무관하게 이미 한국어 단독 — 이 규칙으로 달라지는 것 없음.
+- **Claude가 기존 EN+KO 병기 문서를 수정할 때 (정합성 면제):**
+  - 기존에 EN+KO로 작성된 `*.md`를 수정할 때는 **KO 섹션만 업데이트**합니다. EN 섹션을 함께 수정하여 정합성을 맞출 필요 없습니다.
+  - 대신, EN 섹션에 아직 outdated 경고가 없으면 EN 영역 최상단(`## EN` 헤딩 바로 아래, 또는 EN 내용 시작 부분)에 다음 배너를 삽입합니다:
+    ```
+    > ⚠️ EN section may be outdated — KO section is the authoritative source.
+    ```
+  - 또한, KO 섹션에 아직 정합 안내 배너가 없으면 KO 영역 최상단(`## KO` 헤딩 바로 아래, 또는 KO 내용 시작 부분)에 다음 배너를 삽입합니다:
+    ```
+    > ℹ️ KO 섹션이 최신 기준(authoritative source)입니다. EN 섹션 정합이 필요하면 KO를 기준으로 EN을 업데이트하세요.
+    ```
+  - 두 배너 모두 문서당 **1회만** 삽입합니다. 이미 있으면 중복 삽입하지 않습니다.
+  - 근거: "한국어 우선 읽기" 규칙이 모든 에이전트에 적용되므로, AI 독자는 항상 KO를 먼저 읽습니다. KO 배너는 향후 다른 에이전트가 EN을 KO 기준으로 정합할 때 방향을 명확히 해줍니다.
+  - **Claude가 새 `*.md` 파일을 만들 때:** KO만 작성합니다. EN 섹션은 만들지 않습니다.
 
 <!-- ====================================================
   TIER 2 — 레포 컨텍스트
@@ -850,6 +877,7 @@ plan에 여러 대단계(Step 0, Step 1, …, Step N)가 있을 때, **각 Step�
       - 같은 제목(heading)을 같은 순서로.
       - 같은 단계 번호/옵션 목록/기본값/파일 경로/실행 예시.
       - 같은 표/컬럼 구성(언어만 번역).
+      - **Claude 면제:** Claude 에이전트는 이 정합 규칙이 면제됩니다 — [에이전트별 언어 오버라이드](#에이전트별-언어-오버라이드) 참고. Claude는 KO만 수정하고 EN에는 outdated 경고를 삽입합니다.
     - **상세 작성 규칙(간략 금지):** 문서는 동작을 충분히 설명해야 합니다.
       - 계산/집계 과정을 단계별로 상세히(입력 → 정규화 → 핵심 계산 → 출력).
       - 코드의 로직 구조를 충분히 설명합니다(주요 모듈/함수, 스테이지 순서, 데이터 흐름).

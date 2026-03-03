@@ -2,6 +2,8 @@
 
 ## EN
 
+> ⚠️ EN section may be outdated — KO section is the authoritative source.
+
 ### Probe date
 2026-03-03
 
@@ -425,6 +427,8 @@ Finnhub `/stock/candle` is denied. Options:
 # Step 0 — 데이터 가용성 감사 (종합)
 
 ## KO
+
+> ℹ️ KO 섹션이 최신 기준(authoritative source)입니다. EN 섹션 정합이 필요하면 KO를 기준으로 EN을 업데이트하세요.
 
 ### 프로브 날짜
 2026-03-03

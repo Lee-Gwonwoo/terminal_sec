@@ -2,6 +2,8 @@
 
 ## EN
 
+> ⚠️ EN section may be outdated — KO section is the authoritative source.
+
 ### Goal
 Implement the following changes using `termina_web/figma_code/terminal_ui_ver2_finhub` as the frontend:
 1) Add a **Data Control Window** with:
@@ -920,6 +922,8 @@ Verification
 ---
 
 ## KO
+
+> ℹ️ KO 섹션이 최신 기준(authoritative source)입니다. EN 섹션 정합이 필요하면 KO를 기준으로 EN을 업데이트하세요.
 
 ### 목표
 프론트는 `termina_web/figma_code/terminal_ui_ver2_finhub`를 기준으로 아래를 구현한다.
