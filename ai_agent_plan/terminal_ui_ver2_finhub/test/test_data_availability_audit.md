@@ -238,29 +238,113 @@ AAPL (primary), SPY/JPM (ETF/bank branch checks)
 | CalendarReport (Reuters) | ❌ FAIL | `reqFundamentalData(reportType="CalendarReport")` → empty (Reuters Fundamentals subscription needed, NOT WSH) |
 | FinSummary (Reuters) | ❌ FAIL | `reqFundamentalData(reportType="FinancialSummary")` → empty |
 
-### 3.2 Wall Street Horizon (WSH) Calendar API (probed 2026-03-02)
+### 3.2 Wall Street Horizon (WSH) Calendar API
+
+#### v1 probe (2026-03-02) — INCORRECT initial assessment
 
 Script: `tmp/test_ibkr_wsh_probe.py` — Results: `tmp/probes/ibkr_wsh_probe_AAPL.json`
 
 | API Call | Status | Details |
 |----------|--------|--------|
-| `reqWshMetaData()` | ⚠️ EMPTY | Returns null — no metadata available |
-| `reqWshEventData(AAPL)` | ⚠️ EMPTY | Returns null — no event data |
-| `reqWshEventData(90d broad)` | ⚠️ EMPTY | Returns null — same result with date range filter |
-| ib_insync WSH API support | ✅ | `reqWshMetaData`, `reqWshEventData`, `WshEventData` class all present |
+| `reqWshMetaData()` | ⚠️ EMPTY | Returns null — used low-level async `req*` instead of blocking `get*` |
+| `reqWshEventData(AAPL)` | ⚠️ EMPTY | Returns null — did not pass `conId` parameter |
+| `reqWshEventData(90d broad)` | ⚠️ EMPTY | Returns null — same issue as above |
 
-**Analysis:**
-- `reqFundamentalData("CalendarReport")` = **Reuters Fundamentals** (different product from WSH)
-- `reqWshMetaData` / `reqWshEventData` = **correct WSH API calls** for calendar events
-- WSH API functions exist in ib_insync and calls succeed (no error), but return **empty/null**
-- This means: **UI-level WSH subscription ("Fee Waived") is active, but API entitlement is NOT**
-- API access requires: **"WSH Corporate Event Data for Retail (API)" — $49/month** (separate from UI subscription)
-- Reference: https://www.interactivebrokers.com/en/pricing/research-news-services.php
+**v1 failure root cause:** Used `ib.reqWshMetaData()` (non-blocking, returns before data arrives) instead of `ib.getWshMetaData()` (blocking wrapper). Also did not provide `conId` for event data requests.
 
-**IBKR verdict:**
+#### v2 probe (2026-03-02) — CORRECTED assessment ✅
+
+Script: `tmp/test_ibkr_wsh_probe_v2.py` — Results: `tmp/probes/ibkr_wsh_probe_v2.json`
+
+Used `ib.getWshMetaData()` / `ib.getWshEventData(WshEventData(conId=...))` (blocking wrappers with proper parameters).
+
+| Test Case | Status | Items | Details |
+|-----------|--------|-------|--------|
+| Metadata (`getWshMetaData()`) | ✅ OK | 123,094 | Full event type schema, column definitions |
+| A: conId only | ✅ OK | 265,309 | All historical AAPL WSH events (M&A, conferences, earnings calls, options) |
+| B: conId + startDate/endDate (90d) | ✅ OK | 9,211 | Filtered recent events: "Apple Experience 2026" (IC), option expirations, etc. |
+| C: conId + fillWatchlist | ✅ OK | 265,309 | Same as A |
+| D: fillWatchlist + fillPortfolio (no conId) | ❌ Error | 0 | TWS error 10309: "Invalid WSH event data request" — conId is required |
+| E: filter JSON (symbol) | ✅ OK | 2 | Works but limited result count |
+
+**Discovered WSH event types (from metadata + event data):**
+
+Script: `tmp/test_ibkr_wsh_fields.py` — Results: `tmp/probes/ibkr_wsh_fields_full.json`
+
+Total **24 event types** in metadata, **15 types** observed for AAPL (481 events).
+
+| Event Type | Count | Description | Key Data Fields |
+|------------|-------|-------------|----------------|
+| `wshe_eps` | 20 | **Earnings Report (EPS actual + estimate)** | `amount_oc` (actual EPS), `estimated_eps` (estimate), `change_amount`, `change_percent`, `currency`, `fiscal_year`, `quarter` |
+| `wshe_ed` | 31 | **Earnings Date** | `earnings_date`, `time_of_day` (After Market/BMO), `wshe_earnings_date_status` (CONFIRMED/UNCONFIRMED), `filing_due_date` |
+| `wshe_fq` | 19 | **Future Quarter (predicted earnings date)** | `earnings_date`, `confidence_indicator`, `wshe_earnings_date_status` (INFERRED) |
+| `wshe_cc` | 29 | Conference Calls (earnings calls) | `fiscal_year`, `quarter`, `live_pwebsite`, `replay_pwebsite`, `transcript_url` |
+| `wshe_div` | 29 | **Dividends** | `dividend_oc` (amount), `dividend_currency`, `ex_div_date`, `pay_date`, `frequency`, `change_percent` |
+| `wshe_ic` | 31 | Investor Conferences / Business Updates | `event_desc`, `venue`, `wshe_ic_type`, `start_date` |
+| `wshe_merg_acq` | 1 | M&A events | `action_type`, `acquirer/target`, `wshe_action_status` |
+| `wshe_option` | 193 | Option Expirations | `expiration_date`, `expiration_frequency` (W1/W2/M), `option_type` |
+| `wshe_qe` | 21 | Quarter End dates | `quarter_end_date`, `fiscal_year` |
+| `wshe_sec` | 22 | SEC Filing Due dates | `filing_due_date` |
+| `wshe_bybkmod` | 3 | Buyback Modifications | `news_references`, `external_notes` |
+| `wshe_sh` | 5 | Shareholder Meetings | `shm_meeting_type`, `venue`, `virtual_meeting` |
+| `wshe_splits` | 1 | Stock Splits | `ratio`, `split_type` |
+| `wshe_movies` | 8 | Movie Releases | `release_title`, `distributor` |
+| `wshe_videos` | 68 | Video/Streaming Releases | `release_title`, `distributor` (Apple TV+) |
+
+**Additional event types in metadata (not observed for AAPL):** `wshe_bod` (Board of Directors), `wshe_bybk` (Buyback), `wshe_fda_adv_comm` (FDA Advisory), `wshe_idx` (Index Change), `wshe_interim_dates`, `wshe_ipo`, `wshe_secondary` (Secondary Offering), `wshe_spinoffs`, `wshe_divsr` (Dividend Suspend/Resume).
+
+**★ CRITICAL FINDING: `wshe_eps` contains EPS financial values!**
+
+Sample data (AAPL Q1 FY2026, latest):
+- `amount_oc` = **2.84** (actual EPS)
+- `estimated_eps` = **2.654** (consensus estimate)
+- `change_amount` = 0.99, `change_percent` = 53.5%
+- `currency` = USD
+
+**Key fields per event:**
+- `event_type` — event category
+- `index_date` — event date (YYYYMMDD)
+- `data.announce_date` — announcement date
+- `data.event_desc` — description
+- `data.company.contract` — ticker symbol
+- `data.company.contract_description` — company name
+- `data.wshe_event_status` — HELD / PENDING / COMPLETED
+- `data.local_time_start` — event time
+- `data.fiscal_year`, `data.fiscal_period` — for earnings calls
+- `source` — always "WSHE"
+
+**Correct API usage pattern:**
+```python
+from ib_insync import IB, Stock, WshEventData
+ib = IB()
+ib.connect("127.0.0.1", 4001, clientId=97)
+# 1) Get conId first
+details = ib.reqContractDetails(Stock("AAPL", "SMART", "USD"))
+con_id = details[0].contract.conId
+# 2) Metadata (blocking)
+meta = ib.getWshMetaData()  # NOT reqWshMetaData
+# 3) Events with conId (blocking)
+events = ib.getWshEventData(WshEventData(conId=con_id, startDate="20260302", endDate="20260601"))
+```
+
+**Analysis (corrected after v2 + v3 field probe):**
+- v1 probe used low-level `req*` calls → empty responses (incorrect conclusion)
+- v2 probe used blocking `get*` wrappers with `conId` → **rich WSH data available**
+- v3 field probe (`test_ibkr_wsh_fields.py`) → **24 event types discovered, `wshe_eps` contains EPS actual + estimate**
+- **WSH API entitlement IS active** (not just UI-level subscription as previously assumed)
+- 123K+ metadata items, 265K+ historical events for single symbol (AAPL)
+- Conference calls, investor conferences, M&A, option expirations, **earnings reports (EPS), dividends** all available
+- **Limitation**: `conId` is required for event data (fillWatchlist/fillPortfolio alone → error)
+- **Limitation**: **Revenue is NOT in WSH** — no revenue actual/estimate/surprise fields in any event type
+
+**IBKR verdict (REVISED AGAIN — v3 field probe):**
 - **OHLCV** = ✅ reliable via TWS `reqHistoricalData`
 - **Reuters Fundamentals (CalendarReport/FinSummary)** = ❌ NOT available (no Reuters subscription)
-- **WSH Calendar Events** = ❌ NOT available via API (UI-only subscription; API requires $49/mo add-on)
+- **WSH Calendar Events** = ✅ **AVAILABLE** — conference calls, investor conferences, M&A, option expirations, shareholder meetings, splits, buybacks, etc.
+- **WSH EPS (actual + estimate)** = ✅ **AVAILABLE** via `wshe_eps` — `amount_oc` (actual), `estimated_eps` (estimate), `change_amount`, `change_percent`
+- **WSH Earnings Date** = ✅ **AVAILABLE** via `wshe_ed` — date, time_of_day, status (CONFIRMED/UNCONFIRMED)
+- **WSH Dividend** = ✅ **AVAILABLE** via `wshe_div` — amount, currency, ex-date, pay-date, frequency
+- **WSH Revenue** = ❌ **NOT AVAILABLE** — no revenue fields in any WSH event type. For revenue data, use Finnhub `/stock/earnings` or `/stock/financials`.
 
 ---
 
@@ -273,7 +357,7 @@ Script: `tmp/test_ibkr_wsh_probe.py` — Results: `tmp/probes/ibkr_wsh_probe_AAP
 | **News Sentiment** | Finnhub `/news-sentiment` (premium, accessible) | — | ✅ Ready |
 | **1D OHLCV price** | EODHD (existing `ohlc_1d_watchlist.sqlite`) | IBKR TWS `reqHistoricalData` | ✅ Ready |
 | **Real-time Quote** | Finnhub `/quote` (free) | IBKR TWS | ✅ Ready |
-| **Calendar / Earnings** | Finnhub `/calendar/earnings` (free) + `/stock/earnings` (free) | IBKR WSH API ($49/mo add-on) | ✅ Ready (Finnhub only; WSH requires additional subscription) |
+| **Calendar / Earnings** | **IBKR WSH** `getWshEventData(conId=...)` — EPS actual+estimate (`wshe_eps`), earnings dates (`wshe_ed`), conference calls, dividends, M&A, options, etc. (24 event types) | Finnhub `/stock/earnings` (free) for **Revenue** values (not in WSH) | ✅ Ready (WSH = EPS + event dates/types, Finnhub = Revenue supplement) |
 | **Company Profile** | Finnhub `/stock/profile2` (free) | — | ✅ Ready |
 | **Financial Statements** | Finnhub `/stock/financials` (premium, bs/ic) | `/stock/financials-reported` (free) | ✅ Ready |
 | **Analyst Recommendations** | Finnhub `/stock/recommendation` (free) | — | ✅ Ready |
@@ -291,19 +375,26 @@ Script: `tmp/test_ibkr_wsh_probe.py` — Results: `tmp/probes/ibkr_wsh_probe_AAP
 
 ## 5. Decisions Needed
 
-### Decision #1 — /calendar data source
-IBKR CalendarReport (Reuters) = FAIL, WSH API = EMPTY (no API entitlement), Finnhub `/calendar/earnings` works (free tier). Options:
-1. ✅ **Use Finnhub `/calendar/earnings` + `/stock/earnings`** — earnings surprises + upcoming calendar (RECOMMENDED)
-2. Subscribe to IBKR WSH API ($49/mo) — provides corporate events (earnings, dividends, splits, FDA, conferences, etc.) beyond just earnings
-3. Add EODHD calendar if available
-4. Mix Finnhub + WSH (if subscribed) for different calendar types
-5. Accept calendar as "earnings only" for now
+### Decision #1 — /calendar data source (REVISED after WSH v3 field probe)
+IBKR WSH API is **AVAILABLE** ✅ with **EPS financial data**. WSH provides:
+- ✅ EPS actual (`wshe_eps.amount_oc`) + estimate (`wshe_eps.estimated_eps`) + surprise (`change_amount`/`change_percent`)
+- ✅ Earnings dates (`wshe_ed`) — date, time (BMO/AMC), status (CONFIRMED/UNCONFIRMED)
+- ✅ Dividends (`wshe_div`) — amount, ex-date, pay-date
+- ✅ Conference calls, investor conferences, M&A, option expirations, etc.
+- ❌ **Revenue NOT in WSH** — no revenue actual/estimate/surprise fields
+
+Options:
+1. ✅ **Use IBKR WSH as primary calendar+EPS source** + Finnhub `/stock/earnings` for Revenue only (RECOMMENDED)
+2. Use Finnhub only (simpler but less event types, may duplicate EPS data)
+3. WSH for EPS+events, Finnhub for Revenue (best coverage, no duplication)
+
+**Note**: Revenue is the only major financial metric missing from WSH. Finnhub `/stock/earnings` provides `{actual, estimate, period, quarter, surprise, surprisePercent, symbol, year}` which includes revenue.
 
 ### Decision #5 — IBKR ↔ Node communication
-IBKR TWS is Python-only (`ib_insync`). Options:
-1. Python subprocess from Node backend
-2. Separate Python microservice + HTTP bridge
-3. Skip IBKR entirely, rely on EODHD + Finnhub
+IBKR TWS is Python-only (`ib_insync`). WSH + OHLCV both confirmed working. Options:
+1. Python subprocess from Node backend (simplest)
+2. Separate Python microservice + HTTP bridge (cleanest separation)
+3. Node.js native `@stoqey/ib` library (avoids Python dependency but less mature)
 
 ### Decision #6 — Intraday OHLCV source
 Finnhub `/stock/candle` is denied. Options:
@@ -571,29 +662,71 @@ AAPL (기본), SPY/JPM (ETF/은행 지점 확인)
 | CalendarReport (Reuters) | ❌ 실패 | `reqFundamentalData(reportType="CalendarReport")` → 빈 응답 (Reuters Fundamentals 구독 필요, WSH와 별개) |
 | FinSummary (Reuters) | ❌ 실패 | `reqFundamentalData(reportType="FinancialSummary")` → 빈 응답 |
 
-### 3.2 Wall Street Horizon (WSH) 캘린더 API (2026-03-02 프로브)
+### 3.2 Wall Street Horizon (WSH) 캘린더 API
+
+#### v1 프로브 (2026-03-02) — 잘못된 초기 판정
 
 스크립트: `tmp/test_ibkr_wsh_probe.py` — 결과: `tmp/probes/ibkr_wsh_probe_AAPL.json`
 
 | API 호출 | 상태 | 세부 사항 |
 |---------|------|--------|
-| `reqWshMetaData()` | ⚠️ 빈 응답 | null 반환 — 메타데이터 없음 |
-| `reqWshEventData(AAPL)` | ⚠️ 빈 응답 | null 반환 — 이벤트 데이터 없음 |
-| `reqWshEventData(90일 broad)` | ⚠️ 빈 응답 | null 반환 — 날짜 범위 필터로도 동일 |
-| ib_insync WSH API 지원 | ✅ | `reqWshMetaData`, `reqWshEventData`, `WshEventData` 클래스 모두 존재 |
+| `reqWshMetaData()` | ⚠️ 빈 응답 | null 반환 — 논블로킹 `req*` 사용 오류 |
+| `reqWshEventData(AAPL)` | ⚠️ 빈 응답 | null 반환 — `conId` 미전달 |
 
-**분석:**
-- `reqFundamentalData("CalendarReport")` = **Reuters Fundamentals** (WSH와 다른 제품)
-- `reqWshMetaData` / `reqWshEventData` = **올바른 WSH API 호출** (캘린더 이벤트용)
-- WSH API 함수는 ib_insync에 존재하고 호출 자체는 성공(에러 없음)하지만, **빈/null** 반환
-- 의미: **UI용 WSH 구독("Fee Waived")은 활성화돼 있지만, API 엔타이틀먼트는 없음**
-- API 접근 조건: **"WSH Corporate Event Data for Retail (API)" — $49/월** (UI 구독과 별도)
-- 참고: https://www.interactivebrokers.com/en/pricing/research-news-services.php
+**v1 실패 원인:** `ib.reqWshMetaData()` (논블로킹, 데이터 도착 전 반환) 대신 `ib.getWshMetaData()` (블로킹 래퍼) 사용해야 함. 또 이벤트 요청 시 `conId` 미제공.
 
-**IBKR 판정:**
+#### v2 프로브 (2026-03-02) — 수정된 판정 ✅
+
+스크립트: `tmp/test_ibkr_wsh_probe_v2.py` — 결과: `tmp/probes/ibkr_wsh_probe_v2.json`
+
+| 테스트 | 상태 | 건수 | 세부 사항 |
+|-------|------|-----|--------|
+| 메타데이터 | ✅ OK | 123,094 | 전체 이벤트 타입 스키마, 컬럼 정의 |
+| A: conId만 | ✅ OK | 265,309 | 전체 AAPL 히스토리 이벤트 |
+| B: conId + 날짜 (90일) | ✅ OK | 9,211 | 필터링된 최근 이벤트 |
+| D: conId 없이 | ❌ | 0 | 에러 10309 — conId 필수 |
+
+#### v3 필드 프로브 (2026-03-03) — EPS 재무 수치 발견! ✅
+
+스크립트: `tmp/test_ibkr_wsh_fields.py` — 결과: `tmp/probes/ibkr_wsh_fields_full.json`
+
+메타데이터에 **24개 이벤트 타입**, AAPL 데이터에서 **15개 타입** (481건) 관측.
+
+| 이벤트 타입 | 건수 | 설명 | 핵심 필드 |
+|-----------|-----|------|----------|
+| `wshe_eps` | 20 | **실적 보고서 (EPS actual + estimate)** | `amount_oc` (실제 EPS), `estimated_eps` (예상), `change_amount`, `change_percent` |
+| `wshe_ed` | 31 | **실적 발표일** | `earnings_date`, `time_of_day` (AMC/BMO), `wshe_earnings_date_status` |
+| `wshe_fq` | 19 | **미래 분기 예상일** | `earnings_date`, `confidence_indicator` |
+| `wshe_cc` | 29 | 컨퍼런스콜 | `fiscal_year`, `quarter`, `transcript_url` |
+| `wshe_div` | 29 | **배당** | `dividend_oc` (금액), `dividend_currency`, `ex_div_date`, `pay_date` |
+| `wshe_ic` | 31 | 투자자 컨퍼런스 | `event_desc`, `venue`, `wshe_ic_type` |
+| `wshe_option` | 193 | 옵션 만기 | `expiration_date`, `expiration_frequency` |
+| 기타 | 78 | M&A, 분기종료, SEC공시, 자사주매입, 주주총회, 분할, 영화/비디오 출시 등 | — |
+
+**★ 핵심 발견: `wshe_eps`에 EPS 재무 수치 포함!**
+
+최신 AAPL 데이터 (Q1 FY2026):
+- `amount_oc` = **2.84** (실제 EPS)
+- `estimated_eps` = **2.654** (컨센서스 예상)
+- `change_amount` = 0.99, `change_percent` = 53.5%
+- `currency` = USD
+
+**분석 (v3 필드 프로브 후 최종 수정):**
+- WSH API 엔타이틀먼트 활성화 확인 (UI 전용이 아님)
+- **EPS actual + estimate** = ✅ `wshe_eps`에서 이용 가능
+- **Earnings Date** = ✅ `wshe_ed`에서 이용 가능 (날짜 + 시간대 + 확인 상태)
+- **Dividend** = ✅ `wshe_div`에서 이용 가능 (금액 + 날짜)
+- **Revenue** = ❌ WSH 어떤 이벤트 타입에도 매출 필드 없음
+- `conId` 필수 (fillWatchlist/fillPortfolio 단독 → 에러)
+
+**IBKR 판정 (v3 후 최종):**
 - **OHLCV** = ✅ TWS `reqHistoricalData`로 신뢰할 수 있음
-- **Reuters Fundamentals (CalendarReport/FinSummary)** = ❌ 이용 불가 (Reuters 구독 없음)
-- **WSH 캘린더 이벤트** = ❌ API를 통한 이용 불가 (UI 전용 구독; API는 $49/월 별도 추가 필요)
+- **Reuters Fundamentals** = ❌ 이용 불가 (Reuters 구독 없음)
+- **WSH 캘린더 이벤트** = ✅ 컨퍼런스콜, 투자자 컨퍼런스, M&A, 옵션 만기, 주주총회, 분할 등
+- **WSH EPS (actual + estimate)** = ✅ `wshe_eps` — `amount_oc`(실제), `estimated_eps`(예상), `change_amount`/`change_percent`
+- **WSH 실적 발표일** = ✅ `wshe_ed` — 날짜, 시간대, 확인 상태
+- **WSH 배당** = ✅ `wshe_div` — 금액, 통화, 배당락일, 지급일
+- **WSH Revenue** = ❌ WSH에 매출 필드 없음 → Finnhub `/stock/earnings` 또는 `/stock/financials`로 보충 필요
 
 ---
 
@@ -606,7 +739,7 @@ AAPL (기본), SPY/JPM (ETF/은행 지점 확인)
 | **뉴스 감성** | Finnhub `/news-sentiment` (프리미엄, 접근 가능) | — | ✅ 준비됨 |
 | **1일 OHLCV** | EODHD (기존 `ohlc_1d_watchlist.sqlite`) | IBKR TWS `reqHistoricalData` | ✅ 준비됨 |
 | **실시간 시세** | Finnhub `/quote` (무료) | IBKR TWS | ✅ 준비됨 |
-| **캘린더/어닝** | Finnhub `/calendar/earnings` (무료) + `/stock/earnings` (무료) | IBKR WSH API ($49/월 추가구독) | ✅ 준비됨 (현재 Finnhub만; WSH는 별도 구독 필요) |
+| **캘린더/어닝** | **IBKR WSH** `getWshEventData(conId=...)` — EPS actual+estimate (`wshe_eps`), 실적일(`wshe_ed`), 컨퍼런스콜, 배당, M&A, 옵션 등 (24개 이벤트 타입) | Finnhub `/stock/earnings` (무료) — **Revenue**(매출) 수치만 보충 (WSH에 없음) | ✅ 준비됨 (WSH=EPS+이벤트, Finnhub=매출 보충) |
 | **회사 프로필** | Finnhub `/stock/profile2` (무료) | — | ✅ 준비됨 |
 | **재무제표** | Finnhub `/stock/financials` (프리미엄, bs/ic) | `/stock/financials-reported` (무료) | ✅ 준비됨 |
 | **애널리스트 추천** | Finnhub `/stock/recommendation` (무료) | — | ✅ 준비됨 |
@@ -624,19 +757,26 @@ AAPL (기본), SPY/JPM (ETF/은행 지점 확인)
 
 ## 5. 결정 필요 사항
 
-### 결정 #1 — /calendar 데이터 소스
-IBKR CalendarReport (Reuters) = 실패, WSH API = 빈 응답 (API 엔타이틀먼트 없음), Finnhub `/calendar/earnings` 동작 (무료 티어). 옵션:
-1. ✅ **Finnhub `/calendar/earnings` + `/stock/earnings` 사용** — 어닝 서프라이즈 + 예정 캘린더 (권장)
-2. IBKR WSH API 구독 ($49/월) — 어닝 외에도 배당, 분할, FDA, 컨퍼런스 등 기업 이벤트 전반 제공
-3. EODHD 캘린더 추가 (가용 시)
-4. Finnhub + WSH (구독 시) 혼합
-5. 캘린더를 "어닝 전용"으로 제한
+### 결정 #1 — /calendar 데이터 소스 (WSH v3 필드 프로브 후 수정)
+IBKR WSH API가 **이용 가능** ✅ — **EPS 재무 수치까지 포함**. WSH 제공 범위:
+- ✅ EPS actual (`wshe_eps.amount_oc`) + estimate (`wshe_eps.estimated_eps`) + surprise (`change_amount`/`change_percent`)
+- ✅ 실적 발표일 (`wshe_ed`) — 날짜, 시간 (BMO/AMC), 상태 (CONFIRMED/UNCONFIRMED)
+- ✅ 배당 (`wshe_div`) — 금액, 배당락일, 지급일
+- ✅ 컨퍼런스콜, 투자자 컨퍼런스, M&A, 옵션 만기 등
+- ❌ **Revenue(매출)는 WSH에 없음** — 어떤 이벤트 타입에도 매출 필드 없음
+
+옵션:
+1. ✅ **IBKR WSH를 캘린더+EPS 주 소스로 사용** + Finnhub `/stock/earnings`로 Revenue만 보충 (권장)
+2. Finnhub만 사용 (더 단순하지만 이벤트 타입 제한, EPS 중복)
+3. WSH=EPS+이벤트, Finnhub=Revenue (최고 커버리지, 중복 없음)
+
+**참고**: Revenue만이 WSH에서 빠진 주요 재무 지표. Finnhub `/stock/earnings`는 `{actual, estimate, period, quarter, surprise, surprisePercent, symbol, year}` 제공(Revenue 포함).
 
 ### 결정 #5 — IBKR ↔ Node 통신
-IBKR TWS는 Python 전용 (`ib_insync`):
-1. Node 백엔드에서 Python 서브프로세스
-2. 별도 Python 마이크로서비스 + HTTP 브릿지
-3. IBKR 완전 제외, EODHD + Finnhub만 사용
+IBKR TWS는 Python 전용 (`ib_insync`). WSH + OHLCV 모두 동작 확인됨. 옵션:
+1. Node 백엔드에서 Python 서브프로세스 (가장 단순)
+2. 별도 Python 마이크로서비스 + HTTP 브릿지 (가장 깔끔한 분리)
+3. Node.js 네이티브 `@stoqey/ib` 라이브러리 (Python 의존성 제거하지만 덜 성숙)
 
 ### 결정 #6 — 인트라데이 OHLCV 소스
 Finnhub `/stock/candle` 거부:

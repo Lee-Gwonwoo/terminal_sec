@@ -141,9 +141,14 @@ Draft capability matrix template (fill during audit)
 | News Feed | Earning date line | Finnhub earnings/calendar (preferred) | If unavailable, do **not** fake; render nothing. |
 | News Feed | Market cap | Finnhub company profile (preferred) | Confirm units; store numeric USD and format. |
 | News Feed | Industry | Finnhub company profile (preferred) | Confirm field (`finnhubIndustry` or similar). |
-| Calendar | Earnings fields (EPS/Revenue/etc.) | IBKR (TBD) | Highest risk: verify IBKR actually provides these fields; if not, stop for decision. |
-| Calendar | Conference/Dividend | IBKR (TBD) | Verify event types/fields exist in IBKR APIs. |
-| Calendar | Analyst rating fields | IBKR (TBD) | Very likely not available via IBKR; must be confirmed. |
+| Calendar | Earnings event dates/times | IBKR WSH (`wshe_ed` event type) | ✅ Confirmed via v3 probe: earnings date, time_of_day (BMO/AMC), status (CONFIRMED/UNCONFIRMED) |
+| Calendar | EPS actual + estimate | IBKR WSH (`wshe_eps` event type) | ✅ Confirmed via v3 probe: `amount_oc` (actual EPS), `estimated_eps` (estimate), `change_amount`, `change_percent` |
+| Calendar | Revenue values | Finnhub `/stock/earnings` (free) | ❌ WSH has NO revenue fields; Finnhub fills this gap |
+| Calendar | Conference/Investor events | IBKR WSH (`wshe_ic` event type) | ✅ Confirmed: venue, time, description, status (PENDING/HELD) |
+| Calendar | M&A events | IBKR WSH (`wshe_merg_acq` event type) | ✅ Confirmed: acquirer/target, action type, status |
+| Calendar | Option expirations | IBKR WSH (`wshe_option` event type) | ✅ Confirmed: weekly/monthly expiration dates |
+| Calendar | Analyst rating fields | Not available via IBKR WSH or Finnhub (free) | ❌ Finnhub `/stock/upgrade-downgrade` is 403; NOT in WSH data |
+| Calendar | Dividend events | IBKR WSH (`wshe_div` event type) | ✅ Confirmed via v3 probe: `dividend_oc` (amount), `dividend_currency`, `ex_div_date`, `pay_date`, `frequency` |
 | Watchlist | Price/Change/% | Computed from `ohlc_1d` latest close vs prior close | Also needs backfill of derived metrics for latest rows. |
 | Watchlist | Name/Mkt Cap/Industry | Finnhub company profile (preferred) | If unavailable, show `-` (real “unknown”), not fake. |
 
@@ -572,15 +577,23 @@ Verification
 
 | Sub-step | Task | Status |
 |----------|------|--------|
-| 0-1 | Finnhub probes (profile, news, earnings) | ✅ Done |
-| 0-2 | IBKR TWS probe (OHLCV, calendar) | ✅ Done |
-| 0-3 | Fill capability matrix in `test_data_availability_audit.md` | ✅ Done |
+| 0-1 | Finnhub probes (profile, news, earnings, 67 endpoints total) | ✅ Done |
+| 0-2 | IBKR TWS probe v1 (OHLCV ✅, Reuters ❌, WSH v1 empty) | ✅ Done |
+| 0-2b | IBKR WSH probe v2 (conId-based: metadata ✅, events ✅) | ✅ Done |
+| 0-3 | Fill capability matrix in `test_data_availability_audit.md` | ✅ Done (updated with WSH v2 results) |
 | 0-4 | Pending decisions: /calendar source + Node↔IBKR method | ⏳ Awaiting user |
+
+**WSH v2 key finding (corrects earlier assessment):**
+- v1 probe used `reqWshMetaData()` (non-blocking) → empty. v2 used `getWshMetaData()` (blocking) + `conId` → **rich data available**
+- Metadata: 123K items, Events (AAPL): 265K items, Date-filtered: 9K items
+- Event types: `wshe_cc` (earnings calls), `wshe_ic` (conferences), `wshe_merg_acq` (M&A), `wshe_option` (expirations)
+- **WSH API IS available** (not $49/mo add-on needed as previously concluded)
+- WSH covers event dates/types but NOT financial values (EPS/Revenue) → supplement with Finnhub `/stock/earnings`
 
 **Verification hook (Step 0 closeout):**
 - Check: `test_data_availability_audit.md` covers every UI column with a definitive ✅/❌/Computed.
-- Check: probe JSON files exist in `tmp/probes/` for Finnhub and IBKR.
-- Gate: User must confirm the 2 pending IBKR decisions before Steps 6-7 can proceed.
+- Check: probe JSON files exist in `tmp/probes/` for Finnhub and IBKR (v1 + v2).
+- Gate: User must confirm the 2 pending decisions before Steps 6-7 can proceed.
 
 ---
 
@@ -1048,9 +1061,15 @@ capability matrix 초안 템플릿(감사 단계에서 채움)
 | News Feed | Earning date 라인 | Finnhub earnings/calendar(우선) | 불가하면 렌더하지 않음(가짜 금지) |
 | News Feed | Market cap | Finnhub company profile(우선) | 단위 확인, numeric USD 저장 + 포맷 |
 | News Feed | Industry | Finnhub company profile(우선) | 필드(`finnhubIndustry` 등) 확인 |
-| Calendar | Earnings(EPS/Revenue 등) | IBKR (미확정) | 가장 리스크 큼: 제공 안 되면 즉시 의사결정 필요 |
-| Calendar | Conference/Dividend | IBKR (미확정) | 이벤트 타입/필드 존재 여부 확인 |
-| Calendar | Analyst rating 필드 | IBKR (미확정) | IBKR에 없을 가능성 큼(반드시 확인) |
+| Calendar | 실적 발표일/시간 | IBKR WSH (`wshe_ed`) | ✅ v3 확인: 발표일, 시간대(BMO/AMC), 상태(CONFIRMED/UNCONFIRMED) |
+| Calendar | EPS actual + estimate | IBKR WSH (`wshe_eps`) | ✅ v3 확인: `amount_oc`(실제), `estimated_eps`(예상), `change_amount`, `change_percent` |
+| Calendar | Revenue(매출) | Finnhub `/stock/earnings` (무료) | ❌ WSH에 매출 필드 없음; Finnhub으로 보충 |
+| Calendar | 컨퍼런스콜 | IBKR WSH (`wshe_cc`) | ✅ v2 확인: fiscal_year, quarter, transcript_url |
+| Calendar | 컨퍼런스/투자자 이벤트 | IBKR WSH (`wshe_ic`) | ✅ v2 확인: venue, time, status |
+| Calendar | M&A | IBKR WSH (`wshe_merg_acq`) | ✅ v2 확인: acquirer/target, status |
+| Calendar | 옵션 만기 | IBKR WSH (`wshe_option`) | ✅ v2 확인: 주간/월간 만기일 |
+| Calendar | 배당 | IBKR WSH (`wshe_div`) | ✅ v3 확인: `dividend_oc`(금액), `dividend_currency`, `ex_div_date`, `pay_date` |
+| Calendar | Analyst rating 필드 | 이용 불가 | ❌ Finnhub `/stock/upgrade-downgrade` 403; WSH에도 없음 |
 | Watchlist | Price/Change/% | `ohlc_1d` 최신 close vs 이전 close로 계산 | 최신 rows에 derived metrics backfill 필요 |
 | Watchlist | Name/Mkt Cap/Industry | Finnhub company profile(우선) | 불가하면 `-` 표시(진짜 unknown), 가짜 금지 |
 
@@ -1471,15 +1490,31 @@ UI 동작(최소)
 
 | 세부 단계 | 작업 | 상태 |
 |-----------|------|------|
-| 0-1 | Finnhub 프로브 (profile, news, earnings) | ✅ 완료 |
-| 0-2 | IBKR TWS 프로브 (OHLCV, calendar) | ✅ 완료 |
-| 0-3 | `test_data_availability_audit.md`에 capability matrix 기입 | ✅ 완료 |
+| 0-1 | Finnhub 프로브 (profile, news, earnings, 67개 전체 EP) | ✅ 완료 |
+| 0-2 | IBKR TWS 프로브 v1 (OHLCV ✅, Reuters ❌, WSH v1 빈 응답) | ✅ 완료 |
+| 0-2b | IBKR WSH 프로브 v2 (conId 기반: 메타데이터 ✅, 이벤트 ✅) | ✅ 완료 |
+| 0-2c | IBKR WSH 필드 프로브 v3 (24개 이벤트 타입 전수조사, EPS 발견) | ✅ 완료 |
+| 0-3 | `test_data_availability_audit.md`에 capability matrix 기입 | ✅ 완료 (WSH v3 결과 반영) |
 | 0-4 | 미결 결정: /calendar 소스 + Node↔IBKR 연동 방식 | ⏳ 사용자 대기 |
+
+**WSH v3 필드 프로브 핵심 발견 (기존 판정 재수정):**
+- v1은 `reqWshMetaData()` (비동기 low-level) 사용 → 빈 응답. v2는 `getWshMetaData()` (블로킹) + `conId` → 풍부한 데이터 이용 가능
+- **v3 (`test_ibkr_wsh_fields.py`)는 24개 이벤트 타입을 전수 조사하여 재무 수치 필드 존재 여부 확인**
+- 메타데이터: **24개 이벤트 타입**. AAPL 데이터: **15개 타입, 481건**
+- **★ `wshe_eps` — EPS actual + estimate 포함!**
+  - `amount_oc` = 실제 EPS (예: 2.84)
+  - `estimated_eps` = 컨센서스 예상 EPS (예: 2.654)
+  - `change_amount` / `change_percent` = EPS 변화 (예: 0.99 / 53.5%)
+- **★ `wshe_ed` — 실적 발표일 + 시간대 + 확인 상태**
+- **★ `wshe_div` — 배당금(금액+통화+배당락일+지급일+빈도)**
+- **★ `wshe_fq` — 미래 분기 예상 실적일 (INFERRED 상태까지 2028년 예측)**
+- ❌ **Revenue(매출)는 WSH 어떤 이벤트 타입에도 없음** → Finnhub `/stock/earnings`로 보충 필요
+- **WSH API 이용 가능** (기존 "$49/월 추가 구독 필요" 결론은 잘못됨)
 
 **검증 훅 (0단계 마감):**
 - 확인: `test_data_availability_audit.md`가 모든 UI 컬럼에 대해 확정된 ✅/❌/Computed를 포함하는지.
-- 확인: 프로브 JSON 파일이 `tmp/probes/`에 Finnhub, IBKR용으로 존재하는지.
-- 게이트: IBKR 관련 2개 미결 결정이 확정되어야 Steps 6-7 진행 가능.
+- 확인: 프로브 JSON 파일이 `tmp/probes/`에 Finnhub, IBKR(v1 + v2)용으로 존재하는지.
+- 게이트: 사용자가 2개 미결 결정을 확정해야 Steps 6-7 진행 가능.
 
 ---
 

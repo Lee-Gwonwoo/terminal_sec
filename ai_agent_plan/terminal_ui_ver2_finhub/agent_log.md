@@ -215,3 +215,93 @@
 **Step 0 상태**: done (awaiting user confirmation) — Finnhub 종합 + WSH 프로브 모두 완료, IBKR 관련 결정 보류
 
 ---
+
+### Step 0 최종 보완 — IBKR WSH v2 프로브 결과 반영 (2026-03-02)
+
+**배경**: WSH v1 프로브(`test_ibkr_wsh_probe.py`)가 빈 응답을 반환했으나, v2 프로브(`test_ibkr_wsh_probe_v2.py`)에서 올바른 API 호출 방식(blocking `get*` + `conId`)으로 풍부한 WSH 데이터를 확인함.
+
+**v1 실패 근본 원인:**
+- `ib.reqWshMetaData()` — 비동기 low-level 함수, 데이터 도착 전 null 반환
+- `ib.reqWshEventData()` — `conId` 파라미터 미지정
+- 이로 인해 "WSH API 엔타이틀먼트 없음 ($49/월 추가 구독 필요)" 라는 잘못된 결론 도출
+
+**v2 프로브 결과 (수정된 판정):**
+
+| 테스트 케이스 | 결과 | 건수 |
+|---|---|---|
+| Metadata (`getWshMetaData()`) | ✅ 성공 | 123,094 |
+| A: conId만 | ✅ 성공 | 265,309 |
+| B: conId + startDate/endDate (90일) | ✅ 성공 | 9,211 |
+| C: conId + fillWatchlist | ✅ 성공 | 265,309 |
+| D: fillWatchlist + fillPortfolio (conId 없음) | ❌ 에러 10309 | 0 |
+| E: filter JSON (symbol) | ✅ 성공 | 2 |
+
+**확인된 WSH 이벤트 타입:**
+- `wshe_cc` — 컨퍼런스콜(어닝콜): fiscal_year, replay URL, 전화번호
+- `wshe_ic` — 투자자 컨퍼런스: "Apple Experience 2026" (2026-03-04), 장소, 시간
+- `wshe_merg_acq` — M&A: "Shazam 인수" (2017), 인수자/대상 정보
+- `wshe_option` — 옵션 만기: 주간(W1/W2) 및 월간(M) 만기일
+
+**IBKR 최종 판정 (수정):**
+- **OHLCV** = ✅ `reqHistoricalData`로 신뢰 가능
+- **Reuters Fundamentals** = ❌ 이용 불가 (변동 없음)
+- **WSH 캘린더 이벤트** = ✅ **이용 가능** (`getWshEventData(WshEventData(conId=...))`)
+  - 기존 "❌ API 이용 불가" → **"✅ 이용 가능"으로 수정**
+  - WSH는 이벤트 날짜/타입/설명 제공, 재무 수치(EPS/Revenue)는 미포함 → Finnhub 보완
+
+**문서 업데이트:**
+1. `test_data_availability_audit.md` — EN/KO 양쪽:
+   - Section 3.2: WSH v1(잘못된 판정) + v2(수정된 판정) 병기, 올바른 API 호출 패턴 기록
+   - Section 4 기능 매트릭스: Calendar 행 → WSH 기본 + Finnhub 보완으로 수정
+   - Section 5 결정 #1: WSH 이용 가능 반영, 권장 옵션 수정
+   - Section 5 결정 #5: "IBKR 완전 제외" 옵션 삭제, Node.js 연동 방식만 남김
+2. `plan.md` — EN/KO 양쪽:
+   - Step 0 세부단계 테이블: 0-2b (WSH v2) 추가, 0-3 상태 업데이트
+   - WSH v2 핵심 발견 블록 추가
+   - Capability matrix: Calendar 행 세분화 (earnings dates/values, conference, M&A, option, analyst, dividend)
+
+**Step 0 상태**: done (awaiting user confirmation) — 모든 프로브 완료, 감사 문서 확정, 2개 결정만 대기
+
+---
+
+### Step 0 추가 보완 — IBKR WSH v3 필드 전수조사 (2026-03-03)
+
+**배경**: WSH v2 프로브에서 WSH API 이용 가능을 확인했으나, preview가 2000자로 잘려 저장되어 있어 전체 필드 구조를 볼 수 없었음. 사용자가 "재무 수치가 없다고? 확인해봐라" 요청 → v3 필드 프로브 실행.
+
+**v3 프로브 (`tmp/test_ibkr_wsh_fields.py`):**
+- TWS 포트 4001 연결 (clientId=99)
+- AAPL conId 기반 전체 히스토리 WSH 이벤트 취득
+- **24개 이벤트 타입** (메타데이터), **15개 타입 / 481건** (AAPL 실제 데이터)
+- 각 이벤트 타입의 모든 data 키를 전수 추출, 재무 키워드(eps, revenue, estimate, actual, forecast, surprise, earnings, dividend 등) 매칭
+
+**★ 핵심 발견: `wshe_eps`에 EPS 재무 수치 존재!**
+
+| 이벤트 타입 | 건수 | 핵심 재무 필드 |
+|---|---|---|
+| `wshe_eps` | 20 | `amount_oc`(실제 EPS=2.84), `estimated_eps`(예상=2.654), `change_amount`(0.99), `change_percent`(53.5%) |
+| `wshe_ed` | 31 | `earnings_date`, `time_of_day`(After Market), `wshe_earnings_date_status`(CONFIRMED/UNCONFIRMED) |
+| `wshe_div` | 29 | `dividend_oc`(0.26), `dividend_currency`(USD), `ex_div_date`, `pay_date`, `frequency` |
+| `wshe_fq` | 19 | `earnings_date`, `confidence_indicator`, `wshe_earnings_date_status`(INFERRED — 2028년까지 예측) |
+
+**기존 판정 수정:**
+- 기존 (v2): "WSH는 이벤트 날짜/타입만 제공, 재무 수치(EPS/Revenue)는 없음" → **잘못됨**
+- 수정 (v3): "WSH는 **EPS actual + estimate + surprise 제공**. 단, **Revenue(매출)는 어떤 이벤트 타입에도 없음**"
+
+**Revenue 확인:**
+- WSH 메타데이터의 24개 이벤트 타입 전체에서 `revenue`, `sales`, `income` 관련 필드 없음
+- Revenue 보충 → Finnhub `/stock/earnings` 또는 `/stock/financials` 필요
+
+**문서 업데이트:**
+1. `test_data_availability_audit.md` — EN/KO:
+   - Section 3.2: v3 프로브 섹션 추가 (24개 이벤트 타입 + EPS 필드 상세)
+   - Section 3.2 Analysis/IBKR verdict: "WSH EPS = ✅", "WSH Revenue = ❌"로 수정
+   - Section 4 기능 매트릭스: Calendar 행 → "WSH = EPS + events, Finnhub = Revenue만 보충"
+   - Section 5 결정 #1: EPS 포함 반영, Revenue만 Finnhub 필요
+2. `plan.md` — EN/KO:
+   - Step 0 세부단계: 0-2c (WSH v3 필드) 추가
+   - Capability matrix: Calendar 행 세분화 (EPS/Revenue 분리, Dividend 확정)
+3. `agent_log.md` — 본 기록
+
+**Step 0 상태**: done (awaiting user confirmation) — 모든 프로브 완료(v1+v2+v3+Finnhub종합), 감사 문서 확정
+
+---
