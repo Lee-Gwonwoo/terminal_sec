@@ -226,18 +226,41 @@ AAPL (primary), SPY/JPM (ETF/bank branch checks)
 
 ---
 
-## 3. IBKR TWS Probe Results (unchanged from prior audit)
+## 3. IBKR TWS Probe Results
+
+### 3.1 Basic TWS API (probed earlier)
 
 | Capability | Status | Details |
-|------------|--------|---------|
-| TWS Connect (port 4001) | ✅ PASS | `ib_insync` 0.9.86, read-only mode |
+|------------|--------|--------|
+| TWS Connect (port 4001) | ✅ PASS | `ib_insync` 0.9.86 |
 | Historical 1D OHLCV | ✅ PASS | `reqHistoricalData` works for stocks |
 | Contract Details | ✅ PASS | `reqContractDetails` returns exchange/type |
-| CalendarReport (fundamentals) | ❌ FAIL | `reqFundamentalData(reportType="CalendarReport")` → "No data" / empty |
-| FinSummary (fundamentals) | ❌ FAIL | `reqFundamentalData(reportType="FinancialSummary")` → "No data" / empty |
-| Calendar REST endpoint | ❌ N/A | TWS Socket API has no `/calendar` endpoint |
+| CalendarReport (Reuters) | ❌ FAIL | `reqFundamentalData(reportType="CalendarReport")` → empty (Reuters Fundamentals subscription needed, NOT WSH) |
+| FinSummary (Reuters) | ❌ FAIL | `reqFundamentalData(reportType="FinancialSummary")` → empty |
 
-**IBKR verdict: OHLCV = reliable via TWS; Calendar/Fundamentals = NOT available via TWS.**
+### 3.2 Wall Street Horizon (WSH) Calendar API (probed 2026-03-02)
+
+Script: `tmp/test_ibkr_wsh_probe.py` — Results: `tmp/probes/ibkr_wsh_probe_AAPL.json`
+
+| API Call | Status | Details |
+|----------|--------|--------|
+| `reqWshMetaData()` | ⚠️ EMPTY | Returns null — no metadata available |
+| `reqWshEventData(AAPL)` | ⚠️ EMPTY | Returns null — no event data |
+| `reqWshEventData(90d broad)` | ⚠️ EMPTY | Returns null — same result with date range filter |
+| ib_insync WSH API support | ✅ | `reqWshMetaData`, `reqWshEventData`, `WshEventData` class all present |
+
+**Analysis:**
+- `reqFundamentalData("CalendarReport")` = **Reuters Fundamentals** (different product from WSH)
+- `reqWshMetaData` / `reqWshEventData` = **correct WSH API calls** for calendar events
+- WSH API functions exist in ib_insync and calls succeed (no error), but return **empty/null**
+- This means: **UI-level WSH subscription ("Fee Waived") is active, but API entitlement is NOT**
+- API access requires: **"WSH Corporate Event Data for Retail (API)" — $49/month** (separate from UI subscription)
+- Reference: https://www.interactivebrokers.com/en/pricing/research-news-services.php
+
+**IBKR verdict:**
+- **OHLCV** = ✅ reliable via TWS `reqHistoricalData`
+- **Reuters Fundamentals (CalendarReport/FinSummary)** = ❌ NOT available (no Reuters subscription)
+- **WSH Calendar Events** = ❌ NOT available via API (UI-only subscription; API requires $49/mo add-on)
 
 ---
 
@@ -250,7 +273,7 @@ AAPL (primary), SPY/JPM (ETF/bank branch checks)
 | **News Sentiment** | Finnhub `/news-sentiment` (premium, accessible) | — | ✅ Ready |
 | **1D OHLCV price** | EODHD (existing `ohlc_1d_watchlist.sqlite`) | IBKR TWS `reqHistoricalData` | ✅ Ready |
 | **Real-time Quote** | Finnhub `/quote` (free) | IBKR TWS | ✅ Ready |
-| **Calendar / Earnings** | Finnhub `/calendar/earnings` (free) + `/stock/earnings` (free) | — | ✅ Ready (structural, needs date range with data) |
+| **Calendar / Earnings** | Finnhub `/calendar/earnings` (free) + `/stock/earnings` (free) | IBKR WSH API ($49/mo add-on) | ✅ Ready (Finnhub only; WSH requires additional subscription) |
 | **Company Profile** | Finnhub `/stock/profile2` (free) | — | ✅ Ready |
 | **Financial Statements** | Finnhub `/stock/financials` (premium, bs/ic) | `/stock/financials-reported` (free) | ✅ Ready |
 | **Analyst Recommendations** | Finnhub `/stock/recommendation` (free) | — | ✅ Ready |
@@ -269,11 +292,12 @@ AAPL (primary), SPY/JPM (ETF/bank branch checks)
 ## 5. Decisions Needed
 
 ### Decision #1 — /calendar data source
-Since IBKR CalendarReport is FAIL and Finnhub `/calendar/earnings` works (free tier), options:
+IBKR CalendarReport (Reuters) = FAIL, WSH API = EMPTY (no API entitlement), Finnhub `/calendar/earnings` works (free tier). Options:
 1. ✅ **Use Finnhub `/calendar/earnings` + `/stock/earnings`** — earnings surprises + upcoming calendar (RECOMMENDED)
-2. Add EODHD calendar if available
-3. Mix Finnhub + IBKR for different calendar types
-4. Accept calendar as "earnings only" for now
+2. Subscribe to IBKR WSH API ($49/mo) — provides corporate events (earnings, dividends, splits, FDA, conferences, etc.) beyond just earnings
+3. Add EODHD calendar if available
+4. Mix Finnhub + WSH (if subscribed) for different calendar types
+5. Accept calendar as "earnings only" for now
 
 ### Decision #5 — IBKR ↔ Node communication
 IBKR TWS is Python-only (`ib_insync`). Options:
@@ -535,18 +559,41 @@ AAPL (기본), SPY/JPM (ETF/은행 지점 확인)
 
 ---
 
-## 3. IBKR TWS 프로브 결과 (이전 감사와 동일)
+## 3. IBKR TWS 프로브 결과
+
+### 3.1 기본 TWS API (이전 프로브)
 
 | 기능 | 상태 | 세부 사항 |
-|------|------|---------|
-| TWS 연결 (포트 4001) | ✅ 성공 | `ib_insync` 0.9.86, 읽기 전용 모드 |
+|------|------|--------|
+| TWS 연결 (포트 4001) | ✅ 성공 | `ib_insync` 0.9.86 |
 | 1일 OHLCV | ✅ 성공 | `reqHistoricalData` 주식 정상 동작 |
 | 계약 상세 | ✅ 성공 | `reqContractDetails` 거래소/타입 반환 |
-| CalendarReport (펀더멘탈) | ❌ 실패 | `reqFundamentalData(reportType="CalendarReport")` → "No data" / 빈 응답 |
-| FinSummary (펀더멘탈) | ❌ 실패 | `reqFundamentalData(reportType="FinancialSummary")` → "No data" / 빈 응답 |
-| Calendar REST 엔드포인트 | ❌ 해당없음 | TWS Socket API에 `/calendar` 엔드포인트 없음 |
+| CalendarReport (Reuters) | ❌ 실패 | `reqFundamentalData(reportType="CalendarReport")` → 빈 응답 (Reuters Fundamentals 구독 필요, WSH와 별개) |
+| FinSummary (Reuters) | ❌ 실패 | `reqFundamentalData(reportType="FinancialSummary")` → 빈 응답 |
 
-**IBKR 판정: OHLCV = TWS로 신뢰할 수 있음; Calendar/Fundamentals = TWS로 이용 불가.**
+### 3.2 Wall Street Horizon (WSH) 캘린더 API (2026-03-02 프로브)
+
+스크립트: `tmp/test_ibkr_wsh_probe.py` — 결과: `tmp/probes/ibkr_wsh_probe_AAPL.json`
+
+| API 호출 | 상태 | 세부 사항 |
+|---------|------|--------|
+| `reqWshMetaData()` | ⚠️ 빈 응답 | null 반환 — 메타데이터 없음 |
+| `reqWshEventData(AAPL)` | ⚠️ 빈 응답 | null 반환 — 이벤트 데이터 없음 |
+| `reqWshEventData(90일 broad)` | ⚠️ 빈 응답 | null 반환 — 날짜 범위 필터로도 동일 |
+| ib_insync WSH API 지원 | ✅ | `reqWshMetaData`, `reqWshEventData`, `WshEventData` 클래스 모두 존재 |
+
+**분석:**
+- `reqFundamentalData("CalendarReport")` = **Reuters Fundamentals** (WSH와 다른 제품)
+- `reqWshMetaData` / `reqWshEventData` = **올바른 WSH API 호출** (캘린더 이벤트용)
+- WSH API 함수는 ib_insync에 존재하고 호출 자체는 성공(에러 없음)하지만, **빈/null** 반환
+- 의미: **UI용 WSH 구독("Fee Waived")은 활성화돼 있지만, API 엔타이틀먼트는 없음**
+- API 접근 조건: **"WSH Corporate Event Data for Retail (API)" — $49/월** (UI 구독과 별도)
+- 참고: https://www.interactivebrokers.com/en/pricing/research-news-services.php
+
+**IBKR 판정:**
+- **OHLCV** = ✅ TWS `reqHistoricalData`로 신뢰할 수 있음
+- **Reuters Fundamentals (CalendarReport/FinSummary)** = ❌ 이용 불가 (Reuters 구독 없음)
+- **WSH 캘린더 이벤트** = ❌ API를 통한 이용 불가 (UI 전용 구독; API는 $49/월 별도 추가 필요)
 
 ---
 
@@ -559,7 +606,7 @@ AAPL (기본), SPY/JPM (ETF/은행 지점 확인)
 | **뉴스 감성** | Finnhub `/news-sentiment` (프리미엄, 접근 가능) | — | ✅ 준비됨 |
 | **1일 OHLCV** | EODHD (기존 `ohlc_1d_watchlist.sqlite`) | IBKR TWS `reqHistoricalData` | ✅ 준비됨 |
 | **실시간 시세** | Finnhub `/quote` (무료) | IBKR TWS | ✅ 준비됨 |
-| **캘린더/어닝** | Finnhub `/calendar/earnings` (무료) + `/stock/earnings` (무료) | — | ✅ 준비됨 (구조적, 데이터 있는 날짜 범위 필요) |
+| **캘린더/어닝** | Finnhub `/calendar/earnings` (무료) + `/stock/earnings` (무료) | IBKR WSH API ($49/월 추가구독) | ✅ 준비됨 (현재 Finnhub만; WSH는 별도 구독 필요) |
 | **회사 프로필** | Finnhub `/stock/profile2` (무료) | — | ✅ 준비됨 |
 | **재무제표** | Finnhub `/stock/financials` (프리미엄, bs/ic) | `/stock/financials-reported` (무료) | ✅ 준비됨 |
 | **애널리스트 추천** | Finnhub `/stock/recommendation` (무료) | — | ✅ 준비됨 |
@@ -578,11 +625,12 @@ AAPL (기본), SPY/JPM (ETF/은행 지점 확인)
 ## 5. 결정 필요 사항
 
 ### 결정 #1 — /calendar 데이터 소스
-IBKR CalendarReport 실패, Finnhub `/calendar/earnings` 동작 (무료 티어):
+IBKR CalendarReport (Reuters) = 실패, WSH API = 빈 응답 (API 엔타이틀먼트 없음), Finnhub `/calendar/earnings` 동작 (무료 티어). 옵션:
 1. ✅ **Finnhub `/calendar/earnings` + `/stock/earnings` 사용** — 어닝 서프라이즈 + 예정 캘린더 (권장)
-2. EODHD 캘린더 추가 (가용 시)
-3. Finnhub + IBKR 혼합
-4. 캘린더를 "어닝 전용"으로 제한
+2. IBKR WSH API 구독 ($49/월) — 어닝 외에도 배당, 분할, FDA, 컨퍼런스 등 기업 이벤트 전반 제공
+3. EODHD 캘린더 추가 (가용 시)
+4. Finnhub + WSH (구독 시) 혼합
+5. 캘린더를 "어닝 전용"으로 제한
 
 ### 결정 #5 — IBKR ↔ Node 통신
 IBKR TWS는 Python 전용 (`ib_insync`):

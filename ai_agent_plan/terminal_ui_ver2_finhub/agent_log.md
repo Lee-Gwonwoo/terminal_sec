@@ -159,3 +159,59 @@
 **Step 0 상태**: done (awaiting user confirmation) — Finnhub 종합 감사 완료, IBKR 결정은 여전히 보류
 
 ---
+
+### Step 0 보완 — IBKR Wall Street Horizon (WSH) API 프로브 (2026-03-03)
+
+**배경**: 사용자가 기존 IBKR 프로브의 근본적 문제를 지적.
+- 기존 프로브는 `reqFundamentalData("CalendarReport")`만 테스트 → **Reuters Fundamentals** (WSH와 완전히 다른 제품)
+- IBKR 캘린더 데이터는 `reqWshMetaData()` / `reqWshEventData()` (Wall Street Horizon API)로 조회해야 함
+- 즉, "캘린더 데이터 안 된다"는 기존 결론이 잘못된 API를 테스트한 결과였음
+
+**수행 내역**:
+
+1. **WSH 전용 프로브 스크립트 작성**
+   - 파일: `tmp/test_ibkr_wsh_probe.py`
+   - 테스트 항목:
+     - `reqWshMetaData()` — WSH 이벤트 타입/필터 메타데이터
+     - `reqWshEventData(symbol filter)` — 특정 종목 캘린더 이벤트
+     - `reqWshEventData(90d broad)` — 날짜 범위 기반 조회
+     - ib_insync WSH API 지원 여부 확인
+
+2. **프로브 실행 (3차 시도 후 성공)**
+   - 1차: TWS 미실행 (포트 4001 닫힘) → 사용자가 TWS 시작
+   - 2차: TWS read-only 모드 → 사용자가 read-only 해제
+   - 3차: `tzdata` 모듈 미설치 에러 → `pip install tzdata` 후 성공
+   - 최종 실행: read-write 모드, 정상 연결
+
+3. **프로브 결과**
+   - 결과 파일: `tmp/probes/ibkr_wsh_probe_AAPL.json`
+   - 연결: ✅ 성공 (1개 계정, read-write)
+   - `reqWshMetaData()`: ⚠️ **빈 응답** (null)
+   - `reqWshEventData(AAPL)`: ⚠️ **빈 응답** (null)
+   - `reqWshEventData(90d broad)`: ⚠️ **빈 응답** (null)
+   - ib_insync WSH API 지원: ✅ 모든 함수 존재 (`reqWshMetaData`, `reqWshEventData`, `WshEventData` 클래스)
+
+4. **결론**
+   - ib_insync에 WSH 함수가 존재하고, 호출 자체는 성공(에러 없음)하지만 데이터가 빈 채로 반환
+   - **TWS UI에서 "Wall Street Horizon (Fee Waived)" = UI 전용 구독** → TWS 화면에서 캘린더 확인 가능
+   - **WSH API 엔타이틀먼트** = 별도 유료 구독 필요: **"WSH Corporate Event Data for Retail (API)" $49/월**
+   - 참고: https://www.interactivebrokers.com/en/pricing/research-news-services.php
+
+5. **감사 문서 업데이트**
+   - 파일: `ai_agent_plan/terminal_ui_ver2_finhub/test/test_data_availability_audit.md`
+   - 변경 사항:
+     - Section 3 (EN/KO): IBKR 프로브 결과에 WSH 서브섹션(3.2) 추가
+     - Reuters vs WSH 구분 명확화
+     - IBKR 판정 업데이트 (OHLCV ✅, Reuters ❌, WSH ❌)
+     - 기능 매트릭스: 캘린더 행에 WSH $49/월 대체 소스 추가
+     - 결정 #1: WSH API 구독 옵션 추가 (어닝 외 기업 이벤트 전반 제공)
+
+**IBKR 최종 판정**:
+- **OHLCV** = ✅ `reqHistoricalData`로 신뢰할 수 있음
+- **Reuters Fundamentals** = ❌ 이용 불가 (구독 없음)
+- **WSH 캘린더 이벤트** = ❌ API로 이용 불가 (UI 전용 구독; API는 $49/월 별도)
+- **캘린더 데이터 결론**: 현재는 **Finnhub `/calendar/earnings`가 유일한 무료 대안**. WSH API 구독 시 어닝·배당·분할·FDA·컨퍼런스 등 풍부한 기업 이벤트 데이터 확보 가능.
+
+**Step 0 상태**: done (awaiting user confirmation) — Finnhub 종합 + WSH 프로브 모두 완료, IBKR 관련 결정 보류
+
+---
