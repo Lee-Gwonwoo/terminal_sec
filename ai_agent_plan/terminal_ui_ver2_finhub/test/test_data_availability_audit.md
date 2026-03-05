@@ -408,12 +408,17 @@ events = ib.getWshEventData(WshEventData(conId=con_id, startDate="20260302", end
   - `description` — first ~300 chars of press release body
   - `url` — link to full text
   - `image` — thumbnail URL
-- **Source:** exclusively `www.nasdaq.com` press releases (all URLs point to nasdaq.com)
+- **Source & data pipeline:** all URLs point to `www.nasdaq.com/press-release/...`, but the **original content originates from newswire services**. Per the Finnhub API docs, this endpoint is "mostly press releases sourced from the exchanges, **BusinessWire, AccessWire, GlobeNewswire, Newsfile, and PRNewswire**." The data flow is:
+  1. **Company → Wire service** (e.g., Business Wire): the company pays a wire service to distribute its official press release.
+  2. **Wire service → Nasdaq.com**: Nasdaq republishes/aggregates wire-distributed press releases on its own platform (`nasdaq.com/press-release/...`).
+  3. **Nasdaq.com → Finnhub**: Finnhub collects from the Nasdaq press-release pages and serves them via this API.
+  - Evidence: the AAPL "iPhone 17e" press release body contains `CUPERTINO, Calif.--(BUSINESS WIRE)--` and the page footer links to `businesswire.com/news/home/20260302227994/en/` as the source version.
+  - Therefore, "exclusively `www.nasdaq.com`" describes Finnhub's **collection path**, not the content's **origin**. The origin is the wire services.
 - **Content type:** official company announcements — product launches, earnings results, executive appointments, manufacturing updates, partnerships, etc.
 - **History depth:** ~4+ years (AAPL: oldest = 2021-11-17 with `from=2020-01-01`; 2018-2019 = 0 results)
 - **Volume:** AAPL ~57/year, MSFT ~47/year (moderate — these are major press releases, not all news)
 - **Max per request:** 200 items observed
-- **Difference from `/company-news`:** `/press-releases` = official company-issued announcements via Nasdaq; `/company-news` = third-party media coverage (Yahoo, Benzinga, CNBC). Minimal overlap.
+- **Difference from `/company-news`:** `/press-releases` = official company-issued announcements distributed via wire services (BW, PRN, GNW, AW, Newsfile), aggregated through Nasdaq; `/company-news` = third-party media coverage (Yahoo, Benzinga, CNBC). Minimal overlap.
 
 **Use case in terminal:** "Press Releases" tab or section within ticker detail — shows official company announcements separate from media coverage.
 
@@ -975,12 +980,17 @@ AAPL (기본), SPY/JPM (ETF/은행 지점 확인)
   - `description` — 보도자료 본문 처음 ~300자
   - `url` — 전문 링크
   - `image` — 썸네일 URL
-- **소스:** 전량 `www.nasdaq.com` 보도자료 (모든 URL이 nasdaq.com을 가리킴)
+- **소스 & 데이터 파이프라인:** 모든 URL이 `www.nasdaq.com/press-release/...`를 가리키지만, **원본 콘텐츠의 출처는 뉴스와이어(wire) 서비스**다. Finnhub API 문서에 따르면 이 엔드포인트는 "mostly press releases sourced from the exchanges, **BusinessWire, AccessWire, GlobeNewswire, Newsfile, and PRNewswire**"로부터 수집된다. 데이터 흐름:
+  1. **회사 → Wire 서비스** (예: Business Wire): 회사가 wire 서비스에 비용을 지불하고 공식 보도자료를 배포.
+  2. **Wire 서비스 → Nasdaq.com**: Nasdaq이 wire 배포된 보도자료를 자사 플랫폼에 재게시/집계 (`nasdaq.com/press-release/...`).
+  3. **Nasdaq.com → Finnhub**: Finnhub이 Nasdaq 보도자료 페이지를 수집하여 API로 제공.
+  - 근거: AAPL "iPhone 17e" 보도자료 본문에 `CUPERTINO, Calif.--(BUSINESS WIRE)--` 태그라인이 포함되어 있고, 페이지 하단에 `businesswire.com/news/home/20260302227994/en/`이 원본 소스로 링크됨.
+  - 따라서 "전량 `www.nasdaq.com`"은 Finnhub의 **수집 경로**를 나타내는 것이지, 콘텐츠의 **원래 출처**가 Nasdaq인 것은 아님. 원래 출처는 wire 서비스.
 - **콘텐츠 유형:** 공식 회사 발표 — 제품 출시, 실적 발표, 임원 선임, 제조 업데이트, 파트너십 등
 - **히스토리 깊이:** ~4년+ (AAPL: `from=2020-01-01`일 때 최고(古) = 2021-11-17; 2018-2019 = 0건)
 - **물량:** AAPL ~57건/년, MSFT ~47건/년 (중간 — 주요 보도자료만, 모든 뉴스 아님)
 - **요청당 최대:** 200건 관찰됨
-- **`/company-news`와 차이:** `/press-releases` = Nasdaq 경유 공식 회사 발표; `/company-news` = 외부 미디어 보도 (Yahoo, Benzinga, CNBC). 겹침 거의 없음.
+- **`/company-news`와 차이:** `/press-releases` = wire 서비스(BW, PRN, GNW, AW, Newsfile)를 통해 배포된 공식 회사 발표를 Nasdaq 경유로 집계; `/company-news` = 외부 미디어 보도 (Yahoo, Benzinga, CNBC). 겹침 거의 없음.
 
 **터미널 활용:** 종목 상세 페이지 내 "보도자료" 탭/섹션 — 미디어 보도와 분리된 공식 회사 발표를 표시.
 
