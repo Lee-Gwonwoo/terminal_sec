@@ -20,7 +20,7 @@
 - Write/update `agent_log.md` **only when the user explicitly tells you to execute a specific plan**.
 - **`agent_log.md` language rule (must):** `agent_log.md` is written in **Korean only** (한국어 단독). Do NOT write bilingual EN/KO sections in the log — Korean is sufficient.
 - File storage: `C:\github_coding\terminal_sec\ai_agent_plan\<project_name>\`
-  - `plan.md`: detailed step-by-step plan before starting (goal, approach, files to create/modify, order, risks). Bilingual EN+KO (but see Agent-specific language override — Claude writes Korean only).
+  - `plan.md`: detailed step-by-step plan before starting (goal, approach, files to create/modify, order, risks). **See `plan.md writing conventions` below for language rules.**
   - `agent_log.md`: chronological record of every action taken (files created/modified, commands run, decisions, errors). **Korean only.**
 - **Break large tasks into steps:** if a task is large or complex, decompose it into small, independently verifiable steps. Each step should have a clear deliverable.
 - **Plan changes (mid-stream):** keep history intact.
@@ -130,7 +130,12 @@ When a plan has multiple major Steps (e.g., Step 0, Step 1, …, Step N), **each
 
 - **plan.md writing conventions (must follow when creating/updating plan.md):**
   - **Structure order:** Goal → Approach overview → Step list (each with sub-step table + verification hook) → Execution dependency graph → Open questions / blockers.
-  - **Bilingual:** EN section first, `---` separator, then KO section (same content, translated). *(Override: Claude agents write Korean only — see Agent-specific language override.)*
+  - **Language rules (unified with `copilot-instructions.md`):**
+    - **All agents:** The KO section is the primary source of truth for AI reading; when interpreting a bilingual doc, read KO first.
+    - **Claude (any version):** Write `plan.md` in **KO only** (do not create an EN section).
+      - If editing an existing EN+KO `plan.md`: update **KO only**; keep EN unchanged except for adding the staleness banner if it is missing.
+    - **Non-Claude agents (GPT, Gemini, etc.):** Write **EN+KO**. Put EN first, then `---`, then KO (same content translated). KO remains authoritative.
+    - **Why EN first (for EN+KO docs):** This is a formatting convention for consistent diffs and human scanning; it does not mean EN is authoritative.
   - **Every Step heading** must include its number and a short descriptive name: `#### Step N — Short name`.
   - **Sub-step tables** are mandatory for every Step (see sub-step table format above).
   - **Verification hook blocks** are mandatory for every Step closeout.
@@ -162,7 +167,7 @@ When a plan has multiple major Steps (e.g., Step 0, Step 1, …, Step N), **each
 - `agent_log.md`는 **사용자가 특정 plan을 수행하라고 지시할 때만** 작성/업데이트.
 - **`agent_log.md` 언어 규칙(필수):** `agent_log.md`는 **한국어 단독**으로 작성한다. 영/한 병기 불필요 — 한국어만으로 충분.
 - 저장 위치: `C:\github_coding\terminal_sec\ai_agent_plan\<project_name>\`
-  - `plan.md`: 작업 시작 전 상세 단계별 계획 (목표, 접근법, 생성/수정 파일, 순서, 위험 요소). 영/한 병기 (단, 에이전트별 언어 오버라이드 참고 — Claude는 한국어 단독).
+  - `plan.md`: 작업 시작 전 상세 단계별 계획 (목표, 접근법, 생성/수정 파일, 순서, 위험 요소). **언어 규칙은 아래 `plan.md 작성 규칙` 참조.**
   - `agent_log.md`: 수행한 모든 작업을 시간순으로 기록 (생성/수정 파일, 실행 명령어, 결정, 오류). **한국어 단독.**
 - **큰 작업은 단계로 쪼개기:** 크고 복잡한 작업은 독립적으로 검증 가능한 작은 단계로 분해한다. 각 단계마다 명확한 산출물을 정의한다.
 - **플랜 중간 변경(리비전):** 기록 히스토리를 유지한다.
@@ -272,7 +277,12 @@ plan에 여러 대단계(Step 0, Step 1, …, Step N)가 있을 때, **각 Step�
 
 - **plan.md 작성 규칙(plan.md 생성/수정 시 반드시 준수):**
   - **구조 순서:** 목표 → 접근법 개요 → Step 목록(각 Step에 세부 단계 테이블 + 검증 훅) → 실행 의존성 그래프 → 미결정 사항/차단 요소.
-  - **한/영 병기:** EN 섹션을 먼저, `---` 구분선, 그 다음 KO 섹션(동일 내용 번역). *(오버라이드: Claude는 한국어 단독 — 에이전트별 언어 오버라이드 참고.)*
+  - **언어 규칙 (copilot-instructions.md 기준으로 통합 정리):**
+    - **모든 에이전트 공통:** KO 섹션이 primary source of truth. 읽을 때 KO를 먼저 참조.
+    - **Claude(모든 버전):** `plan.md`를 **KO only**로 작성. EN 섹션은 만들지 않음.
+      - 기존에 EN+KO로 작성된 `plan.md`를 수정할 때: **KO만 업데이트**, EN은 건드리지 않고 staleness 배너(`> ⚠️ EN section may be outdated …`)가 없으면 삽입.
+    - **비-Claude 에이전트(GPT, Gemini 등):** EN+KO 병기. EN 섹션을 먼저, `---` 구분선, 그 다음 KO 섹션(동일 내용 번역). 다만 KO가 authoritative.
+    - **왜 EN을 먼저 두나(EN+KO 문서일 때):** 권위(authority) 문제가 아니라 형식(레이아웃) 규칙입니다. EN-first는 diff/검색/스캔을 일관되게 만들기 위한 관례이고, AI 해석 기준은 여전히 KO가 우선입니다.
   - **모든 Step 제목**에는 번호와 짧은 설명을 포함: `#### Step N — 짧은 이름`.
   - **세부 단계 테이블**은 모든 Step에 필수(위의 세부 단계 테이블 형식 참조).
   - **검증 훅 블록**은 모든 Step 마감 시 필수.
