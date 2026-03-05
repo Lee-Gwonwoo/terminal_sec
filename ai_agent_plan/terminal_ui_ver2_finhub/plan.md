@@ -2,6 +2,8 @@
 
 ## EN
 
+> ⚠️ EN section may be outdated — KO section is the authoritative source.
+
 > ℹ️ KO section is the authoritative source. If EN/KO diverge, sync EN to match KO.
 
 ### Goal
@@ -2027,43 +2029,81 @@ UI 동작(최소/명확)
 
 #### 4단계 — Finnhub 인제션(백엔드)
 목적
-- Brave/mock 기반 뉴스 대신, Finnhub에서 실제 뉴스를 수집해 기존 `news_items` 저장소에 적재한다.
-- 프론트는 일관된 방식으로 `GET /api/news`만 호출하면 된다.
+- Brave/mock 기반 뉴스 대신, Finnhub에서 **company news**(회사 뉴스)와 **press release**(보도자료)를 모두 수집해 기존 `news_items` 저장소에 적재한다.
+- 두 종류의 데이터는 `source_type`으로 구분하여 **별도 저장**한다:
+  - `source_type = 'company_news'` — Finnhub `/company-news` 엔드포인트
+  - `source_type = 'press_release'` — Finnhub `/press-releases` 엔드포인트
+- 프론트는 `GET /api/news?source_names=FINNHUB`(전체) 또는 `&source_type=company_news`/`press_release`(필터)로 조회한다.
+- 수집된 각 뉴스 row에 대해, 해당 날짜+티커의 OHLC 데이터가 이미 DB에 있으면 change% 컬럼을 즉시 병합한다.
 
 시크릿 처리
 - `FINNHUB_API_KEY`(권장) 또는 기존 파일 fallback에서 키를 읽는다.
 - API 키나 시크릿이 포함된 URL 전체를 로그로 찍지 않는다.
 
-중복/재수집 정책
-- 겹치는 기간을 재수집해도 DB가 중복으로 늘어나지 않도록(가능한 범위에서) de-dup를 수행한다.
-- DB에 유니크 키가 있으면 그 제약을 활용하고, 없으면 insert 시 best-effort로 막는다.
+증분 수집 정책(중복 방지 + 갭 방지)
+- **중복 방지**: `news_items`의 `UNIQUE(source, url)` 제약으로 같은 기사가 두 번 삽입되지 않는다(`INSERT OR IGNORE`).
+- **갭 방지(incremental pull)**: 각 `source_type` 별로 `MAX(published_at)`을 조회해, 그 이후 시점부터만 Finnhub에 요청한다.
+  - 최초 수집(DB에 해당 source_type이 없음): 기본 lookback 기간(예: 7일)부터 수집.
+  - 이후 수집: `MAX(published_at)` 이후 ~ 현재까지 수집.
+- **최신 데이터 우선**: 매 수집 시 항상 현재 시각까지를 종료 시점으로 하여 최신 뉴스가 빠지지 않게 한다.
+- DB에 이미 있는 기사는 `INSERT OR IGNORE`로 안전하게 건너뛴다.
+
+news_items 스키마 확장(change% 병합용)
+- `news_items` 테이블에 아래 컬럼을 migration으로 추가한다:
+  - `ohlc_ticker` (TEXT) — change% 계산에 사용한 티커
+  - `ohlc_date` (TEXT) — 매칭된 OHLC 날짜 (`YYYY-MM-DD`)
+  - `change_1d_pct` (REAL) — 전일 종가 대비 당일 종가 % 변화
+  - `change_from_open_pct` (REAL) — 시가 대비 종가 % 변화
+  - `change_7d_pct` (REAL) — 7거래일 전 종가 대비 % 변화
+  - `change_14d_pct` (REAL) — 14거래일 전 종가 대비 % 변화
+  - `change_30d_pct` (REAL) — 30거래일 전 종가 대비 % 변화
+  - `change_computed_at` (TEXT) — 파생값 계산 시각(ISO)
+- 이 컬럼들은 다음 시점에 채워진다:
+  1. **4단계(Finnhub 인제션 시)**: 해당 뉴스의 티커+날짜에 대응하는 OHLC가 이미 DB에 있으면 즉시 계산/저장.
+  2. **7단계(IBKR OHLC 업데이트 후)**: OHLC가 새로 들어온 심볼/날짜에 대해 `change_1d_pct` 등이 NULL인 news_items를 찾아 백필.
 
 API 계약(초안)
-- `POST /api/news/pull-finhub`는 수집을 수행하고 요약을 반환한다:
-  - `{ inserted: <n>, skipped: <n>, source: "FINNHUB" }`
-- `GET /api/news?source_names=FINNHUB`로 적재된 데이터를 조회한다.
+- `POST /api/news/pull-finhub` — company news + press release를 모두 수집하고 요약을 반환:
+  - `{ inserted: <n>, skipped: <n>, source: "FINNHUB", details: { company_news: { inserted, skipped }, press_release: { inserted, skipped } } }`
+- `GET /api/news?source_names=FINNHUB` — 전체 Finnhub 뉴스 조회
+- `GET /api/news?source_names=FINNHUB&source_type=company_news` — company news만 조회
+- `GET /api/news?source_names=FINNHUB&source_type=press_release` — press release만 조회
 
 백엔드 파일:
 - `terminal/backend/src/config.ts`
   - `FINNHUB_API_KEY`를 읽는 설정 추가(또는 파일 fallback)
 - Provider `terminal/backend/src/services/finnhubNewsProvider.ts` 추가
-  - Finnhub 호출 → `insertNewsItem()`에 넣을 형태로 매핑
-  - `source = 'FINNHUB'`, `source_type = 'finhub_api'` 같이 일관된 키 사용
+  - **company news**: Finnhub `/company-news?symbol=X&from=...&to=...` 호출 → `insertNewsItem()`에 매핑
+    - `source = 'FINNHUB'`, `source_type = 'company_news'`
+  - **press release**: Finnhub `/press-releases?symbol=X&from=...&to=...` 호출 → `insertNewsItem()`에 매핑
+    - `source = 'FINNHUB'`, `source_type = 'press_release'`
+  - 각 타입별 `MAX(published_at)` 조회 → 증분 수집 구현
+- 서비스 `terminal/backend/src/services/newsChangeMerger.ts` 추가
+  - 뉴스 row의 `(ohlc_ticker, published_at 날짜)` 기준으로 OHLC DB에서 해당 날짜의 change% 데이터를 조회/계산
+  - `news_items`의 change% 컬럼을 UPDATE
+  - 4단계 인제션 시(새 뉴스 insert 후)와 7단계 OHLC 업데이트 후(backfill) 양쪽에서 호출
 - `terminal/backend/src/server.ts`
   - `POST /api/news/pull-finhub` 추가(EODHD와 유사한 형태)
+  - company_news + press_release 모두 수집 후 change% 병합 시도
   - 성공 시 `update_status`의 `finhub_news` 갱신
 
 검증
 - 인제션 후 `GET /api/news?source_names=FINNHUB`로 조회 가능
+- `source_type` 필터로 company_news / press_release를 각각 조회 가능
+- OHLC 데이터가 있는 날짜의 뉴스 row에 change% 값이 채워져 있음
 
 **세부 단계 (4단계)**
 | 세부 단계 | 작업 | 파일 | 검증 |
 |-----------|------|------|------|
 | 4-1 | `FINNHUB_API_KEY` 설정 로딩 추가 | `terminal/backend/src/config.ts` | 키가 없으면 명확한 오류(키 값 로그 금지) |
-| 4-2 | Finnhub provider 구현 + DB 매핑 | `terminal/backend/src/services/finnhubNewsProvider.ts` | 매핑 결과가 `news_items` insert 스키마에 맞음 |
-| 4-3 | `POST /api/news/pull-finhub` 구현 | `terminal/backend/src/server.ts` | 호출 시 `{inserted, skipped, source}` 반환 |
-| 4-4 | 성공 시 `update_status(finhub_news)` 갱신 | `updateStatusRepository` | `GET /api/updates/status`에서 lastSuccessAt 업데이트 |
-| 4-5 | 적재 데이터 조회 검증 | (런타임) | `GET /api/news?source_names=FINNHUB`로 rows 확인 |
+| 4-2 | `news_items` change% 컬럼 마이그레이션 | `terminal/backend/src/db.ts` | `PRAGMA table_info(news_items)`에 change% 컬럼 존재 |
+| 4-3 | Finnhub company news provider 구현 | `terminal/backend/src/services/finnhubNewsProvider.ts` | `/company-news` 매핑 결과가 `news_items` 스키마에 맞고 `source_type='company_news'` |
+| 4-4 | Finnhub press release provider 구현 | `terminal/backend/src/services/finnhubNewsProvider.ts` | `/press-releases` 매핑 결과가 `news_items` 스키마에 맞고 `source_type='press_release'` |
+| 4-5 | `GET /api/news` source_type 필터 파라미터 지원 | `server.ts`, `newsRepository.ts` | `?source_type=company_news`로 해당 type만 반환 |
+| 4-6 | `newsChangeMerger` 서비스 구현 | `terminal/backend/src/services/newsChangeMerger.ts` | 뉴스 row에 OHLC 기반 change% 업데이트 |
+| 4-7 | `POST /api/news/pull-finhub` 구현(양쪽 수집 + change% 병합) | `terminal/backend/src/server.ts` | `{inserted, skipped, source, details}` 반환 |
+| 4-8 | 성공 시 `update_status(finhub_news)` 갱신 | `updateStatusRepository` | `GET /api/updates/status`에서 lastSuccessAt 업데이트 |
+| 4-9 | 적재 데이터 조회 + source_type 필터 + change% 검증 | (런타임) | `GET /api/news?source_names=FINNHUB&source_type=company_news` rows 확인, change% 값 존재 |
 
 **세부 단계 목적/설명 (4단계)**
 - `4-1` 목적: Finnhub 키를 안전하게 로드. 설명:
@@ -2073,42 +2113,86 @@ API 계약(초안)
   - 완료 조건(눈으로 확인): env var가 있으면 백엔드가 정상 동작하고, 없으면 “키 없음”이 명확한 에러로 실패한다(키 값 노출 없음).
   - 사람 검증(비개발자): 설정이 없을 때 인제션 호출이 “missing key”로 실패하는지, 그리고 키가 화면/로그에 노출되지 않는지 확인.
   - 흔한 문제/주의: 키를 로그로 찍거나, 키가 포함된 전체 URL을 로그로 찍어 유출; 여러 곳에서 키를 읽어 설정이 꼬임.
-- `4-2` 목적: Finnhub 응답을 DB 뉴스 스키마로 변환. 설명:
-  - “company news” 용 Finnhub 호출을 수행한다.
-  - 기존 `insertNewsItem()` 계약에 맞게 매핑하고, `source='FINNHUB'`를 일관되게 설정한다.
-  - 중복 방지: 기간이 겹쳐도 같은 항목이 재삽입되지 않도록(가능한 범위에서) DB 제약 또는 코드 de-dup를 적용한다.
-  - 완료 조건(눈으로 확인): `GET /api/news?source_names=FINNHUB`에서 title/time/url이 비어있지 않은 rows가 나온다.
-  - 사람 검증(비개발자): (5단계 이후) News 창에서 실제 헤드라인이 보이고, placeholder/가짜 텍스트가 없어야 한다.
-  - 흔한 문제/주의: timestamp 단위/타임존 혼동; `source` 문자열 불일치로 필터가 깨짐; 반복 pull 시 중복 급증.
-- `4-3` 목적: 수동으로 적재를 트리거할 수 있게 함. 설명:
-  - `POST /api/news/pull-finhub`에서 pull + insert를 수행한다.
-  - UI가 표시하기 좋은 작은 요약(`inserted`, `skipped`, `source`)만 반환한다.
+- `4-2` 목적: `news_items` 테이블에 change% 관련 컬럼을 migration으로 추가. 설명:
+  - `db.ts`의 `initDb()` 안에서 `ensureColumn()` 헬퍼를 사용해 아래 컬럼을 idempotent하게 추가한다:
+    - `ohlc_ticker TEXT`, `ohlc_date TEXT`, `change_1d_pct REAL`, `change_from_open_pct REAL`, `change_7d_pct REAL`, `change_14d_pct REAL`, `change_30d_pct REAL`, `change_computed_at TEXT`
+  - 기존 row에 영향 없이 새 컬럼은 NULL default로 생성된다.
+  - 완료 조건(눈으로 확인): `PRAGMA table_info(news_items)`에 위 컬럼이 모두 존재.
+  - 사람 검증(비개발자): DB 파일을 SQLite 뷰어로 열어 news_items 테이블의 컬럼 목록 확인.
+  - 흔한 문제/주의: 컬럼명 오타로 유사 컬럼 중복 생성; ensureColumn 호출 순서가 initDb 밖에 있어 실행 안 됨.
+- `4-3` 목적: Finnhub **company news** 응답을 DB 스키마로 변환. 설명:
+  - Finnhub `/company-news?symbol=X&from=YYYY-MM-DD&to=YYYY-MM-DD` 호출을 수행한다.
+  - 기존 `insertNewsItem()` 계약에 맞게 매핑하고, `source='FINNHUB'`, `source_type='company_news'`를 일관되게 설정한다.
+  - **증분 수집**: 해당 source_type의 `MAX(published_at)`을 조회해 from 날짜를 결정한다.
+    - DB에 company_news가 없으면: 기본 lookback(7일 전)부터 수집.
+    - DB에 company_news가 있으면: MAX(published_at) 이후 ~ 현재까지 수집.
+  - 중복 방지: `INSERT OR IGNORE` + `UNIQUE(source, url)` 제약.
+  - 완료 조건(눈으로 확인): `GET /api/news?source_names=FINNHUB&source_type=company_news`에서 title/time/url이 비어있지 않은 rows가 나온다.
+  - 사람 검증(비개발자): (5단계 이후) News 창 필터에서 "Company News"를 선택하면 실제 헤드라인이 보여야 한다.
+  - 흔한 문제/주의: timestamp 단위/타임존 혼동; `source_type` 문자열 불일치로 필터가 깨짐; 반복 pull 시 중복 급증.
+- `4-4` 목적: Finnhub **press release** 응답을 DB 스키마로 변환. 설명:
+  - Finnhub `/press-releases?symbol=X&from=YYYY-MM-DD&to=YYYY-MM-DD` 호출을 수행한다.
+  - `source='FINNHUB'`, `source_type='press_release'`로 매핑한다.
+  - **증분 수집**: company_news와 동일한 전략(source_type별 MAX(published_at) 기반).
+  - press release 응답 구조가 company-news와 다를 수 있으므로 매핑 필드를 각각 확인한다.
+  - 완료 조건(눈으로 확인): `GET /api/news?source_names=FINNHUB&source_type=press_release`에서 rows가 나온다.
+  - 사람 검증(비개발자): (5단계 이후) News 창 필터에서 "Press Release"를 선택하면 별도의 보도자료가 보인다.
+  - 흔한 문제/주의: press release URL 구조가 company-news와 달라 dedup key 충돌; 빈 press release가 생기는 경우 처리.
+- `4-5` 목적: `GET /api/news` API에 `source_type` 필터 파라미터를 추가. 설명:
+  - `newsRepository.ts`의 조회 쿼리에 `source_type` 조건을 추가한다.
+  - `GET /api/news?source_names=FINNHUB&source_type=company_news` → company_news만 반환.
+  - `GET /api/news?source_names=FINNHUB&source_type=press_release` → press_release만 반환.
+  - `source_type` 파라미터가 없으면 기존과 동일(모든 type 반환).
+  - 완료 조건(눈으로 확인): 각 source_type 필터가 정확히 해당 type의 row만 반환.
+  - 사람 검증(비개발자): curl로 source_type 유/무 2가지를 호출해 결과 개수가 다른지 확인.
+  - 흔한 문제/주의: source_type 파라미터를 서버에서 꺼내지 않아 필터가 무시됨; SQL injection 주의(바인드 파라미터 사용).
+- `4-6` 목적: 뉴스 row에 OHLC 기반 change% 데이터를 병합하는 서비스. 설명:
+  - `newsChangeMerger.ts` 구현:
+    - 입력: 병합 대상 뉴스 row 목록 (또는 "change%가 NULL인 row" 자동 조회)
+    - 각 row의 `(tickers_csv 첫 번째 ticker, published_at 날짜)` 기준으로 OHLC DB(`ohlc_1d_watchlist.sqlite`)에서 해당 날짜의 OHLC를 조회
+    - change_1d_pct, change_from_open_pct, change_7d_pct, change_14d_pct, change_30d_pct를 계산 (7단계의 `ohlcDerivedMetrics`와 동일 로직 재사용 또는 OHLC DB에서 이미 계산된 값 읽어옴)
+    - 결과를 `news_items`의 해당 row에 UPDATE (ohlc_ticker, ohlc_date, change_*, change_computed_at)
+  - OHLC 데이터가 없는 날짜(휴장일 등)는 가장 가까운 이전 거래일의 데이터를 사용하거나 NULL로 남긴다.
+  - 완료 조건(눈으로 확인): OHLC 데이터가 있는 날짜의 뉴스 row에서 change_1d_pct 등이 실제 숫자로 채워진다.
+  - 사람 검증(비개발자): 특정 날짜/티커의 뉴스 row를 SQL로 조회해 change% 값이 그럴듯한 범위인지 확인.
+  - 흔한 문제/주의: OHLC DB 경로를 잘못 열음; 주말/휴장일 날짜 매칭 실패; 0으로 나누기(Open=0).
+- `4-7` 목적: company news + press release 양쪽 수집을 한 번에 수행 + change% 병합 트리거. 설명:
+  - `POST /api/news/pull-finhub`:
+    1. Default Ticker CSV에서 티커 로드
+    2. 각 티커에 대해 `pullCompanyNews()` + `pullPressReleases()` 호출 (증분 수집)
+    3. insert 결과를 source_type별로 집계
+    4. 새로 삽입된 뉴스 row에 대해 `newsChangeMerger`로 change% 병합 시도
+    5. 요약 반환: `{ inserted, skipped, source: "FINNHUB", details: { company_news: {..}, press_release: {..}, changeMerged: <n> } }`
   - startup 자동 실행은 하지 않는다(명시적 트리거만).
-  - 완료 조건(눈으로 확인): POST 호출이 무한 대기하지 않고, 작은 요약 JSON만 반환한다.
-  - 사람 검증(비개발자): (5-5 사용 시) 창 안의 Update 버튼을 누르면 목록이 갱신되는지 확인.
-  - 흔한 문제/주의: startup 때 자동 pull이 돌아 예상치 못한 부작용 발생; 너무 큰 payload를 응답으로 내려 UI가 느려짐.
-- `4-4` 목적: “마지막 성공 시각”을 기록. 설명:
+  - 완료 조건(눈으로 확인): POST 호출이 합리적인 시간 내에 끝나고 요약 JSON을 반환한다.
+  - 사람 검증(비개발자): Update 버튼 클릭 후 company_news + press_release 수치가 양쪽 모두 0 이상인지 확인.
+  - 흔한 문제/주의: 한쪽 endpoint 실패 시 전체 실패로 처리할지 부분 성공으로 처리할지 정책 필요; 티커가 많으면 rate limit.
+- `4-8` 목적: "마지막 성공 시각"을 기록. 설명:
   - 성공 시 `update_status(finhub_news).lastSuccessAt = now()`를 저장한다.
   - `details`에는 카운트/기간 같은 최소 정보만 저장하고 원문 응답은 저장하지 않는다.
   - `GET /api/updates/status`로 실제 갱신을 확인한다.
   - 완료 조건(눈으로 확인): 성공적인 pull 직후 `finhub_news.lastSuccessAt`가 null이 아닌 ISO timestamp가 된다.
-  - 사람 검증(비개발자): (8단계 이후) Data Control Window에서 “마지막 성공” 시각이 실제로 바뀐다.
+  - 사람 검증(비개발자): (8단계 이후) Data Control Window에서 "마지막 성공" 시각이 실제로 바뀐다.
   - 흔한 문제/주의: insert 실패인데도 lastSuccessAt을 갱신해 오해를 유발; 표시하기 어려운 포맷(비 ISO) 저장.
-- `4-5` 목적: 적재된 데이터가 실제 조회 가능한지 확인. 설명:
-  - `GET /api/news?source_names=FINNHUB` 조회로 아래를 확인한다:
-    - row 존재
-    - 필수 필드(title/time/url/source 등) 존재
-    - `source`가 정확히 `FINNHUB`
+- `4-9` 목적: 적재 + 필터 + change% 전체 검증. 설명:
+  - 아래를 확인한다:
+    1. `GET /api/news?source_names=FINNHUB` → row 존재, 필수 필드 비어있지 않음
+    2. `GET /api/news?source_names=FINNHUB&source_type=company_news` → company_news row만 반환
+    3. `GET /api/news?source_names=FINNHUB&source_type=press_release` → press_release row만 반환
+    4. OHLC 데이터가 있는 날짜의 뉴스 row에서 `change_1d_pct` 등이 NULL이 아님
   - 데이터가 없다면 UI 문제가 아니라 수집/저장/조회 경로를 먼저 의심한다.
-  - 완료 조건(눈으로 확인): GET이 안정적으로 배열(JSON)을 반환하고, pull 후 최신 항목이 추가된다.
-  - 사람 검증(비개발자): News 창을 새로고침하면(또는 Update 후) 항목이 바뀌거나 늘어난다.
-  - 흔한 문제/주의: rows는 나오는데 필수 필드가 비어있음; `source` 철자가 달라 필터가 비어 보임.
+  - 완료 조건(눈으로 확인): 위 4가지 체크가 모두 통과.
+  - 사람 검증(비개발자): News 창에서 필터 전환(company news ↔ press release)이 되고, Change% 컬럼에 숫자가 있는지 확인.
+  - 흔한 문제/주의: source_type 오타로 필터 결과가 빔; change% 병합이 안 되어 전부 NULL.
 
 **검증 훅 (4단계 마감):**
 ```
 1. POST /api/news/pull-finhub 실행
 2. GET /api/news?source_names=FINNHUB → rows 확인
-3. GET /api/updates/status → finhub_news lastSuccessAt 확인
+3. GET /api/news?source_names=FINNHUB&source_type=company_news → company_news rows만 확인
+4. GET /api/news?source_names=FINNHUB&source_type=press_release → press_release rows만 확인
+5. OHLC 데이터가 있는 날짜의 뉴스 row → change_1d_pct 등 non-NULL 확인
+6. GET /api/updates/status → finhub_news lastSuccessAt 확인
 ```
 - 사용자 확인 필요: **Yes**
 
@@ -2123,6 +2207,11 @@ API 계약(초안)
 
 데이터 흐름
 - 프론트는 `GET /api/news?source_names=FINNHUB`로 렌더한다.
+- **source_type 필터**: 창 상단에 “Company News” / “Press Release” 필터를 제공한다.
+  - 하나만 선택: `GET /api/news?source_names=FINNHUB&source_type=company_news` (또는 `press_release`)
+  - 둘 다 선택(기본): `GET /api/news?source_names=FINNHUB` (source_type 파라미터 없이 전체 반환)
+  - 필터 상태는 컴포넌트 state로 관리(URL/전역 상태 불필요).
+- **Change% 컬럼**: 각 뉴스 row의 `change_1d_pct`, `change_from_open_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct` 값을 백엔드 응답에서 그대로 렌더한다. 값이 없으면 `-`로 표시.
 - (선택) 창 내부에 “Update” 버튼을 두고 `POST /api/news/pull-finhub`로 수집 트리거.
 
 프론트 파일:
@@ -2158,6 +2247,7 @@ API 계약(초안)
 | 5-6 | AddTab 라벨을 정확히 `news feed:finhub api`로 변경 | `src/app/components/AddTabModal.tsx` | UI에 Brave 표기 없음 |
 | 5-7 | `App.tsx` title 매핑 추가/수정 | `src/app/App.tsx` | `finhub-news` → `news feed:finhub api` |
 | 5-8 | `DraggableWindow.tsx` 렌더 스위치 연결 | `src/app/components/DraggableWindow.tsx` | `finhub-news`가 `FinnhubNewsWindow`를 렌더 |
+| 5-9 | source_type 필터 UI 구현 (Company News / Press Release 선택) | `FinnhubNewsWindow.tsx` | 필터 전환 시 해당 source_type만 표시, 둘 다 선택 시 전체 표시 |
 
 **세부 단계 목적/설명 (5단계)**
 - `5-1` 목적: Brave 기반 창을 Finnhub 기반으로 전환. 설명:
@@ -2216,12 +2306,23 @@ API 계약(초안)
   - 완료 조건(눈으로 확인): 창을 열면 입력/목록/빈 상태 등 “내용 영역”이 보이고, 완전히 빈 프레임만 뜨지 않는다.
   - 사람 검증(비개발자): 빈 DB 상태에서도 빈 상태 UI가 보이고 에러/크래시가 없는지 확인.
   - 흔한 문제/주의: switch 연결 누락으로 창은 뜨지만 내용이 비어 있음.
+- `5-9` 목적: source_type 필터 UI를 구현하여 company news / press release를 선택적으로 표시. 설명:
+  - 창 상단(또는 툴바)에 "Company News" / "Press Release" 두 개의 토글/체크박스/버튼 그룹을 배치한다.
+  - **둘 다 선택**(기본 상태): `GET /api/news?source_names=FINNHUB` (source_type 파라미터 없이 요청) → 두 종류 모두 표시.
+  - **하나만 선택**: `GET /api/news?source_names=FINNHUB&source_type=company_news` 또는 `&source_type=press_release` → 선택된 종류만 표시.
+  - **Change% 컬럼 렌더**: 각 row의 `change_1d_pct`, `change_from_open_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct`를 해당 컬럼에 표시. NULL이면 `-`.
+  - 필터 전환 시 기존 데이터를 클리어하고 새 요청을 보낸다(stale 데이터 방지).
+  - 완료 조건(눈으로 확인): 필터 UI가 보이고, 전환 시 목록이 해당 type에 맞게 바뀐다. Change% 컬럼에 실제 숫자(또는 `-`)가 표시된다.
+  - 사람 검증(비개발자): Company News만 선택 → press release가 안 보이는지 확인. 둘 다 선택 → 둘 다 보이는지 확인. Change% 값이 있는 row에서 숫자가 보이는지 확인.
+  - 흔한 문제/주의: 필터 state와 API 파라미터 불일치; 필터 전환 시 이전 응답이 잠깐 보이는 깜빡임; Change% 컬럼 필드명과 백엔드 응답 키 불일치.
 
 **검증 훅 (5단계 마감):**
 ```
 1. news feed:finhub api 창 열기
 2. 네트워크 탭에서 GET /api/news?source_names=FINNHUB 확인
 3. UI에 mock 항목이 나타나지 않는지 확인
+4. source_type 필터 전환 → Company News만 / Press Release만 / 둘 다 각각 렌더 확인
+5. Change% 컬럼에 OHLC 기반 값(또는 `-`) 표시 확인
 ```
 - 사용자 확인 필요: **Yes**
 
@@ -2229,6 +2330,7 @@ API 계약(초안)
 목적
 - 요구사항: `/calendar`는 **IBKR 데이터만** 사용해야 한다.
 - 현재 백엔드는 startup 시 mock 캘린더를 자동 생성하므로, 이를 제거하고 명시적 업데이트로 전환한다.
+- **결정 #5 확정**: 일단 IBKR 캘린더(WSH) 데이터를 사용한다. 추후 Finnhub Estimates(유료 구독) 확보 시 `source` 필드를 기준으로 전환할 수 있도록 설계한다.
 
 동작 변경 요약
 - 기존: 백엔드 기동 시점에 mock worker가 주기적으로 `mock_provider` rows를 insert
@@ -2259,7 +2361,7 @@ API 계약(초안)
 - 업데이트 이후 캘린더 조회 결과가 `source = IBKR`만 포함
 
 **세부 단계 (6단계)**
-> **⚠️ BLOCKED**: `/calendar` 데이터 소스 전략(미결 결정)에 따라 구현 범위/필드가 달라짐.
+> ✅ **결정 완료**: IBKR 캘린더 데이터 우선 사용. 추후 Finnhub Estimates 구독 시 전환 가능하도록 `source` 필드로 분리.
 
 | 세부 단계 | 작업 | 파일 | 검증 |
 |-----------|------|------|------|
@@ -2329,6 +2431,7 @@ API 계약(초안)
   2) IBKR에서 누락된 **일봉(1D) OHLCV**를 가져온다
   3) 기존 canonical DB `OHLC_data/ohlc_1d_watchlist.sqlite`에 upsert 한다
   4) News Feed UI에 필요한 파생 % 변화 컬럼을 계산/저장한다
+  5) **news_items change% 백필**: OHLC 업데이트로 새 데이터가 들어온 심볼/날짜에 대해, `news_items` 테이블의 change% 컬럼(change_1d_pct 등)이 NULL인 row를 찾아 OHLC 기반으로 계산/업데이트한다.
 
 기간 규칙(최소/증분)
 - DB 최신 날짜 `MAX(Datetime)`를 기준으로, 이후 구간만 가져온다.
@@ -2386,14 +2489,16 @@ API 계약(초안)
 - `ohlc_1d`에서 최근 날짜의 파생 컬럼이 실제 값으로 채워졌는지(전부 NULL이 아닌지) 샘플 확인
 
 **세부 단계 (7단계)**
-> **⚠️ BLOCKED**: Node.js ↔ IBKR 연동 방식(미결 결정) 확정 필요.
+> ✅ **결정 완료**: 옵션 B (Python child_process) 확정.
 
 결정 #6 메모(7단계에서 무엇이 달라지는가)
-- 결정에 따라 달라지는 것은 `7-3`(IBKR provider) 구현 방식뿐이다. 나머지( SQLite upsert + 파생 지표 + API 엔드포인트)는 동일하다.
-- 매핑:
-  - 옵션 A(Node 직결): `ibkrOhlc1dProvider.ts`가 Node에서 TWS/Gateway에 직접 연결.
-  - 옵션 B(Python child_process): `ibkrOhlc1dProvider.ts`가 로컬 Python 스크립트를 실행하고, newline-delimited JSON을 파싱.
-  - 옵션 C(Python 마이크로서비스): `ibkrOhlc1dProvider.ts`가 `http://127.0.0.1:<port>`로 호출하고, Python 서비스가 IBKR 세션을 유지.
+- **확정: 옵션 B (Python child_process)**
+- `7-3`(IBKR provider)은 옵션 B로 구현한다. 나머지(SQLite upsert + 파생 지표 + API 엔드포인트)는 동일하다.
+- 구현 방식:
+  - `ibkrOhlc1dProvider.ts`가 로컬 Python 스크립트를 `child_process.spawn`으로 실행
+  - Python 스크립트가 IBKR TWS/Gateway에 연결하여 1D bars를 가져오고, newline-delimited JSON을 stdout으로 출력
+  - Node가 stdout을 파싱하여 bars 배열로 변환
+  - 에러 시 Python이 non-zero exit code로 종료, stderr를 Node가 캡처하여 API 에러로 전달
 
 | 세부 단계 | 작업 | 파일 | 검증 |
 |-----------|------|------|------|
@@ -2404,6 +2509,7 @@ API 계약(초안)
 | 7-5 | `GET /api/ibkr/ohlc1d/status` 연결 | `terminal/backend/src/server.ts` | `{ dbPath, overallMaxDate: "2026-02-20", lastSuccessAt }` 반환 |
 | 7-6 | `POST /api/ibkr/ohlc1d/update` 연결 | `terminal/backend/src/server.ts` | POST 후 `overallMaxDate`가 증가(새 거래일 존재 시) |
 | 7-7 | 파생 컬럼 샘플 점검 | (런타임) | `SELECT ... Change_1d_Pct ... WHERE Symbol='AAPL' ... LIMIT 5` → NULL 아님 |
+| 7-8 | OHLC 업데이트 후 news_items change% 백필 | `newsChangeMerger.ts`, `server.ts` | OHLC 업데이트 전에 change%가 NULL이었던 news row가 업데이트 후 실제 값으로 채워짐 |
 
 **세부 단계 목적/설명 (7단계)**
 - `7-1` 목적: canonical OHLC SQLite DB 접근을 한 곳으로 모아 안전하게 캡슐화한다. 설명:
@@ -2452,6 +2558,7 @@ API 계약(초안)
     - Default Ticker CSV에서 티커를 읽고 정규화+중복 제거
     - DB max date를 기준으로 심볼별 수집 기간을 결정
     - `ibkrOhlc1dProvider`로 bars fetch → upsert → 영향 구간 파생 지표 재계산
+    - **news_items change% 백필**: 새 OHLC가 들어온 심볼/날짜에 대해 `newsChangeMerger`를 호출하여 `news_items`의 change% 컬럼을 채움
     - 전체 성공 시 `update_status(ibkr_ohlc_1d)`를 최소 details로 갱신
   - 부분 실패 정책을 명시해야 한다(코드에 문서화):
     - (a) 전체 실패로 처리, 또는 (b) 가능한 심볼은 계속 진행하고 per-symbol 실패를 리포트
@@ -2466,20 +2573,26 @@ API 계약(초안)
   - 완료 조건(눈으로 확인): SQL 결과에 행이 나오고 파생 컬럼 중 최소 1개가 숫자 값으로 채워져 있다.
   - 사람 검증(비개발자): SQLite 뷰어에 SQL을 붙여 넣고 값이 과도하게 크거나 NaN/inf처럼 보이지 않는지 확인.
   - 흔한 문제/주의: 다른 DB 파일을 열어 확인; `Datetime` 포맷이 어긋나 MAX(Datetime)가 잘못 계산.
+- `7-8` 목적: OHLC 업데이트 후 news_items의 change% 컬럼을 백필한다. 설명:
+  - OHLC upsert + 파생 지표 계산이 완료된 후, `newsChangeMerger`를 호출한다.
+  - 대상: `news_items`에서 `change_1d_pct IS NULL` AND `tickers_csv`가 이번에 업데이트된 심볼을 포함하는 row.
+  - 각 row의 `published_at` 날짜에 대응하는 OHLC 데이터를 `ohlc_1d_watchlist.sqlite`에서 조회하고, change_1d_pct, change_from_open_pct, change_7d_pct, change_14d_pct, change_30d_pct를 계산하여 UPDATE.
+  - OHLC에 해당 날짜가 없으면(휴장일 등): 가장 가까운 이전 거래일 데이터를 사용하거나 NULL 유지.
+  - `POST /api/ibkr/ohlc1d/update`의 반환 요약에 `newsChangesMerged: <n>`을 추가한다.
+  - 완료 조건(눈으로 확인): OHLC 업데이트 전에 change%가 NULL이었던 뉴스 row가, 업데이트 후 실제 숫자로 채워진다.
+  - 사람 검증(비개발자): OHLC 업데이트 전후로 `SELECT id, change_1d_pct FROM news_items WHERE ohlc_ticker='AAPL' LIMIT 5`를 비교.
+  - 흔한 문제/주의: newsChangeMerger가 잘못된 DB를 열어 매칭 실패; 심볼 매칭에서 대소문자/접미사 불일치; 대량 뉴스 row 업데이트 시 트랜잭션 없이 느려짐.
 
-`7-3` 옵션별 small steps(결정 #6)
-- 옵션 A(Node 직결):
-  - Node에서 TWS/IB Gateway에 연결 후 historical daily bars 요청.
-  - 응답을 `{ Datetime, Open, High, Low, Close, Volume }`로 매핑.
-  - 요청 단위 connect/disconnect(또는 안전한 singleton) 전략을 선택하고 최소 프로브로 연결 검증.
-- 옵션 B(Python child_process):
-  - Python 스크립트가 newline-delimited JSON bars를 출력하고, 오류 시 non-zero exit code로 종료.
-  - Node는 스크립트를 args(`symbol`, `start`, `end`)로 실행하고 stdout 파싱을 견고하게 처리(size limit, JSON parse error).
-  - stderr를 캡처하여 API 에러 메시지로 명확히 노출.
-- 옵션 C(Python 마이크로서비스):
-  - localhost HTTP 서비스로 `GET /health`, `POST /bars` 같은 엔드포인트 제공.
-  - 서비스가 IBKR 세션을 유지하고 Node는 HTTP로 호출해 JSON bars를 받는다.
-  - Node는 헬스체크/타임아웃을 넣어 서비스 다운 시 빠르게 실패하도록 한다.
+`7-3` 구현 상세(옵션 B — Python child_process 확정)
+- Python 스크립트가 newline-delimited JSON bars를 출력하고, 오류 시 non-zero exit code로 종료.
+- Node는 스크립트를 args(`symbol`, `start`, `end`)로 실행하고 stdout 파싱을 견고하게 처리(size limit, JSON parse error).
+- stderr를 캡처하여 API 에러 메시지로 명확히 노출.
+- Python 스크립트 위치: `terminal/backend/scripts/ibkr_fetch_ohlc.py` (제안)
+- 인터페이스 규약:
+  - 입력: `python ibkr_fetch_ohlc.py --symbol AAPL --start 2026-02-21 --end 2026-03-05`
+  - 정상 출력(stdout): `{"Datetime":"2026-02-21","Open":...,"High":...,"Low":...,"Close":...,"Volume":...}\n` (1줄 = 1 bar)
+  - 에러 출력(stderr): 사람이 읽을 수 있는 메시지 (시크릿 미포함)
+  - 종료 코드: 0=성공, 1=일시 오류(재시도 가능), 2=영구 오류(재시도 불필요)
 
 **검증 훅 (7단계 마감):**
 ```
@@ -2488,6 +2601,7 @@ API 계약(초안)
 3. GET /api/ibkr/ohlc1d/status → DB max date 확인
 4. POST /api/ibkr/ohlc1d/update → 업서트 및 max date 증가 확인
 5. AAPL 최근 5행 SELECT → 파생 컬럼이 실제 값인지 확인
+6. news_items에서 change_1d_pct가 이전에 NULL이었던 row → OHLC 업데이트 후 실제 값으로 백필 확인
 ```
 - 사용자 확인 필요: **Yes**
 
@@ -2720,12 +2834,12 @@ UI 동작(최소)
            │                                          │
            ▼                                          │
    ╔═══════════════════════════════════════╗           │
-   ║  🚫 IBKR 의존 단계                    ║           │
-   ║  결정 #5, #6 해결 전까지 차단됨       ║           │
+   ║  IBKR 의존 단계                       ║           │
+   ║  ✅ 결정 #5, #6 확정 완료             ║           │
    ╚═══════════════════════════════════════╝           │
            │                                          │
-           ├─► 🚫 Step 6 (캘린더 수집 + mock 정리)
-           │      ◄── 결정 #5 대기: /calendar 데이터 소스
+           ├─► Step 6 (캘린더 수집 + mock 정리)
+           │      ✅ 결정 #5: IBKR 캘린더 → 추후 Finnhub Estimates 전환 가능
            │      6-1 mock worker 제거
            │      6-2 startCalendarIngestionWorkers 제거
            │      6-3 캘린더 데이터 pull 구현 (소스 미정)
@@ -2733,8 +2847,8 @@ UI 동작(최소)
            │      6-5 mock_provider 행 삭제
            │      6-6 ibkr_calendar 상태 갱신
            │
-           ├─► 🚫 Step 7 (IBKR 1D OHLC 수집)
-           │      ◄── 결정 #6 대기: Node↔IBKR 연동 방식
+           ├─► Step 7 (IBKR 1D OHLC 수집)
+           │      ✅ 결정 #6: 옵션 B (Python child_process) 확정
            │      7-1 ohlcWatchlistRepository
            │      7-2 ensureDerivedColumns 마이그레이션
            │      7-3 ibkrOhlc1dProvider
@@ -2769,10 +2883,17 @@ UI 동작(최소)
 **차단 요약:**
 | 결정 | 차단 대상 | 선택지 |
 |------|-----------|--------|
-| #5: /calendar 데이터 소스 | Step 6 | A: Finnhub, B: Client Portal, C: Fundamental 구독, D: 범위 축소 |
-| #6: Node↔IBKR 연동 방식 | Step 7 | A: @stoqey/ib, B: Python child_process, C: Python 마이크로서비스 |
+| #5: /calendar 데이터 소스 | Step 6 | **확정: IBKR 캘린더 우선 사용** → 추후 Finnhub Estimates 구독 시 전환 가능 |
+| #6: Node↔IBKR 연동 방식 | Step 7 | **확정: 옵션 B (Python child_process)** — MVP/빠른 통합 목적 |
 
 ### 결정 #6 — Node↔IBKR 연동 구현 방식(상세)
+> ✅ **확정: 옵션 B (Python child_process)** — MVP/빠른 통합 목적으로 채택 (2026-03-05)
+> - 빠르게 "일단 동작"이 목표일 때 적합 (특히 로컬 개발)
+> - IBKR 통신 로직을 Python 쪽으로 격리 가능
+> - 구현 난이도: 중간 — Node→Python 호출(인자 전달) / Python→Node 결과(JSON) / 에러 코드 규격만 정하면 됨
+> - 단점: 요청마다 프로세스 생성 → 느려질 수 있음, 상태 유지(세션/rate limit 누적)가 어려움
+> - "가끔 호출"이면 B가 깔끔하고, "자주 호출/실시간성"이면 C가 더 나음 → 현재는 "가끔 호출"(수동 update) 시나리오이므로 B 적합
+
 목적(왜 필요한가)
 - 7단계는 IBKR에서 일봉(1D) OHLCV를 안정적으로 받아야 한다. 프론트는 최종 SQLite만 보지만, 백엔드는 IBKR와 통신하는 “안정적인 실행 모델”이 필요하다.
 - 이 결정은 Node/TS 백엔드와 IBKR 사이의 **프로세스/통신 모델**(직결 vs Python 브리지)을 정한다. Windows 환경에서의 안정성, 디버깅, 운영(프로세스 관리)에 직접 영향을 준다.

@@ -305,3 +305,79 @@
 **Step 0 상태**: done (awaiting user confirmation) — 모든 프로브 완료(v1+v2+v3+Finnhub종합), 감사 문서 확정
 
 ---
+
+## 2026-03-03
+
+### Plan 수정 — 사용자 신규 요구사항 4가지 반영
+
+**Status: done (awaiting user confirmation)**
+
+#### 배경
+사용자가 구현 착수 전에 plan.md 수정을 요청함. 스크린샷으로 전달된 4가지 요구사항:
+1. 하나의 news feed window 안에서 필터로 company news, press release를 선택 가능하고 둘다 선택하면 둘다 보이도록. 데이터는 각자 따로 저장.
+2. Change% 컬럼 데이터는 각 row의 날짜에 해당하는 OHLC change 데이터로 병합.
+3. IBKR에서 price OHLC 받으면 그걸로 change 계산하고 news feed 각 row에 병합/업데이트.
+4. 뉴스 데이터는 중복 업데이트 하지 않으면서 갭이 생기지 않게 최신 데이터를 업데이트/저장.
+
+#### 수정된 파일
+- `plan.md` — KO 섹션의 4단계, 5단계, 7단계 + EN staleness banner
+
+#### 4단계 변경 내역
+- **목적**: company news + press release 이원화 수집 추가, `source_type` 구분 (`company_news` / `press_release`)
+- **증분 수집 정책** 추가: source_type별 `MAX(published_at)` 기반 incremental pull, `INSERT OR IGNORE` 중복 방지, 갭 방지
+- **news_items 스키마 확장**: change% 관련 8개 컬럼 추가 (ohlc_ticker, ohlc_date, change_1d_pct, change_from_open_pct, change_7d_pct, change_14d_pct, change_30d_pct, change_computed_at)
+- **API 계약 확대**: source_type 파라미터 지원, 상세 요약 반환
+- **백엔드 파일**: `newsChangeMerger.ts` 서비스 추가
+- **세부 단계**: 4-1~4-5 → 4-1~4-9로 확장 (4-2 migration, 4-3/4-4 company/press, 4-5 filter API, 4-6 changeMerger, 4-7 orchestrator, 4-8 status, 4-9 검증)
+- **검증 훅**: 3항목 → 6항목
+
+#### 5단계 변경 내역
+- **데이터 흐름**: source_type 필터 설명 추가 (Company News / Press Release / 둘 다), Change% 컬럼 렌더 설명 추가
+- **세부 단계**: 5-9 추가 (source_type 필터 UI 구현)
+- **검증 훅**: 3항목 → 5항목 (필터 전환 + Change% 컬럼 확인)
+
+#### 7단계 변경 내역
+- **목적**: 5번째 bullet 추가 — OHLC 업데이트 후 news_items change% 백필
+- **7-6 설명**: news change% 백필 단계 추가 (`newsChangeMerger` 호출)
+- **세부 단계**: 7-8 추가 (OHLC 업데이트 후 news_items change% 백필)
+- **검증 훅**: 5항목 → 6항목
+
+#### EN 섹션
+- `> ⚠️ EN section may be outdated — KO section is the authoritative source.` staleness banner 추가
+
+#### 검증 방법
+- plan.md에서 4단계/5단계/7단계 KO 섹션을 읽어 변경이 반영되었는지 확인
+- EN staleness banner가 문서 상단에 존재하는지 확인
+
+---
+
+### 결정 #5, #6 확정 — plan.md 반영
+
+**Status: done (awaiting user confirmation)**
+
+#### 배경
+사용자가 두 가지 미결 결정을 확정:
+1. **결정 #6 (Node↔IBKR 연동 방식)**: 옵션 B (Python child_process) — MVP/빠른 통합 목적
+   - 빠르게 "일단 동작"이 목표, IBKR 통신을 Python으로 격리
+   - "가끔 호출"(수동 update) 시나리오에 적합
+2. **결정 #5 (Calendar 데이터 소스)**: IBKR 캘린더 데이터 우선 사용 → 추후 Finnhub Estimates 구독 시 전환 가능
+
+#### 수정된 파일
+- `plan.md` — KO 섹션만 수정 (EN 미수정)
+
+#### 변경 내역
+| 항목 | 변경 |
+|------|------|
+| 미결 결정 테이블 | #5, #6 모두 "확정" 상태로 갱신 |
+| 6단계 BLOCKED | `> ⚠️ BLOCKED` → `> ✅ 결정 완료: IBKR 캘린더 우선` |
+| 6단계 목적 | 결정 #5 확정 노트 추가 (Finnhub Estimates 전환 가능 설계) |
+| 7단계 BLOCKED | `> ⚠️ BLOCKED` → `> ✅ 결정 완료: 옵션 B` |
+| 7단계 결정 #6 메모 | 3개 옵션 나열 → 옵션 B만 상세 기술 |
+| 7-3 옵션별 small steps | A/B/C 나열 → 옵션 B 전용 구현 상세 (인터페이스 규약 포함) |
+| 결정 #6 상세 섹션 | 확정 배너 + 선택 근거 삽입 |
+| 의존성 그래프 | 🚫 차단 마커 → ✅ 확정 완료 마커 |
+
+#### 검증 방법
+- plan.md에서 "⚠️ BLOCKED" 검색 → KO 섹션에서 6단계/7단계 관련 BLOCKED가 없을 것
+- plan.md에서 "확정: 옵션 B" 검색 → 3곳 일치 (결정 테이블, 7단계 메모, 결정 #6 상세)
+- plan.md에서 "IBKR 캘린더 우선" 검색 → 1곳 일치 (결정 테이블)
