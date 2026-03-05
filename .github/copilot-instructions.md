@@ -11,6 +11,7 @@
 
 **Execution discipline (must):**
 - Before starting work, use the TABLE OF CONTENTS to identify the most relevant section(s) for this task and prioritize following those instructions.
+- Before starting implementation, decide which `.github/copilot-skills/*.md` documents apply to this task and state your choice in chat (e.g., “Using: planning.md + web-ui.md”). Then start work.
 - Always state a detailed plan in chat before implementation.
 - For each plan step:
   - Implement the step.
@@ -30,159 +31,17 @@
 
 | Tier | Section | Key topics |
 |------|---------|------------|
-| **T1** | [Plan & Agent Log](#plan--agent-log) | plan.md, agent_log.md, step decomposition |
-| **T1** | [Plan sub-step methodology](#plan-sub-step-methodology) | sub-step tables, verification hooks, user-gate |
 | **T1** | [Capability limits / honesty](#project-conventions-to-follow) | no fake features, fail fast |
 | **T1** | [Mock data policy](#project-conventions-to-follow) | no mock unless requested |
 | **T1** | [Safety / repo hygiene](#safety--repo-hygiene) | path ≤250, secrets, naming |
 | **T1** | [Agent-specific language override](#agent-specific-language-override) | Claude → Korean only |
-| **T1** | [Bilingual EN/KO sync](#docs-and-prompt-markdown-files) | *.md + copilot-instructions parity, Korean-first reading |
-| **T2** | [Big picture](#big-picture) | repo overview, key domains |
-| **T2** | [Folder structure & data flow](#folder-structure--data-flow-high-level) | EODHD→original_data→learning_data |
-| **T2** | [How to run (Windows)](#how-to-run-windows) | venv activation, absolute paths |
+| **T1** | [Bilingual EN/KO sync](#project-conventions-to-follow) | *.md + copilot-instructions parity, Korean-first reading |
+| **T2** | [Repository context (optional)](copilot-skills/repo-context.md) | overview, structure, how to run |
 | **T3-A** | [Retries / robustness](#project-conventions-to-follow) | 10 retries, backoff, permanent failures |
-| **T3-A** | [Wrapper + base pattern](#project-conventions-to-follow) | momentum scripts, Config+run_analysis |
-| **T3-A** | [Indicator calculators](#project-conventions-to-follow) | pandas append-only, logging pattern |
-| **T3-A** | [Deep learning trainers](#project-conventions-to-follow) | dedup shared intermediates, presets |
-| **T3-B** | [GUI scripts](#project-conventions-to-follow) | PyQt only, resizable, activity log |
-| **T3-B** | [Web UI scripts](#project-conventions-to-follow) | bind policy, no CDN, debug visibility |
-| **T3-C** | [Config template files (TOML)](#project-conventions-to-follow) | VALUES/EXPLANATIONS, valid TOML |
 | **T3-C** | [Docs / prompt Markdown files](#project-conventions-to-follow) | bilingual EN+KO, parity, output cols |
-| **T3-D** | [EODHD rules](#project-conventions-to-follow) | NY timezone, no Timestamp col, token |
-| **T3-D** | [ThetaData / ThetaTerminal](#project-conventions-to-follow) | run_theta_terminal.ps1 |
+| **T3** | [Skill instructions (situation-specific)](#skill-instructions-situation-specific) | links to `.github/copilot-skills/` |
 
 > **T1** = Always apply every task &nbsp;·&nbsp; **T2** = Repo context (read when unfamiliar) &nbsp;·&nbsp; **T3-A** = Code patterns &nbsp;·&nbsp; **T3-B** = UI dev &nbsp;·&nbsp; **T3-C** = Config/Docs &nbsp;·&nbsp; **T3-D** = Data sources
-
-## Plan & Agent Log
-- Create `plan.md` **only when the user explicitly requests it**.
-- Treat any direct request for a plan as “explicit” (examples: “plan을 세워라”, “계획 세워줘”, “플랜 만들어”, “plan 작성”, “plan.md 만들어”).
-- When a user requests a plan, do BOTH:
-  - Write the detailed step-by-step plan in chat (required by Execution discipline)
-  - Create `C:\github_coding\terminal_sec\ai_agent_plan\<project_name>\plan.md` (unless the user explicitly forbids file changes)
-- If the user says “don’t execute/run” (e.g., “실행하지 말고”) and it’s ambiguous whether file writes are allowed, use the hook question flow (`ask_questions`) to confirm before creating/modifying files.
-  - Default interpretation (unless the user says otherwise): “don’t execute/run” = no code execution (no tests/dev server/scripts), but creating/updating `plan.md` is allowed.
-- Write/update `agent_log.md` **only when the user explicitly tells you to execute a specific plan**.
-- **`agent_log.md` language rule (must):** `agent_log.md` is written in **Korean only** (한국어 단독). Do NOT write bilingual EN/KO sections in the log — Korean is sufficient.
-- File storage: `C:\github_coding\terminal_sec\ai_agent_plan\<project_name>\`
-  - `plan.md`: detailed step-by-step plan before starting (goal, approach, files to create/modify, order, risks). Bilingual EN+KO (but see [Agent-specific language override](#agent-specific-language-override) — Claude writes Korean only).
-  - `agent_log.md`: chronological record of every action taken (files created/modified, commands run, decisions, errors). **Korean only.**
-- **Break large tasks into steps:** if a task is large or complex, decompose it into small, independently verifiable steps. Each step should have a clear deliverable.
-- **Plan changes (mid-stream):** keep history intact.
-  - Do not rewrite or delete previously recorded log entries.
-  - Treat plan updates as revisions: append a short “PLAN CHANGE” note (what/why/impact) and continue from the new plan.
-- **Intermediate review loop:** after each step, verify the result (e.g., check file content, run a test, confirm output) and provide a user-checkable verification procedure.
-  - If user confirmation is required for that step, ask for it explicitly.
-  - In `agent_log.md`, mark step completion as “user-confirmed” only after the user confirms; otherwise mark “awaiting user confirmation”.
-  - If issues are discovered, record them and propose concrete next actions/options.
-## Plan sub-step methodology
-When a plan has multiple major Steps (e.g., Step 0, Step 1, …, Step N), **each Step must be further decomposed into numbered sub-steps** following this structure:
-
-- **Sub-step numbering:** use `<Step>-<seq>` format (e.g., `1-1`, `1-2`, `2-1`).
-- **Sub-step table (required for each Step):**
-
-  | Column | Purpose |
-  |--------|---------|
-  | Sub-step | ID (e.g., `1-1`) |
-  | Task | One-sentence description of what to do |
-  | Files | Which files are created/modified |
-  | Verification | Exact command or check to confirm the sub-step is done correctly |
-
-  Example:
-  ```
-  | Sub-step | Task | Files | Verification |
-  |----------|------|-------|--------------|
-  | 1-1 | Add `foo` table CREATE in `initDb()` | `src/db.ts` | Start backend → table exists (`SELECT name FROM sqlite_master WHERE name='foo'`) |
-  | 1-2 | Create `fooRepository.ts` service | `src/services/fooRepository.ts` | `npx tsc --noEmit` → 0 errors |
-  ```
-
-- **Verification hook block (required for each Step closeout):**
-  - After all sub-steps within a Step are completed, include a fenced code block listing the exact verification commands (build, test, curl, DB query, etc.).
-  - End with: `User confirmation needed: **Yes**`.
-  - Example:
-    ```
-    Verification hook (Step 1 closeout):
-    1. cd project && npx tsc --noEmit   → 0 errors
-    2. npm run test                     → all tests pass
-    3. curl http://localhost:8080/api/foo → returns expected JSON
-    ```
-
-- **User-gate rule (must):**
-  - After completing a Step's verification hook, present the results to the user via `ask_questions`.
-  - Do **not** proceed to the next Step until the user explicitly confirms the current Step.
-  - If the user rejects or finds issues → fix, re-verify, re-ask.
-  - Only after user confirms → mark `completed (user-confirmed)` in `agent_log.md`.
-
-- **Sequential within a Step, gated between Steps:**
-  - Sub-steps within the same Step are executed sequentially.
-  - Steps themselves may be parallelizable — document this with an **Execution dependency graph** (a detailed ASCII/Markdown diagram showing which Steps depend on which).
-
-- **Execution dependency graph requirements (must):**
-  - Include a **legend** at the top showing all status emojis.
-  - Show **every sub-step** listed under its parent Step (one line each, with its current status emoji).
-  - Label **parallel tracks** clearly (e.g., Track A / Track B) and state what each track covers.
-  - Show **blocked sections** with a boxed banner explaining the blocker.
-  - After the graph, include:
-    - A **Parallel tracks summary** listing which Steps run in parallel and any prerequisites.
-    - A **Blocker summary table** (`Decision | Blocks | Options`) if there are pending decisions.
-  - Example (detailed):
-    ```
-    ╔═══════════════════════════════════════════════════════╗
-    ║            EXECUTION DEPENDENCY GRAPH                 ║
-    ║  Legend: ✅ Done  ⏳ Awaiting  🚫 BLOCKED  ⬜ Todo    ║
-    ╚═══════════════════════════════════════════════════════╝
-
-    ✅ Step 0 (audit)
-    │   ├─ 0-1 probe API .............. ✅ Done
-    │   └─ 0-2 capability matrix ...... ✅ Done
-    │
-    ▼
-    ⬜ Step 1 (foundations)
-    │   ├─ 1-1 create table ........... ⬜
-    │   └─ 1-2 wire endpoint .......... ⬜
-    │
-    ├───────────────┬──────────────────┐
-    │  TRACK A      │  TRACK B         │
-    ▼               ▼                  │
-    ⬜ Step 2        ⬜ Step 4           │
-    │               │                  │
-    ▼               ▼                  │
-    ⬜ Step 3        ⬜ Step 5           │
-    │               │                  │
-    └───────┬───────┘                  │
-            ▼                          │
-    ╔═══════════════════════════╗       │
-    ║ 🚫 BLOCKED SECTION       ║       │
-    ║ Needs decision X         ║       │
-    ╚═══════════════════════════╝       │
-            │                          │
-            ├─► 🚫 Step 6             │
-            ├─► 🚫 Step 7             │
-            ▼                          │
-    ⬜ Step 8 ◄── needs 6+7            │
-            ▼                          │
-    ⬜ Step 9 (final)                   │
-    ```
-
-- **Blocked Steps:** if a Step depends on an unresolved decision or external blocker, mark it with `⚠️ BLOCKED` and state the prerequisite. Do not start blocked Steps.
-
-- **Status tracking in sub-step tables:** use these status markers:
-  - `✅ Done` — completed and verified
-  - `⏳ Awaiting user` — done but waiting for user confirmation
-  - `🚫 BLOCKED` — cannot start due to unresolved dependency
-  - `⬜` — not started
-
-- **plan.md writing conventions (must follow when creating/updating plan.md):**
-  - **Structure order:** Goal → Approach overview → Step list (each with sub-step table + verification hook) → Execution dependency graph → Open questions / blockers.
-  - **Bilingual:** EN section first, `---` separator, then KO section (same content, translated). *(Override: Claude agents write Korean only — see [Agent-specific language override](#agent-specific-language-override).)*
-  - **Every Step heading** must include its number and a short descriptive name: `#### Step N — Short name`.
-  - **Sub-step tables** are mandatory for every Step (see sub-step table format above).
-  - **Verification hook blocks** are mandatory for every Step closeout.
-  - **Execution dependency graph** must be detailed (see graph requirements above) — not a simplified tree.
-  - **Emoji status markers** must be used consistently in both the sub-step tables and the dependency graph to provide at-a-glance progress visibility.
-  - **Blocker tracking:** blocked Steps must be visually distinct (boxed section in graph, `⚠️ BLOCKED` label, prerequisite stated).
-  - **Pre-written code notes:** if code was written before formal plan execution, note it explicitly under the relevant sub-step (e.g., "pre-written (needs verify)").
-  - **Open questions section:** list pending decisions with numbered IDs, options, and which Steps they block.
----
 
 # Copilot instructions (python workspace)
 
@@ -205,6 +64,7 @@ When a plan has multiple major Steps (e.g., Step 0, Step 1, …, Step N), **each
 - This repo contains many generated artifacts (`*.xlsx`, `*_raw.csv`, `*_raw.parquet`). When adding new scripts, follow the existing naming convention: `<script_name>.xlsx` + `<script_name>_raw.csv/parquet`, typically under the same folder as the script.
 
 <!-- T1: Agent-specific language override -->
+<a id="agent-specific-language-override"></a>
 ## Agent-specific language override (must)
 - **When the executing AI agent is Claude (any version/model):** all `*.md` documentation — companion docs, `plan.md`, config `EXPLANATIONS`, `copilot-instructions.md` edits — must be written in **Korean only** (한국어 단독). The bilingual EN/KO requirement is waived for Claude agents.
 - **For all other agents (e.g., GPT, Gemini):** follow the standard bilingual EN/KO rules described in each section below.
@@ -228,25 +88,9 @@ When a plan has multiple major Steps (e.g., Step 0, Step 1, …, Step N), **each
   TIER 2 — Repo context
 ===================================================== -->
 
-## Big picture
-- This repo is a collection of *script-first* research pipelines (not a packaged library). Most work is done by running individual `*.py` files that read local CSV/Parquet inputs and write Excel/CSV/Parquet outputs.
-- Key domains:
-  - `momentum/`: option-selling / momentum / reversal analysis scripts. “Base” modules contain the core logic; thin wrappers set file paths + config.
-  - `deep_learning_data/indicator_calculator/`: feature/indicator calculators used to generate learning datasets (stock + options).
-  - `EODHD/`: data download rules and token handling for the EODHD API.
-  - `thetadata/`: ThetaTerminal launcher + credentials files (Java).
-
-## Folder structure & data flow (high level)
-- `EODHD/` contains download/normalization scripts (and strict rules in `EODHD/INSTRUCTION.txt`). These scripts typically write their *final* datasets under `original_data/` so downstream pipelines can consume them.
-  - Example (QQQ 1min regular session): `EODHD/EODHD_qqq/downloader_and_aggregator_qqq_1min_regular_2013_2025.py` writes to `original_data/original_data_stock/original_data_stock_qqq/`.
-- `original_data/` is the “raw canonical dataset” area (CSV/Parquet) that many scripts treat as input (momentum, deep learning feature pipelines, aggregation tests, etc.).
-- `deep_learning_data/indicator_calculator/` transforms `original_data/` (or other parquet/csv inputs) into learning datasets under `deep_learning_data/learning_data_*` folders.
-
-## How to run (Windows)
-- Use the local venv (repo already has `.venv/`). Typical workflow:
-  - Activate: `\.venv\Scripts\Activate.ps1`
-  - Run scripts directly: `python momentum\tree_10_1_optionsell_momentum_atm.py`
-- Many scripts hard-code absolute paths under `c:\\github_coding\\python\\...` (see `momentum/tree_10_1_optionsell_momentum_atm.py`). Preserve this convention when editing existing scripts unless you’re explicitly asked to make paths portable.
+## Repository context (optional)
+- Repo-specific overview / folder structure / how-to-run guidance is kept in a separate document so this file can be copied across repositories without carrying stale assumptions.
+- See: `copilot-skills/repo-context.md`
 
 <!-- ====================================================
   TIER 3 — Task-specific conventions
@@ -280,125 +124,6 @@ When a plan has multiple major Steps (e.g., Step 0, Step 1, …, Step N), **each
   - Prefer short waits with backoff (e.g., 0.1–0.5s initial delay, increasing) and log retry attempts clearly.
   - Do **not** blindly retry permanent failures (invalid paths/config, authentication/token errors, deterministic parsing/validation errors, disk full). Fail fast with a clear error message.
   - If a retry loop would significantly delay a long batch job, make retry counts/delays configurable (constants or CLI/GUI knobs).
-
-- **Wrapper + base pattern (momentum)**
-  - Base modules expose `Config` + `run_analysis` (see `momentum/tree_10_optionsell_base.py`, `momentum/tree_11_optionsell_reversal_base.py`).
-  - Wrappers import the base and only define constants + `main()` (see `momentum/tree_10_1_optionsell_momentum_atm.py`).
-  - Outputs:
-    - Always write a “raw” CSV and try to write Parquet, but gracefully skip Parquet if `pyarrow/fastparquet` isn’t installed (see `save_raw()` in `momentum/tree_10_optionsell_base.py`).
-    - Excel writes use a temp file then `os.replace` to avoid corrupt partial outputs (`save_excel()` pattern).
-  - Progress + status:
-    - Long-running steps should print progress to console (existing pattern: `print(f"[{config.name}] ...")`).
-    - On successful completion, print a clear success line that includes the primary output path(s) (existing pattern: `print(f"[{config.name}] Saved {config.output_excel}")`).
-
-- **Indicator calculators (deep_learning_data)**
-  - Functions operate on pandas DataFrames and append columns without dropping rows; early rows become `NaN` when history is insufficient (see `compute_indicators()` in `deep_learning_data/indicator_calculator/stock2_indicator_calculator.py`).
-  - Logging pattern: file-based logger and a `logger.handlers` guard to avoid duplicate handlers.
-    - If a script creates output files under an output directory, default the log file to that same directory (e.g., `out_dir / f"{Path(__file__).stem}.log"`).
-    - If there is no output directory context, fall back to a module-adjacent log (`Path(__file__).with_suffix('.log')`).
-    - When `log_errors=True`, any exception must be recorded with `logger.exception(...)` and then re-raised (so failures are visible both in console and in the log).
-    - On success, write a final log line like `SUCCESS: wrote <paths>` (include output directory and key filenames).
-  - Progress visibility:
-    - For large inputs / loops, expose a `progress_every`-style knob (or similar) and emit periodic progress messages (to console and/or logger) rather than running silently.
-  - Some scripts provide a CLI and write outputs relative to repo root using `Path(__file__).resolve().parents[2]` (see `_default_output_dir()` in `deep_learning_data/indicator_calculator/option1_1min_time_to_expiration_cumulative_volume_pc_ratio.py`).
-  - CLI example (option features by year):
-    - `python deep_learning_data\indicator_calculator\option1_1min_time_to_expiration_cumulative_volume_pc_ratio.py --input <file-or-dir> --symbol QQQ --overwrite`
-
-- **Deep learning trainers (dedup + presets + docs parity)**
-  - **Deduplicate shared intermediates (must):** for multi-head / multi-case trainers, compute expensive shared intermediates once and reuse them across heads.
-    - Examples: stock `close/high/low` arrays + per-horizon `r_end/r_max/r_min`; options `options_groups` snapshot index; (i, horizon, delta, right) contract pick + horizon-end price match + profit%.
-    - Keep semantic loops (e.g., `label_targets` hit logic) explicit, but do not repeat expensive grouping/picking/matching inside them.
-  - **Definition: “duplicate computation / wasted computation” (important):** only call something duplication/waste when the **inputs + config/options/flags (including random seeds)** are the same, the **results are identical**, and the **work is repeated**. If changing the computation changes results, it is a behavior change (not “waste”) and must be treated separately.
-  - **Case preset / multi-case design:** when supporting `active_cases`-style multi-select presets:
-    - Merge `enable_*` flags with a clear rule (typically OR).
-    - Put conflict-prone shared params (`label_horizons`, `label_deltas`, `label_targets`) in root VALUES, not inside per-case tables.
-    - If stock+option labels can be enabled together, explicitly support a mixed mode (e.g., `Model_SO`) or fail fast with a clear error.
-    - Document backward compatibility (e.g., if `active_cases` is missing/empty, fall back to legacy `active_case`).
-  - **Docs parity (EN/KO):** if a trainer has bilingual `*.md`, keep the same headings in the same order, and clearly separate “deduplicated vs repeated” computations.
-  - **Refactor cleanup (legacy isolation):** if refactors make old code paths unused, delete them or isolate under a clear `LEGACY/UNUSED` section with a short rationale.
-
-- **GUI scripts (when the user requests a GUI)**
-  - Use **PyQt only** (do not use Tkinter, Streamlit, NiceGUI, etc.). Prefer PyQt6 unless the repo/script already uses PyQt5.
-  - Always allow text copy in GUI text areas, tables, and status labels.
-  - GUI windows must be resizable, and layouts should auto-adjust child widgets (no fixed sizes that clip content).
-  - Do not use fixed-size constraints like `setFixedSize(...)` / `MSWindowsFixedSizeDialogHint` unless the user explicitly requests a fixed-size window.
-  - For long folder names / paths displayed in labels, enable wrapping so the window can shrink:
-    - Use `QLabel.setWordWrap(True)` and (if needed) a shrink-friendly size policy like `QSizePolicy.Ignored`.
-  - Always create a GUI activity log when a GUI is requested.
-    - Default location: same folder as the script file.
-    - If the script’s output files are written to another folder, create the GUI log in that output folder after running (so logs live next to outputs).
-    - Recommended filename: `<script_stem>_gui.log`.
-  - The GUI log should record user actions (button clicks, file selections, start/end of processing, progress milestones) and always record exceptions via `logger.exception(...)`.
-  - **When asked to create a `*gui_vm*.py` file**
-    - The GUI must run locally, but the actual computation/code + data access must run on the VM via SSH.
-    - Results must always be written on the VM.
-    - **SSH execution robustness (important)**
-      - Do not rely on `cd <remote_root> && python <relative_script>`; in some VM/login-shell setups the working directory can behave unexpectedly and relative paths may resolve under `$HOME`.
-      - Prefer executing the remote script via an **absolute path** derived from `remote_root`, e.g. `python3 "$remote_root/path/to/script.py" ...`.
-      - On Windows/PowerShell, be careful with `$` expansion when constructing SSH commands. Prefer single-quoted remote command strings or escape `$` so expansion happens on the VM, not locally.
-      - Prefer the VM repo virtualenv interpreter when available (e.g. `/mnt/python/.venv/bin/python`) to avoid `ModuleNotFoundError` due to missing packages in system `python3`.
-      - Treat “remote script file not found” / bad `remote_root` as **non-retryable** configuration errors; fail fast with a clear message.
-    - **Stop / Retry correctness (important)**
-      - If the GUI supports retries, make `Stop` a **hard cancel**:
-        - Set a `stop_requested` flag.
-        - Stop any retry timers immediately.
-        - Clear any pending work queues (e.g., multi-format runs).
-        - On process `finished` callbacks, check `stop_requested` first and **do not** schedule retries or start the next queued run.
-      - Avoid race conditions where a killed process triggers `finished` → “failure” → retry scheduling.
-    - Syncing artifacts back to the local machine is **optional** and should be user-controllable in the GUI (checkbox/toggle).
-      - Default: **do not** sync outputs back to local unless the user opts in.
-      - If sync is disabled, the GUI must clearly indicate that outputs exist only on the VM and include the VM output path(s) in the final status/log.
-    - **Sync default:** prefer `rsync` for VM → local (incremental, restartable). On Windows, prefer `wsl rsync` (WSL path style like `/mnt/c/...`). If `rsync` is unavailable, fall back to `scp`.
-    - Assume local/VM folder structures are identical; if they are not, the GUI must detect the mismatch and stop with an error.
-
-- **Web UI scripts (when the user requests a Web UI)**
-  - **Typical topology (important):** the server may run on a VM, while the user opens the UI from a different computer.
-    - Do not assume `http://127.0.0.1:8000/` is reachable from another machine.
-  - **Bind host/port policy (remote access correctness + safety):**
-    - Default bind should be loopback only (`127.0.0.1`) to avoid accidentally exposing the UI to the Internet.
-    - Make bind host/port configurable via env vars (example: `WEBUI_HOST`, `WEBUI_PORT`) so users can explicitly opt into remote access (`0.0.0.0`).
-    - Document both access modes:
-      - **Recommended:** SSH port-forwarding (`ssh -L 8000:127.0.0.1:8000 <vm_host>`) + open `http://127.0.0.1:8000` locally.
-      - **Direct exposure:** bind to `0.0.0.0` and require firewall/security-group rules that restrict inbound to the user’s IP.
-  - **No external assets by default:** avoid React/CDN/Babel or any network-fetched JS/CSS for the core UI. The UI should render in restricted/offline environments.
-  - **Cache behavior:** the root HTML (`GET /`) should be `no-store` to prevent “stuck on old UI” after edits.
-  - **Browser/WebView compatibility (don’t assume modern JS):**
-    - Avoid JS footguns that can hard-fail parsing in older embedded WebViews:
-      - No trailing commas in function call argument lists.
-      - Avoid `??` (nullish coalescing) and `?.` (optional chaining).
-    - If you use modern JS features (arrow functions, async/await, rest/spread), add a visible startup crash panel and a clear message telling users to open in a modern browser.
-  - **Debug visibility (must-have):**
-    - Show a startup placeholder + “preflight OK” marker so it’s obvious whether JS is running.
-    - Catch `window.onerror` / `unhandledrejection` and render the error message in-page (not only in console).
-    - Provide a lightweight `GET /api/config` or `GET /healthz` endpoint to confirm the backend is alive.
-  - **Noise reduction:** optionally serve `/favicon.ico` (204 or small icon) to avoid repeated 404 console spam.
-  - **Security:** never log secrets; if exposing the server externally, warn users to restrict inbound rules. Prefer SSH tunneling.
-
-- **Config template files (TOML/INI/YAML) (important)**
-  - When creating or updating a *config template file* for running a script from the terminal, split it into two clearly labeled sections:
-    - `VALUES`: key/value settings only (equivalent to CLI options/flags).
-    - `EXPLANATIONS`: all human-readable documentation (no duplicate settings).
-  - **Put required items first (must):** at the very top of `EXPLANATIONS` (inside each language block), add a short “REQUIRED checklist” that includes:
-    - required CLI options/flags to run (e.g., `--config <path>`),
-    - which `VALUES` keys must be filled (and whether they are REQUIRED vs CONDITIONALLY REQUIRED),
-    - one minimal runnable CLI example.
-  - **Empty-string placeholders policy:** if the template contains empty strings like `foo = ""`, `EXPLANATIONS` must explicitly say:
-    - whether the user must fill it,
-    - when it is required (e.g., “only when option labels enabled”),
-    - at least one concrete example value.
-  - **Companion config docs (when behavior is non-trivial):** if a config has merge rules, precedence rules, or complex I/O semantics, keep a companion Markdown next to it:
-    - Prefer same-basename: `something_config.toml` ↔ `something_config.md`
-    - TOML `EXPLANATIONS`: concise (quick-start + required checklist)
-    - MD: more detailed and implementation-accurate, and kept in sync when config behavior changes.
-  - **TOML validity guardrail (must):** config templates must remain valid TOML.
-    - In `.toml` files, every line in `EXPLANATIONS` must be a comment line starting with `#` (or be removed/moved to a separate `.md`).
-    - After writing/editing a `.toml` config template, run a quick parse sanity-check (preferred):
-      - `python -c "import tomllib, pathlib; tomllib.loads(pathlib.Path('path/to/config.toml').read_text(encoding='utf-8'))"`
-      - If Python < 3.11, use `tomli`.
-  - The `EXPLANATIONS` section must be bilingual *(Override: Claude agents write Korean only — see [Agent-specific language override](#agent-specific-language-override))*:
-    - English first, then a separator line `---`, then Korean.
-    - Keep the two language blocks strictly separated and content-matched (same headings, same options, same defaults).
-  - Terminology: prefer “CLI options/flags (command-line options)” rather than “arguments” unless you specifically mean positional arguments.
 
 - **Docs and “prompt” Markdown files (important)**
   - This repo uses `*.md` files as *prompt/spec/explanation companions* for some scripts (example: `deep_learning_data/indicator_calculator/stock2_indicator_calculator.md`).  - **Scope of the bilingual rule (must):** this EN/KO writing convention applies to **both** of the following:
@@ -463,15 +188,21 @@ When a plan has multiple major Steps (e.g., Step 0, Step 1, …, Step N), **each
     - **Column formatting rule (raw-editor friendly):** in these output lists, format column names as `[][][]column_name[][][]` so they stand out in the raw `.md` editor.
       - Preferred format is a small table: `Column | Meaning | Notes` with the column cell written as `[][][]...[][][]`.
 
-- **EODHD rules are strict**
-  - Follow `EODHD/INSTRUCTION.txt`:
-    - All saved timestamps must be `America/New_York` local time.
-    - Do **not** include `Timestamp` in saved outputs (drop it before saving).
-    - Read the API token from `EODHD/API TOKEN`.
-    - Put symbol-specific code + outputs under `EODHD/<symbol>/`.
+  See also:
+  - EODHD rules: `copilot-skills/datasource-eodhd.md`
+  - ThetaData / ThetaTerminal: `copilot-skills/datasource-thetadata.md`
 
-- **ThetaData / ThetaTerminal**
-  - Start the Java ThetaTerminal via `thetadata/run_theta_terminal.ps1` and keep `thetadata/credit.txt` next to the script.
+## Skill instructions (situation-specific)
+These rule sets apply only in specific situations; see `.github/copilot-skills/`:
+- [Planning & Agent Log](copilot-skills/planning.md)
+- [Momentum wrapper/base](copilot-skills/momentum-wrapper-base.md)
+- [Indicator calculators](copilot-skills/indicator-calculators.md)
+- [Deep learning trainers](copilot-skills/deep-learning-trainers.md)
+- [GUI scripts (PyQt)](copilot-skills/gui-pyqt.md)
+- [Web UI scripts](copilot-skills/web-ui.md)
+- [Config templates](copilot-skills/config-templates.md)
+- [EODHD rules](copilot-skills/datasource-eodhd.md)
+- [ThetaData / ThetaTerminal](copilot-skills/datasource-thetadata.md)
 
 ---
 
@@ -487,6 +218,7 @@ When a plan has multiple major Steps (e.g., Step 0, Step 1, …, Step N), **each
 
 **작업 수행 규율(필수):**
 - 작업 시작 전에 목차를 보고 이번 작업과 가장 연관된 섹션(들)을 먼저 확인하고, 해당 지침사항을 우선적으로 따른다.
+- 구현/수정 작업을 시작하기 전에, 이번 작업에 적용할 `.github/copilot-skills/*.md` 문서가 무엇인지 판단한 뒤 채팅에 먼저 명시한다(예: “참고: planning.md + web-ui.md”). 그 다음 작업을 시작한다.
 - 구현에 들어가기 전에 항상 “세부화된 계획”을 채팅에 먼저 명시한다.
 - 계획의 각 단계마다 다음을 반드시 수행한다:
   - 해당 단계를 구현한다.
@@ -504,158 +236,17 @@ When a plan has multiple major Steps (e.g., Step 0, Step 1, …, Step N), **each
 
 | Tier | 섹션 | 주요 내용 |
 |------|------|----------|
-| **T1** | [플랜 & 에이전트 로그](#플랜--에이전트-로그) | plan.md, agent_log.md, 단계 분해 |
-| **T1** | [플랜 세부 단계 작성법](#플랜-세부-단계-작성법) | 세부단계 테이블, 검증 훅, 사용자 게이트 |
 | **T1** | [역량 한계 / 정직성](#프로젝트-컨벤션) | API 키 없을 때, 땜질 금지 |
 | **T1** | [Mock 데이터 정책](#프로젝트-컨벤션) | mock 데이터 요청 없으면 사용 금지 |
 | **T1** | [보안 / 레포 위생](#보안--레포-위생) | 경로 250자 이하, 시크릿, 네이밍 |
 | **T1** | [에이전트별 언어 오버라이드](#에이전트별-언어-오버라이드) | Claude → 한국어 단독 |
-| **T1** | [한/영 동기화](#docs--prompt-markdown-규칙) | *.md + copilot-instructions 정합, 한국어 우선 읽기 |
-| **T2** | [큰 그림](#큰-그림) | 레포 개요, 주요 영역 |
-| **T2** | [폴더 구조 & 데이터 흐름](#폴더-구조--데이터-흐름요약) | EODHD→original_data→learning_data 흐름 |
-| **T2** | [실행 방법 (Windows)](#실행-방법-windows) | venv 활성화, 절대경로 |
+| **T1** | [한/영 동기화](#프로젝트-컨벤션) | *.md + copilot-instructions 정합, 한국어 우선 읽기 |
+| **T2** | [레포 컨텍스트(옵션)](copilot-skills/repo-context.md) | 개요, 구조, 실행 방법 |
 | **T3-A** | [재시도 / 견고성](#프로젝트-컨벤션) | 10회 재시도, 백오프, 영구 실패 처리 |
-| **T3-A** | [Wrapper + base 패턴](#프로젝트-컨벤션) | momentum 스크립트 구조 |
-| **T3-A** | [Indicator calculators](#프로젝트-컨벤션) | pandas, 로깅 패턴 |
-| **T3-A** | [딥러닝 트레이너](#프로젝트-컨벤션) | dedup, 프리셋, 문서 정합 |
-| **T3-B** | [GUI 스크립트](#프로젝트-컨벤션) | PyQt, 크기조정, 로그 |
-| **T3-B** | [Web UI 스크립트](#프로젝트-컨벤션) | 바인딩, CDN 금지 |
-| **T3-C** | [설정 템플릿 파일 (TOML)](#프로젝트-컨벤션) | VALUES/EXPLANATIONS, 한/영, TOML 유효성 |
 | **T3-C** | [Docs / prompt Markdown 규칙](#프로젝트-컨벤션) | 한/영 병기, 정합, 출력 컬럼 |
-| **T3-D** | [EODHD 규칙](#프로젝트-컨벤션) | NY 시간대, Timestamp 컬럼 금지 |
-| **T3-D** | [ThetaData / ThetaTerminal](#프로젝트-컨벤션) | run_theta_terminal.ps1 |
+| **T3** | [스킬 지침(상황별)](#스킬-지침상황별) | `.github/copilot-skills/` 링크 모음 |
 
 > **T1** = 모든 작업에 항상 적용 &nbsp;·&nbsp; **T2** = 레포 컨텍스트 (처음이면 읽기) &nbsp;·&nbsp; **T3-A** = 코드 패턴 &nbsp;·&nbsp; **T3-B** = UI 개발 &nbsp;·&nbsp; **T3-C** = 설정/문서 &nbsp;·&nbsp; **T3-D** = 데이터 소스
-
-## 플랜 & 에이전트 로그
-- `plan.md`는 **사용자가 명시적으로 요청할 때만** 생성.
-- “plan/계획을 세워달라”는 직접 요청은 모두 “명시적 요청”으로 취급한다(예: “plan을 세워라”, “계획 세워줘”, “플랜 만들어”, “plan 작성”, “plan.md 만들어”).
-- 사용자가 plan을 요청하면 아래 둘 다 수행한다:
-  - 채팅에 상세 단계별 계획을 작성(작업 수행 규율의 요구사항)
-  - `C:\github_coding\terminal_sec\ai_agent_plan\<project_name>\plan.md` 파일을 생성(단, 사용자가 ‘파일 변경 금지’를 명시한 경우 제외)
-- 사용자가 “실행하지 말고”(예: “실행하지 말고”)라고 말했을 때, 파일 작성까지 금지인지 애매하면 파일을 만들기/수정하기 전에 hook 질문 플로우(`ask_questions`)로 확인한다.
-  - 기본 해석(사용자가 별도 명시하지 않는 한): “실행하지 말고” = 코드 실행 금지(테스트/서버/스크립트 실행 금지)이며, `plan.md` 작성/갱신은 허용.
-- `agent_log.md`는 **사용자가 특정 plan을 수행하라고 지시할 때만** 작성/업데이트.
-- **`agent_log.md` 언어 규칙(필수):** `agent_log.md`는 **한국어 단독**으로 작성한다. 영/한 병기 불필요 — 한국어만으로 충분.
-- 저장 위치: `C:\github_coding\terminal_sec\ai_agent_plan\<project_name>\`
-  - `plan.md`: 작업 시작 전 상세 단계별 계획 (목표, 접근법, 생성/수정 파일, 순서, 위험 요소). 영/한 병기 (단, [에이전트별 언어 오버라이드](#에이전트별-언어-오버라이드) 참고 — Claude는 한국어 단독).
-  - `agent_log.md`: 수행한 모든 작업을 시간순으로 기록 (생성/수정 파일, 실행 명령어, 결정, 오류). **한국어 단독.**
-- **큰 작업은 단계로 쪼개기:** 크고 복잡한 작업은 독립적으로 검증 가능한 작은 단계로 분해한다. 각 단계마다 명확한 산출물을 정의한다.
-- **플랜 중간 변경(리비전):** 기록 히스토리를 유지한다.
-  - 이미 기록된 로그를 재작성하거나 삭제하지 않는다.
-  - plan 수정은 변경 이력으로 처리한다: “PLAN CHANGE” 노트를 짧게 추가(무엇/왜/영향)하고 새 plan 기준으로 진행한다.
-- **중간 결과물 검토 루프:** 각 단계 완료 후 결과를 검증(파일 내용 확인, 테스트 실행, 출력 확인)하고, 사용자가 직접 확인할 수 있는 검증 절차를 함께 제공한 뒤 다음 단계로 진행한다.
-  - 해당 단계에 사용자 확인이 필요하면, 채팅에서 명확히 확인을 요청한다.
-  - `agent_log.md`에서는 사용자 확인 전에는 “확인 대기”로 표시하고, 확인 후에만 “사용자 확인 후 완료”로 업데이트한다.
-  - 문제점이 발견되면 로그에 기록하고, 다음 행동/선택지를 구체적으로 제안한다.
-## 플랜 세부 단계 작성법
-plan에 여러 대단계(Step 0, Step 1, …, Step N)가 있을 때, **각 Step을 반드시 번호 매긴 세부 단계(sub-step)로 추가 분해**해야 합니다.
-
-- **세부 단계 번호 형식:** `<Step>-<순번>` (예: `1-1`, `1-2`, `2-1`).
-- **세부 단계 테이블(각 Step마다 필수):**
-
-  | 컬럼 | 목적 |
-  |------|------|
-  | Sub-step | ID (예: `1-1`) |
-  | Task | 무엇을 하는지 한 문장 |
-  | Files | 생성/수정하는 파일 |
-  | Verification | 해당 세부 단계가 올바르게 완료됐는지 확인하는 정확한 명령/체크 |
-
-  예시:
-  ```
-  | Sub-step | Task | Files | Verification |
-  |----------|------|-------|--------------|
-  | 1-1 | `initDb()`에 `foo` 테이블 CREATE 추가 | `src/db.ts` | 백엔드 시작 → 테이블 존재 확인 (`SELECT name FROM sqlite_master WHERE name='foo'`) |
-  | 1-2 | `fooRepository.ts` 서비스 생성 | `src/services/fooRepository.ts` | `npx tsc --noEmit` → 에러 0개 |
-  ```
-
-- **검증 훅 블록(각 Step 마감 시 필수):**
-  - Step 내 모든 세부 단계가 완료된 후, 검증 명령어(빌드, 테스트, curl, DB 쿼리 등)를 나열하는 코드 블록을 포함합니다.
-  - 마지막에: `사용자 확인 필요: **예**`를 명시합니다.
-  - 예시:
-    ```
-    검증 훅 (Step 1 마감):
-    1. cd project && npx tsc --noEmit   → 에러 0개
-    2. npm run test                     → 모든 테스트 통과
-    3. curl http://localhost:8080/api/foo → 예상 JSON 반환
-    ```
-
-- **사용자 게이트 규칙(필수):**
-  - Step의 검증 훅 결과를 `ask_questions`를 통해 사용자에게 제시합니다.
-  - 사용자가 현재 Step을 명시적으로 확인할 때까지 다음 Step으로 **진행하지 않습니다**.
-  - 사용자가 거절하거나 문제를 발견하면 → 수정, 재검증, 재질문.
-  - 사용자 확인 후에만 → `agent_log.md`에 `completed (user-confirmed)` 기록.
-
-- **Step 내부는 순차, Step 간에는 게이트:**
-  - 같은 Step 내의 세부 단계는 순차적으로 실행합니다.
-  - Step 자체는 병렬 실행 가능할 수 있으며, 이를 **실행 의존성 그래프**(상세한 ASCII/Markdown 다이어그램)로 문서화합니다.
-
-- **실행 의존성 그래프 요구사항(필수):**
-  - 상단에 모든 상태 이모지를 보여주는 **범례(Legend)**를 포함합니다.
-  - **모든 세부 단계**를 부모 Step 아래에 한 줄씩 나열하고, 현재 상태 이모지를 표시합니다.
-  - **병렬 트랙**을 명확히 라벨링합니다(예: 트랙 A / 트랙 B) + 각 트랙이 다루는 내용을 명시합니다.
-  - **차단 구간**은 박스형 배너로 차단 사유를 설명합니다.
-  - 그래프 다음에 포함:
-    - **병렬 트랙 요약** — 어떤 Steps가 병렬로 가능한지, 선행 조건은 무엇인지.
-    - **차단 요약 테이블** (`결정 | 차단 대상 | 선택지`) — 미결정 사항이 있을 때.
-  - 예시 (상세):
-    ```
-    ╔═══════════════════════════════════════════════════════╗
-    ║              실행 의존성 그래프                         ║
-    ║  범례: ✅ 완료  ⏳ 대기  🚫 차단됨  ⬜ 미시작          ║
-    ╚═══════════════════════════════════════════════════════╝
-
-    ✅ Step 0 (감사)
-    │   ├─ 0-1 API 프로브 ............. ✅ 완료
-    │   └─ 0-2 능력 매트릭스 .......... ✅ 완료
-    │
-    ▼
-    ⬜ Step 1 (기반)
-    │   ├─ 1-1 테이블 생성 ............ ⬜
-    │   └─ 1-2 엔드포인트 연결 ........ ⬜
-    │
-    ├───────────────┬──────────────────┐
-    │  트랙 A       │  트랙 B          │
-    ▼               ▼                  │
-    ⬜ Step 2        ⬜ Step 4           │
-    │               │                  │
-    ▼               ▼                  │
-    ⬜ Step 3        ⬜ Step 5           │
-    │               │                  │
-    └───────┬───────┘                  │
-            ▼                          │
-    ╔═══════════════════════════╗       │
-    ║ 🚫 차단 구간              ║       │
-    ║ 결정 X 필요              ║       │
-    ╚═══════════════════════════╝       │
-            │                          │
-            ├─► 🚫 Step 6             │
-            ├─► 🚫 Step 7             │
-            ▼                          │
-    ⬜ Step 8 ◄── 6+7 필요             │
-            ▼                          │
-    ⬜ Step 9 (최종)                    │
-    ```
-
-- **차단된 Step:** 미결정 사항이나 외부 차단 요소에 의존하는 Step은 `⚠️ BLOCKED`로 표시하고 선행 조건을 명시합니다. 차단된 Step은 시작하지 않습니다.
-
-- **세부 단계 테이블 상태 표기:** 아래 마커를 사용합니다:
-  - `✅ Done` — 완료 및 검증됨
-  - `⏳ Awaiting user` — 완료했으나 사용자 확인 대기 중
-  - `🚫 BLOCKED` — 미해결 의존성으로 시작 불가
-  - `⬜` — 미시작
-
-- **plan.md 작성 규칙(plan.md 생성/수정 시 반드시 준수):**
-  - **구조 순서:** 목표 → 접근법 개요 → Step 목록(각 Step에 세부 단계 테이블 + 검증 훅) → 실행 의존성 그래프 → 미결정 사항/차단 요소.
-  - **한/영 병기:** EN 섹션을 먼저, `---` 구분선, 그 다음 KO 섹션(동일 내용 번역). *(오버라이드: Claude는 한국어 단독 — [에이전트별 언어 오버라이드](#에이전트별-언어-오버라이드) 참고.)*
-  - **모든 Step 제목**에는 번호와 짧은 설명을 포함: `#### Step N — 짧은 이름`.
-  - **세부 단계 테이블**은 모든 Step에 필수(위의 세부 단계 테이블 형식 참조).
-  - **검증 훅 블록**은 모든 Step 마감 시 필수.
-  - **실행 의존성 그래프**는 상세하게 작성(위의 그래프 요구사항 참조) — 단순 트리가 아닌 상세 그래프.
-  - **이모지 상태 마커**를 세부 단계 테이블과 의존성 그래프 모두에서 일관되게 사용하여 한눈에 진행 상황을 파악할 수 있게 합니다.
-  - **차단 추적:** 차단된 Step은 시각적으로 뚜렷하게 구분(그래프에서 박스 구간, `⚠️ BLOCKED` 라벨, 선행 조건 명시).
-  - **사전 작성 코드 표기:** 정식 plan 실행 전에 코드가 작성된 경우, 해당 세부 단계에 명시적으로 기록(예: "사전 작성됨 (검증 필요)").
-  - **미결정 사항 섹션:** 번호 ID, 선택지, 차단 대상 Step을 포함한 미결정 사항 목록 유지.
 # Copilot 지침 (python 워크스페이스, 한국어)
 
 <!-- ====================================================
@@ -677,6 +268,7 @@ plan에 여러 대단계(Step 0, Step 1, …, Step N)가 있을 때, **각 Step�
 - 레포에는 생성 산출물(`*.xlsx`, `*_raw.csv`, `*_raw.parquet`)이 많습니다. 새 스크립트 추가 시 기존 네이밍 규칙(`<script_name>.xlsx` + `<script_name>_raw.csv/parquet`)을 따릅니다.
 
 <!-- T1: 에이전트별 언어 오버라이드 -->
+<a id="에이전트별-언어-오버라이드"></a>
 ## 에이전트별 언어 오버라이드 (필수)
 - **실행하는 AI 에이전트가 Claude(모든 버전/모델)인 경우:** 모든 `*.md` 문서 — 동반 문서, `plan.md`, 설정 `EXPLANATIONS`, `copilot-instructions.md` 수정 — 를 **한국어 단독**으로 작성합니다. Claude 에이전트에 대해서는 한/영 병기 요구사항이 면제됩니다.
 - **그 외 에이전트(예: GPT, Gemini):** 아래 각 섹션에 명시된 기존 한/영 병기 규칙을 따릅니다.
@@ -700,25 +292,9 @@ plan에 여러 대단계(Step 0, Step 1, …, Step N)가 있을 때, **각 Step�
   TIER 2 — 레포 컨텍스트
 ===================================================== -->
 
-## 큰 그림
-- 이 레포는 “패키지 라이브러리”가 아니라 *스크립트 중심(script-first)* 연구/분석 파이프라인 모음입니다. 보통 개별 `*.py`를 직접 실행해서 로컬 CSV/Parquet 입력을 읽고 Excel/CSV/Parquet 출력물을 씁니다.
-- 주요 영역:
-  - `momentum/`: 옵션 셀링 / 모멘텀 / 리버설 분석 스크립트. Base 모듈에 핵심 로직이 있고, 얇은 wrapper가 경로/설정을 지정합니다.
-  - `deep_learning_data/indicator_calculator/`: 학습 데이터(주식+옵션)용 피처/지표 계산기.
-  - `EODHD/`: EODHD API 다운로드 규칙 + 토큰 취급.
-  - `thetadata/`: ThetaTerminal(Java) 실행/자격 증명 관련.
-
-## 폴더 구조 & 데이터 흐름(요약)
-- `EODHD/`에는 다운로드/정규화 스크립트가 있고(규칙은 `EODHD/INSTRUCTION.txt`), 여기서 만든 데이터를 보통 `original_data/` 아래 “원본 데이터 형태”로 저장해 두고 다른 파이프라인이 입력으로 사용합니다.
-  - 예시(QQQ 1분봉 정규장): `EODHD/EODHD_qqq/downloader_and_aggregator_qqq_1min_regular_2013_2025.py` → `original_data/original_data_stock/original_data_stock_qqq/`로 CSV/Parquet 생성.
-- `original_data/`는 사실상 “정식 원본(raw canonical) 데이터” 저장소 역할을 하며, momentum/딥러닝/집계 테스트 등에서 입력으로 많이 참조합니다.
-- `deep_learning_data/indicator_calculator/`는 `original_data/`(또는 다른 parquet/csv 입력)를 받아 피처를 붙여 `deep_learning_data/learning_data_*` 계열 폴더로 학습 데이터를 생성합니다.
-
-## 실행 방법 (Windows)
-- 로컬 venv를 사용합니다(레포에 `.venv/` 존재).
-  - 활성화: `\.venv\Scripts\Activate.ps1`
-  - 예시 실행: `python momentum\tree_10_1_optionsell_momentum_atm.py`
-- 많은 스크립트가 `c:\\github_coding\\python\\...` 절대경로를 하드코딩합니다(예: `momentum/tree_10_1_optionsell_momentum_atm.py`). “경로를 포터블하게 바꿔달라”는 요청이 없는 한, 기존 관례를 유지하세요.
+## 레포 컨텍스트(옵션)
+- 레포 개요/폴더 구조/실행 방법처럼 “레포 종속” 정보는, 이 파일이 다른 레포로 복사될 때 가정이 틀어지는 문제를 피하기 위해 별도 문서로 분리합니다.
+- 참고: `copilot-skills/repo-context.md`
 <!-- ====================================================
   TIER 3 — 작업별 컨벤션
   T3-A: 코드 패턴 (재시도, Wrapper+base, 지표 계산기, DL 트레이너)
@@ -750,119 +326,6 @@ plan에 여러 대단계(Step 0, Step 1, …, Step N)가 있을 때, **각 Step�
   - 짧은 대기 + 백오프(예: 0.1~0.5초부터 시작해서 점점 증가)를 사용하고, 재시도 횟수/원인을 로그로 남깁니다.
   - 영구적인 실패(잘못된 경로/설정, 인증/토큰 오류, 결정적 파싱/검증 오류, 디스크 용량 부족 등)는 무작정 재시도하지 말고 즉시 실패시키되 오류 메시지를 명확히 합니다.
   - 배치 작업이 길어지는 경우 재시도 횟수/대기 시간은 상수 또는 CLI/GUI 옵션으로 조절 가능하게 합니다.
-
-- **Wrapper + base 패턴 (momentum)**
-  - Base 모듈은 `Config` + `run_analysis` 형태로 코어 로직을 제공합니다.
-  - Wrapper는 base를 import하고 상수/경로 설정 + `main()` 정도만 둡니다.
-  - 출력 규칙:
-    - “raw” CSV는 항상 쓰고, Parquet는 가능하면 쓰되(`pyarrow/fastparquet` 없으면 graceful skip).
-    - Excel은 임시 파일에 쓴 뒤 `os.replace`로 교체(부분 파일로 깨지는 것 방지).
-  - 진행/상태 출력:
-    - 오래 걸리는 작업은 콘솔에 진행 상황을 출력합니다.
-    - 성공 시 주요 출력 경로를 포함한 성공 메시지를 출력합니다.
-
-- **Indicator calculators (deep_learning_data)**
-  - pandas DataFrame에 컬럼을 추가하는 방식이며, row를 drop하지 않습니다(초반 구간은 히스토리 부족으로 `NaN` 가능).
-  - 로깅 패턴: 파일 로거 + `logger.handlers` 가드(중복 핸들러 방지).
-    - 출력 디렉토리가 있으면 log 파일도 그 디렉토리에 두는 것을 기본으로.
-    - 출력 디렉토리 맥락이 없으면 스크립트 옆에 `.log`.
-    - `log_errors=True`일 때 예외는 `logger.exception(...)`으로 기록 후 재-raise.
-    - 성공 시 `SUCCESS: wrote <paths>` 같은 최종 로그 라인을 남김.
-  - 큰 입력/루프는 `progress_every` 같은 노브를 제공해 주기적으로 진행 상황을 출력.
-  - 일부 스크립트는 CLI 제공 + repo root 기준 상대 경로로 출력.
-
-- **딥러닝 트레이너(dedup + 프리셋 + 문서 정합)**
-  - **공통 중간 결과 dedup(필수):** 멀티 head / 멀티 case trainer에서는 비용 큰 공통 중간 결과를 먼저 1회 계산하고 여러 head가 재사용하도록 구성합니다.
-    - 예시: 주식 `close/high/low` 배열 + horizon별 `r_end/r_max/r_min`; 옵션 `options_groups`(스냅샷 인덱스); (i,h,delta,right) 계약 선택 + horizon 종료 가격 매칭 + profit%.
-    - `label_targets` hit 판정 같은 의미 루프는 명시적으로 유지하되, 그 안에서 group/pick/match 같은 비싼 작업을 반복하지 않습니다.
-  - **“중복계산/계산낭비” 정의(중요):** **입력 + config/옵션/플래그(랜덤 시드 포함)** 조건이 동일할 때 **결과가 동일한데도** 같은 계산을 반복하는 경우만 중복/낭비로 봅니다. 계산을 바꾸면 결과가 달라지는 경우는 중복/낭비가 아니라 “동작 변경”이므로 별도로 취급합니다.
-  - **case preset / multi-case 설계:** `active_cases` 같은 multi-select 프리셋을 지원할 때:
-    - `enable_*` 플래그 merge 규칙을 명확히 둡니다(보통 OR).
-    - 충돌 가능성이 큰 공통 파라미터(`label_horizons`, `label_deltas`, `label_targets`)는 case 내부가 아니라 루트 VALUES에 둡니다.
-    - 주식+옵션 라벨을 같이 켤 수 있다면 혼합 모드(예: `Model_SO`)를 명시적으로 지원하거나, 아니면 명확한 에러로 즉시 차단합니다.
-    - 하위호환 규칙(`active_cases`가 없거나 비어 있으면 legacy `active_case`)을 코드/문서에 함께 명시합니다.
-  - **문서 정합(EN/KO):** bilingual `*.md`는 같은 제목/같은 순서로 유지하고, “중복 제거 vs 반복”을 구분해 설명합니다.
-  - **리팩터링 후 정리(레거시 격리):** 리팩터링으로 기존 경로가 더 이상 사용되지 않으면 삭제하거나, `LEGACY/UNUSED` 섹션으로 격리하고 간단한 이유를 적습니다.
-
-- **GUI 스크립트(사용자가 GUI 요청 시)**
-  - Tkinter/Streamlit 등 금지, **PyQt만 사용**. 기본은 PyQt6(이미 PyQt5를 쓰면 유지).
-  - GUI의 텍스트 영역/테이블/상태 표시에서 복사 가능하도록 설정.
-  - 창 크기는 항상 조정 가능해야 하며, 레이아웃은 내부 위젯이 자동으로 맞춰지게 구성(고정 크기 금지).
-  - 사용자가 고정 크기를 명시적으로 요청하지 않는 한 `setFixedSize(...)`, `MSWindowsFixedSizeDialogHint` 같은 고정 크기 힌트/제약을 사용하지 마세요.
-  - 폴더명/경로처럼 긴 문자열을 라벨로 표시할 때는 창이 가로로 과도하게 커지지 않도록 줄바꿈을 허용하세요:
-    - `QLabel.setWordWrap(True)` 사용, 필요하면 `QSizePolicy.Ignored`처럼 축소에 유리한 size policy 적용.
-  - GUI 사용 로그(`<script_stem>_gui.log`)를 항상 남기고, 예외는 `logger.exception(...)`으로 기록.
-  - **`*gui_vm*.py` 파일 생성 요청 시**
-    - GUI는 로컬에서 실행되어야 하며, 실제 코드 실행/데이터 접근은 SSH로 VM에서 수행해야 함.
-    - 결과 산출물은 항상 VM에 저장.
-    - **SSH 실행 견고성(중요)**
-      - `cd <remote_root> && python <상대경로>` 방식에 의존하지 마세요. VM/login-shell 환경에 따라 작업 디렉토리가 예상과 다르게 동작하면서 상대경로가 `$HOME` 기준으로 풀릴 수 있습니다.
-      - `remote_root`를 기준으로 **절대경로 스크립트**를 만들어 실행하는 방식을 우선 사용하세요. 예: `python3 "$remote_root/path/to/script.py" ...`
-      - Windows/PowerShell에서 SSH 커맨드를 만들 때 `$`가 로컬에서 먼저 확장되지 않도록 주의하세요(원격 문자열은 single-quote 사용 또는 `$` 이스케이프 권장).
-      - VM에 레포 venv가 있으면 그 파이썬을 우선 사용하세요(예: `/mnt/python/.venv/bin/python`). system `python3`는 패키지(`pandas` 등)가 없어서 `ModuleNotFoundError`가 날 수 있습니다.
-      - “원격 스크립트 파일이 없음” / `remote_root` 불일치 같은 케이스는 **재시도 대상이 아닌 설정 오류**이므로 즉시 실패시키고 안내 메시지를 명확히 하세요.
-    - **Stop / Retry 정확성(중요)**
-      - GUI에 재시도 기능이 있다면 `Stop`은 **완전 중지**여야 합니다:
-        - `stop_requested` 플래그를 세팅
-        - 재시도 타이머 즉시 중지
-        - 대기 중 작업 큐(예: 여러 포맷 순차 실행) 비우기
-        - 프로세스 `finished` 콜백에서 먼저 `stop_requested`를 확인하고, 재시도 예약/다음 작업 실행을 절대 하지 않기
-      - `kill()`로 종료된 뒤 `finished` → “실패 처리” → 재시도 예약이 걸리는 레이스를 방지하세요.
-    - 로컬로 결과를 동기화하는 것은 **옵션**이며, GUI에서 사용자가 켜고 끌 수 있어야 함(체크박스/토글).
-      - 기본값: 사용자가 켜지 않는 한 로컬로 동기화하지 않음.
-      - 동기화를 끈 경우, GUI는 “결과는 VM에만 존재한다”를 명확히 표시하고 최종 상태/로그에 VM 출력 경로를 포함해야 함.
-    - **동기화 기본:** VM → 로컬은 `rsync`를 우선 사용(증분 전송/재시도 유리). Windows에서는 `wsl rsync`를 우선 고려(WSL 경로 `/mnt/c/...` 사용). `rsync`가 없으면 `scp`로 폴백.
-    - 로컬/VM 폴더 구조가 동일하다는 전제를 검증하고, 불일치 시 오류로 중단.
-
-- **Web UI 스크립트(사용자가 Web UI 요청 시)**
-  - **전형적인 토폴로지(중요):** 서버는 VM에서 실행되고, 사용자는 다른 컴퓨터(로컬 PC)에서 브라우저로 접속하는 경우가 많습니다.
-    - 다른 컴퓨터에서 `http://127.0.0.1:8000/`로 접속된다고 가정하면 안 됩니다.
-  - **바인딩(host/port) 정책(원격 접속 정확성 + 안전):**
-    - 기본 바인딩은 외부 노출을 막기 위해 `127.0.0.1`(loopback)로 두세요.
-    - 환경변수로 바인딩을 바꿀 수 있게 만드세요(예: `WEBUI_HOST`, `WEBUI_PORT`). 원격 접속이 필요할 때만 사용자가 명시적으로 `0.0.0.0`를 선택하도록.
-    - 문서에 두 가지 접속 방식을 모두 안내하세요:
-      - **권장:** SSH 포트포워딩(`ssh -L 8000:127.0.0.1:8000 <vm_host>`) 후 로컬에서 `http://127.0.0.1:8000` 접속.
-      - **직접 공개:** `0.0.0.0`로 바인딩하고 VM 방화벽/클라우드 보안그룹에서 인바운드를 “내 IP만” 허용.
-  - **기본은 외부 에셋 금지:** React/CDN/Babel 등 네트워크로 로드되는 JS/CSS에 기본적으로 의존하지 말고, 제한된 네트워크/오프라인에서도 렌더링되게 하세요.
-  - **캐시 처리:** 루트 HTML(`GET /`)은 `no-store`로 해서 “수정했는데도 옛 UI가 계속 보이는” 문제를 방지하세요.
-  - **브라우저/WebView 호환성(최신 JS 가정 금지):**
-    - 구형/내장 WebView에서 파싱 단계에서 바로 죽는 JS 패턴을 피하세요:
-      - 함수 호출 인자 목록에서 trailing comma 사용 금지.
-      - `??`(nullish coalescing), `?.`(optional chaining) 사용 지양.
-    - arrow function, async/await, rest/spread 등 최신 문법을 쓴다면, UI 내에 “시작 실패 패널”을 띄우고 “최신 브라우저로 열라”는 안내를 명확히 표시하세요.
-  - **디버그 가시성(필수):**
-    - 시작 플레이스홀더 + “preflight OK” 표시로 JS가 도는지 즉시 알 수 있게.
-    - `window.onerror` / `unhandledrejection`를 잡아서 콘솔뿐 아니라 UI 화면에도 오류를 보여주세요.
-    - 백엔드 생존 확인용 `GET /api/config` 또는 `GET /healthz` 같은 가벼운 엔드포인트를 제공하세요.
-  - **잡음 감소:** `/favicon.ico`는 204 또는 작은 아이콘으로 응답해서 404 콘솔 스팸을 줄이세요.
-  - **보안:** 시크릿은 절대 로그에 남기지 말고, 외부 공개 시 인바운드 제한을 강하게 권장하세요. 기본은 SSH 터널링을 선호.
-
-- **설정 템플릿 파일(TOML/INI/YAML) 규칙(중요)**
-  - 터미널에서 스크립트를 실행하기 위한 *설정 템플릿 파일*을 만들거나 수정할 때는, 반드시 두 구간으로 분리해서 작성합니다:
-    - `VALUES`: key/value 설정 값만(= CLI 옵션/플래그에 해당하는 값).
-    - `EXPLANATIONS`: 사람이 읽는 설명/문서만(설정값 중복 금지).
-  - **필수 항목을 위로(필수):** `EXPLANATIONS`의 맨 위(각 언어 블록의 시작)에 짧은 “필수 체크리스트”를 두고 아래를 포함합니다:
-    - 실행에 필요한 필수 CLI 옵션/플래그(예: `--config <path>`)
-    - `VALUES`에서 반드시 채워야 하는 key들( REQUIRED / CONDITIONALLY REQUIRED 구분 포함 )
-    - 최소 실행 가능한 CLI 예시 1개
-  - **빈 문자열 placeholder("") 규칙:** 템플릿에 `foo = ""` 같은 빈 값이 있으면 `EXPLANATIONS`에서 반드시:
-    - 사용자가 채워야 하는지 여부,
-    - 언제 필수인지(예: “옵션 라벨 활성화일 때만”),
-    - 구체 예시 값(최소 1개)
-    를 명시합니다.
-  - **config 동반 문서(동작이 복잡할 때):** merge/우선순위/입출력 의미가 복잡한 config는 같은 폴더에 동반 Markdown을 둡니다:
-    - 가능하면 같은 base name 사용: `something_config.toml` ↔ `something_config.md`
-    - TOML `EXPLANATIONS`: 간단(빠른 실행 + 필수 체크리스트)
-    - MD: 더 자세하고 코드 구현과 1:1로 맞게 작성하며, config 동작 변경 시 함께 업데이트
-  - **TOML 문법 안전장치(필수):** 설정 템플릿은 반드시 “유효한 TOML”이어야 합니다.
-    - `.toml` 파일에서 `EXPLANATIONS` 구간의 모든 라인은 반드시 `#`로 시작하는 주석이어야 합니다(아니면 삭제하거나 별도 `.md`로 옮기기).
-    - `.toml` 설정 템플릿을 만들/수정한 직후에는 간단히 파싱 확인을 수행합니다(권장):
-      - `python -c "import tomllib, pathlib; tomllib.loads(pathlib.Path('path/to/config.toml').read_text(encoding='utf-8'))"`
-      - Python 3.11 미만이면 `tomli` 사용.
-  - `EXPLANATIONS` 구간은 한/영 2개 블록으로 작성합니다 *(오버라이드: Claude는 한국어 단독 — [에이전트별 언어 오버라이드](#에이전트별-언어-오버라이드) 참고)*:
-    - 영어를 먼저 쓰고, 구분선 `---` 뒤에 한국어를 씁니다.
-    - 두 언어 블록은 섞지 말고, 내용은 반드시 동일하게 맞춥니다(제목/옵션/기본값/예시 커맨드 동일).
-  - 용어: “인자(arguments)”보다는 “CLI 옵션/플래그(커맨드라인 옵션)” 표현을 우선 사용합니다(특히 `--epochs` 같은 형태).
 
 - **Docs / “prompt” Markdown 규칙(중요)**
   - 일부 스크립트는 같은 이름의 `*.md`를 “프롬프트/스펙/설명” 동반 문서로 사용합니다.  - **한/영 병기 규칙 적용 범위(필수):** 이 한/영 작성 방식은 아래 **두 가지 모두**에 적용됩니다:
@@ -918,13 +381,20 @@ plan에 여러 대단계(Step 0, Step 1, …, Step N)가 있을 때, **각 Step�
       - EN 영역에 한국어 헤딩/키워드가 없는지
       - KO 영역에 영어 헤딩/키워드가 없는지
 
-- **EODHD 규칙은 엄격**
-  - `EODHD/INSTRUCTION.txt` 준수:
-    - 저장되는 시간은 `America/New_York` 로컬.
-    - 저장 출력물에는 `Timestamp` 컬럼을 포함하지 않음(중간 계산에만 사용 가능).
-    - API 토큰은 `EODHD/API TOKEN`에서 읽음.
-    - 심볼별 코드는/출력은 `EODHD/<symbol>/` 아래에 둠.
 
-- **ThetaData / ThetaTerminal**
-  - `thetadata/run_theta_terminal.ps1`로 Java ThetaTerminal을 실행하고, `thetadata/credit.txt`는 스크립트 옆에 유지.
+추가 참고:
+- EODHD 규칙: `copilot-skills/datasource-eodhd.md`
+- ThetaData / ThetaTerminal: `copilot-skills/datasource-thetadata.md`
+
+## 스킬 지침(상황별)
+아래 규칙들은 특정 상황에서만 적용됩니다. 자세한 내용은 `.github/copilot-skills/`를 참고하세요:
+- [플랜 & 에이전트 로그](copilot-skills/planning.md)
+- [Wrapper + base 패턴 (momentum)](copilot-skills/momentum-wrapper-base.md)
+- [Indicator calculators](copilot-skills/indicator-calculators.md)
+- [딥러닝 트레이너](copilot-skills/deep-learning-trainers.md)
+- [GUI 스크립트(PyQt)](copilot-skills/gui-pyqt.md)
+- [Web UI 스크립트](copilot-skills/web-ui.md)
+- [설정 템플릿 파일](copilot-skills/config-templates.md)
+- [EODHD 규칙](copilot-skills/datasource-eodhd.md)
+- [ThetaData / ThetaTerminal](copilot-skills/datasource-thetadata.md)
 
