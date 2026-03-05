@@ -180,6 +180,14 @@ Deliverables
 | 0-3 | Fill capability matrix in `test_data_availability_audit.md` | ✅ Done (updated with WSH v3 results) |
 | 0-4 | Pending decisions: /calendar source + Node↔IBKR method | ⏳ Awaiting user |
 
+**Sub-step purpose & description (Step 0)**
+- `0-1` Purpose: Confirm which Finnhub fields exist for the UI. Description: run Finnhub probes for profile/news/earnings and store raw JSON samples under `tmp/probes/`.
+- `0-2` Purpose: Confirm baseline IBKR TWS connectivity and OHLC retrieval. Description: run the v1 probe and record which parts work/fail (e.g., OHLCV works, Reuters/WSH gaps) for later decisions.
+- `0-2b` Purpose: Confirm WSH metadata/events are accessible via `conId`. Description: use the blocking metadata call and verify non-empty metadata + events; persist samples for reproducibility.
+- `0-2c` Purpose: Identify which WSH event types contain required financial fields. Description: survey event types and record which value fields exist (EPS yes, revenue no).
+- `0-3` Purpose: Turn probe results into a concrete implementation map. Description: fill the capability matrix in `test_data_availability_audit.md` for every UI column.
+- `0-4` Purpose: Unblock IBKR-dependent steps. Description: user decides (a) `/calendar` source strategy and (b) Node↔IBKR integration method.
+
 **WSH v3 key finding (corrects earlier assessment):**
 - v1 used `reqWshMetaData()` (non-blocking) → empty. v2 used `getWshMetaData()` (blocking) + `conId` → rich data available.
 - **`wshe_eps` includes EPS actual + estimate** (`amount_oc`, `estimated_eps`, `change_amount`, `change_percent`).
@@ -236,6 +244,12 @@ Verification
 | 1-2 | `updateStatusRepository.ts` service | `terminal/backend/src/services/updateStatusRepository.ts` | Import check: no TS compile errors (`npx tsc --noEmit`) |
 | 1-3 | Wire `GET /api/updates/status` endpoint | `terminal/backend/src/server.ts` | `curl http://localhost:8080/api/updates/status` returns `{ "sources": { ... } }` with all 4 keys |
 | 1-4 | Persistence test: set a value → restart → same value | (runtime) | 1\. Call `setLastSuccess('tickers_csv', '2026-03-01T00:00:00Z')` via a test endpoint or inline. 2. Restart backend. 3. `curl /api/updates/status` → `tickers_csv.lastSuccessAt` equals the set value. |
+
+**Sub-step purpose & description (Step 1)**
+- `1-1` Purpose: Persist update timestamps in the backend DB. Description: create the `update_status` table in SQLite during initialization.
+- `1-2` Purpose: Centralize status read/write logic. Description: implement a repository service so routes don’t manipulate SQL directly.
+- `1-3` Purpose: Make status visible to the frontend and operators. Description: expose `GET /api/updates/status` returning a stable JSON shape with all source keys.
+- `1-4` Purpose: Prove it survives restarts (not in-memory). Description: set a value, restart the backend, and confirm the same value is returned.
 
 **Verification hook (Step 1 closeout):**
 ```
@@ -305,6 +319,14 @@ Verification
 | 2-5 | Wire `POST /api/tickers/add` endpoint | `terminal/backend/src/server.ts` | `curl -X POST http://localhost:8080/api/tickers/add -H "Content-Type: application/json" -d '{"csvPath":"...","ticker":"ZZZZ"}'` → success, then GET verifies ZZZZ appears. Then manually remove ZZZZ from CSV. |
 | 2-6 | Update `tickers_csv` status on success | `terminal/backend/src/server.ts` | After POST success, `GET /api/updates/status` shows `tickers_csv.lastSuccessAt` updated |
 
+**Sub-step purpose & description (Step 2)**
+- `2-1` Purpose: Read the CSV and extract tickers reliably. Description: implement `readTickersFromCsv()` and validate behavior via unit tests on the sample CSV.
+- `2-2` Purpose: Append a ticker safely. Description: implement `appendTickerToCsv()` with allowlist/path/ticker validation + duplicate policy.
+- `2-3` Purpose: Make writes robust on Windows. Description: use atomic write (temp→rename) and retry on transient `EBUSY/EPERM` errors.
+- `2-4` Purpose: Provide a read API for the UI. Description: wire `GET /api/tickers` and ensure it returns tickers for an allowlisted CSV.
+- `2-5` Purpose: Provide an append API for the UI. Description: wire `POST /api/tickers/add` and confirm it appends a new last row.
+- `2-6` Purpose: Track successful updates for operators/UI. Description: update `update_status` for `tickers_csv` after a successful append.
+
 **Verification hook (Step 2 closeout):**
 ```
 1. npx tsc --noEmit   → 0 errors
@@ -359,6 +381,14 @@ Verification
 | 3-5 | Add title mapping in `App.tsx` | `src/app/App.tsx` | `default-ticker` → "Default Ticker" |
 | 3-6 | Manual UI smoke test | (browser) | Open "Default Ticker" window → shows tickers from CSV → Add a ticker → list refreshes |
 
+**Sub-step purpose & description (Step 3)**
+- `3-1` Purpose: Make the window type selectable in the window system. Description: add `default-ticker` to the frontend `WindowType` union.
+- `3-2` Purpose: Implement the UI surface. Description: create `DefaultTickerWindow.tsx` to edit CSV path, reload, and add tickers.
+- `3-3` Purpose: Ensure the window renders in the desktop layout. Description: wire the component into `DraggableWindow.tsx`.
+- `3-4` Purpose: Allow users to open the window. Description: add the window type to `AddTabModal.tsx`.
+- `3-5` Purpose: Provide a stable, human-readable title. Description: map `default-ticker` to “Default Ticker” in `App.tsx`.
+- `3-6` Purpose: Validate end-to-end behavior. Description: manual smoke test: open window → load tickers → add ticker → list refresh.
+
 **Verification hook (Step 3 closeout):**
 ```
 1. npx tsc --noEmit (frontend)   → 0 errors
@@ -409,6 +439,13 @@ Verification
 | 4-3 | Wire `POST /api/news/pull-finhub` endpoint | `terminal/backend/src/server.ts` | `curl -X POST http://localhost:8080/api/news/pull-finhub` → `{ inserted: N, skipped: N, source: "FINNHUB" }` |
 | 4-4 | Update `finhub_news` status on success | `terminal/backend/src/server.ts` | After POST, `GET /api/updates/status` shows `finhub_news.lastSuccessAt` updated |
 | 4-5 | Verify stored data queryable | (runtime) | `curl "http://localhost:8080/api/news?source_names=FINNHUB"` → returns news items with correct fields |
+
+**Sub-step purpose & description (Step 4)**
+- `4-1` Purpose: Load the Finnhub key safely. Description: add config support (env preferred, file fallback) and fail fast without logging secrets.
+- `4-2` Purpose: Convert Finnhub responses into the DB’s news schema. Description: implement a provider that fetches and maps into `insertNewsItem()` with `source='FINNHUB'`.
+- `4-3` Purpose: Trigger ingestion on demand. Description: wire `POST /api/news/pull-finhub` returning `{inserted, skipped, source}`.
+- `4-4` Purpose: Track the last successful pull. Description: update `update_status` for `finhub_news` after a successful ingestion.
+- `4-5` Purpose: Confirm data is actually queryable by the UI. Description: verify `GET /api/news?source_names=FINNHUB` returns stored rows.
 
 **Verification hook (Step 4 closeout):**
 ```
@@ -471,6 +508,16 @@ Verification
 | 5-7 | Update `App.tsx` title mapping | `src/app/App.tsx` | `finhub-news` → `News Feed: finhub api` |
 | 5-8 | Update `DraggableWindow.tsx` switch | `src/app/components/DraggableWindow.tsx` | `finhub-news` → `FinnhubNewsWindow` |
 
+**Sub-step purpose & description (Step 5)**
+- `5-1` Purpose: Switch the window identity away from Brave. Description: remove `brave-news` and add `finhub-news` so the UI clearly targets Finnhub.
+- `5-2` Purpose: Keep code structure readable. Description: rename the component file to `FinnhubNewsWindow.tsx` to match behavior.
+- `5-3` Purpose: Enforce “no mock data” policy. Description: delete `generateMockData()` and all seeded/synthetic items from the window.
+- `5-4` Purpose: Render real stored news. Description: fetch from `GET /api/news?source_names=FINNHUB` and display results.
+- `5-5` Purpose: Allow manual refresh when needed (optional). Description: add an “Update” button calling `POST /api/news/pull-finhub`.
+- `5-6` Purpose: Match the exact requested label. Description: update the Add Tab label to `News Feed: finhub api`.
+- `5-7` Purpose: Ensure the window title is correct. Description: map `finhub-news` → `News Feed: finhub api`.
+- `5-8` Purpose: Ensure the window actually renders. Description: wire the switch-case to render `FinnhubNewsWindow`.
+
 **Verification hook (Step 5 closeout):**
 ```
 1. grep -r "generateMockData\|mock\|brave-news\|BraveNews" src/ → 0 results (no mock/brave references)
@@ -526,6 +573,14 @@ Verification
 | 6-4 | Wire `POST /api/ibkr/calendar/update` endpoint | `terminal/backend/src/server.ts` | `curl -X POST http://localhost:8080/api/ibkr/calendar/update` → `{ upserted: N, deletedMockRows: N }` |
 | 6-5 | Delete existing `mock_provider` rows on first success | `calendarIngestion.ts` or server route | `SELECT COUNT(*) FROM calendar_events WHERE source='mock_provider'` → 0 |
 | 6-6 | Update `ibkr_calendar` status | `terminal/backend/src/server.ts` | `GET /api/updates/status` → `ibkr_calendar.lastSuccessAt` populated |
+
+**Sub-step purpose & description (Step 6)**
+- `6-1` Purpose: Stop the mock calendar data generator. Description: remove the worker/interval logic that inserts `mock_provider` rows.
+- `6-2` Purpose: Prevent startup side effects. Description: remove `startCalendarIngestionWorkers()` from server startup.
+- `6-3` Purpose: Implement the real calendar pull (decision-dependent). Description: add a `pullCalendarData()` implementation for the decided source.
+- `6-4` Purpose: Expose an explicit update trigger. Description: wire `POST /api/ibkr/calendar/update` to pull+upsert events.
+- `6-5` Purpose: Remove historical mock rows. Description: delete `source='mock_provider'` rows after the first successful real update.
+- `6-6` Purpose: Track last successful update. Description: update `update_status` for `ibkr_calendar` on success.
 
 **Verification hook (Step 6 closeout):**
 ```
@@ -617,6 +672,15 @@ Verification
 | 7-6 | Wire `POST /api/ibkr/ohlc1d/update` | `terminal/backend/src/server.ts` | After POST: `overallMaxDate` advances (if new trading days exist) |
 | 7-7 | Spot-check derived columns | (runtime) | `SELECT ... Change_1d_Pct ... WHERE Symbol='AAPL' ... LIMIT 5` → non-NULL values |
 
+**Sub-step purpose & description (Step 7)**
+- `7-1` Purpose: Provide safe DB access to the canonical OHLC store. Description: implement repository helpers like `getOverallMaxDate()`.
+- `7-2` Purpose: Ensure the schema supports derived metrics. Description: add a migration helper that adds derived columns if missing.
+- `7-3` Purpose: Fetch missing daily bars from IBKR. Description: implement an IBKR provider for 1D bars over a date range.
+- `7-4` Purpose: Compute the UI-required percent-change fields. Description: implement derived metrics computation with unit tests for correctness.
+- `7-5` Purpose: Provide a status endpoint for operators/UI. Description: wire `GET /api/ibkr/ohlc1d/status` to report max date + lastSuccessAt.
+- `7-6` Purpose: Provide an explicit update endpoint. Description: wire `POST /api/ibkr/ohlc1d/update` orchestrating pull+upsert+derive.
+- `7-7` Purpose: Validate that derived columns are populated. Description: spot-check recent rows (e.g., AAPL) and confirm non-NULL values.
+
 **Verification hook (Step 7 closeout):**
 ```
 1. npx tsc --noEmit → 0 errors
@@ -672,6 +736,13 @@ Verification
 | 8-4 | Implement “running” + error states | same | Button disables + “Running…” appears; errors render inline |
 | 8-5 | Hook status refresh after updates | same | After POST, statuses refresh and latest DB date updates |
 
+**Sub-step purpose & description (Step 8)**
+- `8-1` Purpose: Make the window type available to the UI. Description: add `data-control` to frontend window types.
+- `8-2` Purpose: Implement the operations UI. Description: build `DataControlWindow.tsx` that loads status and triggers update endpoints.
+- `8-3` Purpose: Ensure it’s reachable in the app. Description: wire the window into Add Tab, title mapping, and render switch.
+- `8-4` Purpose: Prevent double-click issues and make failures visible. Description: show running state and inline error messages.
+- `8-5` Purpose: Keep displayed status fresh. Description: refresh status (and latest OHLC date) after each successful update.
+
 **Verification hook (Step 8 closeout):**
 ```
 1. Open the Data Control Window
@@ -713,6 +784,13 @@ Verification
 | 9-3 | Add/update backend tests for Finnhub mapping | `terminal/backend/tests/*` | Shape validation passes; no secrets in logs |
 | 9-4 | Add/update backend tests for calendar mock cleanup | `terminal/backend/tests/*` | Mock rows deleted; only real-source rows remain |
 | 9-5 | Manual FE smoke check for new windows | (manual) | Data Control + Default Ticker + News windows render + call APIs |
+
+**Sub-step purpose & description (Step 9)**
+- `9-1` Purpose: Prevent regressions in status persistence. Description: add tests proving status survives restart-like reload.
+- `9-2` Purpose: Prevent CSV security/behavior regressions. Description: test allowlist enforcement and last-row append behavior.
+- `9-3` Purpose: Validate Finnhub mapping without leaking secrets. Description: test response shape and ensure no API key is logged.
+- `9-4` Purpose: Prevent mock calendar data from remaining. Description: test that `mock_provider` rows are deleted after a successful real update.
+- `9-5` Purpose: Validate the end-to-end UI surfaces. Description: manual smoke test that windows render and call the intended APIs.
 
 **Verification hook (Step 9 closeout):**
 ```
@@ -1064,6 +1142,14 @@ IBKR 연동이 가장 불확실(환경/자격증명/게이트웨이 의존)이�
 | 0-3 | `test_data_availability_audit.md`에 capability matrix를 최종 기입 | ✅ 완료 (WSH v3 반영) |
 | 0-4 | 미결 결정: `/calendar` 소스 + Node↔IBKR 연동 방식 | ⏳ 사용자 대기 |
 
+**세부 단계 목적/설명 (0단계)**
+- `0-1` 목적: UI에 필요한 Finnhub 데이터 필드 유무를 확정. 설명: profile/news/earnings 프로브를 실행하고 원본 JSON을 `tmp/probes/`에 저장.
+- `0-2` 목적: IBKR TWS 연결 및 OHLC 수집 가능 여부를 1차 확인. 설명: v1 프로브로 어떤 기능이 동작/미동작인지 기록(예: OHLCV는 됨, Reuters/WSH는 추가 확인 필요).
+- `0-2b` 목적: `conId` 기반 WSH 메타데이터/이벤트 접근 가능성 확인. 설명: blocking 메타데이터 호출로 비어있지 않은 metadata+events 확인 후 샘플 저장.
+- `0-2c` 목적: 필요한 재무 필드를 담는 WSH 이벤트 타입을 식별. 설명: 이벤트 타입을 전수조사하고 각 타입에 어떤 값 필드(EPS 등)가 있는지 기록.
+- `0-3` 목적: 프로브 결과를 실행 가능한 구현 맵으로 정리. 설명: `test_data_availability_audit.md`의 capability matrix를 UI 컬럼 기준으로 채움.
+- `0-4` 목적: IBKR 의존 단계(6~7단계) 진행을 위한 전제 확정. 설명: (a) `/calendar` 소스 전략과 (b) Node↔IBKR 연동 방식을 사용자 결정.
+
 **WSH v3 핵심 발견(기존 판정 재수정):**
 - v1은 `reqWshMetaData()`(비동기) → 빈 응답. v2는 `getWshMetaData()`(블로킹) + `conId` → 풍부한 데이터 확인.
 - **`wshe_eps`에 EPS actual + estimate 존재** (`amount_oc`, `estimated_eps`, `change_amount`, `change_percent`).
@@ -1119,6 +1205,12 @@ API 계약(초안)
 | 1-2 | `updateStatusRepository.ts` 구현 | `terminal/backend/src/services/updateStatusRepository.ts` | `npx tsc --noEmit` → 0 errors |
 | 1-3 | `GET /api/updates/status` 엔드포인트 연결 | `terminal/backend/src/server.ts` | `curl http://localhost:8080/api/updates/status` → 4개 키 포함 |
 | 1-4 | 영구성 검증(값 설정 → 재시작 → 동일 값) | (런타임) | 재시작 후에도 `lastSuccessAt` 동일 |
+
+**세부 단계 목적/설명 (1단계)**
+- `1-1` 목적: 업데이트 시각을 DB에 영속화. 설명: SQLite에 `update_status` 테이블을 생성/초기화.
+- `1-2` 목적: 상태 read/write 로직을 한 곳에 모음. 설명: 라우트에서 SQL을 직접 다루지 않도록 repository service로 구현.
+- `1-3` 목적: 프론트/운영에서 상태를 확인 가능하게 함. 설명: `GET /api/updates/status`로 안정적인 JSON 형태(4개 키 포함)를 반환.
+- `1-4` 목적: 인메모리가 아니라 “재시작 후에도 유지”를 증명. 설명: 값을 저장한 뒤 재시작하고 동일 값이 반환되는지 확인.
 
 **검증 훅 (1단계 마감):**
 ```
@@ -1176,10 +1268,20 @@ API 계약(초안)
 **세부 단계 (2단계)**
 | 세부 단계 | 작업 | 파일 | 검증 |
 |-----------|------|------|------|
-| 2-1 | CSV 경로 allowlist + 확장자/티커 검증 구현 | `terminal/backend/src/services/tickerCsvService.ts` | 허용/거절 케이스 테스트 통과 |
-| 2-2 | `GET /api/tickers` 구현 | `terminal/backend/src/server.ts` | `curl`로 티커 리스트 반환 |
-| 2-3 | `POST /api/tickers/add` 구현 | `terminal/backend/src/server.ts` | 호출 후 파일 마지막에 새 row 추가 |
-| 2-4 | 성공 시 `update_status(tickers_csv)` 갱신 | `updateStatusRepository` | `GET /api/updates/status`에서 lastSuccessAt 업데이트 |
+| 2-1 | `readTickersFromCsv()` 구현 + unit tests | `terminal/backend/src/services/tickerCsvService.ts` | `npm run test` → tickerCsvService 관련 테스트 통과 |
+| 2-2 | `appendTickerToCsv()` 구현 + 보안/정책 체크 | `terminal/backend/src/services/tickerCsvService.ts` | 비허용 `csvPath`/ticker 거절, 허용 케이스 성공 |
+| 2-3 | 원자적 쓰기(temp→replace) + Windows 잠금 재시도 | `tickerCsvService.ts` 내부 헬퍼 | 반복 POST에서도 `EBUSY/EPERM`로 간헐 실패하지 않음 |
+| 2-4 | `GET /api/tickers` 구현 | `terminal/backend/src/server.ts` | `curl "http://localhost:8080/api/tickers?csvPath=tradigview_screener/original_data/watch%20lists2_2026-02-22.csv"` → ticker list 반환 |
+| 2-5 | `POST /api/tickers/add` 구현 | `terminal/backend/src/server.ts` | POST 성공 후 GET에서 새 ticker가 보임(검증 후 수동으로 CSV 원복) |
+| 2-6 | 성공 시 `update_status(tickers_csv)` 갱신 | `updateStatusRepository` | `GET /api/updates/status`에서 `tickers_csv.lastSuccessAt` 업데이트 |
+
+**세부 단계 목적/설명 (2단계)**
+- `2-1` 목적: CSV에서 ticker 목록을 안정적으로 추출. 설명: `readTickersFromCsv()`를 구현하고 샘플 CSV 기반 유닛 테스트로 보장.
+- `2-2` 목적: ticker 추가를 안전하게 수행. 설명: `appendTickerToCsv()`에 allowlist/확장자/경로탐색 차단/티커 정규화+검증/중복 정책을 적용.
+- `2-3` 목적: Windows 파일 잠금 이슈로 인한 간헐적 실패를 방지. 설명: temp 파일에 쓴 뒤 원자적 교체 + `EBUSY/EPERM` 재시도(백오프)로 견고성 확보.
+- `2-4` 목적: UI가 읽을 수 있는 조회 API 제공. 설명: `GET /api/tickers`를 연결하고 allowlist된 CSV에 대해 ticker 리스트 반환.
+- `2-5` 목적: UI가 추가할 수 있는 쓰기 API 제공. 설명: `POST /api/tickers/add`로 ticker를 CSV 마지막 행에 append.
+- `2-6` 목적: 운영/프론트에서 “성공 시각”을 확인. 설명: 성공 시 `tickers_csv.lastSuccessAt`를 `update_status`에 갱신.
 
 **검증 훅 (2단계 마감):**
 ```
@@ -1229,8 +1331,18 @@ UI 동작(최소/명확)
 |-----------|------|------|------|
 | 3-1 | 윈도우 타입 `default-ticker` 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/types.ts` | 타입 추가 후 빌드/런 정상 |
 | 3-2 | `DefaultTickerWindow.tsx` 구현 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DefaultTickerWindow.tsx` | 페이지 로드시 티커 목록 로드/렌더 |
-| 3-3 | 윈도우 시스템에 연결 | `DraggableWindow.tsx`, `AddTabModal.tsx`, `App.tsx` | AddTab에서 선택 시 창이 뜸 |
-| 3-4 | Add ticker → API 호출 → 리스트 갱신 | same | 추가 후 즉시 목록 업데이트 |
+| 3-3 | `DraggableWindow.tsx`에 렌더 스위치 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DraggableWindow.tsx` | AddTab에서 선택 시 창이 뜸 |
+| 3-4 | `AddTabModal.tsx`에 체크박스 추가(라벨: “Default Ticker”) | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/AddTabModal.tsx` | UI에서 선택 가능 |
+| 3-5 | `App.tsx` 타이틀 매핑 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/App.tsx` | `default-ticker` → “Default Ticker” |
+| 3-6 | 수동 UI 스모크 테스트 | (브라우저) | 창 열기 → 로드 → 추가 → 리스트 갱신 확인 |
+
+**세부 단계 목적/설명 (3단계)**
+- `3-1` 목적: 윈도우 시스템에서 선택 가능한 타입을 추가. 설명: `WindowType`에 `default-ticker`를 추가.
+- `3-2` 목적: 기본 티커 관리 UI를 제공. 설명: `DefaultTickerWindow.tsx`에서 CSV 경로 입력/리로드/추가 기능을 구현.
+- `3-3` 목적: 데스크톱 레이아웃에서 실제 렌더되게 연결. 설명: `DraggableWindow.tsx`의 switch에 컴포넌트를 매핑.
+- `3-4` 목적: 사용자가 창을 열 수 있게 함. 설명: `AddTabModal.tsx`에 해당 타입 체크박스 추가.
+- `3-5` 목적: 창 제목을 사람이 읽기 좋게 표시. 설명: `App.tsx`에서 `default-ticker` → “Default Ticker” 타이틀 매핑.
+- `3-6` 목적: end-to-end로 동작 확인. 설명: 창 열기 → 티커 로드 → 추가 → 리스트 갱신을 수동 스모크 테스트.
 
 **검증 훅 (3단계 마감):**
 ```
@@ -1279,6 +1391,14 @@ API 계약(초안)
 | 4-2 | Finnhub provider 구현 + DB 매핑 | `terminal/backend/src/services/finnhubNewsProvider.ts` | 매핑 결과가 `news_items` insert 스키마에 맞음 |
 | 4-3 | `POST /api/news/pull-finhub` 구현 | `terminal/backend/src/server.ts` | 호출 시 `{inserted, skipped, source}` 반환 |
 | 4-4 | 성공 시 `update_status(finhub_news)` 갱신 | `updateStatusRepository` | `GET /api/updates/status`에서 lastSuccessAt 업데이트 |
+| 4-5 | 적재 데이터 조회 검증 | (런타임) | `GET /api/news?source_names=FINNHUB`로 rows 확인 |
+
+**세부 단계 목적/설명 (4단계)**
+- `4-1` 목적: Finnhub 키를 안전하게 로드. 설명: env 우선(파일 fallback)으로 config를 추가하고, 키가 없으면 시크릿을 출력하지 않고 fail fast.
+- `4-2` 목적: Finnhub 응답을 DB 뉴스 스키마로 변환. 설명: fetch + mapping을 구현하고 `source='FINNHUB'`로 `news_items`에 적재.
+- `4-3` 목적: 수동으로 적재를 트리거할 수 있게 함. 설명: `POST /api/news/pull-finhub`를 연결하고 `{inserted, skipped, source}` 반환.
+- `4-4` 목적: “마지막 성공 시각”을 기록. 설명: 성공 시 `finhub_news.lastSuccessAt`를 `update_status`에 갱신.
+- `4-5` 목적: 적재된 데이터가 실제 조회 가능한지 확인. 설명: `GET /api/news?source_names=FINNHUB`로 저장된 row가 반환되는지 검증.
 
 **검증 훅 (4단계 마감):**
 ```
@@ -1326,10 +1446,24 @@ API 계약(초안)
 **세부 단계 (5단계)**
 | 세부 단계 | 작업 | 파일 | 검증 |
 |-----------|------|------|------|
-| 5-1 | 윈도우 타입을 `finhub-news`로 전환(또는 기존 `brave-news`를 Finnhub 기반으로 변경) | `types.ts` | 타입이 맞게 렌더 스위치됨 |
-| 5-2 | AddTab 라벨을 정확히 `News Feed: finhub api`로 변경 | `AddTabModal.tsx` | UI에 Brave 표기 없음 |
-| 5-3 | `generateMockData()` 및 synthetic rows 제거 | `BraveNewsWindow.tsx`(또는 `FinnhubNewsWindow.tsx`) | 코드/런타임에서 mock 생성 경로 없음 |
-| 5-4 | 백엔드 기반 fetch로 교체 | same | `GET /api/news?source_names=FINNHUB`로 렌더 |
+| 5-1 | 윈도우 타입을 `finhub-news`로 전환(기존 `brave-news` 제거/대체) | `src/app/types.ts` | 타입이 맞게 렌더 스위치됨 |
+| 5-2 | 컴포넌트 이름/파일을 `FinnhubNewsWindow`로 정리(권장) | `src/app/components/BraveNewsWindow.tsx` → `FinnhubNewsWindow.tsx` | import 경로 반영 |
+| 5-3 | `generateMockData()` 및 synthetic rows 제거 | `FinnhubNewsWindow.tsx` | 코드/런타임에서 mock 생성 경로 없음 |
+| 5-4 | 백엔드 기반 fetch로 교체 | `FinnhubNewsWindow.tsx` | `GET /api/news?source_names=FINNHUB`로 렌더 |
+| 5-5 | (선택) “Update” 버튼 추가(수동 수집 트리거) | `FinnhubNewsWindow.tsx` | 클릭 시 `POST /api/news/pull-finhub` 호출 후 리스트 갱신 |
+| 5-6 | AddTab 라벨을 정확히 `News Feed: finhub api`로 변경 | `src/app/components/AddTabModal.tsx` | UI에 Brave 표기 없음 |
+| 5-7 | `App.tsx` title 매핑 추가/수정 | `src/app/App.tsx` | `finhub-news` → `News Feed: finhub api` |
+| 5-8 | `DraggableWindow.tsx` 렌더 스위치 연결 | `src/app/components/DraggableWindow.tsx` | `finhub-news`가 `FinnhubNewsWindow`를 렌더 |
+
+**세부 단계 목적/설명 (5단계)**
+- `5-1` 목적: Brave 기반 창을 Finnhub 기반으로 전환. 설명: `brave-news`를 제거하고 `finhub-news` 타입을 사용해 기능 대상을 명확히.
+- `5-2` 목적: 코드 구조/의미를 일치. 설명: 컴포넌트를 `FinnhubNewsWindow`로 리네임하고 import 경로를 정리.
+- `5-3` 목적: mock 데이터 유입을 원천 차단. 설명: `generateMockData()` 및 seed된 가짜 뉴스 로직을 완전히 제거.
+- `5-4` 목적: 실제 저장된 뉴스만 렌더. 설명: `GET /api/news?source_names=FINNHUB`에서 로드한 데이터를 표시.
+- `5-5` 목적: 필요 시 수동 갱신 제공(옵션). 설명: “Update” 버튼으로 `POST /api/news/pull-finhub` 호출 후 리스트 갱신.
+- `5-6` 목적: 요청된 라벨 텍스트를 정확히 반영. 설명: Add Tab 라벨을 `News Feed: finhub api`로 변경.
+- `5-7` 목적: 창 제목을 올바르게 표시. 설명: `App.tsx`에서 `finhub-news` → `News Feed: finhub api` 매핑.
+- `5-8` 목적: 실제 렌더 스위치 연결 보장. 설명: `DraggableWindow.tsx` switch-case에 `FinnhubNewsWindow` 렌더 매핑.
 
 **검증 훅 (5단계 마감):**
 ```
@@ -1377,10 +1511,20 @@ API 계약(초안)
 
 | 세부 단계 | 작업 | 파일 | 검증 |
 |-----------|------|------|------|
-| 6-1 | mock 캘린더 worker 제거 + startup 호출 제거 | `calendarIngestion.ts`, `server.ts` | 재시작 후에도 mock rows가 자동 생성되지 않음 |
-| 6-2 | `POST /api/ibkr/calendar/update` 구현 | `server.ts` | 호출 시 `{ upserted, deletedMockRows, source: "IBKR" }` 반환 |
-| 6-3 | 첫 성공 후 `mock_provider` rows 삭제 | (DB) | `calendar_events`에서 `source='mock_provider'` count=0 |
-| 6-4 | 성공 시 `update_status(ibkr_calendar)` 갱신 | `updateStatusRepository` | `GET /api/updates/status`에서 lastSuccessAt 업데이트 |
+| 6-1 | mock 캘린더 worker 로직 제거 | `terminal/backend/src/services/calendarIngestion.ts` | 재시작 후 mock rows가 자동 생성되지 않음 |
+| 6-2 | startup의 `startCalendarIngestionWorkers()` 호출 제거 | `terminal/backend/src/server.ts` | 서버 시작 직후 mock insert가 발생하지 않음 |
+| 6-3 | `pullCalendarData()` 구현(결정된 소스 기준) | `terminal/backend/src/services/calendarIngestion.ts` | dry-run 또는 단위 테스트 성공 |
+| 6-4 | `POST /api/ibkr/calendar/update` 구현 | `terminal/backend/src/server.ts` | `{ upserted, deletedMockRows, source: "IBKR" }` 반환 |
+| 6-5 | 첫 성공 후 `mock_provider` rows 삭제 | (DB) | `calendar_events`에서 `source='mock_provider'` count=0 |
+| 6-6 | 성공 시 `update_status(ibkr_calendar)` 갱신 | `updateStatusRepository` | `GET /api/updates/status`에서 lastSuccessAt 업데이트 |
+
+**세부 단계 목적/설명 (6단계)**
+- `6-1` 목적: mock 캘린더 데이터 생성 로직을 제거. 설명: 주기적으로 `mock_provider` row를 넣는 워커/interval 코드를 삭제.
+- `6-2` 목적: 서버 시작 시 부작용(자동 적재)을 방지. 설명: startup 경로에서 `startCalendarIngestionWorkers()` 호출을 제거.
+- `6-3` 목적: 실제 캘린더 데이터 pull을 구현(결정 의존). 설명: 결정된 소스에 맞춰 `pullCalendarData()`를 구현.
+- `6-4` 목적: 명시적 업데이트 트리거 제공. 설명: `POST /api/ibkr/calendar/update`를 연결해 pull+upsert를 실행.
+- `6-5` 목적: 기존에 저장된 mock row를 정리. 설명: 첫 성공 업데이트 후 `source='mock_provider'` row를 삭제.
+- `6-6` 목적: 마지막 성공 시각을 기록. 설명: 성공 시 `ibkr_calendar.lastSuccessAt`를 `update_status`에 갱신.
 
 **검증 훅 (6단계 마감):**
 ```
@@ -1467,6 +1611,15 @@ API 계약(초안)
 | 7-6 | `POST /api/ibkr/ohlc1d/update` 연결 | `terminal/backend/src/server.ts` | POST 후 `overallMaxDate`가 증가(새 거래일 존재 시) |
 | 7-7 | 파생 컬럼 샘플 점검 | (런타임) | `SELECT ... Change_1d_Pct ... WHERE Symbol='AAPL' ... LIMIT 5` → NULL 아님 |
 
+**세부 단계 목적/설명 (7단계)**
+- `7-1` 목적: OHLC DB 접근을 안전하게 캡슐화. 설명: repository로 `getOverallMaxDate()` 등 핵심 조회 함수를 제공.
+- `7-2` 목적: 파생 지표 컬럼을 저장할 스키마 준비. 설명: derived 컬럼이 없으면 migration으로 추가.
+- `7-3` 목적: IBKR에서 누락된 일봉 데이터를 가져옴. 설명: 날짜 범위별 1D bar를 가져오는 provider 구현.
+- `7-4` 목적: UI 요구 %변화 지표를 계산. 설명: 파생 지표 계산 로직을 구현하고 유닛 테스트로 검증.
+- `7-5` 목적: 운영/프론트용 상태 API 제공. 설명: `GET /api/ibkr/ohlc1d/status`로 max date와 lastSuccessAt를 반환.
+- `7-6` 목적: 명시적 업데이트 API 제공. 설명: `POST /api/ibkr/ohlc1d/update`에서 pull+upsert+derive를 오케스트레이션.
+- `7-7` 목적: DB에 파생 컬럼이 채워졌는지 확인. 설명: 특정 심볼(AAPL 등) 최근 row를 SQL로 조회해 non-NULL 확인.
+
 **검증 훅 (7단계 마감):**
 ```
 1. npx tsc --noEmit → 0 errors
@@ -1522,6 +1675,13 @@ UI 동작(최소)
 | 8-4 | 실행 중/에러 상태 표시 | same | 버튼 비활성화 + “Running…” + 에러 인라인 표시 |
 | 8-5 | 업데이트 후 status/DB date 재조회 | same | POST 성공 후 timestamp와 overallMaxDate 갱신 |
 
+**세부 단계 목적/설명 (8단계)**
+- `8-1` 목적: 윈도우 타입을 UI에서 선택 가능하게 추가. 설명: `data-control` 타입을 `WindowType`에 추가.
+- `8-2` 목적: 운영용 컨트롤 UI 제공. 설명: `DataControlWindow.tsx`에서 status 로드 + update 호출 버튼 구현.
+- `8-3` 목적: 앱에서 접근/렌더가 되도록 연결. 설명: AddTab/App/DraggableWindow에 타입과 타이틀 매핑/스위치 연결.
+- `8-4` 목적: 중복 실행 방지 및 실패 가시화. 설명: running 상태/버튼 disable + 인라인 에러 메시지 표시.
+- `8-5` 목적: 표시되는 상태를 최신으로 유지. 설명: 업데이트 성공 시 status/DB date를 재조회하여 최신 값 반영.
+
 **검증 훅 (8단계 마감):**
 ```
 1. Data Control Window 열기
@@ -1563,6 +1723,13 @@ UI 동작(최소)
 | 9-3 | Finnhub 매핑 테스트 추가/수정 | `terminal/backend/tests/*` | 응답 shape 검증 + 시크릿 누출 없음 |
 | 9-4 | 캘린더 mock 정리 테스트 추가/수정 | `terminal/backend/tests/*` | `mock_provider` rows 삭제 확인 |
 | 9-5 | 프론트 수동 스모크(윈도우 렌더 + API 호출) | (수동) | Data Control/Default Ticker/News 창이 정상 동작 |
+
+**세부 단계 목적/설명 (9단계)**
+- `9-1` 목적: update_status 영속성 회귀 방지. 설명: 저장/재조회(재시작 유사) 후 값 유지 테스트를 추가.
+- `9-2` 목적: CSV 보안/동작 회귀 방지. 설명: allowlist 위반 차단 + 마지막 행 append 동작을 테스트.
+- `9-3` 목적: Finnhub mapping의 형상 검증 + 시크릿 누출 방지. 설명: 매핑 결과 shape 테스트와 로그에 키가 나오지 않는지 확인.
+- `9-4` 목적: 캘린더 mock 데이터 잔존 방지. 설명: 성공 업데이트 후 `mock_provider` row가 0이 되는지 테스트.
+- `9-5` 목적: UI 통합 동작 확인. 설명: 창들이 렌더되고 의도한 API를 호출하는지 수동 스모크 테스트.
 
 **검증 훅 (9단계 마감):**
 ```

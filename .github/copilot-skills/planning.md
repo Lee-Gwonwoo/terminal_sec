@@ -52,6 +52,19 @@ When a plan has multiple major Steps (e.g., Step 0, Step 1, …, Step N), **each
   | 1-2 | Create `fooRepository.ts` service | `src/services/fooRepository.ts` | `npx tsc --noEmit` → 0 errors |
   ```
 
+- **Sub-step purpose & description block (inline, recommended):**
+  - Immediately under each sub-step table, add a short mapping of each sub-step ID to:
+    - **Purpose:** why the sub-step exists (1 short phrase)
+    - **Description:** what to do / what “done” means (1 sentence)
+  - Keep IDs exactly aligned with the table (no missing/extra IDs).
+  - Keep it **inline under the Step** (do not move these into a separate appendix that can drift).
+  - Example:
+    ```
+    Sub-step purpose & description (Step 1)
+    - `1-1` Purpose: Persist status in DB. Description: create/update the `update_status` table during init.
+    - `1-2` Purpose: Centralize writes. Description: implement repository methods used by routes.
+    ```
+
 - **Verification hook block (required for each Step closeout):**
   - After all sub-steps within a Step are completed, include a fenced code block listing the exact verification commands (build, test, curl, DB query, etc.).
   - End with: `User confirmation needed: **Yes**`.
@@ -136,6 +149,7 @@ When a plan has multiple major Steps (e.g., Step 0, Step 1, …, Step N), **each
       - If editing an existing EN+KO `plan.md`: update **KO only**; keep EN unchanged except for adding the staleness banner if it is missing.
     - **Non-Claude agents (GPT, Gemini, etc.):** Write **EN+KO**. Put EN first, then `---`, then KO (same content translated). KO remains authoritative.
     - **Why EN first (for EN+KO docs):** This is a formatting convention for consistent diffs and human scanning; it does not mean EN is authoritative.
+    - **Authoring workflow (content order):** Draft/update the **KO content first**, then translate/sync the EN content. Keep the file layout as EN → `---` → KO.
   - **Every Step heading** must include its number and a short descriptive name: `#### Step N — Short name`.
   - **Sub-step tables** are mandatory for every Step (see sub-step table format above).
   - **Verification hook blocks** are mandatory for every Step closeout.
@@ -198,6 +212,19 @@ plan에 여러 대단계(Step 0, Step 1, …, Step N)가 있을 때, **각 Step�
   | 1-1 | `initDb()`에 `foo` 테이블 CREATE 추가 | `src/db.ts` | 백엔드 시작 → 테이블 존재 확인 (`SELECT name FROM sqlite_master WHERE name='foo'`) |
   | 1-2 | `fooRepository.ts` 서비스 생성 | `src/services/fooRepository.ts` | `npx tsc --noEmit` → 에러 0개 |
   ```
+
+- **세부 단계 목적/설명 블록(인라인, 권장):**
+  - 각 Step의 세부 단계 테이블 바로 아래에, 세부 단계 ID별로 다음을 짧게 정리합니다.
+    - **목적:** 왜 이 세부 단계가 필요한지(짧은 구)
+    - **설명:** 무엇을 하면 완료인지/어떤 산출물인지(1문장)
+  - 테이블의 ID와 **완전히 동일**하게 맞춥니다(누락/추가 금지).
+  - 이 블록은 Step 아래에 **인라인으로 유지**합니다(별도 appendix로 빼서 문서가 드리프트하지 않게).
+  - 예시:
+    ```
+    세부 단계 목적/설명 (1단계)
+    - `1-1` 목적: status를 DB에 영속화. 설명: init 시 `update_status` 테이블을 생성/갱신.
+    - `1-2` 목적: 쓰기 로직을 한 곳에 모음. 설명: 라우트에서 사용하는 repository 메서드를 구현.
+    ```
 
 - **검증 훅 블록(각 Step 마감 시 필수):**
   - Step 내 모든 세부 단계가 완료된 후, 검증 명령어(빌드, 테스트, curl, DB 쿼리 등)를 나열하는 코드 블록을 포함합니다.
@@ -283,6 +310,7 @@ plan에 여러 대단계(Step 0, Step 1, …, Step N)가 있을 때, **각 Step�
       - 기존에 EN+KO로 작성된 `plan.md`를 수정할 때: **KO만 업데이트**, EN은 건드리지 않고 staleness 배너(`> ⚠️ EN section may be outdated …`)가 없으면 삽입.
     - **비-Claude 에이전트(GPT, Gemini 등):** EN+KO 병기. EN 섹션을 먼저, `---` 구분선, 그 다음 KO 섹션(동일 내용 번역). 다만 KO가 authoritative.
     - **왜 EN을 먼저 두나(EN+KO 문서일 때):** 권위(authority) 문제가 아니라 형식(레이아웃) 규칙입니다. EN-first는 diff/검색/스캔을 일관되게 만들기 위한 관례이고, AI 해석 기준은 여전히 KO가 우선입니다.
+    - **작성 워크플로우(내용 순서):** **KO 내용을 먼저** 작성/수정하여 확정한 뒤, EN을 번역/동기화합니다. 파일 레이아웃은 EN → `---` → KO를 유지합니다.
   - **모든 Step 제목**에는 번호와 짧은 설명을 포함: `#### Step N — 짧은 이름`.
   - **세부 단계 테이블**은 모든 Step에 필수(위의 세부 단계 테이블 형식 참조).
   - **검증 훅 블록**은 모든 Step 마감 시 필수.
