@@ -56,13 +56,23 @@ When a plan has multiple major Steps (e.g., Step 0, Step 1, …, Step N), **each
   - Immediately under each sub-step table, add a short mapping of each sub-step ID to:
     - **Purpose:** why the sub-step exists (1 short phrase)
     - **Description:** what to do / what “done” means (1 sentence)
+  - For non-engineer readability and acceptance testing, extend each sub-step line with the following (keep them short, but observable):
+    - **Done when (observable):** what a human can see to confirm completion
+    - **Human check (non-engineer):** the simplest check a non-engineer can do (UI click, file exists, a known string appears, etc.)
+    - **Common issues to watch:** 1–2 likely pitfalls and how to recognize them
   - Keep IDs exactly aligned with the table (no missing/extra IDs).
   - Keep it **inline under the Step** (do not move these into a separate appendix that can drift).
   - Example:
     ```
     Sub-step purpose & description (Step 1)
     - `1-1` Purpose: Persist status in DB. Description: create/update the `update_status` table during init.
+      Done when: a DB query shows the table exists (and columns are correct).
+      Human check: run the provided query and confirm the table name appears.
+      Common issues to watch: wrong DB path; schema mismatch after a refactor.
     - `1-2` Purpose: Centralize writes. Description: implement repository methods used by routes.
+      Done when: routes call the repository and tests/TS build pass.
+      Human check: run the verification commands and confirm “0 errors”.
+      Common issues to watch: circular imports; returning inconsistent shapes.
     ```
 
 - **Verification hook block (required for each Step closeout):**
@@ -217,13 +227,23 @@ plan에 여러 대단계(Step 0, Step 1, …, Step N)가 있을 때, **각 Step�
   - 각 Step의 세부 단계 테이블 바로 아래에, 세부 단계 ID별로 다음을 짧게 정리합니다.
     - **목적:** 왜 이 세부 단계가 필요한지(짧은 구)
     - **설명:** 무엇을 하면 완료인지/어떤 산출물인지(1문장)
+  - 비개발자도 “완료”를 확인할 수 있도록, 각 세부 단계 라인에 아래 항목을 추가로 붙이는 것을 기본으로 합니다(짧게 쓰되, 눈으로 확인 가능해야 함):
+    - **완료 조건(눈으로 확인):** 사람이 보고 “끝났다”라고 판단할 수 있는 관찰 가능한 기준
+    - **사람 검증(비개발자):** 비개발자가 할 수 있는 가장 쉬운 확인(버튼 클릭, 파일 존재, 특정 문자열 표시 등)
+    - **흔한 문제/주의:** 자주 깨지는 포인트 1–2개 + 어떻게 알아차리는지
   - 테이블의 ID와 **완전히 동일**하게 맞춥니다(누락/추가 금지).
   - 이 블록은 Step 아래에 **인라인으로 유지**합니다(별도 appendix로 빼서 문서가 드리프트하지 않게).
   - 예시:
     ```
     세부 단계 목적/설명 (1단계)
     - `1-1` 목적: status를 DB에 영속화. 설명: init 시 `update_status` 테이블을 생성/갱신.
+      완료 조건: DB 쿼리로 테이블 존재(+컬럼) 확인이 된다.
+      사람 검증: 제공된 쿼리를 실행해서 테이블 이름이 보이는지 확인한다.
+      흔한 문제/주의: DB 경로가 다른 곳을 가리킴; 리팩터링 후 스키마 불일치.
     - `1-2` 목적: 쓰기 로직을 한 곳에 모음. 설명: 라우트에서 사용하는 repository 메서드를 구현.
+      완료 조건: 라우트가 repository를 호출하고, 테스트/TS 빌드가 통과한다.
+      사람 검증: 검증 명령을 실행해서 “에러 0개”인지 확인한다.
+      흔한 문제/주의: 순환 import; 반환 shape이 호출부마다 달라짐.
     ```
 
 - **검증 훅 블록(각 Step 마감 시 필수):**

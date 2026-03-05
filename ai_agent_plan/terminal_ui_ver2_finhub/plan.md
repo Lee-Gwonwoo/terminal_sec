@@ -39,6 +39,48 @@ Implement the following changes using `termina_web/figma_code/terminal_ui_ver2_f
 - Do not log secrets (API keys/tokens).
 - Browser cannot directly write local files; CSV read/append must be done via backend API.
 
+### Reader guide (non-engineer friendly)
+This plan is written for implementation, but you can review/verify progress even if you don’t write code.
+
+How to read each Step
+- Each Step is a deliverable (a piece of functionality you can see in the UI or confirm via an API).
+- Each Step contains:
+  - A sub-step table (what to do)
+  - A purpose/description block (why it matters, what “done” means)
+  - A verification hook (how to confirm it worked)
+
+Two kinds of verification
+- “Developer verification” uses commands like `curl`, DB queries, and TypeScript checks.
+- “Human verification” is what a non-developer can do: open the UI, click the required buttons, and confirm the label/timestamp changes.
+
+Acceptance snapshot (what the finished UI looks like)
+- Default Ticker Window
+  - Shows tickers loaded from the selected CSV path.
+  - Adding a ticker updates the list and appends to the CSV (via backend).
+- News window
+  - The label shows exactly: `news feed:finhub api`.
+  - The table shows real stored news pulled from Finnhub (no mock rows).
+- Data Control Window
+  - Contains exactly two buttons: `IBKR Price Data` and `IBKR Calendar Data`.
+  - Each button updates data through the backend and updates a “last successful update” date/time.
+
+Quick verification checklist (without reading code)
+1) Start the app (backend + web UI) and open the UI URL shown in the terminal.
+2) Confirm the News window label is `news feed:finhub api`.
+3) Confirm the Default Ticker window lists tickers, and adding a ticker makes it appear immediately.
+4) If IBKR is configured: click `IBKR Price Data` and/or `IBKR Calendar Data` and confirm “last successful update” changes.
+
+Glossary (plain language)
+- Backend: the Node/TypeScript server (`terminal/backend`) that talks to databases, reads/writes CSVs, and calls external APIs.
+- Frontend: the UI app (`termina_web/figma_code/terminal_ui_ver2_finhub`) that users interact with.
+- API endpoint: a URL the frontend calls on the backend (example: `GET /api/updates/status`).
+- SQLite DB: a single-file local database (example: `OHLC_data/ohlc_1d_watchlist.sqlite`).
+- Ingestion / pull: downloading data from a provider (Finnhub/IBKR) and storing it locally.
+- Upsert: “insert if missing, otherwise update” so repeated runs don’t create duplicates.
+- OHLCV (1D): daily Open/High/Low/Close/Volume bars.
+- Derived metrics: fields computed from stored OHLC (e.g., percent changes) — not mocked.
+- “No mock” policy: if real data is missing, we store `null` / show blank; we do not fabricate values.
+
 ### Process templates (plan changes + step confirmation)
 
 #### Plan change protocol (when the plan must be revised mid-stream)
@@ -110,7 +152,7 @@ Audit deliverables
 - A small set of probe scripts/endpoints that return raw samples (for developer verification only; do not expose externally; do not log secrets).
 
 Columns to audit (minimum, based on current UI)
-- “News Feed: finhub api” window (currently implemented as `BraveNewsWindow` mock):
+- “news feed:finhub api” window (currently implemented as `BraveNewsWindow` mock):
   - Table columns: `Date`, `Time`, `Title`, `Sources`, `Changes %`
   - `Changes %` sub-fields rendered inside the cell:
     - `Chg` (1D % change)
@@ -153,6 +195,17 @@ IBKR integration is the highest-uncertainty dependency; CSV + Finnhub are lower 
 > - Each step includes a sub-step table and a verification hook.
 > - At step closeout: run the hook commands/checklist, share results with the user, and only after user confirmation mark `completed (user-confirmed)` in `agent_log.md`.
 
+Non-engineer milestones (what you can visually confirm, and when)
+- Some early steps are “backend-only” (you mainly confirm via an API). UI-visible milestones appear after the window steps.
+- Use this as a quick “are we on track?” checklist:
+
+| Milestone | Becomes visible after | What to do (human check) | Expected result |
+|----------|------------------------|--------------------------|----------------|
+| Default Ticker Window works | Step 2 + Step 3 | Open Default Ticker Window → add a ticker | Ticker appears immediately; persists via backend CSV append |
+| News window uses Finnhub (no mock) | Step 4 + Step 5 | Open News window | Label is `news feed:finhub api`; rows are real stored news (not generated) |
+| “Changes %” has real computed numbers | Step 7 | Open News window and inspect “Changes %” cell | Values match OHLC-derived calculations; missing history shows blank/`null` |
+| Data Control Window buttons update timestamps | Step 8 (+ Step 6/7/IBKR configured) | Click `IBKR Price Data` / `IBKR Calendar Data` | “last successful update” updates on success; failures are shown clearly |
+
 #### Step 0 — Data availability audit (IBKR + Finnhub vs UI columns)
 Purpose (why this step exists)
 - This project’s UI tables imply specific fields (market cap, industry, earnings fields, analyst ratings, etc.). Before we implement UI or DB schemas, we must confirm which fields are actually obtainable from IBKR/Finnhub, and which can be computed from the existing 1D OHLC DB.
@@ -189,22 +242,37 @@ Deliverables
   - Run Finnhub probes for the specific UI needs (company news + company profile + next earnings date), using a small fixed symbol set (AAPL/MSFT/TSLA).
   - Save raw JSON responses under `tmp/probes/` with clear filenames (symbol + endpoint + date) so results are reproducible.
   - Record “missing field” outcomes explicitly in the matrix; do not infer/approximate values.
+  - Done when (observable): `tmp/probes/` contains the expected Finnhub JSON samples and the matrix has explicit Yes/No entries for Finnhub fields.
+  - Human check: open a couple of JSON files and verify they contain real API responses (not placeholders) and that the matrix references them.
+  - Common issues to watch: forgetting to store raw samples; accidentally printing tokens/keys in console logs.
 - `0-2` Purpose: Confirm baseline IBKR TWS connectivity and OHLC retrieval. Description:
   - Run the v1 probe to validate host/port, permissions, and that historical daily bars can be fetched end-to-end.
   - Record failures as “capability gaps” (e.g., Reuters unavailable, WSH empty in v1) rather than patching around them.
   - Save raw samples (or concise summaries) for later comparison when changing settings.
+  - Done when (observable): the probe produces a non-empty daily-bar sample for at least one symbol and records any missing capabilities explicitly.
+  - Human check: confirm the probe output includes a date range and OHLCV values (not empty arrays).
+  - Common issues to watch: connecting to the wrong TWS/Gateway port (paper vs live); permissions not enabled in TWS.
 - `0-2b` Purpose: Confirm WSH metadata/events are accessible via `conId`. Description:
   - Use the *blocking* metadata call and verify results are non-empty (metadata + events).
   - Persist one representative metadata sample + one event sample per symbol so we can re-check after code changes.
   - Note any per-symbol differences (some tickers may have metadata while others do not).
+  - Done when (observable): for at least one symbol, you have saved a metadata JSON and an events JSON that are clearly non-empty.
+  - Human check: open the saved JSON and verify it contains fields like event types / identifiers (not `{}` or `[]`).
+  - Common issues to watch: using the non-blocking call and misreading “empty now” as “not available”; mixing symbols without clear filenames.
 - `0-2c` Purpose: Identify which WSH event types contain required financial fields. Description:
   - Survey event types against the UI-required fields (EPS actual/estimate, revenue, etc.).
   - For each event type, record which numeric fields exist and whether the semantics match the UI column meanings.
   - Capture “not available” results explicitly (e.g., revenue not present) so Step 6/7 scope is honest.
+  - Done when (observable): the matrix (or a companion note) lists each required UI field and whether WSH provides it, with an example payload reference.
+  - Human check: confirm at least one example shows EPS actual/estimate, and that revenue is explicitly marked as not present (if confirmed).
+  - Common issues to watch: confusing similarly named fields; assuming a field exists because it appears for one symbol only.
 - `0-3` Purpose: Turn probe results into a concrete implementation map. Description:
   - Fill the capability matrix in `test_data_availability_audit.md` for *every* UI column using one of: IBKR / Finnhub / Computed-from-OHLC / Not available.
   - If “Not available”, also write the required follow-up decision (remove column vs accept blank vs alternate provider).
   - Keep the matrix stable and referenceable so later steps do not re-open the same questions.
+  - Done when (observable): every UI column has exactly one final classification and there are no “TBD” cells left.
+  - Human check: scroll the matrix top-to-bottom and confirm there are no empty rows/cells for any UI column.
+  - Common issues to watch: leaving ambiguous “maybe” entries; not linking “not available” items to a concrete decision.
 - `0-4` Purpose: Unblock IBKR-dependent steps (Steps 6–8). Description: make two explicit decisions and capture the operational details needed to implement and verify them:
   - Decision #5: `/calendar` source strategy (what provider supplies the calendar data, and how it will be pulled).
   - Decision #6: Node↔IBKR integration method (how the Node/TS backend will call IBKR for Step 7 and other IBKR endpoints).
@@ -213,6 +281,9 @@ Deliverables
     - Host/port for the API (typical examples: `127.0.0.1:7496` live, `127.0.0.1:7497` paper — user confirms actual)
     - Whether Python is allowed on the backend machine (only needed for options B/C), and whether a long-running local service is acceptable (option C)
   - Output of this decision: record the chosen option + a minimal “hello IBKR historical bars” probe that can be run repeatedly to validate connectivity.
+  - Done when (observable): the plan records the chosen options and includes exact host/port + a repeatable probe command/script.
+  - Human check: a non-engineer can read the recorded host/port and verify it matches what is configured in TWS/Gateway settings.
+  - Common issues to watch: deciding “Option B/C” without confirming Python availability; leaving host/port unspecified and blocking later work.
 
 **WSH v3 key finding (corrects earlier assessment):**
 - v1 used `reqWshMetaData()` (non-blocking) → empty. v2 used `getWshMetaData()` (blocking) + `conId` → rich data available.
@@ -276,18 +347,30 @@ Verification
   - Implement `update_status` table creation in `initDb()` in an idempotent way (safe across restarts).
   - Ensure schema matches the plan (primary key `source_key`, ISO string timestamps, JSON details field).
   - Verification expectation: the table exists in the actual SQLite DB file the backend uses at runtime.
+  - Done when (observable): a DB query returns the table name and columns, and the backend still starts cleanly after a restart.
+  - Human check: (no UI yet) ask the developer to show the `SELECT name FROM sqlite_master ...` output.
+  - Common issues to watch: creating the table in a *different* DB file than the server uses; non-idempotent CREATE that fails on restart.
 - `1-2` Purpose: Centralize status read/write logic. Description:
   - Implement a small repository (`listUpdateStatuses`, `setLastSuccess`, optional `getUpdateStatus`) that is the *only* place that issues SQL for update-status.
   - Define a stable “source key” allowlist (tickers_csv, finhub_news, ibkr_calendar, ibkr_ohlc_1d) to avoid accidental key drift.
   - Keep `details_json` minimal (counts + maxDate) and avoid storing raw provider payloads.
+  - Done when (observable): server code uses the repository (not ad-hoc SQL) and `npx tsc --noEmit` succeeds.
+  - Human check: ask for a quick demo where a status key is set once and then appears in `GET /api/updates/status`.
+  - Common issues to watch: drifting keys (typos like `finnhub_news` vs `finhub_news`); storing large raw payloads in `details_json`.
 - `1-3` Purpose: Make status visible to the frontend and operators. Description:
   - Add `GET /api/updates/status` and return a stable JSON shape that always includes all expected keys.
   - If a key has never succeeded, return `lastSuccessAt: null` (never fabricate).
   - Keep the route read-only and safe (no secrets; no provider calls).
+  - Done when (observable): `curl` returns JSON with all 4 keys every time, even right after a fresh DB.
+  - Human check: copy-paste the URL into a browser; it should show JSON (no login, no crash).
+  - Common issues to watch: returning missing keys (breaks UI); returning fake timestamps (violates policy).
 - `1-4` Purpose: Prove it survives restarts (not in-memory). Description:
   - Write a known timestamp via repository code (from a test or a controlled code path).
   - Restart the backend process and confirm the timestamp still appears in `GET /api/updates/status`.
   - Treat “resets to null after restart” as a correctness failure (indicates in-memory state or wrong DB file).
+  - Done when (observable): after restart, the exact same timestamp is still present.
+  - Human check: run the same `curl` command before/after restart and visually compare.
+  - Common issues to watch: writing to a temporary in-memory DB during tests but reading from a file DB at runtime.
 
 **Verification hook (Step 1 closeout):**
 ```
@@ -362,26 +445,44 @@ Verification
   - Parse the allowlisted CSV and extract tickers from the decided header (`Ticker` or `Symbol`).
   - Normalize output tickers (`trim`, uppercase) and drop empty/invalid rows.
   - Unit test against `tradigview_screener/original_data/watch lists2_2026-02-22.csv` to ensure we don’t break on spaces in filenames.
+  - Done when (observable): `GET /api/tickers` returns a non-empty list for the default CSV path.
+  - Human check: in the Default Ticker Window later, tickers appear without manual typing.
+  - Common issues to watch: wrong header name/case; failing to handle filenames with spaces; returning duplicates/empty strings.
 - `2-2` Purpose: Append a ticker safely. Description:
   - Validate `csvPath`: allowlist root, `.csv` extension, no traversal (`..`), and resolve path deterministically.
   - Validate ticker: allowed charset, normalize, and enforce duplicate policy (default: reject duplicates).
   - Error messages must be actionable (e.g., “path not allowlisted” vs generic 500).
+  - Done when (observable): a valid ticker appends as a new last line, and invalid inputs return a clear 4xx error.
+  - Human check: you can add `ZZZZ` once; adding it again fails with a readable message.
+  - Common issues to watch: accidentally allowing `..` traversal; silently accepting duplicates; returning 500 for user mistakes.
 - `2-3` Purpose: Make writes robust on Windows. Description:
   - Implement atomic write by writing a temp file in the same directory and replacing the original.
   - Add bounded retry with backoff for transient replace failures (`EBUSY`/`EPERM`), up to 10 attempts.
   - Ensure the retry is *not* applied to permanent failures (invalid path, permission denied, non-existent file).
+  - Done when (observable): repeated POST requests do not randomly fail due to file locking.
+  - Human check: add 3–5 different test tickers in a row; it should not intermittently error.
+  - Common issues to watch: temp file created in a different drive/folder (replace fails); retrying permanent failures (hides real errors).
 - `2-4` Purpose: Provide a read API for the UI. Description:
   - Wire `GET /api/tickers` to call `readTickersFromCsv()`.
   - Ensure query params are validated and rejected safely; do not read arbitrary filesystem locations.
   - Response shape should be stable: `{ csvPath, tickers: string[] }`.
+  - Done when (observable): the curl example works even with URL-encoded spaces.
+  - Human check: later, changing CSV path in UI triggers a reload without breaking the app.
+  - Common issues to watch: forgetting URL encoding; returning different JSON shapes between success/error.
 - `2-5` Purpose: Provide an append API for the UI. Description:
   - Wire `POST /api/tickers/add` to call `appendTickerToCsv()`.
   - On success, return either the updated full list or enough data for the UI to refresh.
   - Ensure the endpoint updates `update_status(tickers_csv)` only on successful write.
+  - Done when (observable): POST returns success and the next GET includes the new ticker.
+  - Human check: add a ticker and immediately see it in the UI list (no full-page refresh).
+  - Common issues to watch: updating status on failure; appending but not reloading list.
 - `2-6` Purpose: Track successful updates for operators/UI. Description:
   - Update `update_status` using `setLastSuccess('tickers_csv', nowIso, details)`.
   - Store only minimal details (e.g., `{ csvPath, tickerAdded }`) and avoid persisting raw CSV content.
   - Verify via `GET /api/updates/status` that `tickers_csv.lastSuccessAt` changes after a successful append.
+  - Done when (observable): `GET /api/updates/status` shows a non-null timestamp after a successful add.
+  - Human check: in the Data Control window later, a “last success” field is not stuck at blank.
+  - Common issues to watch: timezones/format drift (non-ISO), and storing sensitive/local paths in details.
 
 **Verification hook (Step 2 closeout):**
 ```
@@ -442,26 +543,44 @@ Verification
   - Add `default-ticker` to the `WindowType` union (and any related type maps) so it can be instantiated.
   - Ensure there is no stale reference to a removed/renamed type that would break rendering.
   - Keep naming consistent across types, window title mapping, and AddTab labels.
+  - Done when (observable): the “Default Ticker” entry can be created from Add Tab without runtime errors.
+  - Human check: open Add Tab and confirm “Default Ticker” exists (Step 3-4 also required).
+  - Common issues to watch: adding the type but forgetting to wire rendering/title, resulting in a blank window.
 - `3-2` Purpose: Implement the UI surface. Description:
   - Build `DefaultTickerWindow.tsx` as a thin client: CSV path input + reload button + list + add form.
   - Call only backend APIs (`GET /api/tickers`, `POST /api/tickers/add`); do not attempt browser-side file operations.
   - Display backend validation errors inline (no modal) and keep text minimal.
+  - Done when (observable): the window shows a list when backend is reachable, and shows an inline error when backend rejects the path/ticker.
+  - Human check: type a clearly invalid path (e.g., `C:\\`) and confirm the UI shows a readable rejection (not a crash).
+  - Common issues to watch: frontend calling the wrong backend base URL/port; errors shown only in console instead of inside the window.
 - `3-3` Purpose: Ensure the window renders in the desktop layout. Description:
   - Add a `default-ticker` rendering branch in `DraggableWindow.tsx` to render `DefaultTickerWindow`.
   - Confirm the component receives the same window props pattern as other windows (position/size/state).
   - Ensure the window does not crash when the CSV path is invalid (show error instead).
+  - Done when (observable): selecting the tab opens a draggable window that actually contains the Default Ticker UI controls.
+  - Human check: open/close the window multiple times; it should not duplicate unexpectedly or render blank.
+  - Common issues to watch: missing switch-case wiring (window opens but content is empty).
 - `3-4` Purpose: Allow users to open the window. Description:
   - Add a checkbox entry to `AddTabModal.tsx` that creates the `default-ticker` window.
   - Label must be exactly “Default Ticker” to match the plan.
   - Ensure toggling it on/off behaves consistently with other windows.
+  - Done when (observable): the checkbox exists and creates exactly one window when checked.
+  - Human check: check it once → one window opens; uncheck → it closes (or follows existing behavior).
+  - Common issues to watch: label mismatch (acceptance failure), double-create on repeated toggles.
 - `3-5` Purpose: Provide a stable, human-readable title. Description:
   - Map `default-ticker` to “Default Ticker” in `App.tsx` title mapping.
   - Ensure there are no duplicate/conflicting title mappings.
   - Keep the title string stable because it becomes an acceptance-test anchor.
+  - Done when (observable): the window header/title shows “Default Ticker” exactly.
+  - Human check: visually confirm the title; no extra spaces/case differences.
+  - Common issues to watch: title mapping updated but not applied to existing window instances until refresh (stale title).
 - `3-6` Purpose: Validate end-to-end behavior. Description:
   - Open the window, confirm it calls `GET /api/tickers` and renders the list.
   - Add a ticker and confirm it calls `POST /api/tickers/add`, then refreshes the list.
   - Clean up the appended ticker afterwards (manual revert) so the repo data is not polluted.
+  - Done when (observable): add flow works end-to-end and the list refreshes immediately.
+  - Human check: add a test ticker, close/reopen the window (or reload) and confirm it still appears (proves backend wrote the CSV).
+  - Common issues to watch: backend not running (network error); forgetting to revert the test ticker in the CSV after demo.
 
 **Verification hook (Step 3 closeout):**
 ```
@@ -519,24 +638,39 @@ Verification
   - Prefer `FINNHUB_API_KEY` from environment; only use the file fallback if the env var is absent.
   - If key is missing, fail fast with a clear message but never log/print the key.
   - Keep config loading centralized (single source of truth) so provider code never reads secrets directly.
+  - Done when (observable): starting the backend with/without the env var produces predictable behavior (works if present, clear error if missing).
+  - Human check: run the ingestion endpoint once; it should fail with a readable “missing key” error (without revealing the key) if not configured.
+  - Common issues to watch: accidentally logging the key or the full request URL with the key; reading the key in multiple places.
 - `4-2` Purpose: Convert Finnhub responses into the DB’s news schema. Description:
   - Fetch from Finnhub endpoints required for “company news”.
   - Map into the existing `insertNewsItem()` contract and set `source='FINNHUB'` consistently.
   - Dedup policy: avoid re-inserting the same item when ranges overlap (prefer DB uniqueness; otherwise best-effort in code).
+  - Done when (observable): `GET /api/news?source_names=FINNHUB` returns items with non-empty title + timestamp + URL.
+  - Human check: open the News window later and confirm you see real headlines (not placeholders).
+  - Common issues to watch: timestamp units/timezone mismatch; inconsistent `source` string (breaks filtering); duplicates on repeated pulls.
 - `4-3` Purpose: Trigger ingestion on demand. Description:
   - Add `POST /api/news/pull-finhub` that runs the provider pull and persists rows.
   - Return a small summary (`inserted`, `skipped`, `source`) suitable for UI display.
   - Ensure the endpoint does not run automatically on startup (explicit trigger only).
+  - Done when (observable): POST returns the summary JSON quickly and does not block indefinitely.
+  - Human check: click “Update” (if Step 5-5 is enabled) and see the list refresh.
+  - Common issues to watch: doing automatic pulls on startup (surprise side effects); returning huge payloads instead of a small summary.
 - `4-4` Purpose: Track the last successful pull. Description:
   - On success, write `update_status(finhub_news).lastSuccessAt = now()`.
   - Store minimal details like counts and the covered date range; do not store raw response bodies.
   - Verify status changes via `GET /api/updates/status`.
+  - Done when (observable): after a successful POST, `finhub_news.lastSuccessAt` becomes a non-null ISO timestamp.
+  - Human check: in the Data Control window later, a “last success” timestamp is visible and updates.
+  - Common issues to watch: updating lastSuccessAt even when insertion failed; storing non-ISO timestamps that are hard to display.
 - `4-5` Purpose: Confirm data is actually queryable by the UI. Description:
   - Query `GET /api/news?source_names=FINNHUB` and verify:
     - items exist
     - required fields (title, published time, url/source) are present
     - `source` matches exactly `FINNHUB`
   - If no items appear, treat it as an ingestion or query bug (not a UI issue).
+  - Done when (observable): GET returns a stable JSON array and the newest items appear after ingestion.
+  - Human check: refresh the News window; items should change over time when you pull again.
+  - Common issues to watch: endpoint returns items but with missing fields; query filters use a different `source` spelling.
 
 **Verification hook (Step 4 closeout):**
 ```
@@ -549,10 +683,10 @@ Verification
 ```
 - User confirmation needed: **Yes**
 
-#### Step 5 — Migrate “News Feed: Brave API” → “News Feed: finhub api” (frontend)
+#### Step 5 — Migrate “News Feed: Brave API” → “news feed:finhub api” (frontend)
 Purpose
 - Remove synthetic/mock “Brave News” UI and rewire it to the backend’s Finnhub-backed news.
-- Ensure the label is exactly `News Feed: finhub api` and the UI no longer implies Brave is used.
+- Ensure the label is exactly `news feed:finhub api` and the UI no longer implies Brave is used.
 
 Non-negotiables (policy + requirement)
 - Remove `generateMockData()` and any seeded/synthetic rows.
@@ -568,10 +702,10 @@ Frontend files:
     - `WindowType` remove `brave-news`, add `finhub-news`
     - Replace `BraveNews*` types with `FinnhubNews*` (or re-use `NewsItem` if possible)
 - `src/app/components/AddTabModal.tsx`
-  - Label: change to exactly `News Feed: finhub api`
+  - Label: change to exactly `news feed:finhub api`
   - Toggle window type `finhub-news`
 - `src/app/App.tsx`
-  - Title mapping: `finhub-news` → `News Feed: finhub api`
+  - Title mapping: `finhub-news` → `news feed:finhub api`
 - `src/app/components/DraggableWindow.tsx`
   - Render `FinnhubNewsWindow` for `finhub-news`
 - `src/app/components/BraveNewsWindow.tsx`
@@ -584,7 +718,7 @@ Frontend files:
 
 Verification
 - No synthetic generation remains.
-- “News Feed: finhub api” window shows Finnhub-backed items only.
+- “news feed:finhub api” window shows Finnhub-backed items only.
 
 **Sub-steps (Step 5)**
 
@@ -595,8 +729,8 @@ Verification
 | 5-3 | Remove `generateMockData()` entirely | `FinnhubNewsWindow.tsx` | `grep -r "generateMockData" src/` → 0 results |
 | 5-4 | Implement real fetch from `GET /api/news?source_names=FINNHUB` | `FinnhubNewsWindow.tsx` | Component fetches from backend on mount |
 | 5-5 | Add optional "Update" button calling `POST /api/news/pull-finhub` | `FinnhubNewsWindow.tsx` | Button visible, triggers ingestion |
-| 5-6 | Update `AddTabModal.tsx` label → `News Feed: finhub api` | `src/app/components/AddTabModal.tsx` | Label text exact match |
-| 5-7 | Update `App.tsx` title mapping | `src/app/App.tsx` | `finhub-news` → `News Feed: finhub api` |
+| 5-6 | Update `AddTabModal.tsx` label → `news feed:finhub api` | `src/app/components/AddTabModal.tsx` | Label text exact match |
+| 5-7 | Update `App.tsx` title mapping | `src/app/App.tsx` | `finhub-news` → `news feed:finhub api` |
 | 5-8 | Update `DraggableWindow.tsx` switch | `src/app/components/DraggableWindow.tsx` | `finhub-news` → `FinnhubNewsWindow` |
 
 **Sub-step purpose & description (Step 5)**
@@ -604,40 +738,64 @@ Verification
   - Remove the `brave-news` window type and introduce `finhub-news` as the canonical type.
   - Update any type-level models (`BraveNews*` types) to Finnhub equivalents or reuse the backend `NewsItem` shape if already defined.
   - Success criterion: no user-facing UI path can still open a “Brave” news window.
+  - Done when (observable): Add Tab no longer offers a Brave news entry; creating the news window results in a `finhub-news` window type without runtime errors.
+  - Human check: in the UI, search for “Brave” and confirm no news-related label/option contains it.
+  - Common issues to watch: adding `finhub-news` but leaving `brave-news` referenced in a render switch (blank window or crash).
 - `5-2` Purpose: Keep code structure readable. Description:
   - Rename the window component to `FinnhubNewsWindow` (file rename preferred) so naming matches behavior.
   - Update all imports/exports accordingly.
   - Avoid leaving duplicate/unused components (e.g., both BraveNewsWindow and FinnhubNewsWindow) unless intentionally kept.
+  - Done when (observable): the app builds/runs with no runtime “module not found” errors after the rename.
+  - Human check: open the News window; it renders content (even if empty) instead of showing a blank/crashed window.
+  - Common issues to watch: stale import paths, incorrect default/named export after rename, case-sensitive path issues in git.
 - `5-3` Purpose: Enforce “no mock data” policy. Description:
   - Remove `generateMockData()` and any synthetic seed arrays.
   - Remove any fallback code path that “creates demo items” when backend returns empty.
   - Verification expectation: searching the frontend source tree for `generateMockData` and related mock helpers returns zero matches.
+  - Done when (observable): with an empty backend DB, the window shows “no items” (or empty state) rather than demo headlines.
+  - Human check: open the window immediately after a fresh backend start (before any pull) and confirm you do not see seeded/demo items.
+  - Common issues to watch: leftover hard-coded arrays in component state; “if empty then seed sample data” logic.
 - `5-4` Purpose: Render real stored news. Description:
   - Fetch news from backend using `GET /api/news?source_names=FINNHUB`.
   - Render exactly what the backend returns; if fields are missing, display empty/`-` (never invent values).
   - Keep fetch behavior predictable (load-on-mount + optional manual refresh only).
+  - Done when (observable): browser Network tab shows `GET /api/news?source_names=FINNHUB` and the UI list reflects the response.
+  - Human check: in DevTools → Network, click the request and confirm it returns JSON (array) and the UI updates accordingly.
+  - Common issues to watch: calling the wrong backend port; missing `source_names=FINNHUB` filter; not handling empty arrays gracefully.
 - `5-5` Purpose: Allow manual refresh when needed (optional). Description:
   - Add an in-window “Update” button that calls `POST /api/news/pull-finhub`.
   - After POST success, refresh the list by re-calling `GET /api/news?source_names=FINNHUB`.
   - Ensure the UI shows a minimal running/error state without adding new modals.
+  - Done when (observable): clicking Update shows a short “Running…” state, then the list refreshes (or a clear error appears).
+  - Human check: click Update twice quickly; the second click should be blocked/disabled while the first is running.
+  - Common issues to watch: calling the POST automatically on mount (surprise side effects); no disabled state leading to double-ingestion.
 - `5-6` Purpose: Match the exact requested label. Description:
-  - In `AddTabModal.tsx`, update the label text to exactly `News Feed: finhub api` (case + spacing exact).
+  - In `AddTabModal.tsx`, update the label text to exactly `news feed:finhub api` (case + spacing exact).
   - Ensure no other place still shows “Brave API” for this window.
   - Treat label mismatch as acceptance failure (it’s user-visible and specified).
+  - Done when (observable): Add Tab shows the label exactly as `news feed:finhub api`.
+  - Human check: visually compare the label character-by-character (including spaces and colon placement).
+  - Common issues to watch: extra whitespace, different capitalization, or a different string used in another mapping.
 - `5-7` Purpose: Ensure the window title is correct. Description:
-  - Update `App.tsx` title mapping so `finhub-news` renders the exact title `News Feed: finhub api`.
+  - Update `App.tsx` title mapping so `finhub-news` renders the exact title `news feed:finhub api`.
   - Ensure switching between windows does not show stale titles.
   - Keep the string stable as an acceptance-test anchor.
+  - Done when (observable): the window header/title shows `news feed:finhub api` every time the window is opened.
+  - Human check: open a different window, then switch back; confirm the title does not “stick” to the old one.
+  - Common issues to watch: title mapping exists but is applied only on first render; old instances keep the previous title.
 - `5-8` Purpose: Ensure the window actually renders. Description:
   - Add a `finhub-news` case in `DraggableWindow.tsx` that renders `FinnhubNewsWindow`.
   - Verify the window opens, fetches, and renders without crashing even when the backend returns an empty array.
   - Ensure there is no leftover `brave-news` rendering path.
+  - Done when (observable): selecting the tab opens a non-empty window frame with the expected controls/content region.
+  - Human check: open the window on a clean DB (empty list) and confirm you see an empty state, not a blank frame.
+  - Common issues to watch: forgetting to wire the render switch (window opens but content area is empty).
 
 **Verification hook (Step 5 closeout):**
 ```
 1. grep -r "generateMockData\|mock\|brave-news\|BraveNews" src/ → 0 results (no mock/brave references)
 2. npx tsc --noEmit → 0 errors
-3. npm run dev → Open "News Feed: finhub api" window
+3. npm run dev → Open `news feed:finhub api` window
 4. Window shows real Finnhub news (requires Step 4 data to be ingested first)
 5. "Update" button triggers backend pull
 ```
@@ -694,25 +852,43 @@ Verification
   - Remove *all* timer/worker code paths that insert `calendar_events(source='mock_provider')`.
   - Ensure the file no longer contains mock helpers (e.g. `generateMock*`, `setInterval`, hard-coded sample events).
   - Success criterion: starting the backend does not create any new rows unless an explicit endpoint is called.
+  - Done when (observable): restarting the backend does not change `/api/calendar/events` output unless `POST /api/ibkr/calendar/update` is called.
+  - Human check: start backend, wait 1–2 minutes, then call `GET /api/calendar/events`; results should not grow automatically.
+  - Common issues to watch: leftover `setInterval` or startup hooks that still insert mock rows in the background.
 - `6-2` Purpose: Remove startup side effects so `/calendar` is pull-on-demand only. Description:
   - Delete the `startCalendarIngestionWorkers()` call from the server startup path.
   - If the function remains for backward compatibility, it must not run automatically.
   - Verification focus: reboot backend → DB remains unchanged until `POST /api/ibkr/calendar/update`.
+  - Done when (observable): a clean backend restart produces zero calendar write activity until the update endpoint is called.
+  - Human check: restart backend and immediately call `GET /api/calendar/events`; it should return the same set as before restart (no new mock rows).
+  - Common issues to watch: the call is removed from one code path but still runs via another imported startup helper.
 - `6-3` Purpose: Implement the real calendar pull in a testable, provider-agnostic shape (decision-dependent). Description:
   - Add a `pullCalendarData()` function that returns a normalized list of events.
   - Normalization rules (minimum): stable IDs (or deterministic hash), ISO timestamps, symbol, event type, and a `source` field.
   - Explicitly document which fields are *not* available from the chosen source (never fabricate).
+  - Done when (observable): `pullCalendarData()` returns an array of normalized events and unit tests (or a dev probe) can validate the shape without UI.
+  - Human check: call the update endpoint once and confirm the response shows `source: "IBKR"` (or the decided source) and non-negative counts.
+  - Common issues to watch: using non-ISO timestamps; generating IDs that change every run (causes duplicates).
 - `6-4` Purpose: Provide an explicit operator/UI trigger for calendar refresh. Description:
   - Add `POST /api/ibkr/calendar/update` which does: pull → upsert → update status.
   - The route must return a small summary (`upserted`, `deletedMockRows`, `source`) and a non-200 on failure.
   - Do not log secrets; only log counts + high-level errors.
+  - Done when (observable): `curl -X POST http://localhost:8080/api/ibkr/calendar/update` returns a small JSON summary within a reasonable time.
+  - Human check: run the POST twice; the second run should not explode row counts (upsert should prevent duplicates).
+  - Common issues to watch: returning huge payloads; treating partial failures as success and still updating status.
 - `6-5` Purpose: Remove already-stored mock data so the app becomes “IBKR-only” without manual DB resets. Description:
   - On the *first successful* real update, delete `calendar_events` rows with `source='mock_provider'`.
   - This deletion must be idempotent and safe to re-run.
   - Prefer performing delete+upsert+status update in a single transaction where practical.
+  - Done when (observable): after the first successful update, `GET /api/calendar/events` never returns items with `source='mock_provider'`.
+  - Human check: call `GET /api/calendar/events` and scan the JSON for any `mock_provider` string; it should be absent.
+  - Common issues to watch: deleting mock rows even when the real pull failed; cleanup running on every startup.
 - `6-6` Purpose: Persist “last success” timestamps for the Data Control Window and ops. Description:
   - On success, write `update_status(ibkr_calendar).lastSuccessAt = now()`.
   - Store minimal `details` (e.g. `{ upserted, deletedMockRows }`) for debugging; do not store secrets or raw provider payloads.
+  - Done when (observable): after a successful update POST, `GET /api/updates/status` shows a non-null `ibkr_calendar.lastSuccessAt`.
+  - Human check: intentionally cause a failure (e.g., service down) and confirm `lastSuccessAt` does not change.
+  - Common issues to watch: updating timestamps on failed pulls; storing raw provider payloads in `details`.
 
 **Verification hook (Step 6 closeout):**
 ```
@@ -817,11 +993,17 @@ Decision #6 note (what changes in Step 7)
   - Provide query helpers: `getOverallMaxDate()`, and (optionally) `getSymbolMaxDate(symbol)`.
   - Provide `upsertBars(symbol, bars)` using a deterministic mapping (Symbol, Datetime, Open, High, Low, Close, Volume).
   - Error handling: translate low-level SQLite errors into actionable messages; do not swallow failures silently.
+  - Done when (observable): a small dev probe or unit test can open the DB and `getOverallMaxDate()` returns a plausible date string (or null if empty).
+  - Human check: after Step 7-5 is wired, call `GET /api/ibkr/ohlc1d/status` and confirm `dbPath` points at `OHLC_data/ohlc_1d_watchlist.sqlite` and `overallMaxDate` is not garbage.
+  - Common issues to watch: wrong relative path resolution (runs in a different CWD); SQLite “database is locked” from missing busy-timeout handling.
 - `7-2` Purpose: Make derived-metric storage possible without manual DB rebuilds. Description:
   - Implement `ensureDerivedColumns()` that is idempotent:
     - inspect existing schema via `PRAGMA table_info(ohlc_1d)`
     - `ALTER TABLE ... ADD COLUMN` only for missing columns
   - Migration must be safe on repeated runs and safe on a DB that already contains data.
+  - Done when (observable): running the migration twice produces no errors and the derived columns exist exactly once.
+  - Human check: open the SQLite DB in a viewer (e.g., DB Browser for SQLite) and confirm the derived columns exist on `ohlc_1d`.
+  - Common issues to watch: forgetting to run migration before writes (columns stay NULL forever); typos in column names causing multiple similar columns.
 - `7-3` Purpose: Provide a single “fetch 1D bars” abstraction regardless of how we integrate with IBKR (Decision #6). Description:
   - Input: `{ symbol, startDate, endDate }` where dates are trading dates in `YYYY-MM-DD`.
   - Output: ordered bars with `Datetime` in `YYYY-MM-DD` and numeric OHLCV.
@@ -829,15 +1011,24 @@ Decision #6 note (what changes in Step 7)
     - Bounded retries with backoff for transient disconnect/pacing
     - Fail fast on permanent config errors (host/port, permissions)
     - Never log credentials; log only symbol + date range + counts.
+  - Done when (observable): for a known symbol (AAPL), the provider returns a non-empty bar list for a recent date range.
+  - Human check: run `POST /api/ibkr/ohlc1d/update` for a single-symbol ticker CSV and confirm the summary shows `rowsUpserted > 0` (on a market day).
+  - Common issues to watch: IBKR pacing/timeouts; returning bars in descending order; mixing timezone/local date boundaries.
 - `7-4` Purpose: Compute and persist the News Feed “Changes %” fields from real OHLC (no mock/UI-only). Description:
   - For each affected symbol, load enough history to compute lookbacks (>= 30 prior trading bars).
   - Compute: `Change_1d_Pct`, `Change_From_Open_Pct`, `Change_7d_Pct`, `Change_14d_Pct`, `Change_30d_Pct`.
   - Missing history rule: if a lookback bar does not exist, store `NULL` (do not fabricate).
   - Write derived values back for a bounded safety window (e.g. `min_new_date - 40 bars` → `max_new_date`).
+  - Done when (observable): after at least one successful update, recent `ohlc_1d` rows have non-NULL derived columns where history exists.
+  - Human check: run the provided spot-check SQL for AAPL and confirm at least one of the derived columns is not NULL for recent rows.
+  - Common issues to watch: using calendar days instead of trading bars for 7/14/30 lookbacks; dividing by zero / missing previous close.
 - `7-5` Purpose: Expose a read-only status endpoint so UI/ops can confirm DB freshness. Description:
   - Implement `GET /api/ibkr/ohlc1d/status` which returns:
     - `dbPath` (string), `overallMaxDate` (string or null), `lastSuccessAt` (ISO or null).
   - `overallMaxDate` is sourced from DB `MAX(Datetime)`; `lastSuccessAt` from `update_status(ibkr_ohlc_1d)`.
+  - Done when (observable): the endpoint returns JSON with all fields present even when values are null.
+  - Human check: `curl http://localhost:8080/api/ibkr/ohlc1d/status` and confirm it returns quickly and consistently.
+  - Common issues to watch: returning dates in inconsistent formats; reading `lastSuccessAt` from the wrong update_status key.
 - `7-6` Purpose: Implement the orchestrator endpoint that performs pull → upsert → derive → status update. Description:
   - Implement `POST /api/ibkr/ohlc1d/update`:
     - Read tickers from the Default Ticker CSV (normalized + de-duplicated)
@@ -846,11 +1037,17 @@ Decision #6 note (what changes in Step 7)
     - On full success, update `update_status(ibkr_ohlc_1d)` with minimal details
   - Partial failure policy must be explicit (choose one and document it in code):
     - (a) fail the whole request, or (b) continue and report per-symbol failures.
+  - Done when (observable): a single POST call advances `overallMaxDate` when new trading days exist, and updates `update_status(ibkr_ohlc_1d).lastSuccessAt`.
+  - Human check: call the POST once, then call `GET /api/updates/status` and confirm `ibkr_ohlc_1d.lastSuccessAt` changed only on success.
+  - Common issues to watch: updating status even when some symbols failed (without reporting it); recomputing derived metrics for too small a window (lookbacks stay NULL).
 - `7-7` Purpose: Provide a concrete “human check” that proves the pipeline produced real derived values. Description:
   - After at least one successful update, run a small SQL query for a known symbol (AAPL) and confirm:
     - rows exist for recent dates
     - derived columns are not all `NULL` for recent rows
   - This is not a substitute for unit tests; it is an operational sanity check.
+  - Done when (observable): the query returns rows and at least one derived column has numeric values.
+  - Human check: copy/paste the exact SQL into a SQLite viewer and confirm results look reasonable (no huge NaNs/inf).
+  - Common issues to watch: querying the wrong DB file; bar dates not matching `YYYY-MM-DD` so MAX(Datetime) is wrong.
 
 Option-specific small steps for `7-3` (Decision #6)
 - Option A (Node direct):
@@ -926,22 +1123,37 @@ Verification
   - Add `data-control` to the frontend window type union.
   - Ensure the AddTab entry and the DraggableWindow rendering use the exact same type string.
   - Keep naming consistent because it becomes a stable integration point.
+  - Done when (observable): the “Data Control” option exists in Add Tab and selecting it opens a window without errors.
+  - Human check: open Add Tab and confirm you can create exactly one Data Control window (no duplicates on repeated toggles).
+  - Common issues to watch: type string mismatch between AddTab and DraggableWindow (blank window).
 - `8-2` Purpose: Implement the operations UI. Description:
   - Implement `DataControlWindow.tsx` with two sections (Price, Calendar) and minimal controls.
   - On mount, call `GET /api/updates/status` and render `lastSuccessAt` values (or `-` if null).
   - Fetch `GET /api/ibkr/ohlc1d/status` for the OHLC “latest date” display.
+  - Done when (observable): on open, the window shows two sections and displays `-` or timestamps/dates (not empty placeholders).
+  - Human check: with backend running, refresh the page and confirm the status fields populate without clicking any buttons.
+  - Common issues to watch: calling the wrong backend base URL/port; crashing when `lastSuccessAt` is null.
 - `8-3` Purpose: Ensure it’s reachable in the app. Description:
   - Add checkbox entry in `AddTabModal.tsx`, title mapping in `App.tsx`, and rendering switch in `DraggableWindow.tsx`.
   - Ensure the window opens without requiring any IBKR calls until the user clicks an update button.
   - Keep wiring changes minimal and aligned with existing window patterns.
+  - Done when (observable): opening the window does not trigger any POST requests; only GET status calls happen on mount.
+  - Human check: open DevTools → Network and confirm no `POST /api/ibkr/*` fires until you click.
+  - Common issues to watch: accidentally calling update endpoints on mount; title mapping missing so header shows the wrong title.
 - `8-4` Purpose: Prevent double-click issues and make failures visible. Description:
   - When a POST is in-flight, disable only the relevant button and show “Running…” near it.
   - On failure, render a short error string inside the window; do not introduce new modal UX.
   - Ensure state resets correctly after success/failure so the user can retry.
+  - Done when (observable): clicking a button disables it and shows “Running…” until completion, then re-enables.
+  - Human check: intentionally stop the backend and click an update button; you should see a readable error inside the window.
+  - Common issues to watch: button stays disabled forever; errors only appear in console (not in the window).
 - `8-5` Purpose: Keep displayed status fresh. Description:
   - After each successful update POST, re-fetch `GET /api/updates/status`.
   - After price updates, also re-fetch `GET /api/ibkr/ohlc1d/status` so “latest DB date” updates.
   - Ensure refresh order is deterministic (POST → refresh GETs) to avoid stale UI.
+  - Done when (observable): after a successful update, the timestamp fields change without requiring a full page refresh.
+  - Human check: click “IBKR Price Data” once; after it finishes, confirm the displayed “latest DB date” updates.
+  - Common issues to watch: refreshing only one endpoint (timestamps update but DB date doesn’t, or vice versa).
 
 **Verification hook (Step 8 closeout):**
 ```
@@ -990,24 +1202,39 @@ Verification
   - Add repository-level tests that write a status row and read it back from the same DB handle.
   - Ensure `lastSuccessAt` stays stable across “new repository instance” creation (restart-like behavior).
   - Confirm all expected keys are present in the API response even when null.
+  - Done when (observable): `npm run test` includes at least one test that simulates “restart-like” behavior and still reads the same status.
+  - Human check: run backend tests; confirm failures are actionable (test names mention status persistence clearly).
+  - Common issues to watch: tests rely on real local DB state (flaky); timestamps compared without allowing time tolerance.
 - `9-2` Purpose: Prevent CSV security/behavior regressions. Description:
   - Test allowlist enforcement: reject paths outside `tradigview_screener/original_data/` and traversal attempts.
   - Test append semantics: appended ticker appears as a new last row and is returned by subsequent reads.
   - Test duplicate policy: second insert of same ticker fails (default).
+  - Done when (observable): tests cover “allowed path ok” + “disallowed path rejected” + “duplicate rejected”.
+  - Human check: run tests and confirm the error messages mention why a path is rejected (not a generic crash).
+  - Common issues to watch: OS-specific path separators causing tests to pass on one OS and fail on another.
 - `9-3` Purpose: Validate Finnhub mapping without leaking secrets. Description:
   - Test that mapping produces required fields (title/time/url/source) and persists with `source='FINNHUB'`.
   - Ensure tests do not print API keys/tokens; use local stubs/mocks for HTTP if needed.
   - Verify `update_status(finhub_news)` updates only on success.
+  - Done when (observable): tests assert required fields exist and do not require a real Finnhub API key.
+  - Human check: scan test output/logs; confirm no tokens/keys appear.
+  - Common issues to watch: accidentally hitting the real network in tests; storing raw payloads in snapshots/logs.
 - `9-4` Purpose: Prevent mock calendar data from remaining. Description:
   - Add a test that inserts a small number of `mock_provider` rows, then simulates a successful real update.
   - Verify deletion is idempotent (running cleanup twice still results in zero mock rows).
   - Ensure the cleanup triggers only after a successful update (avoid deleting everything on failures).
+  - Done when (observable): there is a test that proves mock rows are removed only after a successful update path.
+  - Human check: run tests and confirm the calendar cleanup test fails if cleanup is triggered on failure.
+  - Common issues to watch: test DB not isolated, causing interference with developer data.
 - `9-5` Purpose: Validate the end-to-end UI surfaces. Description:
   - Manual smoke test checklist for the three new/changed windows:
     - Default Ticker: loads + add works
-    - News Feed: finhub api: renders from backend and no mock
+    - news feed:finhub api: renders from backend and no mock
     - Data Control: buttons call endpoints and status refreshes
   - Focus on correctness and “no extra UX” constraints rather than pixel perfection.
+  - Done when (observable): a person can complete the checklist in one sitting and capture any failures as screenshots/notes.
+  - Human check: run through the checklist with the backend running; verify Network tab shows the expected GET/POST calls.
+  - Common issues to watch: backend not running (false failures); cached UI state hiding that an endpoint call failed.
 
 **Verification hook (Step 9 closeout):**
 ```
@@ -1062,7 +1289,7 @@ Verification
 │                      │                              │
 ▼                      ▼                              │
 ⬜ Step 3               ⬜ Step 5                      │
-(Default Ticker UI)    (News Feed: finhub api UI)     │
+(Default Ticker UI)    (news feed:finhub api UI)     │
 │ 3-1 window type      │ 5-1 remove brave-news        │
 │ 3-2 component        │ 5-2 rename → FinnhubNews     │
 │ 3-3 DraggableWindow  │ 5-3 remove mock data         │
@@ -1203,6 +1430,48 @@ Verification after choosing (what “done” looks like)
 - 시크릿(API 키/토큰)은 로그에 남기지 않는다.
 - 브라우저에서 로컬 파일 직접 쓰기 불가 → CSV 읽기/append는 백엔드 API가 담당한다.
 
+### 읽는 방법(비개발자/일반인 기준)
+이 문서는 구현(개발)용 계획이지만, 코드를 직접 작성하지 않아도 진행 상황을 리뷰/검증할 수 있도록 작성한다.
+
+각 Step을 읽는 법
+- Step 하나는 “사용자가 눈으로 확인 가능한 결과물” 1개 단위다(UI에서 보이거나 API로 확인 가능).
+- 각 Step에는 보통 아래가 포함된다.
+  - sub-step 테이블(무엇을 하는지)
+  - 목적/설명 블록(왜 필요한지, 무엇이 ‘완료’인지)
+  - Verification hook(검증 방법)
+
+검증은 2종류가 있다
+- “개발자 검증”: `curl`, DB 쿼리, TypeScript 컴파일 체크 같은 명령 기반 확인.
+- “사람 검증(비개발자)”: UI를 열고 라벨/버튼/시간표시가 요구대로 바뀌는지 확인.
+
+완료 시 UI 스냅샷(최종 결과가 어떻게 보여야 하는가)
+- Default Ticker Window
+  - 선택된 CSV 경로에서 로드한 티커 목록이 보인다.
+  - 티커 추가 시 목록이 즉시 반영되고, CSV에도 append 된다(백엔드가 수행).
+- News window
+  - 라벨이 정확히 `news feed:finhub api`로 표시된다.
+  - Finnhub에서 실제로 pull하여 DB에 저장된 뉴스만 렌더된다(mock 행 금지).
+- Data Control Window
+  - 버튼은 정확히 2개: `IBKR Price Data`, `IBKR Calendar Data`.
+  - 버튼 클릭은 백엔드 업데이트를 트리거하고, “마지막 성공 업데이트 날짜/시각”이 갱신된다.
+
+빠른 검증 체크리스트(코드 안 읽고 확인)
+1) 앱을 실행(backend + web UI)하고, 터미널에 표시되는 UI URL로 접속.
+2) News 창 라벨이 `news feed:finhub api`인지 확인.
+3) Default Ticker 창에서 티커 목록이 보이고, 티커 추가 시 즉시 목록에 반영되는지 확인.
+4) IBKR 설정이 되어 있다면: `IBKR Price Data`/`IBKR Calendar Data` 클릭 후 “마지막 성공 업데이트”가 바뀌는지 확인.
+
+용어집(쉬운 정의)
+- 백엔드: 데이터베이스/CSV/외부 API와 통신하는 Node/TypeScript 서버(`terminal/backend`).
+- 프론트: 사용자가 보는 UI 앱(`termina_web/figma_code/terminal_ui_ver2_finhub`).
+- API 엔드포인트: 프론트가 백엔드를 호출하는 URL(예: `GET /api/updates/status`).
+- SQLite DB: 파일 1개로 된 로컬 DB(예: `OHLC_data/ohlc_1d_watchlist.sqlite`).
+- 수집(pull/ingestion): Finnhub/IBKR에서 데이터를 내려받아 로컬에 저장하는 과정.
+- Upsert: “없으면 insert, 있으면 update”해서 중복을 만들지 않는 저장 방식.
+- OHLCV(1D): 일봉 Open/High/Low/Close/Volume.
+- 파생 지표: OHLC 기반으로 계산되는 값(예: %변화율) — mock 금지.
+- “No mock” 정책: 실제 데이터가 없으면 `null`/빈 값으로 두고, 숫자를 지어내지 않는다.
+
 ### 프로세스 템플릿(plan 변경 + 단계 완료 확인)
 
 #### plan 중간 변경 프로토콜(리비전)
@@ -1271,7 +1540,7 @@ UI 컬럼이 요구하는 데이터(예: market cap, turnover, earnings calendar
   - 외부 노출 금지, 시크릿 로그 금지
 
 점검 대상 컬럼(최소, 현재 UI 기준)
-- “News Feed: finhub api” 윈도우(현재 `BraveNewsWindow`가 mock으로 구현된 부분):
+- “news feed:finhub api” 윈도우(현재 `BraveNewsWindow`가 mock으로 구현된 부분):
   - 표 컬럼: `Date`, `Time`, `Title`, `Sources`, `Changes %`
   - `Changes %` 셀 내부에 렌더되는 하위 항목:
     - `Chg` (1D % change)
@@ -1349,6 +1618,17 @@ IBKR 연동이 가장 불확실(환경/자격증명/게이트웨이 의존)이�
 > - 각 단계에는 세부 단계 테이블과 검증 훅을 포함한다.
 > - 단계 완료 시: 훅의 명령/체크리스트를 실행해 결과를 사용자에게 공유하고, 사용자 확인 후에만 `agent_log.md`에 `completed (user-confirmed)`로 기록한다.
 
+비개발자 마일스톤(언제 무엇을 눈으로 확인할 수 있나)
+- 초반 단계 중 일부는 “백엔드만 변경”되는 단계다(주로 API로 확인). UI에서 눈에 보이는 변화는 윈도우 단계 이후부터 명확해진다.
+- 아래 표는 “지금 제대로 진행 중인가?”를 빠르게 확인하는 체크리스트다.
+
+| 마일스톤 | 언제부터 보이나 | 사람이 하는 확인(휴먼 체크) | 기대 결과 |
+|----------|------------------|----------------------------|----------|
+| Default Ticker Window 동작 | 2단계 + 3단계 이후 | Default Ticker Window 열기 → 티커 추가 | 목록에 즉시 반영되고, 백엔드가 CSV에 append 하여 재시작 후에도 유지 |
+| News 창이 Finnhub 기반(=mock 제거) | 4단계 + 5단계 이후 | News 창 열기 | 라벨이 `news feed:finhub api`; 실제 저장된 Finnhub 뉴스만 표시(생성 금지) |
+| “Changes %”가 실제 계산값 표시 | 7단계 이후 | News 창에서 “Changes %” 셀 확인 | OHLC 기반 계산값이 보이고, 히스토리 부족은 빈 값/`null`로 표시 |
+| Data Control Window 버튼이 타임스탬프를 갱신 | 8단계 이후(+ 6/7단계 + IBKR 설정 완료) | `IBKR Price Data` / `IBKR Calendar Data` 클릭 | 성공 시 “마지막 성공 업데이트”가 갱신되고, 실패는 명확히 표시 |
+
 #### 0단계 — 데이터 수집 가능 범위 점검(감사) (IBKR + Finnhub vs UI 컬럼)
 목적(왜 먼저 하는가)
 - 이 프로젝트 UI 테이블은 market cap, industry, earnings 필드, analyst rating 등 특정 데이터를 “당연히 존재하는 것처럼” 전제한다. 구현에 들어가기 전에 IBKR/Finnhub가 실제로 제공하는지, 혹은 기존 1D OHLC DB로 계산 가능한지 확정해야 한다.
@@ -1402,23 +1682,38 @@ IBKR 연동이 가장 불확실(환경/자격증명/게이트웨이 의존)이�
   - 심볼은 고정된 소수 세트(AAPL/MSFT/TSLA)로 통일해 결과를 비교 가능하게 만든다.
   - 원본 JSON 응답을 `tmp/probes/`에 “심볼+엔드포인트+날짜”가 드러나는 파일명으로 저장해 재현 가능하게 한다.
   - 필드가 없으면 “없음”을 매트릭스에 명시하고, 추정/대체/가짜 값을 만들지 않는다.
+  - 완료 조건(눈으로 확인): `tmp/probes/`에 Finnhub 원시 JSON 샘플이 있고, 매트릭스에 Finnhub 필드가 Yes/No로 명시되어 있다.
+  - 사람 검증(비개발자): JSON 파일 몇 개를 열어 실제 응답(placeholder 아님)인지 확인하고, 매트릭스가 그 결과를 반영하는지 확인.
+  - 흔한 문제/주의: 원시 샘플 저장을 빼먹음; 콘솔 로그에 키/토큰이 노출.
 - `0-2` 목적: IBKR TWS 연결 및 OHLC 수집 가능 여부를 1차 확인. 설명:
   - v1 프로브로 host/port/권한이 맞는지와 “일봉 historical bars”가 end-to-end로 동작하는지 확인한다.
   - 실패는 땜질하지 말고 capability gap으로 기록한다(예: Reuters 불가, WSH 빈 응답 등).
   - 설정 변경 전/후 비교를 위해 원시 샘플 또는 요약을 남긴다.
+  - 완료 조건(눈으로 확인): 최소 1개 심볼에서 일봉 OHLC 샘플이 비어있지 않고, 실패/갭은 명시적으로 기록되어 있다.
+  - 사람 검증(비개발자): 프로브 출력에 날짜 구간과 OHLCV 값이 실제로 포함되는지(빈 배열 아님) 확인.
+  - 흔한 문제/주의: live/paper 포트 혼동; TWS 권한/설정 미허용.
 - `0-2b` 목적: `conId` 기반 WSH 메타데이터/이벤트 접근 가능성 확인. 설명:
   - *블로킹* 메타데이터 호출로 결과가 비어있지 않은지(메타데이터 + 이벤트) 확인한다.
   - 심볼별로 대표 샘플(메타데이터 1개 + 이벤트 1개)을 저장해 이후 회귀 점검이 가능하게 한다.
   - 심볼별 편차(일부는 되고 일부는 안 됨)가 있으면 그 사실을 그대로 기록한다.
+  - 완료 조건(눈으로 확인): 최소 1개 심볼에 대해 메타데이터 JSON 1개 + 이벤트 JSON 1개가 저장되어 있고, 내용이 비어있지 않다.
+  - 사람 검증(비개발자): 저장된 JSON을 열어 `{}`/`[]`가 아니라 이벤트 타입/식별자 같은 필드가 들어있는지 확인.
+  - 흔한 문제/주의: 비블로킹 호출로 인해 “잠깐 비어있는 것”을 “불가”로 오판; 파일명이 뒤섞여 심볼 구분 불가.
 - `0-2c` 목적: 필요한 재무 필드를 담는 WSH 이벤트 타입을 식별. 설명:
   - UI가 요구하는 필드(EPS actual/estimate, revenue 등)를 기준으로 이벤트 타입을 전수조사한다.
   - 각 이벤트 타입에 어떤 numeric 필드가 존재하는지, 그리고 UI 컬럼 의미와 일치하는지 기록한다.
   - “불가”(예: revenue 없음)는 명확히 적어 Step 6/7 범위를 정직하게 만든다.
+  - 완료 조건(눈으로 확인): 각 UI 필드가 WSH에서 가능한지 여부가 정리되어 있고, 예시 payload가 참조로 남아있다.
+  - 사람 검증(비개발자): EPS actual/estimate 예시가 최소 1개 존재하는지, revenue는 “없음”으로 명시되어 있는지 확인(확정된 경우).
+  - 흔한 문제/주의: 비슷한 이름의 필드를 혼동; 한 심볼에서만 나온 값을 전체로 일반화.
 - `0-3` 목적: 프로브 결과를 실행 가능한 구현 맵으로 정리. 설명:
   - `test_data_availability_audit.md`의 capability matrix를 *모든 UI 컬럼*에 대해 아래 중 하나로 확정해 채운다:
     - IBKR 제공 / Finnhub 제공 / OHLC에서 계산 / 불가
   - “불가”인 경우에는 후속 의사결정(컬럼 제거 vs 빈 값 허용 vs 대체 공급자)을 함께 적어 둔다.
   - 이후 단계에서 같은 질문을 다시 꺼내지 않도록, 매트릭스를 “참조 가능한 단일 근거”로 유지한다.
+  - 완료 조건(눈으로 확인): 모든 UI 컬럼이 정확히 1개의 최종 분류를 가지며, “TBD/빈칸”이 남아있지 않다.
+  - 사람 검증(비개발자): 매트릭스를 위에서 아래로 훑어 빈 칸/누락 컬럼이 없는지 확인.
+  - 흔한 문제/주의: “아마” 같은 애매한 표기; 불가 항목에 대해 후속 결정(제거/빈값/대체)이 연결되지 않음.
 - `0-4` 목적: IBKR 의존 단계(Steps 6–8)를 진행하기 위한 전제 확정. 설명: 2가지 결정을 “구현/검증 가능한 수준”으로 확정하고, 운영 디테일까지 함께 확정한다.
   - 결정 #5: `/calendar` 소스 전략(어떤 provider가 캘린더 데이터를 제공하고, 어떤 방식으로 pull할지).
   - 결정 #6: Node↔IBKR 연동 구현 방식(Step 7 및 기타 IBKR 엔드포인트에서 Node/TS 백엔드가 IBKR를 어떤 프로세스/프로토콜로 호출할지).
@@ -1427,6 +1722,9 @@ IBKR 연동이 가장 불확실(환경/자격증명/게이트웨이 의존)이�
     - API host/port(예: `127.0.0.1:7496` live, `127.0.0.1:7497` paper — 실제 값은 사용자 확인)
     - Python 설치/실행이 가능한지(옵션 B/C에 필요), 그리고 “항상 실행되는 로컬 서비스”를 허용하는지(옵션 C)
   - 이 결정의 산출물: 선택한 옵션 + 반복 실행 가능한 “hello IBKR historical bars” 프로브(연결 검증용)를 확정한다.
+  - 완료 조건(눈으로 확인): 선택된 옵션이 문서에 기록되어 있고, host/port와 “반복 실행 가능한 프로브”가 구체적으로 적혀 있다.
+  - 사람 검증(비개발자): 기록된 host/port가 TWS/Gateway 설정 화면의 값과 동일한지 확인할 수 있다.
+  - 흔한 문제/주의: 옵션 B/C를 선택했는데 Python 가능 여부를 확인하지 않음; host/port를 비워둬 이후 단계가 막힘.
 
 **WSH v3 핵심 발견(기존 판정 재수정):**
 - v1은 `reqWshMetaData()`(비동기) → 빈 응답. v2는 `getWshMetaData()`(블로킹) + `conId` → 풍부한 데이터 확인.
@@ -1489,18 +1787,30 @@ API 계약(초안)
   - `initDb()`에서 `update_status` 테이블을 “재시작해도 안전(idempotent)”하게 생성한다.
   - 스키마는 계획의 핵심 요구( `source_key` PK, ISO timestamp 문자열, JSON details 필드 )를 만족해야 한다.
   - 검증 기준: 런타임에서 백엔드가 사용하는 SQLite 파일에 실제로 테이블이 존재해야 한다.
+  - 완료 조건(눈으로 확인): DB에서 테이블/컬럼이 조회되고, 백엔드 재시작 후에도 에러 없이 정상 기동한다.
+  - 사람 검증(비개발자): (UI 없음) 개발자가 `sqlite_master` 조회 결과를 보여주면 된다.
+  - 흔한 문제/주의: 서버가 쓰는 DB 파일과 다른 파일에 테이블을 만들어버림; 재시작 때 CREATE가 다시 실행되어 실패.
 - `1-2` 목적: 상태 read/write 로직을 한 곳에 모음. 설명:
   - `listUpdateStatuses`, `setLastSuccess`, (선택) `getUpdateStatus`를 제공하는 repository를 만든다.
   - source key는 고정 allowlist( tickers_csv, finhub_news, ibkr_calendar, ibkr_ohlc_1d )로 관리해 키가 흔들리지 않게 한다.
   - `details_json`에는 카운트/최신 날짜 같은 최소 정보만 저장하고, 원문 payload는 저장하지 않는다.
+  - 완료 조건(눈으로 확인): 서버 코드가 ad-hoc SQL 대신 repository를 통해 읽고/쓰며, `npx tsc --noEmit`가 통과한다.
+  - 사람 검증(비개발자): status 값을 1회 set한 뒤 `GET /api/updates/status`에서 그 값이 보이는 시연.
+  - 흔한 문제/주의: 키 오타로 `finhub_news`/`finnhub_news` 혼재; `details_json`에 과도한 원문 저장.
 - `1-3` 목적: 프론트/운영에서 상태를 확인 가능하게 함. 설명:
   - `GET /api/updates/status`를 추가하고, 항상 4개 키를 포함하는 안정적인 JSON 형태를 반환한다.
   - 한 번도 성공한 적 없는 키는 `lastSuccessAt: null`로 반환한다(가짜 금지).
   - 이 엔드포인트는 provider 호출 없이 read-only로 유지하고, 시크릿이 포함된 로그를 남기지 않는다.
+  - 완료 조건(눈으로 확인): `curl`로 호출 시 매번 4개 키가 항상 존재하고, 초기에는 null로 나온다.
+  - 사람 검증(비개발자): 브라우저 주소창에 URL을 붙여 넣으면 JSON이 보인다(크래시/로그인 없음).
+  - 흔한 문제/주의: 일부 키가 누락되어 UI가 깨짐; 임의의 가짜 timestamp를 채워 넣음(정책 위반).
 - `1-4` 목적: 인메모리가 아니라 “재시작 후에도 유지”를 증명. 설명:
   - 테스트 또는 통제된 코드 경로에서 repository로 알려진 timestamp를 저장한다.
   - 백엔드 프로세스를 재시작한 뒤 `GET /api/updates/status`에서 동일 timestamp가 유지되는지 확인한다.
   - 재시작 후 null로 돌아가면 “잘못된 DB 파일 사용/인메모리 저장” 가능성이므로 오류로 간주한다.
+  - 완료 조건(눈으로 확인): 재시작 전/후 `lastSuccessAt` 값이 정확히 동일하다.
+  - 사람 검증(비개발자): 재시작 전/후 `curl` 결과를 화면으로 비교한다.
+  - 흔한 문제/주의: 테스트는 메모리 DB에 쓰고 런타임은 파일 DB에서 읽는 등, 읽기/쓰기 DB가 다름.
 
 **검증 훅 (1단계 마감):**
 ```
@@ -1570,26 +1880,44 @@ API 계약(초안)
   - allowlist된 CSV를 파싱하고, 결정된 헤더(`Ticker` 또는 `Symbol`)에서 티커를 추출한다.
   - 결과 티커는 `trim` + 대문자화로 정규화하고, 빈/잘못된 행은 제외한다.
   - 공백이 포함된 파일명(예: `watch lists2_...`)에서도 깨지지 않도록 샘플 CSV로 유닛 테스트를 만든다.
+  - 완료 조건(눈으로 확인): 기본 CSV 경로로 `GET /api/tickers` 호출 시 티커 리스트가 실제로 나온다.
+  - 사람 검증(비개발자): (3단계 UI 이후) Default Ticker 창에서 티커가 자동으로 표시된다.
+  - 흔한 문제/주의: 헤더 이름/대소문자 불일치; 공백 포함 파일명 처리 실패; 빈 문자열/중복이 섞여 나옴.
 - `2-2` 목적: ticker 추가를 안전하게 수행. 설명:
   - `csvPath` 검증: allowlist root + `.csv` 확장자 + `..` 차단 + 결정적 경로 해석.
   - ticker 검증: 허용 문자셋 + 정규화 + 중복 정책(기본 reject).
   - 오류는 “원인별로 조치 가능한” 메시지가 되도록 한다(예: allowlist 위반, 중복, invalid ticker).
+  - 완료 조건(눈으로 확인): 정상 티커는 파일 마지막 줄에 추가되고, 잘못된 입력은 4xx + 이해 가능한 메시지로 거절된다.
+  - 사람 검증(비개발자): `ZZZZ` 1회 추가는 성공, 같은 값 2회 추가는 “중복”으로 실패.
+  - 흔한 문제/주의: `..`를 허용해 임의 파일을 수정할 수 있게 됨; 중복을 조용히 허용; 사용자 실수도 500으로 뭉뚱그림.
 - `2-3` 목적: Windows 파일 잠금 이슈로 인한 간헐적 실패를 방지. 설명:
   - 임시 파일을 같은 디렉토리에 작성한 뒤 원본을 교체하는 원자적 write를 사용한다.
   - `EBUSY/EPERM` 등 일시 오류에 대해 최대 10회, 짧은 백오프로 재시도한다.
   - 영구 실패(경로 불가/권한/파일 없음 등)에는 무작정 재시도하지 않고 빠르게 실패시킨다.
+  - 완료 조건(눈으로 확인): POST를 여러 번 연속 호출해도 Windows 잠금 때문에 랜덤하게 실패하지 않는다.
+  - 사람 검증(비개발자): 테스트 티커 3~5개를 연속으로 추가해도 간헐 에러가 없어야 한다.
+  - 흔한 문제/주의: temp 파일을 다른 폴더/드라이브에 만들어 replace가 실패; 영구 실패까지 재시도해 원인 파악이 늦어짐.
 - `2-4` 목적: UI가 읽을 수 있는 조회 API 제공. 설명:
   - `GET /api/tickers`가 `readTickersFromCsv()`를 호출하도록 연결한다.
   - 쿼리 파라미터는 검증 후 거절/허용을 명확히 하고, 임의 파일 읽기를 절대 허용하지 않는다.
   - 응답 형태는 `{ csvPath, tickers: string[] }`로 안정적으로 유지한다.
+  - 완료 조건(눈으로 확인): 공백이 있는 파일 경로도 URL 인코딩된 상태로 정상 동작한다.
+  - 사람 검증(비개발자): (3단계 UI 이후) CSV 경로를 바꿔도 앱이 죽지 않고 오류/결과를 표시한다.
+  - 흔한 문제/주의: URL 인코딩 누락으로 400/404; 성공/실패 시 JSON 형태가 바뀌어 UI가 깨짐.
 - `2-5` 목적: UI가 추가할 수 있는 쓰기 API 제공. 설명:
   - `POST /api/tickers/add`가 `appendTickerToCsv()`를 호출하도록 연결한다.
   - 성공 시 UI가 갱신할 수 있도록 “업데이트된 리스트” 또는 충분한 정보를 반환한다.
   - 성공적인 write 이후에만 `update_status(tickers_csv)`를 갱신한다.
+  - 완료 조건(눈으로 확인): POST 성공 후 바로 GET에서 새 티커가 보인다.
+  - 사람 검증(비개발자): UI에서 Add를 누르면 즉시 목록에 뜬다(페이지 새로고침 없이).
+  - 흔한 문제/주의: 실패인데도 status를 갱신; 파일은 변경됐는데 UI 리스트 갱신을 안 함.
 - `2-6` 목적: 운영/프론트에서 “성공 시각”을 확인. 설명:
   - 성공 시 `setLastSuccess('tickers_csv', nowIso, details)`로 갱신한다.
   - `details`에는 `{ csvPath, tickerAdded }` 같은 최소 정보만 저장하고 CSV 원문은 저장하지 않는다.
   - `GET /api/updates/status`에서 `tickers_csv.lastSuccessAt`가 변하는지로 검증한다.
+  - 완료 조건(눈으로 확인): 성공적인 add 이후 `tickers_csv.lastSuccessAt`가 null이 아닌 값으로 바뀐다.
+  - 사람 검증(비개발자): (8단계 UI 이후) “마지막 성공”이 계속 비어있지 않다.
+  - 흔한 문제/주의: ISO 포맷이 아닌 문자열로 저장(표시가 깨짐); details에 민감한 로컬 경로를 과도하게 저장.
 
 **검증 훅 (2단계 마감):**
 ```
@@ -1649,26 +1977,44 @@ UI 동작(최소/명확)
   - `WindowType` 유니온(및 관련 맵)에 `default-ticker`를 추가해 창이 인스턴스화될 수 있게 한다.
   - 제거/변경된 타입과의 불일치(렌더 스위치 누락 등)가 없도록 정리한다.
   - 타입/타이틀/라벨 문자열을 일관되게 유지한다.
+  - 완료 조건(눈으로 확인): Add Tab에서 “Default Ticker”를 선택해 창을 만들었을 때 런타임 에러 없이 열린다.
+  - 사람 검증(비개발자): Add Tab에 “Default Ticker”가 존재하는지 확인(3-4와 함께 확인).
+  - 흔한 문제/주의: 타입만 추가하고 렌더/타이틀 연결을 빼먹어 빈 창이 뜸.
 - `3-2` 목적: 기본 티커 관리 UI를 제공. 설명:
   - `DefaultTickerWindow.tsx`는 “얇은 클라이언트”로 구현한다: CSV 경로 입력 + Reload + 목록 + Add 폼.
   - 브라우저에서 파일 I/O를 시도하지 않고, Step 2의 백엔드 API(`GET /api/tickers`, `POST /api/tickers/add`)만 호출한다.
   - 백엔드 검증 오류는 창 내부에 인라인으로 간단히 표시한다(모달 금지).
+  - 완료 조건(눈으로 확인): 백엔드가 정상일 때 목록이 보이고, 경로/티커가 거절되면 창 안에 에러 문구가 표시된다(앱 크래시 없음).
+  - 사람 검증(비개발자): 일부러 말이 안 되는 경로(예: `C:\\`)를 넣었을 때 “거절 메시지”가 창 안에 보이는지 확인.
+  - 흔한 문제/주의: 프론트가 잘못된 백엔드 포트/URL로 호출함; 에러가 콘솔에만 찍히고 UI에는 안 보임.
 - `3-3` 목적: 데스크톱 레이아웃에서 실제 렌더되게 연결. 설명:
   - `DraggableWindow.tsx`의 switch에 `default-ticker` 케이스를 추가해 `DefaultTickerWindow`를 렌더한다.
   - 다른 창과 동일한 props 패턴(위치/크기/상태)을 유지한다.
   - CSV 경로가 잘못된 경우에도 크래시하지 않고 에러 표시로 처리한다.
+  - 완료 조건(눈으로 확인): 창을 열면 빈 화면이 아니라 입력/버튼/목록 UI가 실제로 렌더된다.
+  - 사람 검증(비개발자): 창을 여러 번 열고 닫아도 중복 생성/빈 창 문제가 없는지 확인.
+  - 흔한 문제/주의: switch 연결 누락으로 창은 뜨는데 내용이 비어 있음.
 - `3-4` 목적: 사용자가 창을 열 수 있게 함. 설명:
   - `AddTabModal.tsx`에 체크박스를 추가해 `default-ticker` 창을 생성할 수 있게 한다.
   - 라벨은 계획대로 “Default Ticker”를 정확히 사용한다.
   - on/off 토글 동작이 기존 창들과 동일하게 동작하는지 확인한다.
+  - 완료 조건(눈으로 확인): 체크박스가 보이고, 체크 1회에 창이 정확히 1개 생성된다.
+  - 사람 검증(비개발자): 체크 1회→창 1개, 체크 해제→닫힘(또는 기존 창들과 같은 동작)인지 확인.
+  - 흔한 문제/주의: 라벨 오타(수락 실패); 토글 반복 시 창이 여러 개 생김.
 - `3-5` 목적: 창 제목을 사람이 읽기 좋게 표시. 설명:
   - `App.tsx`에서 `default-ticker` → “Default Ticker” 타이틀 매핑을 추가한다.
   - 중복/충돌하는 매핑이 없도록 하고, 문자열을 안정적으로 유지한다(수락 테스트 앵커).
   - 창 전환 시 제목이 stale하게 남지 않게 한다.
+  - 완료 조건(눈으로 확인): 창 헤더/제목에 “Default Ticker”가 정확히 표시된다.
+  - 사람 검증(비개발자): 대소문자/공백까지 포함해 화면에 보이는 문자열이 정확한지 확인.
+  - 흔한 문제/주의: 기존 인스턴스에 타이틀이 바로 반영되지 않아 새로고침 전까지 구 타이틀이 남음.
 - `3-6` 목적: end-to-end로 동작 확인. 설명:
   - 창을 열고 `GET /api/tickers` 호출 및 리스트 렌더를 확인한다.
   - 티커를 추가하고 `POST /api/tickers/add` 호출 후 리스트가 갱신되는지 확인한다.
   - 테스트용으로 추가된 티커는 이후 수동으로 원복해 레포 데이터가 오염되지 않게 한다.
+  - 완료 조건(눈으로 확인): add가 end-to-end로 성공하고, 목록이 즉시 갱신된다.
+  - 사람 검증(비개발자): 테스트 티커를 추가한 뒤 창을 닫고 다시 열어도(또는 Reload) 동일 티커가 남아 있으면 CSV 저장이 된 것.
+  - 흔한 문제/주의: 백엔드 미실행으로 네트워크 에러; 데모 후 CSV에 테스트 티커가 남아 데이터가 오염됨.
 
 **검증 훅 (3단계 마감):**
 ```
@@ -1724,24 +2070,39 @@ API 계약(초안)
   - `FINNHUB_API_KEY` 환경변수를 우선 사용하고, 없을 때만 파일 fallback을 사용한다.
   - 키가 없으면 명확히 실패시키되, 키 자체를 절대 로그/출력하지 않는다.
   - config 로딩을 단일화해 provider 코드가 시크릿을 직접 읽지 않도록 한다.
+  - 완료 조건(눈으로 확인): env var가 있으면 백엔드가 정상 동작하고, 없으면 “키 없음”이 명확한 에러로 실패한다(키 값 노출 없음).
+  - 사람 검증(비개발자): 설정이 없을 때 인제션 호출이 “missing key”로 실패하는지, 그리고 키가 화면/로그에 노출되지 않는지 확인.
+  - 흔한 문제/주의: 키를 로그로 찍거나, 키가 포함된 전체 URL을 로그로 찍어 유출; 여러 곳에서 키를 읽어 설정이 꼬임.
 - `4-2` 목적: Finnhub 응답을 DB 뉴스 스키마로 변환. 설명:
   - “company news” 용 Finnhub 호출을 수행한다.
   - 기존 `insertNewsItem()` 계약에 맞게 매핑하고, `source='FINNHUB'`를 일관되게 설정한다.
   - 중복 방지: 기간이 겹쳐도 같은 항목이 재삽입되지 않도록(가능한 범위에서) DB 제약 또는 코드 de-dup를 적용한다.
+  - 완료 조건(눈으로 확인): `GET /api/news?source_names=FINNHUB`에서 title/time/url이 비어있지 않은 rows가 나온다.
+  - 사람 검증(비개발자): (5단계 이후) News 창에서 실제 헤드라인이 보이고, placeholder/가짜 텍스트가 없어야 한다.
+  - 흔한 문제/주의: timestamp 단위/타임존 혼동; `source` 문자열 불일치로 필터가 깨짐; 반복 pull 시 중복 급증.
 - `4-3` 목적: 수동으로 적재를 트리거할 수 있게 함. 설명:
   - `POST /api/news/pull-finhub`에서 pull + insert를 수행한다.
   - UI가 표시하기 좋은 작은 요약(`inserted`, `skipped`, `source`)만 반환한다.
   - startup 자동 실행은 하지 않는다(명시적 트리거만).
+  - 완료 조건(눈으로 확인): POST 호출이 무한 대기하지 않고, 작은 요약 JSON만 반환한다.
+  - 사람 검증(비개발자): (5-5 사용 시) 창 안의 Update 버튼을 누르면 목록이 갱신되는지 확인.
+  - 흔한 문제/주의: startup 때 자동 pull이 돌아 예상치 못한 부작용 발생; 너무 큰 payload를 응답으로 내려 UI가 느려짐.
 - `4-4` 목적: “마지막 성공 시각”을 기록. 설명:
   - 성공 시 `update_status(finhub_news).lastSuccessAt = now()`를 저장한다.
   - `details`에는 카운트/기간 같은 최소 정보만 저장하고 원문 응답은 저장하지 않는다.
   - `GET /api/updates/status`로 실제 갱신을 확인한다.
+  - 완료 조건(눈으로 확인): 성공적인 pull 직후 `finhub_news.lastSuccessAt`가 null이 아닌 ISO timestamp가 된다.
+  - 사람 검증(비개발자): (8단계 이후) Data Control Window에서 “마지막 성공” 시각이 실제로 바뀐다.
+  - 흔한 문제/주의: insert 실패인데도 lastSuccessAt을 갱신해 오해를 유발; 표시하기 어려운 포맷(비 ISO) 저장.
 - `4-5` 목적: 적재된 데이터가 실제 조회 가능한지 확인. 설명:
   - `GET /api/news?source_names=FINNHUB` 조회로 아래를 확인한다:
     - row 존재
     - 필수 필드(title/time/url/source 등) 존재
     - `source`가 정확히 `FINNHUB`
   - 데이터가 없다면 UI 문제가 아니라 수집/저장/조회 경로를 먼저 의심한다.
+  - 완료 조건(눈으로 확인): GET이 안정적으로 배열(JSON)을 반환하고, pull 후 최신 항목이 추가된다.
+  - 사람 검증(비개발자): News 창을 새로고침하면(또는 Update 후) 항목이 바뀌거나 늘어난다.
+  - 흔한 문제/주의: rows는 나오는데 필수 필드가 비어있음; `source` 철자가 달라 필터가 비어 보임.
 
 **검증 훅 (4단계 마감):**
 ```
@@ -1751,10 +2112,10 @@ API 계약(초안)
 ```
 - 사용자 확인 필요: **Yes**
 
-#### 5단계 — “News Feed: Brave API” → “News Feed: finhub api” 전환(프론트)
+#### 5단계 — “News Feed: Brave API” → “news feed:finhub api” 전환(프론트)
 목적
 - 기존 `brave-news`(mock 포함) UI를 제거하고 Finnhub 기반으로 교체한다.
-- 라벨을 정확히 `News Feed: finhub api`로 바꾸고, UI가 Brave를 암시하지 않게 한다.
+- 라벨을 정확히 `news feed:finhub api`로 바꾸고, UI가 Brave를 암시하지 않게 한다.
 
 필수 준수사항(정책/요구)
 - `generateMockData()` 및 synthetic rows를 완전히 제거한다.
@@ -1770,10 +2131,10 @@ API 계약(초안)
     - `WindowType`에서 `brave-news` 제거, `finhub-news` 추가
     - `BraveNews*` 타입은 `FinnhubNews*`로 대체하거나, 가능하면 `NewsItem`을 재사용
 - `src/app/components/AddTabModal.tsx`
-  - 라벨을 정확히 `News Feed: finhub api`로 변경
+  - 라벨을 정확히 `news feed:finhub api`로 변경
   - 토글 타입도 `finhub-news`로 변경
 - `src/app/App.tsx`
-  - title 매핑: `finhub-news` → `News Feed: finhub api`
+  - title 매핑: `finhub-news` → `news feed:finhub api`
 - `src/app/components/DraggableWindow.tsx`
   - `finhub-news`에 대해 `FinnhubNewsWindow` 렌더
 - `src/app/components/BraveNewsWindow.tsx`
@@ -1794,8 +2155,8 @@ API 계약(초안)
 | 5-3 | `generateMockData()` 및 synthetic rows 제거 | `FinnhubNewsWindow.tsx` | 코드/런타임에서 mock 생성 경로 없음 |
 | 5-4 | 백엔드 기반 fetch로 교체 | `FinnhubNewsWindow.tsx` | `GET /api/news?source_names=FINNHUB`로 렌더 |
 | 5-5 | (선택) “Update” 버튼 추가(수동 수집 트리거) | `FinnhubNewsWindow.tsx` | 클릭 시 `POST /api/news/pull-finhub` 호출 후 리스트 갱신 |
-| 5-6 | AddTab 라벨을 정확히 `News Feed: finhub api`로 변경 | `src/app/components/AddTabModal.tsx` | UI에 Brave 표기 없음 |
-| 5-7 | `App.tsx` title 매핑 추가/수정 | `src/app/App.tsx` | `finhub-news` → `News Feed: finhub api` |
+| 5-6 | AddTab 라벨을 정확히 `news feed:finhub api`로 변경 | `src/app/components/AddTabModal.tsx` | UI에 Brave 표기 없음 |
+| 5-7 | `App.tsx` title 매핑 추가/수정 | `src/app/App.tsx` | `finhub-news` → `news feed:finhub api` |
 | 5-8 | `DraggableWindow.tsx` 렌더 스위치 연결 | `src/app/components/DraggableWindow.tsx` | `finhub-news`가 `FinnhubNewsWindow`를 렌더 |
 
 **세부 단계 목적/설명 (5단계)**
@@ -1803,38 +2164,62 @@ API 계약(초안)
   - `brave-news` 윈도우 타입을 제거하고 `finhub-news`를 canonical 타입으로 만든다.
   - 타입 레벨 모델(`BraveNews*`)은 Finnhub 기준으로 교체하거나 이미 정의된 `NewsItem`을 재사용한다.
   - 성공 기준: 사용자 UI에서 “Brave” 뉴스 창을 여는 경로가 더 이상 존재하지 않는다.
+  - 완료 조건(눈으로 확인): Add Tab에 Brave 뉴스 항목이 더 이상 없고, 뉴스 창을 열면 타입이 `finhub-news`로 열린다(크래시 없음).
+  - 사람 검증(비개발자): 화면에서 “Brave”라는 단어를 찾아보고(라벨/타이틀 포함) 뉴스 관련 표기가 0인지 확인.
+  - 흔한 문제/주의: 타입만 바꾸고 렌더 스위치에서 `brave-news`가 남아 빈 창/크래시 발생.
 - `5-2` 목적: 코드 구조/의미를 일치. 설명:
   - 창 컴포넌트를 `FinnhubNewsWindow`로 정리한다(파일 rename 권장).
   - 모든 import/export 경로를 함께 수정해 런타임/빌드 에러가 없게 한다.
   - 의도치 않게 중복 창(Brave/Finnhub 둘 다)이 남지 않게 정리한다.
+  - 완료 조건(눈으로 확인): 빌드/실행 시 “module not found” 같은 오류 없이 정상 로드된다.
+  - 사람 검증(비개발자): News 창을 열었을 때 빈 화면이 아니라 “목록(비어있어도 됨) / 버튼(옵션)” 등 UI 뼈대가 보인다.
+  - 흔한 문제/주의: rename 후 import 경로 누락; export 형태(default/named) 불일치; git에서 케이스만 바꾼 rename이 누락.
 - `5-3` 목적: mock 데이터 유입을 원천 차단. 설명:
   - `generateMockData()` 및 synthetic seed 배열을 완전히 제거한다.
   - 백엔드가 빈 배열을 주는 경우 “데모 데이터를 만들기” 같은 fallback을 넣지 않는다.
   - 검증 기준: 프론트 소스에서 `generateMockData` 및 관련 mock 헬퍼 검색 결과가 0건.
+  - 완료 조건(눈으로 확인): 백엔드 DB가 비어있을 때도 “데모 헤드라인/샘플 row”가 UI에 나타나지 않는다(빈 상태만 표시).
+  - 사람 검증(비개발자): 백엔드를 새로 켠 직후(수집 전) News 창을 열어 sample 항목이 없는지 확인.
+  - 흔한 문제/주의: 컴포넌트 state에 남은 하드코딩 배열; `if empty then seed` 로직.
 - `5-4` 목적: 실제 저장된 뉴스만 렌더. 설명:
   - 백엔드 `GET /api/news?source_names=FINNHUB`로부터 데이터를 가져와 그대로 렌더한다.
   - 필드가 없으면 빈 값/`-`로 표시하고, 절대 값을 지어내지 않는다.
   - fetch는 mount 시 1회 + (옵션) 수동 refresh로만 수행해 동작을 예측 가능하게 만든다.
+  - 완료 조건(눈으로 확인): 브라우저 Network 탭에서 `GET /api/news?source_names=FINNHUB` 요청이 보이고, 응답에 따라 리스트가 바뀐다.
+  - 사람 검증(비개발자): DevTools → Network에서 해당 요청을 클릭해 JSON(배열) 응답을 확인.
+  - 흔한 문제/주의: 백엔드 포트/주소가 잘못되어 404/네트워크 에러; `source_names=FINNHUB` 파라미터 누락; 빈 배열 처리 미흡.
 - `5-5` 목적: 필요 시 수동 갱신 제공(옵션). 설명:
   - 창 내부에 “Update” 버튼을 추가하고 `POST /api/news/pull-finhub`로 수집을 트리거한다.
   - POST 성공 후 `GET /api/news?source_names=FINNHUB`로 리스트를 다시 로드한다.
   - 추가 모달 없이 최소 running/error 상태만 표시한다.
+  - 완료 조건(눈으로 확인): Update 클릭 시 “Running…” 같은 간단한 표시가 뜨고, 성공 후 리스트가 갱신된다(또는 실패 시 에러가 인라인 표시).
+  - 사람 검증(비개발자): Update를 빠르게 2번 눌러도 2번째는 막히거나 버튼이 비활성화되어 중복 실행이 되지 않는다.
+  - 흔한 문제/주의: mount 시 자동으로 POST가 실행되어 예기치 않은 부작용; disable 상태가 없어 중복 수집.
 - `5-6` 목적: 요청된 라벨 텍스트를 정확히 반영. 설명:
-  - `AddTabModal.tsx`에서 라벨을 정확히 `News Feed: finhub api`로 맞춘다(대소문자/공백 포함).
+  - `AddTabModal.tsx`에서 라벨을 정확히 `news feed:finhub api`로 맞춘다(대소문자/공백 포함).
   - 다른 영역에서 “Brave API”가 남아있지 않게 함께 점검한다.
   - 라벨 불일치는 사용자 요구사항 위반이므로 수락 실패로 취급한다.
+  - 완료 조건(눈으로 확인): Add Tab에 `news feed:finhub api`가 정확히 표시된다.
+  - 사람 검증(비개발자): 글자/공백/콜론 위치까지 화면을 보고 그대로 일치하는지 확인.
+  - 흔한 문제/주의: 불필요한 공백/대문자; 다른 매핑에서 다른 문자열을 쓰는 경우.
 - `5-7` 목적: 창 제목을 올바르게 표시. 설명:
-  - `App.tsx` title 매핑에서 `finhub-news` → `News Feed: finhub api`를 정확히 설정한다.
+  - `App.tsx` title 매핑에서 `finhub-news` → `news feed:finhub api`를 정확히 설정한다.
   - 창 전환 시 제목이 stale하게 남지 않도록 한다.
   - 문자열을 안정적으로 유지해 수락 테스트 앵커로 사용한다.
+  - 완료 조건(눈으로 확인): 창 헤더/제목에 `news feed:finhub api`가 항상 표시된다.
+  - 사람 검증(비개발자): 다른 창으로 이동했다가 다시 돌아와도 제목이 바뀌지 않고 정확히 유지되는지 확인.
+  - 흔한 문제/주의: 기존 인스턴스가 이전 제목을 유지; 매핑이 있어도 첫 렌더에만 적용.
 - `5-8` 목적: 실제 렌더 스위치 연결 보장. 설명:
   - `DraggableWindow.tsx`에 `finhub-news` 케이스를 추가해 `FinnhubNewsWindow`를 렌더한다.
   - 백엔드가 빈 배열을 반환해도 크래시 없이 렌더되어야 한다.
   - `brave-news` 렌더 경로가 남지 않게 한다.
+  - 완료 조건(눈으로 확인): 창을 열면 입력/목록/빈 상태 등 “내용 영역”이 보이고, 완전히 빈 프레임만 뜨지 않는다.
+  - 사람 검증(비개발자): 빈 DB 상태에서도 빈 상태 UI가 보이고 에러/크래시가 없는지 확인.
+  - 흔한 문제/주의: switch 연결 누락으로 창은 뜨지만 내용이 비어 있음.
 
 **검증 훅 (5단계 마감):**
 ```
-1. News Feed: finhub api 창 열기
+1. news feed:finhub api 창 열기
 2. 네트워크 탭에서 GET /api/news?source_names=FINNHUB 확인
 3. UI에 mock 항목이 나타나지 않는지 확인
 ```
@@ -1890,25 +2275,43 @@ API 계약(초안)
   - `calendar_events(source='mock_provider')`를 insert하는 모든 timer/worker 코드 경로를 제거한다.
   - 파일 내에 남아있는 mock 헬퍼(예: `generateMock*`, `setInterval`, 하드코딩 샘플 이벤트)가 없도록 정리한다.
   - 성공 기준: 백엔드 재시작만으로는 어떤 row도 추가되지 않고, 오직 명시적 엔드포인트 호출 때만 변경된다.
+  - 완료 조건(눈으로 확인): 백엔드를 재시작해도 `POST /api/ibkr/calendar/update`를 호출하기 전까지 `/api/calendar/events` 결과가 자동으로 늘어나지 않는다.
+  - 사람 검증(비개발자): 백엔드 실행 후 1~2분 기다렸다가 `GET /api/calendar/events`를 호출해 “저절로 증가”가 없는지 확인.
+  - 흔한 문제/주의: `setInterval`/startup hook이 남아 백그라운드에서 mock insert가 계속 발생.
 - `6-2` 목적: 서버 기동 부작용을 제거하여 `/calendar`를 “요청 시 갱신(pull-on-demand)”로 만든다. 설명:
   - 서버 startup 경로에서 `startCalendarIngestionWorkers()` 호출을 삭제한다.
   - 함수가 하위 호환을 위해 남아있더라도 자동 실행되면 안 된다.
   - 검증 포인트: 재시작 후 DB 변화 없음 → `POST /api/ibkr/calendar/update` 호출 시에만 변화.
+  - 완료 조건(눈으로 확인): 백엔드 재시작 직후에는 캘린더 DB/응답이 변하지 않고, update 엔드포인트를 호출했을 때만 변한다.
+  - 사람 검증(비개발자): 재시작 직후 `GET /api/calendar/events` 결과가 이전과 동일한지 확인(새 mock row 금지).
+  - 흔한 문제/주의: 한 군데서만 startup 호출을 지웠지만 다른 초기화 코드에서 여전히 실행.
 - `6-3` 목적: 실제 캘린더 pull을 “테스트 가능 + 소스 독립” 형태로 구현한다(결정 의존). 설명:
   - `pullCalendarData()`가 정규화된 이벤트 리스트를 반환하도록 구현한다.
   - 정규화 최소 규칙: 안정적인 ID(또는 결정적 해시), ISO timestamp, symbol, event type, `source` 필드.
   - 선택한 소스에서 제공 불가능한 필드는 명시하고, 절대 가짜 값을 만들지 않는다.
+  - 완료 조건(눈으로 확인): `pullCalendarData()`가 정규화된 배열을 반환하고(또는 dev probe/단위 테스트로) 형상을 확인할 수 있다.
+  - 사람 검증(비개발자): update 엔드포인트 호출 결과에서 `source`가 "IBKR"(또는 결정된 소스)로 나오고 카운트가 음수가 아닌지 확인.
+  - 흔한 문제/주의: timestamp 포맷이 제각각(비 ISO); ID가 실행마다 바뀌어 중복이 생김.
 - `6-4` 목적: 운영/UI에서 명시적으로 갱신을 실행할 수 있는 트리거를 제공한다. 설명:
   - `POST /api/ibkr/calendar/update`를 추가하고, pull → upsert → status update를 수행한다.
   - 라우트는 작은 요약(`upserted`, `deletedMockRows`, `source`)을 반환하고 실패 시 non-200을 준다.
   - 시크릿을 로그에 남기지 않고, 카운트/요약 오류만 기록한다.
+  - 완료 조건(눈으로 확인): `POST /api/ibkr/calendar/update`가 “작은 요약 JSON”만 반환하고 합리적인 시간 내에 끝난다.
+  - 사람 검증(비개발자): 같은 POST를 2번 실행해도 row가 폭증하지 않는지 확인(업서트가 중복을 막아야 함).
+  - 흔한 문제/주의: 큰 payload를 그대로 반환; 부분 실패인데도 성공으로 처리하고 status를 갱신.
 - `6-5` 목적: 이미 저장된 mock 데이터를 정리해 “IBKR-only” 요구사항을 DB 리셋 없이 만족한다. 설명:
   - *첫 번째* 실제 업데이트 성공 시 `source='mock_provider'` row를 삭제한다.
   - 삭제는 idempotent(여러 번 실행해도 안전)해야 한다.
   - 가능하면 delete+upsert+status update를 하나의 트랜잭션으로 묶는다.
+  - 완료 조건(눈으로 확인): 첫 성공 이후 `GET /api/calendar/events` 결과에서 `source='mock_provider'`가 절대 보이지 않는다.
+  - 사람 검증(비개발자): `/api/calendar/events` JSON에서 `mock_provider` 문자열이 포함되어 있는지 검색해 0인지 확인.
+  - 흔한 문제/주의: pull 실패인데도 cleanup이 실행되어 데이터가 사라짐; cleanup이 startup마다 실행.
 - `6-6` 목적: Data Control Window/운영에서 쓸 “마지막 성공 시각”을 영속 저장한다. 설명:
   - 성공 시 `update_status(ibkr_calendar).lastSuccessAt = now()`를 저장한다.
   - `details`에는 최소 정보(예: `{ upserted, deletedMockRows }`)만 저장하고 시크릿/원문 payload는 저장하지 않는다.
+  - 완료 조건(눈으로 확인): 성공적인 update 이후 `GET /api/updates/status`에서 `ibkr_calendar.lastSuccessAt`가 null이 아닌 값으로 바뀐다.
+  - 사람 검증(비개발자): 실패를 유도했을 때(서비스 다운 등)에는 `lastSuccessAt`가 바뀌지 않는지 확인.
+  - 흔한 문제/주의: 실패했는데도 timestamp를 갱신해 오해; `details`에 원문 payload를 저장.
 
 **검증 훅 (6단계 마감):**
 ```
@@ -2008,11 +2411,17 @@ API 계약(초안)
   - 핵심 조회 헬퍼 제공: `getOverallMaxDate()`, (선택) `getSymbolMaxDate(symbol)`.
   - `upsertBars(symbol, bars)`를 결정적 매핑(Symbol, Datetime, Open, High, Low, Close, Volume)으로 구현한다.
   - SQLite 저수준 에러를 “조치 가능한 메시지”로 변환하고, 실패를 조용히 무시하지 않는다.
+  - 완료 조건(눈으로 확인): dev probe/단위 테스트에서 DB를 열고 `getOverallMaxDate()`가 그럴듯한 날짜(또는 비어있으면 null)를 반환한다.
+  - 사람 검증(비개발자): (7-5 연결 후) `GET /api/ibkr/ohlc1d/status`에서 `dbPath`가 `OHLC_data/ohlc_1d_watchlist.sqlite`를 가리키고 `overallMaxDate`가 이상하지 않은지 확인.
+  - 흔한 문제/주의: 상대 경로 해석이 달라 다른 DB를 열어버림; busy timeout 미설정으로 “database is locked”.
 - `7-2` 목적: DB를 새로 만들지 않고도 파생 지표 컬럼을 저장할 수 있게 한다. 설명:
   - `ensureDerivedColumns()`를 idempotent하게 구현한다:
     - `PRAGMA table_info(ohlc_1d)`로 현재 스키마를 확인
     - 누락 컬럼에 대해서만 `ALTER TABLE ... ADD COLUMN` 수행
   - 반복 실행에 안전하고, 기존 데이터가 있는 DB에도 안전해야 한다.
+  - 완료 조건(눈으로 확인): 마이그레이션을 2번 실행해도 에러가 없고, 파생 컬럼이 정확히 1번씩만 존재한다.
+  - 사람 검증(비개발자): SQLite 뷰어로 DB를 열어 `ohlc_1d` 테이블에 파생 컬럼이 있는지 확인.
+  - 흔한 문제/주의: 마이그레이션 실행 시점을 놓쳐 컬럼이 영원히 NULL; 컬럼명 오타로 유사 컬럼이 여러 개 생김.
 - `7-3` 목적: Decision #6(연동 방식)과 무관하게 동일한 “1D 바 수집” 추상화를 제공한다. 설명:
   - 입력: `{ symbol, startDate, endDate }` (날짜는 `YYYY-MM-DD`, 트레이딩 날짜 기준)
   - 출력: `Datetime=YYYY-MM-DD` + numeric OHLCV가 포함된 정렬된 bars
@@ -2020,15 +2429,24 @@ API 계약(초안)
     - 끊김/페이싱 같은 일시 실패는 제한된 재시도+백오프로 처리
     - host/port/권한 같은 영구 실패는 빠르게 실패시키고 원인을 명확히
     - 시크릿 로그 금지(심볼/기간/카운트만 로그)
+  - 완료 조건(눈으로 확인): 알려진 심볼(AAPL)로 최근 구간을 요청했을 때 bar 리스트가 비어있지 않다.
+  - 사람 검증(비개발자): 단일 심볼 CSV로 `POST /api/ibkr/ohlc1d/update`를 실행해 요약에서 `rowsUpserted > 0`(거래일 기준)인지 확인.
+  - 흔한 문제/주의: IBKR 페이싱/타임아웃; bars가 역순으로 와서 저장/계산이 깨짐; 날짜 경계/타임존 혼동.
 - `7-4` 목적: News Feed의 “Changes %”를 실제 OHLC 기반으로 계산/저장한다(mock/UI-only 금지). 설명:
   - 심볼별로 lookback 계산에 필요한 과거 구간(최소 30거래일 이전)을 로드한다.
   - 계산 컬럼: `Change_1d_Pct`, `Change_From_Open_Pct`, `Change_7d_Pct`, `Change_14d_Pct`, `Change_30d_Pct`.
   - 히스토리 부족 규칙: lookback bar가 없으면 `NULL`로 저장(가짜 금지).
   - 안전 구간을 제한해 재계산한다(예: `min_new_date - 40 bars` → `max_new_date`).
+  - 완료 조건(눈으로 확인): 1회 이상 성공 업데이트 후 최근 row에서 파생 컬럼이(히스토리가 있으면) NULL이 아닌 값으로 채워진다.
+  - 사람 검증(비개발자): AAPL 샘플 SQL을 실행해 최근 row에서 파생 컬럼 중 최소 1개가 NULL이 아닌지 확인.
+  - 흔한 문제/주의: 7/14/30을 “달력일”로 계산; 전일 종가/히스토리 누락 처리에서 0 나누기.
 - `7-5` 목적: UI/운영이 DB 최신 상태를 확인할 수 있는 read-only status API를 제공한다. 설명:
   - `GET /api/ibkr/ohlc1d/status`는 아래를 반환:
     - `dbPath`(string), `overallMaxDate`(string 또는 null), `lastSuccessAt`(ISO 또는 null)
   - `overallMaxDate`는 DB `MAX(Datetime)` 기반, `lastSuccessAt`는 `update_status(ibkr_ohlc_1d)` 기반.
+  - 완료 조건(눈으로 확인): 어떤 값이 null이어도 JSON에 필드가 항상 존재한다.
+  - 사람 검증(비개발자): `curl http://localhost:8080/api/ibkr/ohlc1d/status`가 빠르게 응답하고 값이 일관되는지 확인.
+  - 흔한 문제/주의: 날짜 포맷이 일관되지 않아 UI 표시가 어려움; update_status 키를 잘못 읽음.
 - `7-6` 목적: pull → upsert → derive → status update를 한 번에 수행하는 오케스트레이터 엔드포인트를 구현한다. 설명:
   - `POST /api/ibkr/ohlc1d/update` 구현:
     - Default Ticker CSV에서 티커를 읽고 정규화+중복 제거
@@ -2037,11 +2455,17 @@ API 계약(초안)
     - 전체 성공 시 `update_status(ibkr_ohlc_1d)`를 최소 details로 갱신
   - 부분 실패 정책을 명시해야 한다(코드에 문서화):
     - (a) 전체 실패로 처리, 또는 (b) 가능한 심볼은 계속 진행하고 per-symbol 실패를 리포트
+  - 완료 조건(눈으로 확인): POST 1회로(새 거래일이 있으면) `overallMaxDate`가 증가하고 `update_status(ibkr_ohlc_1d).lastSuccessAt`가 성공 시에만 갱신된다.
+  - 사람 검증(비개발자): POST 실행 후 `GET /api/updates/status`에서 `ibkr_ohlc_1d.lastSuccessAt`가 성공 시에만 바뀌는지 확인.
+  - 흔한 문제/주의: 일부 심볼 실패인데도 성공으로 찍힘(보고 없음); 파생 재계산 구간이 너무 짧아 lookback 컬럼이 계속 NULL.
 - `7-7` 목적: 파이프라인이 “실제 파생 값”을 만들었음을 사람이 확인할 수 있는 구체 체크를 제공한다. 설명:
   - 최소 1회 성공 업데이트 후, 알려진 심볼(AAPL)로 작은 SQL을 실행해 아래를 확인:
     - 최근 날짜 row 존재
     - 파생 컬럼이 최근 row에서 전부 `NULL`이 아님
   - 유닛 테스트의 대체가 아니라 운영 sanity-check다.
+  - 완료 조건(눈으로 확인): SQL 결과에 행이 나오고 파생 컬럼 중 최소 1개가 숫자 값으로 채워져 있다.
+  - 사람 검증(비개발자): SQLite 뷰어에 SQL을 붙여 넣고 값이 과도하게 크거나 NaN/inf처럼 보이지 않는지 확인.
+  - 흔한 문제/주의: 다른 DB 파일을 열어 확인; `Datetime` 포맷이 어긋나 MAX(Datetime)가 잘못 계산.
 
 `7-3` 옵션별 small steps(결정 #6)
 - 옵션 A(Node 직결):
@@ -2117,22 +2541,37 @@ UI 동작(최소)
   - 프론트 window type 유니온에 `data-control`을 추가한다.
   - AddTab의 타입 문자열과 DraggableWindow의 렌더 케이스 문자열이 완전히 일치해야 한다.
   - 네이밍이 안정적이어야 이후 통합 포인트로 안전하게 쓸 수 있다.
+  - 완료 조건(눈으로 확인): Add Tab에 “Data Control”이 생기고 선택 시 창이 에러 없이 열린다.
+  - 사람 검증(비개발자): Add Tab에서 토글을 여러 번 해도 창이 중복으로 여러 개 생기지 않는지 확인.
+  - 흔한 문제/주의: AddTab/DraggableWindow의 타입 문자열 불일치로 빈 창이 뜸.
 - `8-2` 목적: 운영용 컨트롤 UI 제공. 설명:
   - `DataControlWindow.tsx`에 Price/Calendar 2개 섹션과 최소 컨트롤을 구현한다.
   - mount 시 `GET /api/updates/status`를 호출해 `lastSuccessAt`를 렌더한다(null이면 `-`).
   - OHLC 최신 날짜 표시를 위해 `GET /api/ibkr/ohlc1d/status`도 로드한다.
+  - 완료 조건(눈으로 확인): 창을 열면 섹션 2개가 보이고, 타임스탬프/날짜가 `-` 또는 값으로 표시된다(비어있는 placeholder 금지).
+  - 사람 검증(비개발자): 백엔드 실행 상태에서 새로고침 후, 버튼을 누르지 않아도 상태 값이 표시되는지 확인.
+  - 흔한 문제/주의: 백엔드 base URL/포트가 달라 404; `lastSuccessAt`가 null일 때 렌더 크래시.
 - `8-3` 목적: 앱에서 접근/렌더가 되도록 연결. 설명:
   - `AddTabModal.tsx` 체크박스, `App.tsx` 타이틀 매핑, `DraggableWindow.tsx` 렌더 스위치를 연결한다.
   - 사용자가 버튼을 누르기 전에는 IBKR 호출이 발생하지 않도록 한다(열기만으로 POST 금지).
   - 기존 윈도우 패턴을 유지하며 변경을 최소화한다.
+  - 완료 조건(눈으로 확인): 창을 여는 것만으로는 어떤 POST도 발생하지 않고, mount 시에는 GET status만 호출된다.
+  - 사람 검증(비개발자): DevTools → Network에서 `POST /api/ibkr/*`가 클릭 전에는 0건인지 확인.
+  - 흔한 문제/주의: mount 시 update 엔드포인트를 자동 호출; 타이틀 매핑 누락으로 창 제목이 틀림.
 - `8-4` 목적: 중복 실행 방지 및 실패 가시화. 설명:
   - POST 실행 중에는 해당 버튼만 disable하고 버튼 근처에 “Running…”을 표시한다.
   - 실패 시 창 내부에 짧은 에러 메시지를 인라인으로 표시하고, 모달을 추가하지 않는다.
   - 성공/실패 후 상태가 정상적으로 복구돼 재시도 가능해야 한다.
+  - 완료 조건(눈으로 확인): 클릭하면 버튼이 비활성화되고 “Running…”이 뜨며, 종료 후 다시 활성화된다.
+  - 사람 검증(비개발자): 백엔드를 꺼둔 상태에서 버튼을 눌러 “읽기 쉬운 에러”가 창 안에 표시되는지 확인.
+  - 흔한 문제/주의: 버튼이 영원히 비활성화; 에러가 콘솔에만 찍히고 UI에는 안 보임.
 - `8-5` 목적: 표시되는 상태를 최신으로 유지. 설명:
   - POST 성공 후 `GET /api/updates/status`를 재조회한다.
   - 가격 업데이트 성공 후에는 `GET /api/ibkr/ohlc1d/status`도 재조회해 DB 최신 날짜를 갱신한다.
   - refresh 순서를 고정(POST → GET 재조회)해 stale UI를 피한다.
+  - 완료 조건(눈으로 확인): 업데이트 성공 후 페이지 새로고침 없이도 화면의 timestamp/DB date가 즉시 바뀐다.
+  - 사람 검증(비개발자): “IBKR Price Data” 1회 실행 후, 완료되면 “DB 최신 날짜” 표시가 바뀌는지 확인.
+  - 흔한 문제/주의: 한쪽만 refresh해서 timestamp는 바뀌는데 DB date는 안 바뀌는 등 불일치.
 
 **검증 훅 (8단계 마감):**
 ```
@@ -2181,24 +2620,39 @@ UI 동작(최소)
   - repository 레벨 테스트로 status row를 쓰고 같은 DB 핸들에서 다시 읽어오는 것을 보장한다.
   - “새 repository 인스턴스 생성”을 통해 재시작에 준하는 동작에서도 값이 유지되는지 확인한다.
   - API 응답은 null이어도 모든 키가 존재해야 한다(키 누락 방지).
+  - 완료 조건(눈으로 확인): `npm run test`에 “재시작에 준하는 재조회” 시나리오를 포함한 테스트가 들어있다.
+  - 사람 검증(비개발자): 테스트를 실행했을 때 실패 메시지가 status 영속성과 직접 연결되어 이해 가능해야 한다.
+  - 흔한 문제/주의: 로컬 DB 상태에 의존해 flaky; timestamp 비교 시 허용 오차 없이 비교해 실패.
 - `9-2` 목적: CSV 보안/동작 회귀 방지. 설명:
   - allowlist 강제: `tradigview_screener/original_data/` 밖 경로 및 traversal 시도를 거절하는 테스트.
   - append 의미: 마지막 행에 새 row로 추가되고, 이후 read에서 반환되는 테스트.
   - 중복 정책: 같은 티커 2회 추가 시 2번째는 실패하는 테스트(기본).
+  - 완료 조건(눈으로 확인): “허용 경로 통과/비허용 경로 거절/중복 거절”이 모두 테스트로 커버된다.
+  - 사람 검증(비개발자): 실패 시 메시지에 ‘왜 거절인지(allowlist 위반)’가 포함되는지 확인.
+  - 흔한 문제/주의: OS별 경로 구분자 차이로 Windows/WSL에서 결과가 달라짐.
 - `9-3` 목적: Finnhub mapping의 형상 검증 + 시크릿 누출 방지. 설명:
   - 매핑 결과가 필수 필드(title/time/url/source 등)를 포함하고 `source='FINNHUB'`로 저장되는지 검증한다.
   - 테스트에서 API 키/토큰이 출력되지 않도록 하고, 필요 시 HTTP는 스텁/목으로 대체한다.
   - `update_status(finhub_news)`가 성공 시에만 갱신되는지도 확인한다.
+  - 완료 조건(눈으로 확인): 테스트가 실 Finnhub API 키 없이도 동작하며, 필수 필드 존재를 assert 한다.
+  - 사람 검증(비개발자): 테스트 출력/로그에 키/토큰이 없는지 눈으로 확인.
+  - 흔한 문제/주의: 테스트가 실 네트워크를 때려 flaky; snapshot/log에 원문 payload를 저장.
 - `9-4` 목적: 캘린더 mock 데이터 잔존 방지. 설명:
   - `mock_provider` row를 소수 삽입한 뒤 “성공 업데이트” 시나리오에서 삭제가 수행되는지 테스트한다.
   - 삭제는 idempotent해야 한다(2번 실행해도 결과는 0 유지).
   - 실패 시에는 무분별 삭제가 일어나지 않게 “성공 후에만 cleanup” 조건을 검증한다.
+  - 완료 조건(눈으로 확인): mock row가 “성공 시에만” 삭제되는 것을 증명하는 테스트가 존재한다.
+  - 사람 검증(비개발자): 실패 시나리오에서 cleanup이 실행되면 테스트가 실패하도록 되어 있는지 확인.
+  - 흔한 문제/주의: 테스트 DB가 분리되지 않아 개발자 DB를 오염/삭제.
 - `9-5` 목적: UI 통합 동작 확인. 설명:
   - 수동 스모크 체크리스트(3개 창):
     - Default Ticker: load + add 동작
-    - News Feed: finhub api: 백엔드 기반 렌더 + mock 없음
+    - news feed:finhub api: 백엔드 기반 렌더 + mock 없음
     - Data Control: 버튼 호출 + 상태 refresh
   - 픽셀/스타일보다 “정확성 + 추가 UX 금지” 조건을 중심으로 확인한다.
+  - 완료 조건(눈으로 확인): 체크리스트를 1회 끝까지 수행할 수 있고, 실패는 스크린샷/메모로 남길 수 있다.
+  - 사람 검증(비개발자): Network 탭에서 예상된 GET/POST 호출이 실제로 발생했는지 확인.
+  - 흔한 문제/주의: 백엔드 미실행으로 인한 가짜 실패; 캐시된 UI 상태가 실패를 가림.
 
 **검증 훅 (9단계 마감):**
 ```
@@ -2252,7 +2706,7 @@ UI 동작(최소)
 │                      │                              │
 ▼                      ▼                              │
 ⬜ Step 3               ⬜ Step 5                      │
-(Default Ticker UI)    (News Feed: finhub api UI)     │
+(Default Ticker UI)    (news feed:finhub api UI)     │
 │ 3-1 window type      │ 5-1 brave-news 제거          │
 │ 3-2 컴포넌트         │ 5-2 FinnhubNews로 이름변경   │
 │ 3-3 DraggableWindow  │ 5-3 mock 데이터 제거         │
