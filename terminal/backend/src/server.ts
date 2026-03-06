@@ -32,7 +32,7 @@ import {
   getTickerAnchorMap,
 } from "./services/finnhubNewsProvider.js";
 import type { FinnhubMappedItem } from "./services/finnhubNewsProvider.js";
-import { mergeChangeForNewItems } from "./services/newsChangeMerger.js";
+import { mergeChangeForNewItems, bulkUpdate7dChange, bulkUpdateCustomChange } from "./services/newsChangeMerger.js";
 import { createJob, getJob, updateProgress, appendLog, completeJob, failJob } from "./services/jobManager.js";
 import { getFulltext, getUnextractedNewsIds } from "./services/fulltextRepository.js";
 import { runFulltextUpdate } from "./services/fulltextUpdateService.js";
@@ -483,6 +483,51 @@ app.get("/api/news/fulltext/:newsId", async (req, res, next) => {
       keywords: JSON.parse(row.keywords_json || "[]"),
       keywordsStatus: row.keywords_status,
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Change Metrics Update endpoints (5-20, 5-21) ──
+
+app.post("/api/news/change/update-7d", async (_req, res, next) => {
+  try {
+    const jobId = createJob(0); // total unknown upfront
+    (async () => {
+      try {
+        await bulkUpdate7dChange((done, total) => {
+          updateProgress(jobId, done, total);
+        });
+        completeJob(jobId);
+      } catch (err: any) {
+        failJob(jobId, err?.message ?? String(err));
+      }
+    })();
+    res.json({ jobId });
+  } catch (error) {
+    next(error);
+  }
+});
+
+const customChangeSchema = z.object({
+  lookbackDays: z.number().int().min(1).max(365),
+});
+
+app.post("/api/news/change/update-custom", async (req, res, next) => {
+  try {
+    const { lookbackDays } = customChangeSchema.parse(req.body);
+    const jobId = createJob(0);
+    (async () => {
+      try {
+        await bulkUpdateCustomChange(lookbackDays, (done, total) => {
+          updateProgress(jobId, done, total);
+        });
+        completeJob(jobId);
+      } catch (err: any) {
+        failJob(jobId, err?.message ?? String(err));
+      }
+    })();
+    res.json({ jobId });
   } catch (error) {
     next(error);
   }

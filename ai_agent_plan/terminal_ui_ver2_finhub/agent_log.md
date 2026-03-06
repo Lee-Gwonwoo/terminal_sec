@@ -1018,6 +1018,51 @@
 
 #### 검증
 - plan.md 목표 섹션에 #5 "장시간 업데이트 UX" 확인
+
+## 2026-03-09
+
+### Session — 4단계/5단계 Change Metrics Migration + Change Update + Industry 컬럼
+
+**Status: done (확인 대기)**
+
+#### 완료 항목
+
+| 서브스텝 | 작업 | 상태 |
+|----------|------|------|
+| 4-2 | `news_change_metrics` CREATE TABLE 추가 (`db.ts`) — PK `(news_id, metric_key)` | ✅ |
+| 4-4a | Market news provider 구현 상태 확인 → 이미 구현됨 | ✅ (기존) |
+| 4-6 | `newsChangeMerger.ts` 전면 재작성 — `news_change_metrics` upsert 방식 + `bulkUpdate7dChange()` + `bulkUpdateCustomChange()` | ✅ |
+| 4-7 | `newsRepository.ts` — `getNews()`, `getNewsById()` SQL을 `news_change_metrics` LEFT JOIN 5개로 변경 | ✅ |
+| 5-9 | source_type 필터 UI 상태 확인 → 이미 구현됨 | ✅ (기존) |
+| 5-15 | split-dropdown 상태 확인 → 이미 구현됨 | ✅ (기존) |
+| 5-20 | `POST /api/news/change/update-7d` 엔드포인트 + 프론트 dropdown "7D Change Update" 버튼 | ✅ |
+| 5-21 | `POST /api/news/change/update-custom` 엔드포인트 + Custom Change Days 모달 + 프론트 dropdown 버튼 | ✅ |
+| 5-22 | Industry 컬럼 — `industryLookup.ts` CSV 서비스 + `newsRepository.ts` lookup + 프론트 컬럼 | ✅ |
+
+#### 수정/생성 파일
+
+| 파일 | 변경 |
+|------|------|
+| `terminal/backend/src/db.ts` | `news_change_metrics` CREATE TABLE 추가 |
+| `terminal/backend/src/services/newsChangeMerger.ts` | 전면 재작성: upsert → `news_change_metrics`, `bulkUpdate7dChange`, `bulkUpdateCustomChange`, `getOhlcCloseOnOrBefore` 추가 |
+| `terminal/backend/src/services/newsRepository.ts` | `getNews()`, `getNewsById()` SQL → LEFT JOIN 5개 (cm_1d, cm_open, cm_7d, cm_14d, cm_30d) + `industryLookup` import + `mapNewsRow`에 industry 추가 |
+| `terminal/backend/src/services/jobManager.ts` | `updateProgress()` 시그니처 확장: `total?` 옵셔널 파라미터 추가 |
+| `terminal/backend/src/services/industryLookup.ts` | **신규** — CSV(`watch lists2_*.csv`) → `Symbol→Industry` 매핑 서비스 |
+| `terminal/backend/src/server.ts` | `bulkUpdate7dChange`, `bulkUpdateCustomChange` import + `POST /api/news/change/update-7d`, `POST /api/news/change/update-custom` 엔드포인트 |
+| `terminal/backend/src/types.ts` | `NewsItem`에 `industry?: string \| null` 추가 |
+| `termina_web/.../FinnhubNewsWindow.tsx` | `TrendingUp` icon import, `industry` fields → BackendNewsItem/DisplayItem/mapBackendItem, `ColumnId`에 `industry` 추가, DEFAULT_COLUMNS에 Industry 컬럼, getSortValue/renderCell에 industry case, `handleChange7dUpdate`/`handleCustomChangeUpdate` 핸들러, dropdown "Change Update" 섹션, Custom Change Days 모달 |
+| `ai_agent_plan/terminal_ui_ver2_finhub/plan.md` | 서브스텝 상태 업데이트: 4-2, 4-4a, 4-6, 4-7, 5-9, 5-15, 5-20, 5-21, 5-22 → ✅ |
+
+#### 검증 방법
+1. 백엔드: `cd terminal/backend && npx tsc --noEmit` — 에러 없음 확인
+2. 프론트: IDE 에러 없음 확인 (Vite dev server)
+3. 런타임: 서버 시작 후 `GET /api/news` → 응답에 `industry` 필드 존재 확인
+4. UI: dropdown 메뉴에 "Change Update" 섹션 (7D Change Update / Custom Change Update) 확인
+5. UI: 테이블에 Industry 컬럼 표시 확인, CSV에 있는 ticker는 industry 값, 없는 것은 `-`
+
+#### 리스크
+- `news_change_metrics` 테이블이 첫 서버 시작 시 자동 생성됨 — 기존 DB에 change 데이터가 있던 경우 새 테이블은 비어있으므로 "7D Change Update" 실행 필요
+- `industryLookup.ts`의 CSV 상대경로가 빌드 후 dist 구조에서 맞지 않을 수 있음 — `__dirname` 기반이므로 `tsc` 빌드 아웃풋 위치와 CSV 위치 관계 확인 필요
 - PLAN CHANGE (2026-03-06) 노트 존재 확인
 - "장시간 update UX 원칙(공통)" 섹션 존재 확인
 - 5단계 서브스텝 테이블에 5-17, 5-18 존재 + 설명/검증 훅 확인

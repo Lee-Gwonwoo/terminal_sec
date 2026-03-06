@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { Search, Save, FolderOpen, Filter, ChevronDown, ArrowUp, ArrowDown, GripVertical, FileText, AlignLeft, RotateCw, Download, Columns3, Eye, X, Calendar } from 'lucide-react';
+import { Search, Save, FolderOpen, Filter, ChevronDown, ArrowUp, ArrowDown, GripVertical, FileText, AlignLeft, RotateCw, Download, Columns3, Eye, X, Calendar, TrendingUp } from 'lucide-react';
 import { VariableSizeList as List } from 'react-window';
 
 const API_BASE = "";
@@ -13,7 +13,7 @@ const ROW_HEIGHT_WITH_ABSTRACT = 140;
 type DisplayMode = 'title-only' | 'title-abstract';
 
 // ─── Column definition ───
-type ColumnId = 'date' | 'ticker' | 'time' | 'title' | 'publisher' | 'source' | 'changes' | 'fulltext' | 'keywords';
+type ColumnId = 'date' | 'ticker' | 'time' | 'title' | 'publisher' | 'industry' | 'source' | 'changes' | 'fulltext' | 'keywords';
 
 interface ColumnDef {
   id: ColumnId;
@@ -29,6 +29,7 @@ const DEFAULT_COLUMNS: ColumnDef[] = [
   { id: 'time',    label: 'Time',      defaultWidth: 52,  minWidth: 40 },
   { id: 'title',   label: 'Title',     defaultWidth: 300, minWidth: 100, flex: true },
   { id: 'publisher', label: 'Publisher', defaultWidth: 96, minWidth: 60 },
+  { id: 'industry', label: 'Industry', defaultWidth: 110, minWidth: 60 },
   { id: 'source',  label: 'Sources',   defaultWidth: 90,  minWidth: 50 },
   { id: 'fulltext', label: 'Full Text', defaultWidth: 60,  minWidth: 40 },
   { id: 'changes', label: 'Changes %', defaultWidth: 280, minWidth: 160 },
@@ -81,6 +82,7 @@ interface BackendNewsItem {
   hasFullText?: boolean;
   keywords?: string[];
   keywordsStatus?: string | null;
+  industry?: string | null;
 }
 
 // ─── Display item ───
@@ -104,6 +106,7 @@ interface DisplayItem {
   hasFullText: boolean;
   keywords: string[];
   keywordsStatus: string | null;
+  industry: string | null;
 }
 
 function mapBackendItem(item: BackendNewsItem): DisplayItem {
@@ -128,6 +131,7 @@ function mapBackendItem(item: BackendNewsItem): DisplayItem {
     hasFullText: !!item.hasFullText,
     keywords: item.keywords ?? [],
     keywordsStatus: item.keywordsStatus ?? null,
+    industry: item.industry ?? null,
   };
 }
 
@@ -232,6 +236,8 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
   const [showCustomDateModal, setShowCustomDateModal] = useState(false);
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [showChangeDaysModal, setShowChangeDaysModal] = useState(false);
+  const [changeLookbackDays, setChangeLookbackDays] = useState(30);
   const [showPreflightModal, setShowPreflightModal] = useState(false);
   const [preflightData, setPreflightData] = useState<{ totalTickers: number; fallbackCount: number; fallbackTickers: string[] } | null>(null);
   const [pendingUpdateSourceType, setPendingUpdateSourceType] = useState<UpdateSourceType>('all');
@@ -416,6 +422,53 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
     setShowCustomDateModal(true);
   };
 
+  // ─── Change Update: 7D change recalculation ───
+  const handleChange7dUpdate = async () => {
+    setUpdating(true);
+    setError(null);
+    setJobStatus(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/news/change/update-7d`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || `HTTP ${res.status}`);
+        setUpdating(false);
+        return;
+      }
+      setCurrentJobId(data.jobId);
+    } catch (err: any) {
+      setError(err.message || 'Failed to start 7D change update');
+      setUpdating(false);
+    }
+  };
+
+  // ─── Change Update: Custom N-day change recalculation ───
+  const handleCustomChangeUpdate = async (days: number) => {
+    setUpdating(true);
+    setError(null);
+    setJobStatus(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/news/change/update-custom`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lookbackDays: days }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || `HTTP ${res.status}`);
+        setUpdating(false);
+        return;
+      }
+      setCurrentJobId(data.jobId);
+    } catch (err: any) {
+      setError(err.message || 'Failed to start custom change update');
+      setUpdating(false);
+    }
+  };
+
   // ─── Fetch full text for a single news item ───
   const fetchFulltext = useCallback(async (newsId: string, title: string) => {
     setFulltextLoading(true);
@@ -568,6 +621,7 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
       case 'time': return item.time;
       case 'title': return item.title.toLowerCase();
       case 'publisher': return (item.publisher ?? '').toLowerCase();
+      case 'industry': return (item.industry ?? '').toLowerCase();
       case 'source': return item.source.toLowerCase();
       case 'fulltext': return item.hasFullText ? 1 : 0;
       case 'changes': return item.changeFromOpenPct ?? 0;
@@ -775,6 +829,8 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
         );
       case 'publisher':
         return renderLinkCell(newsItem.publisher, 'text-gray-600 dark:text-gray-400');
+      case 'industry':
+        return <span className="truncate text-gray-600 dark:text-gray-400" title={newsItem.industry ?? undefined}>{newsItem.industry ?? '-'}</span>;
       case 'source':
         return renderLinkCell(newsItem.source, 'text-gray-600 dark:text-gray-400');
       case 'fulltext':
@@ -994,6 +1050,18 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
                       <button onClick={() => { setShowUpdateMenu(false); handleCustomStart('market_news'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <Calendar className="w-3.5 h-3.5 shrink-0 text-amber-500" />
                         <div><div className="font-medium">Custom Market News</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick date range · limited by Finnhub /news history depth</div></div>
+                      </button>
+
+                      {/* ── Change Update ── */}
+                      <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
+                      <div className="px-2 py-1 text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Change Update</div>
+                      <button onClick={() => { setShowUpdateMenu(false); handleChange7dUpdate(); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <TrendingUp className="w-3.5 h-3.5 shrink-0 text-teal-500" />
+                        <div><div className="font-medium">7D Change Update</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Recalculate 7-day change % for all news (uses OHLC DB)</div></div>
+                      </button>
+                      <button onClick={() => { setShowUpdateMenu(false); setShowChangeDaysModal(true); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <TrendingUp className="w-3.5 h-3.5 shrink-0 text-indigo-500" />
+                        <div><div className="font-medium">Custom Change Update</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick lookback trading days · recalculate custom change %</div></div>
                       </button>
                     </div>
                   </div>
@@ -1413,6 +1481,36 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
                 onClick={() => { setShowPreflightModal(false); handleUpdate('recent', pendingUpdateSourceType); }}
                 className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
               >계속</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Custom Change Days Modal ─── */}
+      {showChangeDaysModal && (
+        <div className="absolute inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-4 w-72 border border-gray-200 dark:border-gray-700">
+            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-indigo-500" />Custom Change Update</h3>
+            <div className="space-y-2">
+              <label className="block text-xs text-gray-500">Lookback Trading Days</label>
+              <input
+                type="number"
+                min={1}
+                max={365}
+                value={changeLookbackDays}
+                onChange={(e) => setChangeLookbackDays(Math.max(1, Math.min(365, Number(e.target.value) || 1)))}
+                className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                autoFocus
+                onKeyDown={(e) => { if (e.key === 'Enter') { setShowChangeDaysModal(false); handleCustomChangeUpdate(changeLookbackDays); } if (e.key === 'Escape') setShowChangeDaysModal(false); }}
+              />
+              <p className="text-[10px] text-gray-400">Recalculate custom_{'{N}'}d_pct for all news items using OHLC DB.</p>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setShowChangeDaysModal(false)} className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
+              <button
+                onClick={() => { setShowChangeDaysModal(false); handleCustomChangeUpdate(changeLookbackDays); }}
+                className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+              >Start</button>
             </div>
           </div>
         </div>

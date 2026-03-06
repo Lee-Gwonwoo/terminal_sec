@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getDb } from "../db.js";
 import type { NewsItem, NewsQuery } from "../types.js";
+import { getIndustry } from "./industryLookup.js";
 
 function clampInt(value: number, min: number, max: number): number {
   return Math.min(Math.max(Math.trunc(value), min), max);
@@ -112,12 +113,23 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
   const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
   const sql = `
     SELECT ni.id, ni.published_at, ni.source, ni.publisher, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
-           ni.ohlc_ticker, ni.ohlc_date, ni.change_1d_pct, ni.change_from_open_pct,
-           ni.change_7d_pct, ni.change_14d_pct, ni.change_30d_pct, ni.change_computed_at,
+           cm_1d.ohlc_ticker,
+           cm_1d.anchor_date AS ohlc_date,
+           cm_1d.value_pct AS change_1d_pct,
+           cm_open.value_pct AS change_from_open_pct,
+           cm_7d.value_pct AS change_7d_pct,
+           cm_14d.value_pct AS change_14d_pct,
+           cm_30d.value_pct AS change_30d_pct,
+           cm_1d.computed_at AS change_computed_at,
            CASE WHEN nf.extraction_status = 'success' THEN 1 ELSE 0 END AS has_full_text,
            nf.keywords_json, nf.keywords_status
     FROM news_items ni
     LEFT JOIN news_fulltext nf ON nf.news_id = ni.id
+    LEFT JOIN news_change_metrics cm_1d ON cm_1d.news_id = ni.id AND cm_1d.metric_key = 'change_1d_pct'
+    LEFT JOIN news_change_metrics cm_open ON cm_open.news_id = ni.id AND cm_open.metric_key = 'change_from_open_pct'
+    LEFT JOIN news_change_metrics cm_7d ON cm_7d.news_id = ni.id AND cm_7d.metric_key = 'change_7d_pct'
+    LEFT JOIN news_change_metrics cm_14d ON cm_14d.news_id = ni.id AND cm_14d.metric_key = 'change_14d_pct'
+    LEFT JOIN news_change_metrics cm_30d ON cm_30d.news_id = ni.id AND cm_30d.metric_key = 'change_30d_pct'
     ${whereSql}
     ORDER BY ni.published_at DESC, ni.id DESC
     LIMIT ?
@@ -135,12 +147,23 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
 export async function getNewsById(id: string): Promise<NewsItem | null> {
   const row = await getDb().get<any>(
     `SELECT ni.id, ni.published_at, ni.source, ni.publisher, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
-            ni.ohlc_ticker, ni.ohlc_date, ni.change_1d_pct, ni.change_from_open_pct,
-            ni.change_7d_pct, ni.change_14d_pct, ni.change_30d_pct, ni.change_computed_at,
+            cm_1d.ohlc_ticker,
+            cm_1d.anchor_date AS ohlc_date,
+            cm_1d.value_pct AS change_1d_pct,
+            cm_open.value_pct AS change_from_open_pct,
+            cm_7d.value_pct AS change_7d_pct,
+            cm_14d.value_pct AS change_14d_pct,
+            cm_30d.value_pct AS change_30d_pct,
+            cm_1d.computed_at AS change_computed_at,
             CASE WHEN nf.extraction_status = 'success' THEN 1 ELSE 0 END AS has_full_text,
             nf.keywords_json, nf.keywords_status
      FROM news_items ni
      LEFT JOIN news_fulltext nf ON nf.news_id = ni.id
+     LEFT JOIN news_change_metrics cm_1d ON cm_1d.news_id = ni.id AND cm_1d.metric_key = 'change_1d_pct'
+     LEFT JOIN news_change_metrics cm_open ON cm_open.news_id = ni.id AND cm_open.metric_key = 'change_from_open_pct'
+     LEFT JOIN news_change_metrics cm_7d ON cm_7d.news_id = ni.id AND cm_7d.metric_key = 'change_7d_pct'
+     LEFT JOIN news_change_metrics cm_14d ON cm_14d.news_id = ni.id AND cm_14d.metric_key = 'change_14d_pct'
+     LEFT JOIN news_change_metrics cm_30d ON cm_30d.news_id = ni.id AND cm_30d.metric_key = 'change_30d_pct'
      WHERE ni.id = ?`,
     [id]
   );
@@ -222,6 +245,11 @@ function mapNewsRow(row: any): NewsItem {
     hasFullText: row.has_full_text === 1,
     keywords: row.keywords_json ? JSON.parse(row.keywords_json) : [],
     keywordsStatus: row.keywords_status ?? null,
+    industry: (() => {
+      const tickers = splitCsvEnvelope(row.tickers_csv);
+      for (const t of tickers) { const ind = getIndustry(t); if (ind) return ind; }
+      return null;
+    })(),
   };
 }
 

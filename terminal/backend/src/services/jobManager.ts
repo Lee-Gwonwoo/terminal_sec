@@ -72,9 +72,12 @@ export function getJob(id: string): JobState | undefined {
   return jobs.get(id);
 }
 
-export function updateProgress(id: string, completed: number): void {
+export function updateProgress(id: string, completed: number, total?: number): void {
   const job = jobs.get(id);
   if (!job) return;
+  if (total !== undefined) {
+    job.progress.total = total;
+  }
   job.progress.completed = completed;
   job.progress.pct =
     job.progress.total > 0

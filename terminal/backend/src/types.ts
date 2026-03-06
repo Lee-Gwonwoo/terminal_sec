@@ -37,4 +37,6 @@ export type NewsItem = {
   hasFullText?: boolean;
   keywords?: string[];
   keywordsStatus?: string | null;
+  // industry (Step 5-22)
+  industry?: string | null;
 };

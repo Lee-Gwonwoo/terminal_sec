@@ -1131,13 +1131,13 @@ API 계약(초안)
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
 | 4-1 | `FINNHUB_API_KEY` 설정 로딩 추가 | `terminal/backend/src/config.ts` | 키가 없으면 명확한 오류(키 값 로그 금지) | ✅ |
-| 4-2 | `news_change_metrics` 테이블 마이그레이션 | `terminal/backend/src/db.ts` | `sqlite_master`에 테이블 존재, PK=`(news_id, metric_key)` 확인 | ⏳ |
+| 4-2 | `news_change_metrics` 테이블 마이그레이션 | `terminal/backend/src/db.ts` | `sqlite_master`에 테이블 존재, PK=`(news_id, metric_key)` 확인 | ✅ |
 | 4-3 | Finnhub company news provider 구현 | `terminal/backend/src/services/finnhubNewsProvider.ts` | `/company-news` 매핑 결과가 `news_items` 스키마에 맞고 `source_type='company_news'` | ✅ |
 | 4-4 | Finnhub press release provider 구현 | `terminal/backend/src/services/finnhubNewsProvider.ts` | `/press-releases` 매핑 결과가 `news_items` 스키마에 맞고 `source_type='press_release'` | ✅ |
-| 4-4a | Finnhub market news provider 구현 | `terminal/backend/src/services/finnhubNewsProvider.ts` | `/news?category=general` 매핑 결과가 `news_items` 스키마에 맞고 `source_type='market_news'` | ⏳ |
+| 4-4a | Finnhub market news provider 구현 | `terminal/backend/src/services/finnhubNewsProvider.ts` | `/news?category=general` 매핑 결과가 `news_items` 스키마에 맞고 `source_type='market_news'` | ✅ |
 | 4-5 | `GET /api/news` source_type 필터 파라미터 지원 | `server.ts`, `newsRepository.ts` | `?source_type=company_news`로 해당 type만 반환 | ✅ |
-| 4-6 | `newsChangeMerger` 서비스 구현 | `terminal/backend/src/services/newsChangeMerger.ts` | 뉴스 row 기준으로 `news_change_metrics` 표준 row upsert | ⏳ |
-| 4-7 | `POST /api/news/pull-finhub` 구현(양쪽 수집 + change upsert) | `terminal/backend/src/server.ts` | `{inserted, skipped, source, details}` 반환 + change upsert count 포함 | ⏳ |
+| 4-6 | `newsChangeMerger` 서비스 구현 | `terminal/backend/src/services/newsChangeMerger.ts` | 뉴스 row 기준으로 `news_change_metrics` 표준 row upsert | ✅ |
+| 4-7 | `POST /api/news/pull-finhub` 구현(양쪽 수집 + change upsert) | `terminal/backend/src/server.ts` | `{inserted, skipped, source, details}` 반환 + change upsert count 포함 | ✅ |
 | 4-8 | 성공 시 `update_status(finhub_news)` 갱신 | `updateStatusRepository` | `GET /api/updates/status`에서 lastSuccessAt 업데이트 | ✅ |
 | 4-9 | 적재 데이터 조회 + source_type 필터 + change 검증 | (런타임) | `GET /api/news?source_names=FINNHUB&source_type=company_news|press_release|market_news` rows 확인, change 값 병합 확인 | ⏳ |
 
@@ -1311,22 +1311,22 @@ API 계약(초안)
 | 5-6 | AddTab 라벨을 정확히 `news feed:finhub api`로 변경 | `src/app/components/AddTabModal.tsx` | UI에 Brave 표기 없음 | ✅ |
 | 5-7 | `App.tsx` title 매핑 추가/수정 | `src/app/App.tsx` | `finhub-news` → `news feed:finhub api` | ✅ |
 | 5-8 | `DraggableWindow.tsx` 렌더 스위치 연결 | `src/app/components/DraggableWindow.tsx` | `finhub-news`가 `FinnhubNewsWindow`를 렌더 | ✅ |
-| 5-9 | source_type 필터 UI 구현 (Company News / Press Release / Market News 선택) | `FinnhubNewsWindow.tsx` | 필터 전환 시 해당 source_type만 표시, `All` 선택 시 전체 표시 | ⏳ |
+| 5-9 | source_type 필터 UI 구현 (Company News / Press Release / Market News 선택) | `FinnhubNewsWindow.tsx` | 필터 전환 시 해당 source_type만 표시, `All` 선택 시 전체 표시 | ✅ |
 | 5-10 | 서버사이드 키워드 검색(전체 DB 검색) | FinnhubNewsWindow.tsx | 검색어 입력 시 keyword 파라미터로 GET /api/news 호출, 백엔드가 전체 DB 필터링 | ✅ |
 | 5-11 | Update 버튼 툴팁(5초 hover 지연) | FinnhubNewsWindow.tsx | Update 버튼을 5초 hover하면 범위 설명 툴팁 노출 | ✅ |
 | 5-12 | Ticker 전용 컬럼 추가 | FinnhubNewsWindow.tsx | Date와 Time 사이에 Ticker 컬럼이 표시되고, 클릭 시 검색창 ticker 필터 동작 | ✅ |
 | 5-13 | 컬럼 가시성 토글(show/hide columns) | FinnhubNewsWindow.tsx | Columns 버튼 클릭 → 체크박스 드롭다운으로 컬럼 표시/숨김 전환 | ✅ |
 | 5-14 | 백엔드 "entire" 모드 — adaptive date-splitting backfill | server.ts, finnhubNewsProvider.ts | `POST /api/news/pull-finhub { mode: "entire" }` → 5년 범위 adaptive 분할 수집, cap 우회, 중복 없음 | ✅ |
-| 5-15 | Update 버튼 → split-dropdown (12개 옵션: sourceType별 × mode별) | FinnhubNewsWindow.tsx | 드롭다운에 All/Company/Press/Market × 7d/Recent/Custom 메뉴 | ⏳ |
+| 5-15 | Update 버튼 → split-dropdown (12개 옵션: sourceType별 × mode별) | FinnhubNewsWindow.tsx | 드롭다운에 All/Company/Press/Market × 7d/Recent/Custom 메뉴 | ✅ |
 | 5-16 | Source 셀: 우클릭 Copy URL + 클릭 시 링크 열기 | FinnhubNewsWindow.tsx | Source 우클릭 → Copy URL → 클립보드 복사, Source 클릭 → 브라우저 새 탭으로 열림 | ✅ |
 | 5-24 | News 테이블에 `Publisher` 컬럼 추가 | `newsRepository.ts`, `FinnhubNewsWindow.tsx` | `publisher` 값 렌더, 클릭/우클릭 동작이 Source와 동일 | ✅ |
 | 5-25 | `Source` 컬럼 기본 가시성 해제 | `FinnhubNewsWindow.tsx` | Columns 메뉴에서 Source가 기본 unchecked 상태로 시작 | ✅ |
 | 5-17 | 백엔드 잡 큐 + `GET /api/jobs/:jobId` 폴링 엔드포인트 | `server.ts`, `jobManager.ts`(신규) | POST → `{ jobId }` 즉시 반환, GET 폴링 시 `{ status, progress, logs[] }` 응답 | ✅ |
 | 5-18 | View Log 버튼 + 로그 패널 UI(자동 오픈 금지) | `FinnhubNewsWindow.tsx` | Update 옆 View Log 클릭 → 진행률 바 + 실시간 로그 표시, 시작 시 자동 열림 없음 | ✅ |
 | 5-19 | Update UX 전면 리디자인: 7d/Recent/Custom 3모드 + preflight + date picker | `server.ts`, `finnhubNewsProvider.ts`, `FinnhubNewsWindow.tsx` | Entire 제거 → Custom(date picker + adaptive backfill), 기본 Update → 7d, Recent = per-ticker anchor + preflight 경고 모달, 메인 버튼 = 마지막 사용 모드 기억(localStorage) | ✅ |
-| 5-20 | News 툴바에 `7D Change Update` 버튼 추가 | `FinnhubNewsWindow.tsx` | 클릭 시 `POST /api/news/change/update-7d` → `{ jobId }` 반환, 완료 후 목록 재조회 | ⬜ |
-| 5-21 | News 툴바에 `Custom Change Update` 입력+버튼 추가 | `FinnhubNewsWindow.tsx` | `N` 입력 후 `POST /api/news/change/update-custom` 호출, 완료 후 목록 재조회 | ⬜ |
-| 5-22 | News 테이블에 `Industry` 컬럼 추가 | `FinnhubNewsWindow.tsx` | `industry` 값 렌더, 없으면 `-` | ⬜ |
+| 5-20 | News 툴바에 `7D Change Update` 버튼 추가 | `FinnhubNewsWindow.tsx` | 클릭 시 `POST /api/news/change/update-7d` → `{ jobId }` 반환, 완료 후 목록 재조회 | ✅ |
+| 5-21 | News 툴바에 `Custom Change Update` 입력+버튼 추가 | `FinnhubNewsWindow.tsx` | `N` 입력 후 `POST /api/news/change/update-custom` 호출, 완료 후 목록 재조회 | ✅ |
+| 5-22 | News 테이블에 `Industry` 컬럼 추가 | `FinnhubNewsWindow.tsx` | `industry` 값 렌더, 없으면 `-` | ✅ |
 | 5-23 | News 테이블에 `Keywords` 컬럼 추가 | `FinnhubNewsWindow.tsx` | `keywords` 값 렌더, AI 분석 전에는 `-` | 🚫 |
 
 **세부 단계 목적/설명 (5단계)**

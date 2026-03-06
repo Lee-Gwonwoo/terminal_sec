@@ -120,6 +120,25 @@ export async function initDb(): Promise<void> {
   await ensureColumn("news_items", "change_30d_pct", "REAL");
   await ensureColumn("news_items", "change_computed_at", "TEXT");
 
+  // Step 4-2: news_change_metrics table (separate change data from news_items)
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS news_change_metrics (
+      news_id TEXT NOT NULL REFERENCES news_items(id),
+      metric_key TEXT NOT NULL,
+      value_pct REAL,
+      ohlc_ticker TEXT NOT NULL,
+      reference_date TEXT NOT NULL,
+      anchor_date TEXT NOT NULL,
+      lookback_trading_days INTEGER,
+      calc_version TEXT NOT NULL DEFAULT 'v1',
+      computed_at TEXT NOT NULL,
+      PRIMARY KEY (news_id, metric_key)
+    );
+  `);
+  await db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_ncm_news_id ON news_change_metrics (news_id);"
+  );
+
   // Step 10: publisher column on news_items
   await ensureColumn("news_items", "publisher", "TEXT");
 
