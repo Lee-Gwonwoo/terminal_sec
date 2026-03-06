@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { Search, Save, FolderOpen, Filter, ChevronDown, ArrowUp, ArrowDown, GripVertical, FileText, AlignLeft, RotateCw, Download, Columns3 } from 'lucide-react';
+import { Search, Save, FolderOpen, Filter, ChevronDown, ArrowUp, ArrowDown, GripVertical, FileText, AlignLeft, RotateCw, Download, Columns3, Eye, X } from 'lucide-react';
 import { VariableSizeList as List } from 'react-window';
 
 const API_BASE = "";
@@ -183,6 +183,18 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // ─── Background job tracking ───
+  const [currentJobId, setCurrentJobId] = useState<string | null>(null);
+  const [showLogPanel, setShowLogPanel] = useState(false);
+  const [jobStatus, setJobStatus] = useState<{
+    status: 'running' | 'done' | 'failed';
+    progress: { completed: number; total: number; pct: number };
+    logs: string[];
+    error?: string;
+    result?: Record<string, unknown>;
+  } | null>(null);
+  const logEndRef = useRef<HTMLDivElement>(null);
+
   const listContainerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<List>(null);
   const filterMenuRef = useRef<HTMLDivElement>(null);
@@ -286,13 +298,14 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchQuery]);
 
-  // ─── Update (pull from Finnhub) ───
+  // ─── Update (pull from Finnhub — background job) ───
   const handleUpdate = async (
     mode: 'recent' | 'entire' = 'recent',
     sourceType: 'all' | 'company_news' | 'press_release' = 'all',
   ) => {
     setUpdating(true);
     setError(null);
+    setJobStatus(null);
     try {
       const res = await fetch(`${API_BASE}/api/news/pull-finhub`, {
         method: 'POST',
@@ -302,16 +315,62 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || `HTTP ${res.status}`);
+        setUpdating(false);
         return;
       }
-      // Reload after pull
-      await fetchNews(searchQuery || undefined);
+      // Store jobId — polling effect picks up from here
+      // Panel does NOT auto-open; user must click View Log
+      setCurrentJobId(data.jobId);
     } catch (err: any) {
-      setError(err.message || 'Failed to update');
-    } finally {
+      setError(err.message || 'Failed to start update');
       setUpdating(false);
     }
   };
+
+  // ─── Poll background job status ───
+  useEffect(() => {
+    if (!currentJobId) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/jobs/${currentJobId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        setJobStatus(data);
+        if (data.status === 'done') {
+          setUpdating(false);
+          fetchNews(searchQuery || undefined);
+        } else if (data.status === 'failed') {
+          setUpdating(false);
+          setError(data.error || 'Job failed');
+        }
+      } catch {
+        // Ignore transient fetch errors; will retry next interval
+      }
+    };
+    poll();
+    const timer = setInterval(poll, 2500);
+    return () => { cancelled = true; clearInterval(timer); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentJobId]);
+
+  // Auto-scroll log panel to bottom
+  useEffect(() => {
+    if (showLogPanel && logEndRef.current) {
+      logEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [jobStatus?.logs?.length, showLogPanel]);
+
+  // ESC key closes log panel
+  useEffect(() => {
+    if (!showLogPanel) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowLogPanel(false);
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [showLogPanel]);
 
   // ─── Dynamic height ───
   useEffect(() => {
@@ -781,6 +840,31 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
             );
           })()}
 
+          {/* View Log button — only shown when there's an active or recent job */}
+          {currentJobId && (
+            <button
+              onClick={() => setShowLogPanel(!showLogPanel)}
+              className={`px-3 py-1.5 border rounded transition-colors flex items-center gap-1.5 text-xs ${
+                showLogPanel
+                  ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+                  : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800'
+              }`}
+              title="View update job logs and progress"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span>View Log</span>
+              {jobStatus?.status === 'running' && (
+                <span className="ml-1 text-[10px] text-blue-500 tabular-nums">{jobStatus.progress.pct}%</span>
+              )}
+              {jobStatus?.status === 'done' && (
+                <span className="ml-1 w-2 h-2 rounded-full bg-green-500 inline-block" />
+              )}
+              {jobStatus?.status === 'failed' && (
+                <span className="ml-1 w-2 h-2 rounded-full bg-red-500 inline-block" />
+              )}
+            </button>
+          )}
+
           {/* Refresh button */}
           <button onClick={() => fetchNews(searchQuery || undefined)} disabled={loading} className="p-2 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors" title="Refresh from DB">
             <RotateCw className={`w-3.5 h-3.5 text-gray-600 dark:text-gray-400 ${loading ? 'animate-spin' : ''}`} />
@@ -973,6 +1057,60 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
           </List>
         )}
       </div>
+
+      {/* ─── Job Log Panel (bottom overlay) ─── */}
+      {showLogPanel && jobStatus && (
+        <div className="absolute bottom-0 left-0 right-0 h-[45%] bg-white dark:bg-gray-900 border-t border-gray-300 dark:border-gray-700 z-40 flex flex-col shadow-lg">
+          {/* Panel header */}
+          <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 shrink-0">
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">Update Log</span>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                jobStatus.status === 'running' ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300' :
+                jobStatus.status === 'done' ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300' :
+                'bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300'
+              }`}>
+                {jobStatus.status === 'running' ? 'Running' : jobStatus.status === 'done' ? 'Done' : 'Failed'}
+              </span>
+              <span className="text-[10px] text-gray-400 tabular-nums">
+                {jobStatus.progress.completed}/{jobStatus.progress.total} ({jobStatus.progress.pct}%)
+              </span>
+            </div>
+            <button onClick={() => setShowLogPanel(false)} className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors" title="Close (Esc)">
+              <X className="w-3.5 h-3.5 text-gray-500" />
+            </button>
+          </div>
+          {/* Progress bar */}
+          <div className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 shrink-0">
+            <div
+              className={`h-full transition-all duration-300 ${
+                jobStatus.status === 'failed' ? 'bg-red-500' : jobStatus.status === 'done' ? 'bg-green-500' : 'bg-blue-500'
+              }`}
+              style={{ width: `${jobStatus.progress.pct}%` }}
+            />
+          </div>
+          {/* Log lines */}
+          <div className="flex-1 overflow-y-auto px-3 py-2 font-mono text-[11px] leading-relaxed text-gray-600 dark:text-gray-300 bg-gray-50/50 dark:bg-gray-900">
+            {jobStatus.logs.map((line, i) => (
+              <div key={i} className={`whitespace-pre-wrap py-0.5 ${line.includes('⚠') ? 'text-amber-600 dark:text-amber-400' : ''}`}>
+                {line}
+              </div>
+            ))}
+            {jobStatus.error && (
+              <div className="mt-2 px-2 py-1.5 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded text-red-600 dark:text-red-400 text-xs">
+                Error: {jobStatus.error}
+              </div>
+            )}
+            <div ref={logEndRef} />
+          </div>
+          {/* Result summary when done */}
+          {jobStatus.status === 'done' && jobStatus.result && (
+            <div className="px-3 py-2 border-t border-gray-200 dark:border-gray-700 bg-green-50 dark:bg-green-900/20 text-xs text-green-700 dark:text-green-300 shrink-0">
+              ✓ Completed — {(jobStatus.result as Record<string, unknown>).inserted as number ?? 0} inserted, {(jobStatus.result as Record<string, unknown>).skipped as number ?? 0} skipped, {(jobStatus.result as Record<string, unknown>).changeMerged as number ?? 0} change% merged
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ─── Save Search Modal ─── */}
       {showSaveModal && (

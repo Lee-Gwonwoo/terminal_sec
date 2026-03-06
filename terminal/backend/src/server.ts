@@ -23,6 +23,7 @@ import { listUpdateStatuses, setLastSuccess } from "./services/updateStatusRepos
 import { readTickersFromCsv, appendTickerToCsv, CsvServiceError } from "./services/tickerCsvService.js";
 import { pullCompanyNews, pullPressReleases, pullCompanyNewsBackfill, pullPressReleasesBackfill } from "./services/finnhubNewsProvider.js";
 import { mergeChangeForNewItems } from "./services/newsChangeMerger.js";
+import { createJob, getJob, updateProgress, appendLog, completeJob, failJob } from "./services/jobManager.js";
 import type { NewsQuery } from "./types.js";
 
 const app = express();
@@ -209,76 +210,126 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
     }
     console.log(`[pull-finhub] mode=${input.mode} sourceType=${input.sourceType} maxTickers=${input.maxTickers} → tickerList.length=${tickerList.length}`);
 
-    const counters = { totalInserted: 0, totalSkipped: 0 };
-    const newItems: Array<{ id: string; tickers: string[]; publishedAt: string }> = [];
-    const detailsPerType: Record<string, { fetched: number; inserted: number }> = {
-      company_news: { fetched: 0, inserted: 0 },
-      press_release: { fetched: 0, inserted: 0 },
-    };
+    // ── Create background job and return immediately ──
+    const jobId = createJob(tickerList.length);
+    appendLog(jobId, `Starting ${input.mode}/${input.sourceType} pull for ${tickerList.length} tickers`);
 
-    // Rate limit: ~60 calls/min for free tier. Add small delays between tickers.
-    for (const ticker of tickerList) {
-      // Company news
-      if (pullCompany) {
-        try {
-          const items = isEntire
-            ? await pullCompanyNewsBackfill(ticker, effectiveFrom!, effectiveTo)
-            : await pullCompanyNews(ticker, effectiveFrom, effectiveTo);
-          await insertFetchedItems(items, detailsPerType.company_news, newItems, counters);
-        } catch (err: any) {
-          console.error(`[pull-finhub] company_news ${ticker}: ${err.message}`);
-        }
-      }
+    // Return jobId immediately — the actual work runs in the background
+    res.json({ jobId });
 
-      // Press releases
-      if (pullPress) {
-        try {
-          const items = isEntire
-            ? await pullPressReleasesBackfill(ticker, effectiveFrom!, effectiveTo)
-            : await pullPressReleases(ticker, effectiveFrom, effectiveTo);
-          await insertFetchedItems(items, detailsPerType.press_release, newItems, counters);
-        } catch (err: any) {
-          console.error(`[pull-finhub] press_release ${ticker}: ${err.message}`);
-        }
-      }
+    // ── Background job execution (fire-and-forget) ──
+    (async () => {
+      const counters = { totalInserted: 0, totalSkipped: 0 };
+      const newItems: Array<{ id: string; tickers: string[]; publishedAt: string }> = [];
+      const detailsPerType: Record<string, { fetched: number; inserted: number }> = {
+        company_news: { fetched: 0, inserted: 0 },
+        press_release: { fetched: 0, inserted: 0 },
+      };
 
-      // Small delay between tickers to respect rate limits
-      await new Promise((r) => setTimeout(r, 250));
-    }
-
-    // Merge change% for newly inserted items
-    let changeMergeResult = { merged: 0, skipped: 0 };
-    if (newItems.length > 0) {
       try {
-        changeMergeResult = await mergeChangeForNewItems(newItems);
+        for (let i = 0; i < tickerList.length; i++) {
+          const ticker = tickerList[i];
+          appendLog(jobId, `[${i + 1}/${tickerList.length}] Processing ${ticker}...`);
+
+          // Company news
+          if (pullCompany) {
+            try {
+              const items = isEntire
+                ? await pullCompanyNewsBackfill(ticker, effectiveFrom!, effectiveTo)
+                : await pullCompanyNews(ticker, effectiveFrom, effectiveTo);
+              await insertFetchedItems(items, detailsPerType.company_news, newItems, counters);
+              if (items.length > 0) {
+                appendLog(jobId, `  company_news: ${items.length} fetched, ${detailsPerType.company_news.inserted} inserted so far`);
+              }
+            } catch (err: any) {
+              console.error(`[pull-finhub] company_news ${ticker}: ${err.message}`);
+              appendLog(jobId, `  ⚠ company_news ${ticker}: ${err.message}`);
+            }
+          }
+
+          // Press releases
+          if (pullPress) {
+            try {
+              const items = isEntire
+                ? await pullPressReleasesBackfill(ticker, effectiveFrom!, effectiveTo)
+                : await pullPressReleases(ticker, effectiveFrom, effectiveTo);
+              await insertFetchedItems(items, detailsPerType.press_release, newItems, counters);
+              if (items.length > 0) {
+                appendLog(jobId, `  press_release: ${items.length} fetched, ${detailsPerType.press_release.inserted} inserted so far`);
+              }
+            } catch (err: any) {
+              console.error(`[pull-finhub] press_release ${ticker}: ${err.message}`);
+              appendLog(jobId, `  ⚠ press_release ${ticker}: ${err.message}`);
+            }
+          }
+
+          // Update progress
+          updateProgress(jobId, i + 1);
+
+          // Small delay between tickers to respect rate limits
+          await new Promise((r) => setTimeout(r, 250));
+        }
+
+        // Merge change% for newly inserted items
+        let changeMergeResult = { merged: 0, skipped: 0 };
+        if (newItems.length > 0) {
+          appendLog(jobId, `Merging change% for ${newItems.length} new items...`);
+          try {
+            changeMergeResult = await mergeChangeForNewItems(newItems);
+            appendLog(jobId, `Change merge: ${changeMergeResult.merged} merged, ${changeMergeResult.skipped} skipped`);
+          } catch (err: any) {
+            console.error(`[pull-finhub] change merger error: ${err.message}`);
+            appendLog(jobId, `⚠ Change merge error: ${err.message}`);
+          }
+        }
+
+        // Update status
+        await setLastSuccess("finhub_news", new Date().toISOString(), {
+          mode: input.mode,
+          sourceType: input.sourceType,
+          tickerCount: tickerList.length,
+          inserted: counters.totalInserted,
+          skipped: counters.totalSkipped,
+          changeMerged: changeMergeResult.merged,
+        });
+
+        completeJob(jobId, {
+          source: "FINNHUB",
+          mode: input.mode,
+          sourceType: input.sourceType,
+          tickerCount: tickerList.length,
+          inserted: counters.totalInserted,
+          skipped: counters.totalSkipped,
+          changeMerged: changeMergeResult.merged,
+          details: detailsPerType,
+        });
       } catch (err: any) {
-        console.error(`[pull-finhub] change merger error: ${err.message}`);
+        console.error(`[pull-finhub] job ${jobId} fatal error: ${err.message}`);
+        failJob(jobId, err.message || "Unknown error");
       }
-    }
-
-    // Update status
-    await setLastSuccess("finhub_news", new Date().toISOString(), {
-      mode: input.mode,
-      sourceType: input.sourceType,
-      tickerCount: tickerList.length,
-      inserted: counters.totalInserted,
-      skipped: counters.totalSkipped,
-      changeMerged: changeMergeResult.merged,
-    });
-
-    res.json({
-      source: "FINNHUB",
-      mode: input.mode,
-      sourceType: input.sourceType,
-      tickerCount: tickerList.length,
-      inserted: counters.totalInserted,
-      skipped: counters.totalSkipped,
-      changeMerged: changeMergeResult.merged,
-      details: detailsPerType,
-    });
+    })();
   } catch (error) {
     next(error);
   }
+});
+
+// ── Job status polling endpoint ──
+app.get("/api/jobs/:jobId", (req, res) => {
+  const job = getJob(req.params.jobId);
+  if (!job) {
+    res.status(404).json({ error: "Job not found" });
+    return;
+  }
+  res.json({
+    id: job.id,
+    status: job.status,
+    progress: job.progress,
+    logs: job.logs,
+    error: job.error,
+    result: job.result,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+  });
 });
 
 app.get("/api/news", async (req, res, next) => {

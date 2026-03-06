@@ -18,6 +18,7 @@
    - 추가 시 CSV **마지막 행에 append**
 3) `/calendar`는 **IBKR 캘린더 데이터만** 사용
 4) `news feed_brave api` 표기를 **`news feed:finhub api`**로 변경하고, 뉴스는 **Finnhub API**로 수집/표시(Brave 기반은 사용하지 않음)
+5) **장시간 업데이트 UX** — 모든 장시간 수집 작업(Finnhub 뉴스, IBKR 가격, IBKR 캘린더)은 **백그라운드 잡**으로 실행하고, 각 창에 **View Log** 버튼을 배치하여 진행률/로그를 확인할 수 있게 한다. **시작 시 로그 창 자동 오픈 금지** — 사용자가 View Log 버튼을 눌러야만 열린다.
 
 ### 현재 레포 상태(중요, 확인됨)
 - 프론트에는 이미 `brave-news` 윈도우 타입이 존재하며 구현 파일은 아래와 같다.
@@ -112,6 +113,21 @@ Step N — <제목>
 - 사용자 확인 필요?: Yes/No (Yes이면: 완료 확인 부탁)
 ```
 
+---
+```
+PLAN CHANGE (2026-03-06)
+- 왜: 장시간 업데이트(Finnhub 뉴스 전체 수집, IBKR 가격/캘린더) 시 동기 응답 대기 UX가 부적합.
+  사용자 요구: "시작 시 자동 오픈 금지, View Log 버튼으로 진행률/로그 확인".
+- 무엇이 바뀌었나:
+  - 목표 #5 신설 — 백그라운드 잡 + View Log 버튼 UX
+  - 아키텍처 아래 "장시간 update UX 원칙(공통)" 섹션 추가
+  - 5단계: Update 동작을 동기→백그라운드 잡 패턴으로 변경, 5-17/5-18 서브스텝 추가
+  - 8단계: 각 섹션에 View Log 버튼 추가, 8-6/8-7 서브스텝 추가
+  - 의존성 그래프에 신규 서브스텝 반영
+- 영향: 5단계·8단계 구현 범위 확대(백엔드 잡 큐 + 프론트 로그 패널). 기존 완료 서브스텝에는 영향 없음.
+```
+---
+
 ### 아키텍처(상위)
 - 프론트(Vite/React)가 백엔드(Node/TS, `terminal/backend`) API 호출.
 - 백엔드는 다음을 책임진다.
@@ -119,6 +135,30 @@ Step N — <제목>
   - Finnhub 뉴스 수집
   - 티커 CSV read/append + 경로 제한(보안)
   - last updated 시각 저장/조회
+
+### 장시간 update UX 원칙(공통)
+> 아래 원칙은 Finnhub 뉴스, IBKR 가격, IBKR 캘린더 등 **모든 장시간 업데이트 작업**에 동일하게 적용한다.
+
+1. **백그라운드 잡 패턴**
+   - Update 버튼 클릭 시 백엔드는 잡을 **비동기로 시작**하고 즉시 `{ jobId }` 를 반환한다.
+   - 프론트는 `jobId`로 상태를 폴링(`GET /api/jobs/:jobId`)하여 `{ status, progress, logs[], error? }` 를 받는다.
+   - 폴링 주기: 2~3초(조절 가능).
+
+2. **View Log 버튼(자동 오픈 금지)**
+   - 각 Update 섹션 옆에 **View Log** 버튼을 배치한다.
+   - **시작 시 로그 패널이 자동으로 열리지 않는다.** 사용자가 View Log를 눌러야만 열린다.
+   - 로그 패널 내용:
+     - 진행률 바 (`completed / total tickers`, 퍼센트)
+     - 실시간 로그 라인(타임스탬프 + 메시지), 최신이 아래.
+     - 에러 발생 시 빨간 텍스트로 에러 메시지 표시.
+   - 잡이 완료되면 상태가 "Done" 또는 "Failed"로 바뀌고, View Log로 최종 결과를 확인할 수 있다.
+   - 로그 패널은 닫기 버튼(X)이나 외부 클릭/ESC로 닫을 수 있다.
+
+3. **Finnhub 뉴스 특수 사항(rate limit)**
+   - Finnhub 무료: 300 req/min → 안전 운영: **200~240 req/min**.
+   - ticker당 2개 endpoint(company_news + press_releases) → 분당 ~100~120 tickers 처리 가능.
+   - 토큰 버킷(token-bucket) 또는 간단한 딜레이로 rate limit 준수.
+   - 진행률: `처리된 ticker 수 / 전체 ticker 수`.
 
 ### 결정/선행조건(초기에 확정 필요)
 1) **IBKR 연동 방식**
@@ -822,7 +862,11 @@ API 계약(초안)
   - 둘 다 선택(기본): `GET /api/news?source_names=FINNHUB` (source_type 파라미터 없이 전체 반환)
   - 필터 상태는 컴포넌트 state로 관리(URL/전역 상태 불필요).
 - **Change% 컬럼**: 각 뉴스 row의 `change_1d_pct`, `change_from_open_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct` 값을 백엔드 응답에서 그대로 렌더한다. 값이 없으면 `-`로 표시.
-- (선택) 창 내부에 “Update” 버튼을 두고 `POST /api/news/pull-finhub`로 수집 트리거.
+- 창 내부에 “Update” 버튼(split-dropdown 포함)을 두고 `POST /api/news/pull-finhub`로 **백그라운드 잡**을 시작한다.
+  - 백엔드는 즉시 `{ jobId }` 를 반환하고, 수집은 비동기로 실행된다.
+  - Update 버튼 옆에 **View Log** 버튼을 배치한다. **시작 시 자동 오픈 금지**  사용자가 눌러야만 로그 패널이 열린다.
+  - 로그 패널: 진행률 바(처리된 ticker / 전체 ticker, %) + 실시간 로그 라인 + 에러 표시.
+  - 잡 완료/실패 후에도 View Log로 최종 결과 확인 가능.
 
 프론트 파일:
 - `brave-news` 윈도우 타입을 `finhub-news`로 교체(권장):
@@ -865,6 +909,8 @@ API 계약(초안)
 | 5-14 | 백엔드 "entire" 모드 — adaptive date-splitting backfill | server.ts, finnhubNewsProvider.ts | `POST /api/news/pull-finhub { mode: "entire" }` → 5년 범위 adaptive 분할 수집, cap 우회, 중복 없음 | ✅ |
 | 5-15 | Update 버튼 → split-dropdown (6개 옵션: sourceType별 × mode별) | FinnhubNewsWindow.tsx | 드롭다운에 All/Company/Press × Recent/Entire = 6개 메뉴 | ✅ |
 | 5-16 | Source 셀: 우클릭 Copy URL + 클릭 시 링크 열기 | FinnhubNewsWindow.tsx | Source 우클릭 → Copy URL → 클립보드 복사, Source 클릭 → 브라우저 새 탭으로 열림 | ✅ |
+| 5-17 | 백엔드 잡 큐 + `GET /api/jobs/:jobId` 폴링 엔드포인트 | `server.ts`, `jobManager.ts`(신규) | POST → `{ jobId }` 즉시 반환, GET 폴링 시 `{ status, progress, logs[] }` 응답 | ⏳ |
+| 5-18 | View Log 버튼 + 로그 패널 UI(자동 오픈 금지) | `FinnhubNewsWindow.tsx` | Update 옆 View Log 클릭 → 진행률 바 + 실시간 로그 표시, 시작 시 자동 열림 없음 | ⏳ |
 
 **세부 단계 목적/설명 (5단계)**
 - `5-1` 목적: Brave 기반 창을 Finnhub 기반으로 전환. 설명:
@@ -1017,6 +1063,26 @@ API 계약(초안)
   - 사람 검증(비개발자): 우클릭→Copy URL→붙여넣기, 좌클릭→브라우저 열림을 각각 확인.
   - 흔한 문제/주의: 브라우저 권한/정책으로 clipboard API가 막혀 fallback 필요; 메뉴가 화면 밖으로 나가는 포지셔닝.
 
+- `5-17` 목적: Update 요청을 동기 응답 대신 백그라운드 잡으로 전환하여, 장시간 수집에도 UI가 멈추지 않게 한다. 설명:
+  - `POST /api/news/pull-finhub` 응답을 즉시 `{ jobId }` 반환으로 변경한다. 실제 수집은 백그라운드에서 실행된다.
+  - `GET /api/jobs/:jobId` 폴링 엔드포인트를 추가한다: `{ status: "running"|"done"|"failed", progress: { completed, total, pct }, logs: string[], error?: string }`.
+  - 잡 상태를 메모리(Map) 또는 SQLite로 관리하는 `jobManager.ts` 모듈을 신규 생성한다.
+  - Rate limit 준수: Finnhub 300 req/min 제한 내에서 토큰 버킷 또는 딱레이로 조절.
+  - 완료 조건(눈으로 확인): POST 응답이 1초 이내로 `{ jobId }` 반환. GET 폴링 시 `progress.pct`가 0→100으로 증가.
+  - 사람 검증(비개발자): Update 클릭 후 페이지가 멈추지 않고 다른 조작이 가능한지 확인.
+  - 흔한 문제/주의: 잡 상태가 누락되어 영원히 "running" 상태로 남음; rate limit 초과로 429 응답 발생.
+
+- `5-18` 목적: 사용자가 수집 진행 상황을 **원할 때만** 확인할 수 있는 View Log 버튼과 로그 패널을 제공한다. 설명:
+  - Update 버튼(split-dropdown) 우측에 **View Log** 버튼을 배치한다.
+  - **시작 시 로그 패널이 자동으로 열리지 않는다.** 사용자가 View Log를 눌러야만 열린다.
+  - 로그 패널 내용: 진행률 바(처리된 ticker / 전체 ticker, %), 실시간 로그 라인(타임스탬프 + 메시지), 에러 시 빨간 텍스트.
+  - 로그 패널은 닫기 버튼(X) 또는 외부 클릭/ESC로 닫을 수 있다.
+  - 잡 완료/실패 후에도 View Log로 최종 결과를 확인할 수 있다.
+  - 폴링 주기: 2~3초(status가 done/failed면 중단).
+  - 완료 조건(눈으로 확인): Update 클릭 후 View Log 버튼이 활성화됨. 클릭 시 로그 패널에 진행률 + 로그 표시. 완료 후 "Done" 상태.
+  - 사람 검증(비개발자): Update 클릭 → View Log 클릭 → 진행률이 올라가는지 확인. Update만 클릭하고 View Log를 누르지 않으면 로그 패널이 안 열리는지 확인.
+  - 흔한 문제/주의: 폴링 중단 실패로 로그가 멈쵤; 로그 패널 z-index 부족으로 다른 요소에 가려짐; 잡이 없을 때 View Log 버튼 상태 처리.
+
 **검증 훅 (5단계 마감):**
 ```
 1. news feed:finhub api 창 열기
@@ -1033,6 +1099,8 @@ API 계약(초안)
 12. 콘솔에 `[backfill] company_news ... splitting…` 로그 확인 (adaptive splitting 동작)
 13. Press Release Update 클릭 → POST body에 `{mode:"recent", sourceType:"press_release"}` 확인
 14. Source 컬럼: 좌클릭으로 링크 열기, 우클릭 메뉴에서 Copy URL → 붙여넣기 확인
+15. Update 클릭 → 응답이 `{ jobId }` 로 즉시 반환되고, UI가 멈추지 않는지 확인
+16. View Log 버튼 클릭 → 로그 패널에 진행률 바 + 로그 표시 확인. Update만 클릭하고 View Log 안 누르면 패널 안 열리는지 확인
 ```
 - 사용자 확인 필요: **Yes**
 
@@ -1319,30 +1387,33 @@ API 계약(초안)
 목적
 - 백엔드 업데이트를 수동으로 실행하고, 최신 상태를 확인할 수 있는 최소 운영 창을 제공한다.
 - 1단계의 update status를 읽어 각 항목의 “마지막 성공 시각”을 보여준다.
+- **각 섹션에 View Log 버튼을 배치**하여 장시간 업데이트의 진행률/로그를 확인할 수 있게 한다(시작 시 자동 오픈 금지).
 
 UI 동작(최소)
-- 버튼 2개:
-  - `IBKR Price Data` → `POST /api/ibkr/ohlc1d/update`
-  - `IBKR Calendar Data` → `POST /api/ibkr/calendar/update`
+- 섹션별 구성:
+  - `IBKR Price Data` → Update 버튼 + **View Log** 버튼 + last success + DB 최신 날짜
+  - `IBKR Calendar Data` → Update 버튼 + **View Log** 버튼 + last success
+- Update 클릭 시 **백그라운드 잡**으로 시작(`{ jobId }` 즉시 반환).
+- **View Log 버튼은 시작 시 자동 오픈 금지** — 사용자가 눌러야만 로그 패널이 열린다.
 - 상태 표시(읽기 전용):
   - 각 소스의 last success timestamp
   - OHLC DB 최신 날짜(`GET /api/ibkr/ohlc1d/status`)
 
 로딩/에러
-- 실행 중에는 해당 버튼 비활성화 + “Running…” 텍스트 표시.
+- 실행 중에는 해당 Update 버튼 비활성화 + “Running…” 텍스트 표시.
 - 실패 시 창 내부에 짧은 에러 메시지를 표시(추가 모달 금지).
-
 프론트 파일:
 - `src/app/types.ts`에 `data-control` 윈도우 타입 추가
 - `src/app/components/DataControlWindow.tsx` 신규
   - 섹션 2개
-    - IBKR Price Data(OHLC 1D): Update 버튼 + last updated + DB 최신 날짜
-    - IBKR Calendar Data: Update 버튼 + last updated
+    - IBKR Price Data(OHLC 1D): Update 버튼 + **View Log** 버튼 + last updated + DB 최신 날짜
+    - IBKR Calendar Data: Update 버튼 + **View Log** 버튼 + last updated
   - 초기 로드: `GET /api/updates/status`
-  - 버튼 클릭:
-    - 가격: `POST /api/ibkr/ohlc1d/update`
-    - 캘린더: `POST /api/ibkr/calendar/update`
+  - Update 클릭:
+    - 가격: `POST /api/ibkr/ohlc1d/update` → `{ jobId }` 반환
+    - 캘린더: `POST /api/ibkr/calendar/update` → `{ jobId }` 반환
     - 이후 `GET /api/updates/status` + `GET /api/ibkr/ohlc1d/status` 재조회
+  - View Log 클릭: `GET /api/jobs/:jobId`로 폴링 → 로그 패널에 진행률 + 로그 표시 (자동 오픈 금지)
 - 등록:
   - `AddTabModal.tsx` 체크박스 추가
   - `App.tsx` title 매핑
@@ -1397,13 +1468,32 @@ UI 동작(최소)
   - 사람 검증(비개발자): “IBKR Price Data” 1회 실행 후, 완료되면 “DB 최신 날짜” 표시가 바뀌는지 확인.
   - 흔한 문제/주의: 한쪽만 refresh해서 timestamp는 바뀌는데 DB date는 안 바뀌는 등 불일치.
 
+- `8-6` 목적: IBKR 업데이트 요청을 동기 응답 대신 백그라운드 잡으로 전환하여 장시간 작업에도 UI가 멘추지 않게 한다. 설명:
+  - `POST /api/ibkr/ohlc1d/update` 및 `POST /api/ibkr/calendar/update` 응답을 즉시 `{ jobId }` 반환으로 변경한다.
+  - 5단계의 `jobManager.ts` 모듈을 공유해 잡 상태를 관리한다.
+  - `GET /api/jobs/:jobId` 폴링으로 `{ status, progress, logs[] }` 응답.
+  - 완료 조건(눈으로 확인): POST 응답이 1초 이내로 `{ jobId }` 반환. GET 폴링 시 progress가 증가.
+  - 사람 검증(비개발자): Update 클릭 후 창이 멘추지 않고 다른 조작 가능한지 확인.
+  - 흔한 문제/주의: 잡 상태가 누락되어 영원히 running 상태로 남음; IBKR 연결 끊김 시 잡 실패 처리.
+
+- `8-7` 목적: 사용자가 IBKR 업데이트 진행 상황을 원할 때만 확인할 수 있는 View Log 버튼과 로그 패널을 제공한다. 설명:
+  - 각 섹션(Price Data / Calendar Data) 우측에 **View Log** 버튼을 배치한다.
+  - **시작 시 로그 패널이 자동으로 열리지 않는다.** 사용자가 View Log를 눌러야만 열린다.
+  - 로그 패널: 진행률 바(ticker 기준) + 실시간 로그 라인 + 에러 표시.
+  - 닫기: X 버튼 또는 외부 클릭/ESC.
+  - 완료 조건(눈으로 확인): Update 클릭 후 View Log 버튼 활성화. 클릭 시 로그 패널 열림. Update만 클릭하면 패널 안 열림.
+  - 사람 검증(비개발자): Update → View Log → 진행률 업데이트 확인. Update만 클릭하고 View Log 안 누르면 패널이 안 뜨는지 확인.
+  - 흔한 문제/주의: 폴링 중단 실패로 로그 멈쵤; z-index 부족; 잡 없을 때 View Log 버튼 disabled 처리.
+
 **검증 훅 (8단계 마감):**
 ```
 1. Data Control Window 열기
-2. IBKR Price Data 클릭 → POST /api/ibkr/ohlc1d/update
+2. IBKR Price Data Update 클릭 → 응답이 `{ jobId }` 로 즉시 반환, UI 멈추지 않는지 확인
 3. 성공 후 ibkr_ohlc_1d lastSuccessAt 갱신 확인
 4. GET /api/ibkr/ohlc1d/status로 최신 DB date 갱신 확인
-5. IBKR Calendar Data 클릭 → POST /api/ibkr/calendar/update; lastSuccessAt 갱신 확인
+5. IBKR Calendar Data Update 클릭 → `{ jobId }` 반환; 완료 후 lastSuccessAt 갱신 확인
+6. View Log 버튼 클릭 → 로그 패널에 진행률 바 + 로그 표시 확인
+7. Update만 클릭하고 View Log 안 누르면 패널 안 열리는지 확인 (자동 오픈 금지)
 ```
 - 사용자 확인 필요: **Yes**
 
@@ -1540,6 +1630,8 @@ UI 동작(최소)
 │                      │ ✅ 5-9 Changes% 실시간 계산  │
 │                      │ ✅ 5-10 서버사이드 검색      │
 │                      │ ✅ 5-11 Update 툴팁(5초)     │
+│                      │ ⏳ 5-17 백엔드 잡 큐 + 폴링  │
+│                      │ ⏳ 5-18 View Log 버튼/패널 │
 │                      │                              │
 └──────────┬───────────┘                              │
            │                                          │
@@ -1574,7 +1666,9 @@ UI 동작(최소)
    │  8-2 /api/updates/status에서 상태 fetch
    │  8-3 소스별 update 버튼
    │  8-4 진행률/에러 표시
-   │  8-5 스모크 테스트
+   │  8-5 status/DB date 재조회
+   │  8-6 백엔드 잡 큐 연동(IBKR)
+   │  8-7 View Log 버튼 + 로그 패널
    │
    ▼
    ⬜ Step 9 (테스트 + 수락 검사)

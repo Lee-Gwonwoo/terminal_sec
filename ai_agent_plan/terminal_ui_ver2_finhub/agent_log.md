@@ -917,3 +917,69 @@
   - `figma_frontend_prompt.md`에 6개 Update 옵션, `maxTickers` 미전송, Ticker/Columns/Source UX 반영 확인
   - `plan.md`에 5-12/5-13/5-16 상태가 ✅로 반영됨 확인
 
+### 장시간 업데이트 UX — 백그라운드 잡 + View Log 버튼 plan 반영
+
+**작성 시각:** 02:47 (local)
+**Status: done (확인 대기)**
+
+#### 변경 사유
+- 장시간 업데이트(Finnhub 뉴스 전체 수집, IBKR 가격/캘린더) 시 동기 응답 대기 UX가 부적합.
+- 사용자 요구: "시작 시 자동 오픈 금지, View Log 버튼으로 진행률/로그 확인".
+
+#### 수행 내용
+
+1. **목표 #5 추가** — 장시간 업데이트 UX (백그라운드 잡 + View Log 버튼, 시작 시 자동 오픈 금지)
+2. **PLAN CHANGE (2026-03-06) 노트 추가** — 변경 사유/영향 기록
+3. **"장시간 update UX 원칙(공통)" 섹션 신설** — 아키텍처 아래, 모든 장시간 작업에 공통 적용되는 백그라운드 잡 패턴 + View Log 규칙 + Finnhub rate limit 사항 정리
+4. **5단계 수정:**
+   - 데이터 흐름: Update → 백그라운드 잡 패턴으로 변경 (즉시 `{ jobId }` 반환)
+   - 서브스텝 5-17 추가: 백엔드 잡 큐 + `GET /api/jobs/:jobId` 폴링 엔드포인트
+   - 서브스텝 5-18 추가: View Log 버튼 + 로그 패널 UI (자동 오픈 금지)
+   - 검증 훅 15-16 추가
+5. **8단계 수정:**
+   - 목적/UI 동작 섹션: 각 섹션에 View Log 버튼 배치, 백그라운드 잡 패턴 명시
+   - 프론트 파일 설명: View Log + jobId 폴링 동작 반영
+   - 서브스텝 8-6 추가: 백엔드 잡 큐 연동 (IBKR 엔드포인트 → 백그라운드 잡 전환)
+   - 서브스텝 8-7 추가: 각 섹션 View Log 버튼 + 로그 패널 UI (자동 오픈 금지)
+   - 검증 훅 6-7 추가
+6. **의존성 그래프 업데이트** — 5-17/5-18, 8-6/8-7 반영
+
+#### 수정 파일
+
+| 파일 | 변경 |
+|------|------|
+| `ai_agent_plan/terminal_ui_ver2_finhub/plan.md` | 목표 #5, PLAN CHANGE 노트, UX 원칙 섹션, 5단계 (5-17/5-18), 8단계 (8-6/8-7), 의존성 그래프 업데이트 |
+| `agent_log.md` | 이 항목 기록 |
+
+#### 검증
+- plan.md 목표 섹션에 #5 "장시간 업데이트 UX" 확인
+- PLAN CHANGE (2026-03-06) 노트 존재 확인
+- "장시간 update UX 원칙(공통)" 섹션 존재 확인
+- 5단계 서브스텝 테이블에 5-17, 5-18 존재 + 설명/검증 훅 확인
+- 8단계 서브스텝 테이블에 8-6, 8-7 존재 + 설명/검증 훅 확인
+- 의존성 그래프에 5-17/5-18, 8-6/8-7 라인 존재 확인
+
+---
+
+### 5-17/5-18 구현: 백그라운드 잡 큐 + View Log 버튼/패널
+
+| 항목 | 내용 |
+|------|------|
+| 시점 | plan 반영 직후 |
+| 상태 | 확인 대기(awaiting user confirmation) |
+| 관련 서브스텝 | 5-17 (백엔드 잡 큐 + 폴링), 5-18 (View Log 버튼/패널) |
+
+#### 변경 파일
+
+| 파일 | 변경 내용 |
+|------|------|
+| `terminal/backend/src/services/jobManager.ts` | **신규 생성** — 메모리 기반 잡 관리 모듈. `createJob`, `getJob`, `updateProgress`, `appendLog`, `completeJob`, `failJob` 내보내기. 30분 후 완료 잡 자동 정리, 최대 500줄 로그 |
+| `terminal/backend/src/server.ts` | (1) `jobManager` import 추가 (2) `POST /api/news/pull-finhub` → `{ jobId }` 즉시 반환 + fire-and-forget async IIFE로 백그라운드 수집 (3) `GET /api/jobs/:jobId` 폴링 엔드포인트 추가 |
+| `termina_web/.../FinnhubNewsWindow.tsx` | (1) `handleUpdate` → async job 패턴 (POST → jobId 저장, 완료 대기 X) (2) 2.5초 간격 폴링 useEffect (3) View Log 버튼 (Update 옆, 자동 오픈 금지) (4) 하단 로그 패널 오버레이 (진행률 바 + 실시간 로그 + 에러 표시 + ESC 닫기) |
+| `ai_agent_plan/.../plan.md` | 5-17/5-18 상태 ⬜→⏳, 의존성 그래프도 동일 업데이트 |
+
+#### 검증
+- `npx tsc --noEmit` (backend) — 에러 없음
+- VS Code IDE 에러 검사 (FinnhubNewsWindow.tsx) — 에러 없음
+- 사용자 확인 필요: 실제 UI에서 Update 클릭 → jobId 반환 확인, View Log 클릭 → 패널 열림/진행률/로그 확인
+
