@@ -20,6 +20,9 @@
    - 추가 시 CSV **마지막 행에 append**
 3) `/calendar`는 **IBKR 캘린더 데이터만** 사용
 4) `news feed_brave api` 표기를 **`news feed:finhub api`**로 변경하고, 뉴스는 **Finnhub API**로 수집/표시(Brave 기반은 사용하지 않음)
+  - News Feed Window 표 컬럼에 `Industry`와 `Keywords`를 추가한다.
+  - `Industry`는 Finnhub company profile 계열 데이터에서 온 값으로 표시한다.
+  - `Keywords`는 `news_fulltext` 저장 위치 옆 컬럼에 저장된 후속 AI keyword 분석 결과를 표시한다.
 5) **장시간 업데이트 UX** — 모든 장시간 수집 작업(Finnhub 뉴스, IBKR 가격, IBKR 캘린더)은 **백그라운드 잡**으로 실행하고, 각 창에 **View Log** 버튼을 배치하여 진행률/로그를 확인할 수 있게 한다. **시작 시 로그 창 자동 오픈 금지** — 사용자가 View Log 버튼을 눌러야만 열린다.
 6) **Full Text Extraction(뉴스 원문 추출)** — 뉴스 피드 업데이트와 **별도 버튼/프로세스**로, 저장된 뉴스의 원본 기사를 크롤링하여 full text를 추출/저장한다.
    - 대상: full text가 아직 없는 **모든 news_id** (press_release + company_news 구분 처리)
@@ -191,6 +194,17 @@ PLAN CHANGE (2026-03-06 #4)
   - 5-20, 5-21 서브스텝 신설
 - 영향: News Feed Window 툴바 범위가 확대되지만, backend 로직은 새로 분기하지 않고 Data Control과 동일 엔드포인트를 재사용한다.
 ```
+
+```
+PLAN CHANGE (2026-03-06 #5)
+- 왜: 사용자가 News Feed Window에 `Industry` 컬럼과 `Keywords` 컬럼도 추가하라고 요청함. `Keywords`는 full text 저장 위치 옆 컬럼에 저장하되, 값 자체는 나중에 별도 AI agent가 full text를 보고 정리한 뒤 표시되어야 함.
+- 무엇이 바뀌었나:
+  - 목표 #4에 `Industry` / `Keywords` 컬럼 요구 추가
+  - capability matrix와 5단계 News Feed Window 컬럼 정의에 `Industry`, `Keywords` 추가
+  - 10단계 `news_fulltext` 스키마에 keyword 저장 컬럼 추가
+  - 10단계에 "키워드 분석은 후속 AI enrichment 작업"이라는 비범위/후속 규칙 명시
+- 영향: UI는 `Keywords` 컬럼을 가지되, 실제 값은 full text 추출 이후의 별도 AI 분석이 완료되어야만 채워진다. 초기 상태는 빈 값/`-` 또는 pending 상태다.
+```
 ---
 
 ### 아키텍처(상위)
@@ -350,7 +364,7 @@ UI 컬럼이 요구하는 데이터(예: market cap, turnover, earnings calendar
 
 점검 대상 컬럼(최소, 현재 UI 기준)
 - “news feed:finhub api” 윈도우(현재 `BraveNewsWindow`가 mock으로 구현된 부분):
-  - 표 컬럼: `Date`, `Time`, `Title`, `Sources`, `Changes %`
+  - 표 컬럼: `Date`, `Time`, `Title`, `Industry`, `Sources`, `Changes %`, `Keywords`
   - `Changes %` 셀 내부에 렌더되는 하위 항목:
     - `Chg` (1D % change)
     - `fr.Open` (오픈 대비 % change)
@@ -359,6 +373,7 @@ UI 컬럼이 요구하는 데이터(예: market cap, turnover, earnings calendar
   - 필터 UI가 암시하는 추가 필드:
     - Market cap(시가총액, market-cap preset용)
     - Industry(산업, multi-select)
+    - Keywords(후속 AI keyword 분석 결과)
 - Calendar window (`/calendar`는 IBKR-only 요구사항):
   - Earnings 탭(표에 기본으로 보이는 컬럼):
     - `Date Announcement`, `Time`, `Symbol`, `Session`, `Period`, `Confirmed`, `EPS`, `Est. EPS`, `Surprise %`, `Revenue`, `Est. Revenue`
@@ -385,10 +400,11 @@ capability matrix 초안 템플릿(감사 단계에서 채움)
 | News Feed | Title | Finnhub |  |
 | News Feed | Sources | Finnhub | 필드명(`source` 등) 확인 |
 | News Feed | Ticker | Finnhub(심볼 파라미터) | 보통 심볼별로 요청; 실제 동작 확인 |
+| News Feed | Industry | Finnhub company profile(우선) | `finnhubIndustry` 또는 동등 필드 매핑 필요 |
 | News Feed | Changes: `Chg` / `fr.Open` / `+7D` / `+14D` / `+30D` | `OHLC_data/ohlc_1d_watchlist.sqlite`의 `ohlc_1d` 기반 계산 | 히스토리 부족 시 `-`로 렌더(가짜 금지) |
+| News Feed | Keywords | `news_fulltext.keywords_json` | full text 추출 후, 별도 AI keyword 분석 작업이 완료된 row만 표시 |
 | News Feed | Earning date 라인 | Finnhub earnings/calendar(우선) | 불가하면 렌더하지 않음(가짜 금지) |
 | News Feed | Market cap | Finnhub company profile(우선) | 단위 확인, numeric USD 저장 + 포맷 |
-| News Feed | Industry | Finnhub company profile(우선) | 필드(`finnhubIndustry` 등) 확인 |
 | Calendar | 실적 발표일/시간 | IBKR WSH (`wshe_ed`) | ✅ v3 확인: 발표일, 시간대(BMO/AMC), 상태(CONFIRMED/UNCONFIRMED) |
 | Calendar | EPS actual + estimate | IBKR WSH (`wshe_eps`) | ✅ v3 확인: `amount_oc`(실제), `estimated_eps`(예상), `change_amount`, `change_percent` |
 | Calendar | Revenue(매출) | Finnhub `/stock/earnings` (무료) | ❌ WSH에 매출 필드 없음; Finnhub으로 보충 |
@@ -1026,6 +1042,10 @@ API 계약(초안)
   - 둘 다 선택(기본): `GET /api/news?source_names=FINNHUB` (source_type 파라미터 없이 전체 반환)
   - 필터 상태는 컴포넌트 state로 관리(URL/전역 상태 불필요).
 - **Change% 컬럼**: 각 뉴스 row의 `change_1d_pct`, `change_from_open_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct` 값을 백엔드 응답에서 그대로 렌더한다. 값이 없으면 `-`로 표시.
+- **Industry 컬럼**: 각 뉴스 row의 `industry` 값을 백엔드 응답에서 렌더한다. 값이 없으면 `-`.
+- **Keywords 컬럼**: 각 뉴스 row의 `keywords` 값을 백엔드 응답에서 렌더한다.
+  - 저장 원천은 `news_fulltext.keywords_json`.
+  - 후속 AI keyword 분석이 아직 수행되지 않은 row는 빈 배열 또는 `pending` 상태로 남고, UI에서는 `-`로 표시한다.
 - 창 내부에 “Update” 버튼(split-dropdown 포함)을 두고 `POST /api/news/pull-finhub`로 **백그라운드 잡**을 시작한다.
   - 백엔드는 즉시 `{ jobId }` 를 반환하고, 수집은 비동기로 실행된다.
   - Update 버튼 옆에 **View Log** 버튼을 배치한다. **시작 시 자동 오픈 금지**  사용자가 눌러야만 로그 패널이 열린다.
@@ -1082,6 +1102,8 @@ API 계약(초안)
 | 5-19 | Update UX 전면 리디자인: 7d/Recent/Custom 3모드 + preflight + date picker | `server.ts`, `finnhubNewsProvider.ts`, `FinnhubNewsWindow.tsx` | Entire 제거 → Custom(date picker + adaptive backfill), 기본 Update → 7d, Recent = per-ticker anchor + preflight 경고 모달, 메인 버튼 = 마지막 사용 모드 기억(localStorage) | ✅ |
 | 5-20 | News 툴바에 `7D Change Update` 버튼 추가 | `FinnhubNewsWindow.tsx` | 클릭 시 `POST /api/news/change/update-7d` → `{ jobId }` 반환, 완료 후 목록 재조회 | ⬜ |
 | 5-21 | News 툴바에 `Custom Change Update` 입력+버튼 추가 | `FinnhubNewsWindow.tsx` | `N` 입력 후 `POST /api/news/change/update-custom` 호출, 완료 후 목록 재조회 | ⬜ |
+| 5-22 | News 테이블에 `Industry` 컬럼 추가 | `FinnhubNewsWindow.tsx` | `industry` 값 렌더, 없으면 `-` | ⬜ |
+| 5-23 | News 테이블에 `Keywords` 컬럼 추가 | `FinnhubNewsWindow.tsx` | `keywords` 값 렌더, AI 분석 전에는 `-` | 🚫 |
 
 **세부 단계 목적/설명 (5단계)**
 - `5-1` 목적: Brave 기반 창을 Finnhub 기반으로 전환. 설명:
@@ -1145,6 +1167,8 @@ API 계약(초안)
   - **둘 다 선택**(기본 상태): `GET /api/news?source_names=FINNHUB` (source_type 파라미터 없이 요청) → 두 종류 모두 표시.
   - **하나만 선택**: `GET /api/news?source_names=FINNHUB&source_type=company_news` 또는 `&source_type=press_release` → 선택된 종류만 표시.
   - **Change% 컬럼 렌더**: 각 row의 `change_1d_pct`, `change_from_open_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct`를 해당 컬럼에 표시. NULL이면 `-`.
+  - **Industry 컬럼 렌더**: 각 row의 `industry`를 표시. NULL이면 `-`.
+  - **Keywords 컬럼 렌더**: 각 row의 `keywords`를 표시. 후속 AI keyword 분석 전이면 `-`.
   - 필터 전환 시 기존 데이터를 클리어하고 새 요청을 보낸다(stale 데이터 방지).
   - 완료 조건(눈으로 확인): 필터 UI가 보이고, 전환 시 목록이 해당 type에 맞게 바뀐다. Change% 컬럼에 실제 숫자(또는 `-`)가 표시된다.
   - 사람 검증(비개발자): Company News만 선택 → press release가 안 보이는지 확인. 둘 다 선택 → 둘 다 보이는지 확인. Change% 값이 있는 row에서 숫자가 보이는지 확인.
@@ -1270,6 +1294,22 @@ API 계약(초안)
   - 사람 검증(비개발자): `21` 입력 후 실행하고, 완료 뒤 대상 뉴스의 custom change 계산 결과가 backend에 저장됐는지 확인.
   - 흔한 문제/주의: 입력값 검증 누락; News Window와 Data Control이 서로 다른 parameter 이름을 보내는 문제.
 
+- `5-22` 목적: News Feed Window에서 산업 정보를 뉴스 row와 함께 볼 수 있게 한다. 설명:
+  - 테이블 컬럼에 `Industry`를 추가한다.
+  - 값은 backend가 제공하는 `industry` 필드에서 렌더하며, 일반적으로 Finnhub company profile 계열 값이 들어온다.
+  - 완료 조건(눈으로 확인): Industry 컬럼이 보이고, 값이 없는 row는 `-`로 표시된다.
+  - 사람 검증(비개발자): 서로 다른 ticker 뉴스 row에서 산업명이 보이거나, 없으면 `-`로 일관되게 보이는지 확인.
+  - 흔한 문제/주의: industry 필드가 백엔드 응답에 없는데 프론트만 먼저 렌더하여 빈 컬럼이 되는 문제.
+
+- `5-23` 목적: News Feed Window에서 후속 AI keyword 분석 결과를 볼 수 있게 한다. 설명:
+  - 테이블 컬럼에 `Keywords`를 추가한다.
+  - 값은 `news_fulltext.keywords_json`에서 온 `keywords` 배열을 표시한다.
+  - **중요:** 키워드 생성 자체는 이번 단계의 범위가 아니며, 나중에 별도 AI agent 작업으로 full text를 읽고 정리한 뒤에만 값이 채워진다.
+  - 분석 전 상태는 `-` 또는 pending으로 표시한다.
+  - 완료 조건(눈으로 확인): Keywords 컬럼이 보이고, 분석 전 row는 `-`, 분석된 row는 키워드 목록이 표시된다.
+  - 사람 검증(비개발자): full text는 있지만 keyword 분석이 아직 없는 row에서 `-`가 표시되는지 확인.
+  - 흔한 문제/주의: full text 추출 완료와 keyword 분석 완료를 혼동해 O/X만 보고 keywords가 있다고 가정하는 문제.
+
 **검증 훅 (5단계 마감):**
 ```
 1. news feed:finhub api 창 열기
@@ -1290,6 +1330,8 @@ API 계약(초안)
 16. View Log 버튼 클릭 → 로그 패널에 진행률 바 + 로그 표시 확인. Update만 클릭하고 View Log 안 누르면 패널 안 열리는지 확인
 17. News 창의 `7D Change Update` 클릭 → `{ jobId }` 반환, 완료 후 목록 재조회 확인
 18. News 창의 `Custom Change Update`에 `21` 입력 후 실행 → `{ jobId }` 반환, 완료 후 재조회 확인
+19. Industry 컬럼 표시 확인 → 값이 없으면 `-`, 있으면 산업명 표시 확인
+20. Keywords 컬럼 표시 확인 → AI keyword 분석 전에는 `-`, 분석 후에는 키워드 목록 표시 확인
 ```
 - 사용자 확인 필요: **Yes**
 
@@ -1800,6 +1842,8 @@ UI 동작(최소)
 
 저장 전략
 - 별도 테이블 `news_fulltext` (news_items와 1:1 관계)
+- `news_fulltext`에 keyword 저장 컬럼을 함께 둔다(예: `keywords_json`, `keywords_status`, `keywords_updated_at`).
+- 키워드 값은 full text 추출 단계에서 즉시 생성하지 않고, **후속 AI keyword 분석 작업**이 `full_text`를 읽은 뒤 나중에 채운다.
 - `news_items`에 `publisher TEXT` 컬럼 migration 추가
 - full text가 없는 뉴스 = `news_fulltext`에 해당 news_id가 없는 경우
 
@@ -1815,17 +1859,21 @@ API 계약(초안)
 - `POST /api/news/fulltext/update` → `{ jobId }` (백그라운드 잡 시작)
   - 잡 내부: 미추출 news_id 순회 → 도메인별 추출 → `news_fulltext` INSERT
 - `GET /api/news/fulltext/:newsId` → `{ newsId, fullText, extractionStatus, extractionNote, wordCount, extractedAt }`
-- `GET /api/news` 응답에 `hasFullText: boolean` 필드 추가 (JOIN으로 계산)
+- `GET /api/news` 응답에 `hasFullText: boolean`, `keywords: string[]`, `keywordsStatus` 필드 추가 (JOIN으로 계산)
 
 백엔드 파일:
 - `terminal/backend/src/db.ts`
   - `news_fulltext` 테이블 CREATE (initDb 내)
+    - `keywords_json TEXT NOT NULL DEFAULT '[]'`
+    - `keywords_status TEXT NOT NULL DEFAULT 'pending'`
+    - `keywords_updated_at TEXT`
   - `news_items`에 `publisher TEXT` 컬럼 ensureColumn 추가
 - `terminal/backend/src/services/fulltextRepository.ts` 신규
   - `getFulltext(newsId)` → full text row 조회
   - `insertFulltext(newsId, data)` → extraction 결과 저장
   - `getUnextractedNewsIds()` → news_fulltext에 없는 news_id 목록
   - `getFulltextStatus(newsIds)` → 다건 hasFullText 조회 (news 목록 표시용)
+  - `updateKeywords(newsId, keywords)` → 후속 AI keyword 분석 결과 저장
 - `terminal/backend/src/services/fulltextExtractors.ts` 신규
   - `extractNasdaq(url)` → HTTP GET + HTML parsing → article body text
   - `extractTmx(url)` → newsid 파싱 → GraphQL 호출 → story HTML
@@ -1841,7 +1889,7 @@ API 계약(초안)
   - `GET /api/news` 응답에 `hasFullText` 필드 추가
 - `terminal/backend/src/services/newsRepository.ts`
   - `getNews()` 쿼리에 `news_fulltext` LEFT JOIN → `hasFullText` 계산
-  - `GET /api/news` 응답 각 row에 `hasFullText: boolean` 포함
+  - `GET /api/news` 응답 각 row에 `hasFullText: boolean`, `keywords`, `keywordsStatus` 포함
 - `terminal/backend/src/services/finnhubNewsProvider.ts`
   - 뉴스 insert 시 URL 도메인을 파싱하여 `publisher` 컬럼에 자동 세팅
   - 기존 news_items 중 `publisher IS NULL`인 row에 대한 일괄 backfill 함수 추가
@@ -1851,6 +1899,9 @@ API 계약(초안)
   - 테이블에 **"Full Text" 컬럼** 추가
     - `hasFullText === true` → **O** (초록색, 클릭 가능)
     - `hasFullText === false` → **X** (회색)
+  - 테이블에 **"Keywords" 컬럼** 추가
+    - `keywordsStatus === 'ready'` 이고 `keywords.length > 0` → 키워드 badge/list 표시
+    - `keywordsStatus === 'pending'` 또는 빈 배열 → `-`
   - **O 클릭 시**: `GET /api/news/fulltext/:newsId` 호출 → 모달/팝업으로 full text 표시
     - HTML full text인 경우: `dangerouslySetInnerHTML` 또는 iframe sandbox로 안전 렌더
     - 팝업 닫기: X 버튼 / 외부 클릭 / ESC
@@ -1865,13 +1916,14 @@ API 계약(초안)
   - Nasdaq 뉴스의 full text가 `news_fulltext`에 저장됨
   - TMX 뉴스의 full text가 GraphQL API를 통해 저장됨
   - finnhub.io 뉴스는 `skipped`로 처리됨
+  - 키워드 컬럼은 후속 AI keyword 분석 완료 전까지 `-` 또는 pending으로 보임
   - UI에서 O/X 컬럼이 정확히 표시되고, O 클릭 시 본문이 팝업으로 나옴
 
 **세부 단계 (10단계)**
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 10-1 | `news_fulltext` 테이블 CREATE + `news_items.publisher` 컬럼 migration | `terminal/backend/src/db.ts` | 백엔드 시작 후 테이블/컬럼 존재 확인 | ⬜ |
+| 10-1 | `news_fulltext` 테이블 CREATE + keyword 컬럼 + `news_items.publisher` 컬럼 migration | `terminal/backend/src/db.ts` | 백엔드 시작 후 테이블/컬럼 존재 확인 | ⬜ |
 | 10-2 | `fulltextRepository.ts` 구현 (CRUD + 미추출 목록 조회) | `terminal/backend/src/services/fulltextRepository.ts` | `npx tsc --noEmit` → 0 errors | ⬜ |
 | 10-3 | 기존 news_items `publisher` 컬럼 backfill (URL 도메인 파싱) | `terminal/backend/src/services/finnhubNewsProvider.ts` | 기존 707건에 대해 publisher가 NASDAQ/TMX/FINNHUB 중 하나로 세팅 | ⬜ |
 | 10-4 | `extractNasdaq(url)` — Nasdaq HTML scraping 추출기 | `terminal/backend/src/services/fulltextExtractors.ts` | 샘플 Nasdaq URL로 article body 추출 성공 | ⬜ |
@@ -1880,18 +1932,21 @@ API 계약(초안)
 | 10-7 | `fulltextUpdateService.ts` — 백그라운드 잡 오케스트레이터 | `terminal/backend/src/services/fulltextUpdateService.ts` | 미추출 news_id 순회 + 도메인별 추출 + 진행률 로그 | ⬜ |
 | 10-8 | `POST /api/news/fulltext/update` 엔드포인트 (잡 시작) | `terminal/backend/src/server.ts` | POST → `{ jobId }` → 잡 실행 확인 | ⬜ |
 | 10-9 | `GET /api/news/fulltext/:newsId` 엔드포인트 | `terminal/backend/src/server.ts` | 특정 newsId에 대해 full text 반환 | ⬜ |
-| 10-10 | `GET /api/news` 응답에 `hasFullText` 필드 추가 | `newsRepository.ts`, `server.ts` | 응답 각 row에 `hasFullText: boolean` 포함 | ⬜ |
-| 10-11 | 프론트: Full Text 컬럼 (O/X) 추가 + 컬럼 토글 연동 | `FinnhubNewsWindow.tsx` | 테이블에 O/X 표시, Columns 드롭다운에 포함 | ⬜ |
+| 10-10 | `GET /api/news` 응답에 `hasFullText`, `keywords`, `keywordsStatus` 필드 추가 | `newsRepository.ts`, `server.ts` | 응답 각 row에 관련 필드 포함 | ⬜ |
+| 10-11 | 프론트: Full Text 컬럼 (O/X) + Keywords 컬럼 추가 + 컬럼 토글 연동 | `FinnhubNewsWindow.tsx` | 테이블에 O/X와 Keywords 표시, Columns 드롭다운에 포함 | ⬜ |
 | 10-12 | 프론트: O 클릭 → full text 팝업 (안전 HTML 렌더) | `FinnhubNewsWindow.tsx` | O 클릭 시 모달에 full text 표시, XSS 방지 | ⬜ |
 | 10-13 | 프론트: "Full Text Update" 버튼 + View Log 연동 | `FinnhubNewsWindow.tsx` | 버튼 클릭 → 잡 시작 → View Log로 확인 → 완료 후 목록 재조회 | ⬜ |
 | 10-14 | end-to-end 검증: Nasdaq + TMX + finnhub.io 각각 추출 결과 확인 | (런타임) | 3개 도메인 모두 정상 처리 확인 | ⬜ |
+| 10-15 | 후속 AI keyword 분석 결과 저장 규약 정의 | `fulltextRepository.ts`, `plan.md` | `keywords_json`/`keywords_status` 사용 규약 문서화 | ⬜ |
 
 **세부 단계 목적/설명 (10단계)**
 - `10-1` 목적: full text 저장 인프라를 DB에 준비. 설명:
   - `initDb()`에 `news_fulltext` 테이블을 idempotent하게 CREATE한다.
+  - `news_fulltext`에 `keywords_json`, `keywords_status`, `keywords_updated_at` 컬럼을 함께 둔다.
+  - 키워드 값은 이 단계에서 생성하지 않고, 후속 AI enrichment 작업이 나중에 채운다.
   - `news_items`에 `publisher TEXT` 컬럼을 `ensureColumn()`으로 추가한다.
   - `news_fulltext`의 FK(`news_id`)는 `news_items.id`를 참조한다.
-  - 완료 조건(눈으로 확인): 백엔드 시작 후 `sqlite_master`에 `news_fulltext` 테이블이 존재하고, `PRAGMA table_info(news_items)`에 `publisher` 컬럼이 있다.
+  - 완료 조건(눈으로 확인): 백엔드 시작 후 `sqlite_master`에 `news_fulltext` 테이블이 존재하고, `PRAGMA table_info(news_fulltext)`에 keyword 컬럼이 있으며, `PRAGMA table_info(news_items)`에 `publisher` 컬럼이 있다.
   - 사람 검증(비개발자): SQLite 뷰어에서 테이블/컬럼 존재 확인.
   - 흔한 문제/주의: FK 컬럼 타입 불일치; ensureColumn 호출이 initDb 밖에 있어 실행 안 됨.
 - `10-2` 목적: full text 데이터 접근을 캡슐화. 설명:
@@ -1948,11 +2003,20 @@ API 계약(초안)
   - 흔한 문제/주의: newsId 타입 불일치(string vs number); 대용량 HTML 응답 시 timeout.
 - `10-10` 목적: 뉴스 목록 API에 full text 존재 여부를 포함. 설명:
   - `newsRepository.getNews()` 쿼리에 `news_fulltext` LEFT JOIN을 추가.
-  - 각 row에 `hasFullText: boolean` 필드를 포함하여 반환 (JOIN 결과가 NULL이 아니고 `extraction_status = 'success'`이면 true).
+  - 각 row에 `hasFullText: boolean`, `keywords`, `keywordsStatus` 필드를 포함하여 반환한다.
+  - `keywords`는 `keywords_json`을 파싱한 배열이고, 후속 AI keyword 분석이 아직 안 끝났으면 빈 배열 또는 pending 상태다.
   - 기존 pagination/filter 로직에 영향 없도록 주의.
-  - 완료 조건(눈으로 확인): `GET /api/news?source_names=FINNHUB` 응답에 각 row마다 `hasFullText` 필드가 존재.
+  - 완료 조건(눈으로 확인): `GET /api/news?source_names=FINNHUB` 응답에 각 row마다 `hasFullText`, `keywords`, `keywordsStatus` 필드가 존재.
   - 흔한 문제/주의: JOIN으로 인한 쿼리 성능 저하(인덱스 필요); `hasFullText` 계산 조건 실수.
-- `10-11` 목적: News 테이블에 O/X 컬럼을 추가하여 full text 존재 여부를 시각적으로 표시. 설명:
+- `10-11` 목적: News 테이블에 O/X 컬럼과 Keywords 컬럼을 추가하여 full text/keyword 상태를 시각적으로 표시. 설명:
+  - `Keywords` 컬럼은 AI 분석이 끝난 row만 키워드 목록을 보여주고, 그 전에는 `-` 또는 pending으로 표시한다.
+  - 컬럼 가시성 토글에도 `Keywords`를 포함한다.
+
+- `10-15` 목적: 후속 AI keyword 분석 작업이 어떤 컬럼을 어떻게 채워야 하는지 규약을 고정한다. 설명:
+  - 별도 AI agent 작업은 `news_fulltext.full_text`를 읽고, `keywords_json`, `keywords_status='ready'`, `keywords_updated_at`를 업데이트한다.
+  - full text는 있으나 아직 분석 안 됐으면 `keywords_status='pending'` 유지.
+  - 완료 조건(눈으로 확인): 문서와 repository helper에 같은 컬럼 규약이 반영된다.
+  - 흔한 문제/주의: full text 추출 단계와 keyword 분석 단계를 혼동해, 빈 키워드를 success처럼 저장하는 문제.
   - `ColumnId` 타입에 `'fulltext'` 추가.
   - `renderCell`에 `fulltext` 케이스: `hasFullText ? 'O'(초록) : 'X'(회색)`. O는 클릭 가능(커서 포인터).
   - 컬럼 가시성 토글(Columns 드롭다운)에 "Full Text" 포함.

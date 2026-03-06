@@ -285,6 +285,34 @@
 
 ---
 
+**작성 시각:** 11:50 (local)
+
+### PLAN CHANGE — News Feed에 Industry / Keywords 컬럼 추가
+
+**Status: done (awaiting user confirmation)**
+
+#### Actions taken
+
+1. `plan.md` 목표와 capability matrix에 News Feed Window의 `Industry`, `Keywords` 컬럼 요구를 추가함
+2. 5단계에 `Industry` 컬럼 표시와 `Keywords` 컬럼 표시 요구를 추가하고, `5-22`, `5-23` 서브스텝을 신설함
+3. 10단계 `news_fulltext` 저장 전략에 keyword 저장 컬럼(`keywords_json`, `keywords_status`, `keywords_updated_at`)을 추가함
+4. 키워드 생성 자체는 full text 추출과 분리된 **후속 AI keyword 분석 작업**임을 명시함
+
+#### Verification
+
+1. `plan.md`에 `PLAN CHANGE (2026-03-06 #5)` 노트 추가
+2. 5단계에 `Industry` / `Keywords` 컬럼 설명 및 검증 항목 추가
+3. 10단계에 keyword 저장 컬럼과 후속 AI 분석 규약 추가
+
+#### Risks / notes
+
+1. `Industry`는 News API에 실제 필드를 공급하는 backend enrichment 경로가 구현되어야 함
+   - 완화: 구현 단계에서 company profile source와 응답 필드명을 먼저 고정
+2. `Keywords`는 컬럼이 먼저 생기더라도, 후속 AI keyword 분석 전에는 값이 비어 있음
+   - 완화: UI에서 `-` 또는 pending으로 일관되게 표시하고, full text 완료와 keyword 완료를 구분
+
+---
+
 ### Step 0 최종 보완 — IBKR WSH v2 프로브 결과 반영 (2026-03-02)
 
 **배경**: WSH v1 프로브(`test_ibkr_wsh_probe.py`)가 빈 응답을 반환했으나, v2 프로브(`test_ibkr_wsh_probe_v2.py`)에서 올바른 API 호출 방식(blocking `get*` + `conId`)으로 풍부한 WSH 데이터를 확인함.
