@@ -840,30 +840,31 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
             );
           })()}
 
-          {/* View Log button — only shown when there's an active or recent job */}
-          {currentJobId && (
-            <button
-              onClick={() => setShowLogPanel(!showLogPanel)}
-              className={`px-3 py-1.5 border rounded transition-colors flex items-center gap-1.5 text-xs ${
-                showLogPanel
+          {/* View Log button — always visible, disabled when no job */}
+          <button
+            onClick={() => currentJobId && setShowLogPanel(!showLogPanel)}
+            disabled={!currentJobId}
+            className={`px-3 py-1.5 border rounded transition-colors flex items-center gap-1.5 text-xs ${
+              !currentJobId
+                ? 'border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-600 cursor-not-allowed opacity-50'
+                : showLogPanel
                   ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
                   : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800'
-              }`}
-              title="View update job logs and progress"
-            >
-              <Eye className="w-3.5 h-3.5" />
-              <span>View Log</span>
-              {jobStatus?.status === 'running' && (
-                <span className="ml-1 text-[10px] text-blue-500 tabular-nums">{jobStatus.progress.pct}%</span>
-              )}
-              {jobStatus?.status === 'done' && (
-                <span className="ml-1 w-2 h-2 rounded-full bg-green-500 inline-block" />
-              )}
-              {jobStatus?.status === 'failed' && (
-                <span className="ml-1 w-2 h-2 rounded-full bg-red-500 inline-block" />
-              )}
-            </button>
-          )}
+            }`}
+            title={currentJobId ? "View update job logs and progress" : "No active job — click Update first"}
+          >
+            <Eye className="w-3.5 h-3.5" />
+            <span>View Log</span>
+            {jobStatus?.status === 'running' && (
+              <span className="ml-1 text-[10px] text-blue-500 tabular-nums">{jobStatus.progress.pct}%</span>
+            )}
+            {jobStatus?.status === 'done' && (
+              <span className="ml-1 w-2 h-2 rounded-full bg-green-500 inline-block" />
+            )}
+            {jobStatus?.status === 'failed' && (
+              <span className="ml-1 w-2 h-2 rounded-full bg-red-500 inline-block" />
+            )}
+          </button>
 
           {/* Refresh button */}
           <button onClick={() => fetchNews(searchQuery || undefined)} disabled={loading} className="p-2 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors" title="Refresh from DB">
