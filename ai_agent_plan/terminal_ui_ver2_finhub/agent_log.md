@@ -648,3 +648,50 @@
 |------|------|
 | `.github/copilot-skills/planning.md` | EN 배너 + KO 트리거 문장 수정 + KO 신규 4규칙 블록 |
 | `agent_log.md` | 이 항목 기록 |
+
+---
+
+### plan.md 가독성 개선 — 대단계(Step) 상태 이모지 표시
+
+**Status: done (awaiting user confirmation)**
+
+#### 수행 작업
+- `ai_agent_plan/terminal_ui_ver2_finhub/plan.md`의 대단계 헤딩(EN: `#### Step N`, KO: `#### N단계`) 앞에 상태 이모지(✅/⏳/⬜)를 추가
+- Step 섹션 시작부에 간단한 범례(legend) 1줄을 EN/KO 각각 추가
+
+#### 의도
+- 사용자가 "#### 2단계 — ..." 같은 large step을 스크롤 중에도 한눈에 식별/상태 확인 가능하게 함
+
+#### 검증
+- plan.md에서 Step 0~9 헤딩이 이모지를 포함하는지 육안 확인
+
+---
+
+### plan.md 세부단계 표에 상태 이모지 컬럼 추가 + planning.md 엄격 기준 반영
+
+**Status: done (awaiting user confirmation)**
+
+#### 수행 작업 — plan.md 세부단계 표 갱신
+- EN/KO 세부단계 표(Steps 1–9)에 `| Status |` / `| 상태 |` 컬럼 추가
+- 각 행에 이모지 상태 부여:
+  - Steps 1–5: ✅ (모든 세부단계 구현 완료, 의존성 그래프와 일치)
+  - Steps 6–7: ⬜ (미착수)
+  - Step 8: 🚫 (선행조건 미충족/차단)
+  - Step 9: ⬜ (미착수)
+- EN Step 5 테이블에 5-9/5-10/5-11 행 신규 추가 (의존성 그래프에는 이미 있었으나 테이블에 누락)
+- KO 5단계 테이블에 5-10/5-11 행 신규 추가
+
+#### 수행 작업 — planning.md 엄격 기준 명문화
+- `.github/copilot-skills/planning.md` KO 섹션의 "세부 단계 테이블 상태 표기" 블록을 전면 개정:
+  - 4개 이모지의 엄격 정의 추가 (✅ = 구현+사용자확인, ⏳ = 구현완료/사용자확인 대기, ⬜ = 미착수, 🚫 = 선행조건 미충족)
+  - **3곳 일관성 규칙** 신설: 이모지를 (1) 대단계 제목, (2) 실행 의존성 그래프, (3) 세부단계 표에 모두 표시하고 동기화
+  - **대단계 제목 이모지 집계 규칙** 추가
+- `plan.md 작성 규칙` 내 이모지 관련 문장도 3곳 일관성 참조로 갱신
+
+#### 수정 파일
+
+| 파일 | 변경 |
+|------|------|
+| `ai_agent_plan/terminal_ui_ver2_finhub/plan.md` | EN Steps 1–9 + KO 1–9단계 세부단계 표에 상태 컬럼 추가, 5단계 신규 행 추가 |
+| `.github/copilot-skills/planning.md` | KO "상태 표기" 엄격 기준 전면 개정 + 3곳 일관성 규칙 신설 |
+| `agent_log.md` | 이 항목 기록 |
