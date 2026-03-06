@@ -216,6 +216,75 @@
 
 ---
 
+## 2026-03-06
+
+**작성 시각:** 11:37 (local)
+
+### PLAN CHANGE — change 저장 구조 및 Data Control 버튼 확장
+
+**Status: done (awaiting user confirmation)**
+
+#### Actions taken
+
+1. `plan.md`의 목표 섹션을 수정하여 Data Control Window 버튼을 2개에서 4개로 확장함
+   - `IBKR Price Data`
+   - `IBKR Calendar Data`
+   - `7D Change Update`
+   - `Custom Change Update`
+
+2. change 데이터 저장 구조를 `news_items` 직접 컬럼 병합 방식에서 `news_change_metrics` 별도 테이블 방식으로 변경함
+   - 저장은 분리
+   - `GET /api/news` 응답에서만 표준 change 값을 join/병합
+   - custom change는 `custom_{N}d_pct` metric_key로 관리
+
+3. `plan.md`의 관련 섹션을 일관되게 갱신함
+   - 목표
+   - PLAN CHANGE 노트
+   - 아키텍처(상위) + Change Metrics 아키텍처
+   - 4단계(Finnhub 인제션 + change upsert)
+   - 7단계(OHLC 이후 표준/custom change 계산)
+   - 8단계(Data Control Window 4버튼 UI)
+   - 실행 의존성 그래프
+
+#### Verification
+
+1. `plan.md`에서 기존 "news_items change% 컬럼 직접 업데이트" 문구를 핵심 구현 구간에서 제거
+2. `plan.md`에서 Data Control Window 버튼 구성을 4개로 통일
+3. `plan.md`에 `PLAN CHANGE (2026-03-06 #3)` 노트 추가
+
+#### Risks / notes
+
+1. 기존 코드 구현은 아직 `news_items` 직접 컬럼 업데이트 방식을 사용 중일 수 있음
+   - 완화: 실제 구현 단계에서 DB 스키마/리포지토리/API join을 함께 바꾸는 migration step 필요
+2. `7D Change Update`와 기존 표준 프리셋(1d/open/14d/30d)의 역할 경계가 구현 시 다시 명확해져야 함
+   - 완화: Step 7 구현 시 "자동 표준 백필" vs "운영용 7D/custom 버튼" 책임을 주석/문서/API 이름으로 분리
+
+---
+
+**작성 시각:** 11:47 (local)
+
+### PLAN CHANGE — News Feed Window에도 change update 버튼 추가
+
+**Status: done (awaiting user confirmation)**
+
+#### Actions taken
+
+1. `plan.md`의 Change Metrics 아키텍처에 `7D Change Update` / `Custom Change Update` 버튼을 Data Control Window와 News Feed Window 양쪽에 둔다는 원칙을 추가함
+2. 5단계(News Feed Window) 데이터 흐름과 세부 단계에 News 툴바용 change update 버튼 2개를 추가함
+3. `5-20`, `5-21` 서브스텝을 신설하여 News Window가 동일 backend job/API를 재사용하는 구조로 명시함
+
+#### Verification
+
+1. `plan.md`에 `PLAN CHANGE (2026-03-06 #4)` 노트 추가
+2. 5단계에 `7D Change Update`, `Custom Change Update` 버튼 설명 및 검증 항목 추가
+
+#### Risks / notes
+
+1. News Window와 Data Control Window의 버튼이 서로 다른 endpoint/body를 보내면 문서 취지와 달라짐
+   - 완화: 구현 시 공통 action creator 또는 공통 API helper 사용
+
+---
+
 ### Step 0 최종 보완 — IBKR WSH v2 프로브 결과 반영 (2026-03-02)
 
 **배경**: WSH v1 프로브(`test_ibkr_wsh_probe.py`)가 빈 응답을 반환했으나, v2 프로브(`test_ibkr_wsh_probe_v2.py`)에서 올바른 API 호출 방식(blocking `get*` + `conId`)으로 풍부한 WSH 데이터를 확인함.

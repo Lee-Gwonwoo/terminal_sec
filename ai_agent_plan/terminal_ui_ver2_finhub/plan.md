@@ -9,6 +9,8 @@
 1) **Data Control Window** 추가
    - `IBKR Price Data` 업데이트 버튼
    - `IBKR Calendar Data` 업데이트 버튼
+  - `7D Change Update` 업데이트 버튼
+  - `Custom Change Update` 업데이트 버튼
    - 각 항목의 **마지막 성공 업데이트 날짜/시각 표시**
 2) **Default Ticker Window** 추가
    - 참조 CSV 경로를 UI에서 수정 가능하게 제공
@@ -25,6 +27,11 @@
    - 저장: 별도 `news_fulltext` 테이블 (news_items와 1:1 관계)
    - `news_items`에 `publisher` 컬럼 추가: `source`(=데이터 공급자, 예: FINNHUB) vs `publisher`(=원본 사이트, 예: NASDAQ/TMX/FINNHUB)
    - UI: News 테이블에 **O/X 컬럼**(full text 존재 여부), **O 클릭 시 팝업**으로 full text 표시, **"Full Text Update" 별도 버튼**
+7) **Change Metrics(뉴스 기준 변화율 저장)** — change 데이터는 `news_items` 컬럼에 직접 병합하지 않고, `news_id` 기준 별도 저장으로 관리한다.
+  - 저장: 별도 `news_change_metrics` 테이블 (`news_items`와 1:N 관계, `metric_key`로 표준/custom 구분)
+  - 표준 프리셋: `change_1d_pct`, `change_from_open_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct`
+  - custom 프리셋: `custom_{N}d_pct` 형태로 저장
+  - 조회: `GET /api/news` 응답에서 필요한 표준 change 값만 join/병합하여 내려준다
 
 ### 현재 레포 상태(중요, 확인됨)
 - 프론트에는 이미 `brave-news` 윈도우 타입이 존재하며 구현 파일은 아래와 같다.
@@ -80,14 +87,14 @@
   - 라벨이 정확히 `news feed:finhub api`로 표시된다.
   - Finnhub에서 실제로 pull하여 DB에 저장된 뉴스만 렌더된다(mock 행 금지).
 - Data Control Window
-  - 버튼은 정확히 2개: `IBKR Price Data`, `IBKR Calendar Data`.
+  - 버튼은 정확히 4개: `IBKR Price Data`, `IBKR Calendar Data`, `7D Change Update`, `Custom Change Update`.
   - 버튼 클릭은 백엔드 업데이트를 트리거하고, “마지막 성공 업데이트 날짜/시각”이 갱신된다.
 
 빠른 검증 체크리스트(코드 안 읽고 확인)
 1) 앱을 실행(backend + web UI)하고, 터미널에 표시되는 UI URL로 접속.
 2) News 창 라벨이 `news feed:finhub api`인지 확인.
 3) Default Ticker 창에서 티커 목록이 보이고, 티커 추가 시 즉시 목록에 반영되는지 확인.
-4) IBKR 설정이 되어 있다면: `IBKR Price Data`/`IBKR Calendar Data` 클릭 후 “마지막 성공 업데이트”가 바뀌는지 확인.
+4) IBKR 설정이 되어 있다면: `IBKR Price Data`/`IBKR Calendar Data`/`7D Change Update`/`Custom Change Update` 클릭 후 각 항목의 “마지막 성공 업데이트”가 바뀌는지 확인.
 
 용어집(쉬운 정의)
 - 백엔드: 데이터베이스/CSV/외부 API와 통신하는 Node/TypeScript 서버(`terminal/backend`).
@@ -162,6 +169,28 @@ PLAN CHANGE (2026-03-06 #2)
 - 영향: 4단계 이후에 진행 가능(Finnhub 뉴스가 news_items에 적재된 상태 필요).
   기존 완료 서브스텝에는 영향 없음. news_items 마이그레이션(publisher 컬럼)은 10단계 초반에 수행.
 ```
+
+```
+PLAN CHANGE (2026-03-06 #3)
+- 왜: change 데이터를 뉴스 원본 row와 분리해 `news_id` 기준으로 별도 저장하고, 운영 UI에서 change 재계산을 명시적으로 돌릴 수 있게 하려는 요구가 추가됨.
+- 무엇이 바뀌었나:
+  - 목표 #1을 4개 버튼 구조로 변경 (`IBKR Price Data`, `IBKR Calendar Data`, `7D Change Update`, `Custom Change Update`)
+  - 목표 #7 신설 — `news_change_metrics` 별도 저장 구조 추가
+  - 아키텍처에 "Change Metrics 아키텍처" 섹션 추가
+  - 4단계/7단계에서 `news_items` 직접 UPDATE 방식 대신 `news_change_metrics` upsert 방식으로 변경
+  - 8단계 Data Control Window를 4개 섹션 기준으로 재정의
+- 영향: change 데이터는 app DB 내부의 별도 테이블로 관리하고, `GET /api/news`에서만 join하여 내려준다. 프론트 Changes % 렌더 계약은 유지하되 저장 방식과 운영 버튼 구성이 변경된다.
+```
+
+```
+PLAN CHANGE (2026-03-06 #4)
+- 왜: 사용자가 `7D Change Update`와 `Custom Change Update` 버튼을 Data Control Window뿐 아니라 News Feed Window에도 두라고 요청함.
+- 무엇이 바뀌었나:
+  - Change Metrics 아키텍처에 "두 윈도우에서 같은 job/API를 호출하는 중복 진입점" 원칙 추가
+  - 5단계 News Feed Window 계획에 `7D Change Update` / `Custom Change Update` 버튼 추가
+  - 5-20, 5-21 서브스텝 신설
+- 영향: News Feed Window 툴바 범위가 확대되지만, backend 로직은 새로 분기하지 않고 Data Control과 동일 엔드포인트를 재사용한다.
+```
 ---
 
 ### 아키텍처(상위)
@@ -169,10 +198,53 @@ PLAN CHANGE (2026-03-06 #2)
 - 백엔드는 다음을 책임진다.
   - IBKR 업데이트(가격 + 캘린더)
   - Finnhub 뉴스 수집
+  - news 기준 change metric 계산/재계산 잡
   - 티커 CSV read/append + 경로 제한(보안)
   - last updated 시각 저장/조회
 
 ### 장시간 update UX 원칙(공통)
+
+### Change Metrics 아키텍처
+> change 데이터는 뉴스 row의 부가 컬럼이 아니라, `news_id`에 종속된 별도 파생 데이터로 저장한다.
+
+1. **저장 위치: 별도 테이블 `news_change_metrics`**
+   - 물리적으로는 같은 SQLite(app DB) 안에 저장하되, **별도 파일을 새로 만드는 방식이 아니라 별도 테이블**로 관리한다.
+   - 기본 키: `(news_id, metric_key)`
+   - 권장 스키마:
+     - `news_id TEXT NOT NULL REFERENCES news_items(id)`
+     - `metric_key TEXT NOT NULL` — `change_1d_pct`, `change_from_open_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct`, `custom_{N}d_pct`
+     - `value_pct REAL`
+     - `ohlc_ticker TEXT NOT NULL`
+     - `reference_date TEXT NOT NULL`
+     - `anchor_date TEXT NOT NULL`
+     - `lookback_trading_days INTEGER`
+     - `calc_version TEXT NOT NULL`
+     - `computed_at TEXT NOT NULL`
+     - `PRIMARY KEY (news_id, metric_key)`
+
+2. **표준 프리셋 vs custom 프리셋**
+   - 표준 프리셋은 현재 News 창의 Changes % UI와 맞춘다:
+     - `change_1d_pct`
+     - `change_from_open_pct`
+     - `change_7d_pct`
+     - `change_14d_pct`
+     - `change_30d_pct`
+   - custom 프리셋은 `custom_{N}d_pct` 형태로 저장한다.
+   - 같은 news_id에 대해 표준 row 5개 + custom row 여러 개가 공존할 수 있다.
+
+3. **조회 방식: API에서 병합**
+   - `GET /api/news`는 `news_items`를 기준으로 조회하되, 표준 metric_key를 join하여 기존 응답 필드(`change_1d_pct` 등)로 펼쳐서 내려준다.
+   - 즉, **저장은 분리 / 응답은 병합** 구조를 따른다.
+   - 프론트는 기존 Changes % 렌더 계약을 유지한다.
+
+4. **운영 버튼 정책**
+   - `IBKR Price Data`: OHLC 1D 수집/업서트
+   - `IBKR Calendar Data`: 캘린더 수집
+   - `7D Change Update`: `change_7d_pct` 표준 metric만 일괄 계산/업데이트
+   - `Custom Change Update`: 사용자가 지정한 거래일 window에 대해 `custom_{N}d_pct`를 일괄 계산/업데이트
+  - `7D Change Update` / `Custom Change Update` 버튼은 **Data Control Window와 News Feed Window 둘 다**에 둔다.
+  - 두 위치의 버튼은 서로 다른 로직을 만들지 않고, **같은 백엔드 job/API를 호출하는 중복 진입점**으로 유지한다.
+  - 표준 change 전체 재계산은 7단계 OHLC update 이후 자동 백필로 유지하되, 운영자가 자주 쓸 수 있는 수동 버튼은 7D/custom 두 개만 제공한다.
 
 ### Full Text Extraction 아키텍처
 > 뉴스 원문(full text) 추출은 뉴스 피드 업데이트와 **완전히 분리된 별도 프로세스**로 동작한다.
@@ -366,7 +438,7 @@ Full Text Extraction(10단계)은 Finnhub 뉴스가 적재된 후(4단계) 독�
 | Default Ticker Window 동작 | 2단계 + 3단계 이후 | Default Ticker Window 열기 → 티커 추가 | 목록에 즉시 반영되고, 백엔드가 CSV에 append 하여 재시작 후에도 유지 |
 | News 창이 Finnhub 기반(=mock 제거) | 4단계 + 5단계 이후 | News 창 열기 | 라벨이 `news feed:finhub api`; 실제 저장된 Finnhub 뉴스만 표시(생성 금지) |
 | “Changes %”가 실제 계산값 표시 | 7단계 이후 | News 창에서 “Changes %” 셀 확인 | OHLC 기반 계산값이 보이고, 히스토리 부족은 빈 값/`null`로 표시 |
-| Data Control Window 버튼이 타임스탬프를 갱신 | 8단계 이후(+ 6/7단계 + IBKR 설정 완료) | `IBKR Price Data` / `IBKR Calendar Data` 클릭 | 성공 시 “마지막 성공 업데이트”가 갱신되고, 실패는 명확히 표시 |
+| Data Control Window 버튼이 타임스탬프를 갱신 | 8단계 이후(+ 6/7단계 + IBKR 설정 완료) | 4개 버튼 클릭 | 성공 시 각 버튼의 “마지막 성공 업데이트”가 갱신되고, 실패는 명확히 표시 |
 
 > Legend: ✅ 구현+사용자확인 완료 · ⏳ 구현완료, 사용자확인 대기 · ⬜ 미착수 · 🚫 선행조건 미충족(차단)
 
@@ -787,19 +859,22 @@ UI 동작(최소/명확)
 - **최신 데이터 우선**: 매 수집 시 항상 현재 시각까지를 종료 시점으로 하여 최신 뉴스가 빠지지 않게 한다.
 - DB에 이미 있는 기사는 `INSERT OR IGNORE`로 안전하게 건너뛴다.
 
-news_items 스키마 확장(change% 병합용)
-- `news_items` 테이블에 아래 컬럼을 migration으로 추가한다:
-  - `ohlc_ticker` (TEXT) — change% 계산에 사용한 티커
-  - `ohlc_date` (TEXT) — 매칭된 OHLC 날짜 (`YYYY-MM-DD`)
-  - `change_1d_pct` (REAL) — 전일 종가 대비 당일 종가 % 변화
-  - `change_from_open_pct` (REAL) — 시가 대비 종가 % 변화
-  - `change_7d_pct` (REAL) — 7거래일 전 종가 대비 % 변화
-  - `change_14d_pct` (REAL) — 14거래일 전 종가 대비 % 변화
-  - `change_30d_pct` (REAL) — 30거래일 전 종가 대비 % 변화
-  - `change_computed_at` (TEXT) — 파생값 계산 시각(ISO)
-- 이 컬럼들은 다음 시점에 채워진다:
-  1. **4단계(Finnhub 인제션 시)**: 해당 뉴스의 티커+날짜에 대응하는 OHLC가 이미 DB에 있으면 즉시 계산/저장.
-  2. **7단계(IBKR OHLC 업데이트 후)**: OHLC가 새로 들어온 심볼/날짜에 대해 `change_1d_pct` 등이 NULL인 news_items를 찾아 백필.
+change 저장 구조(`news_change_metrics`)
+- `news_items`에 change 컬럼을 계속 늘리지 않고, 아래 별도 테이블을 migration으로 추가한다:
+  - `news_id` (TEXT, FK → `news_items.id`)
+  - `metric_key` (TEXT) — 표준: `change_1d_pct`, `change_from_open_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct`; custom: `custom_{N}d_pct`
+  - `value_pct` (REAL)
+  - `ohlc_ticker` (TEXT) — change 계산에 사용한 티커
+  - `reference_date` (TEXT) — 비교 기준 OHLC 날짜 (`YYYY-MM-DD`)
+  - `anchor_date` (TEXT) — 뉴스 기준 날짜 (`YYYY-MM-DD`)
+  - `lookback_trading_days` (INTEGER)
+  - `calc_version` (TEXT)
+  - `computed_at` (TEXT) — 파생값 계산 시각(ISO)
+  - PK: `(news_id, metric_key)`
+- 이 row들은 다음 시점에 채워진다:
+  1. **4단계(Finnhub 인제션 시)**: 해당 뉴스의 티커+날짜에 대응하는 OHLC가 이미 DB에 있으면 표준 metric row를 즉시 upsert.
+  2. **7단계(IBKR OHLC 업데이트 후)**: OHLC가 새로 들어온 심볼/날짜에 대해 누락된 표준 metric row를 백필.
+  3. **8단계(Data Control Window)**: `7D Change Update`와 `Custom Change Update`로 선택적 재계산 실행.
 
 API 계약(초안)
 - `POST /api/news/pull-finhub` — company news + press release를 모두 수집하고 요약을 반환:
@@ -818,31 +893,31 @@ API 계약(초안)
     - `source = 'FINNHUB'`, `source_type = 'press_release'`
   - 각 타입별 `MAX(published_at)` 조회 → 증분 수집 구현
 - 서비스 `terminal/backend/src/services/newsChangeMerger.ts` 추가
-  - 뉴스 row의 `(ohlc_ticker, published_at 날짜)` 기준으로 OHLC DB에서 해당 날짜의 change% 데이터를 조회/계산
-  - `news_items`의 change% 컬럼을 UPDATE
+  - 뉴스 row의 `(ticker, published_at 날짜)` 기준으로 OHLC DB에서 해당 날짜의 change 데이터를 조회/계산
+  - 결과를 `news_change_metrics`에 upsert
   - 4단계 인제션 시(새 뉴스 insert 후)와 7단계 OHLC 업데이트 후(backfill) 양쪽에서 호출
 - `terminal/backend/src/server.ts`
   - `POST /api/news/pull-finhub` 추가(EODHD와 유사한 형태)
-  - company_news + press_release 모두 수집 후 change% 병합 시도
+  - company_news + press_release 모두 수집 후 표준 change metric upsert 시도
   - 성공 시 `update_status`의 `finhub_news` 갱신
 
 검증
 - 인제션 후 `GET /api/news?source_names=FINNHUB`로 조회 가능
 - `source_type` 필터로 company_news / press_release를 각각 조회 가능
-- OHLC 데이터가 있는 날짜의 뉴스 row에 change% 값이 채워져 있음
+- OHLC 데이터가 있는 날짜의 뉴스 row에 대응하는 `news_change_metrics` row가 생기고, `GET /api/news`에서는 change 값이 병합되어 보임
 
 **세부 단계 (4단계)**
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
 | 4-1 | `FINNHUB_API_KEY` 설정 로딩 추가 | `terminal/backend/src/config.ts` | 키가 없으면 명확한 오류(키 값 로그 금지) | ✅ |
-| 4-2 | `news_items` change% 컬럼 마이그레이션 | `terminal/backend/src/db.ts` | `PRAGMA table_info(news_items)`에 change% 컬럼 존재 | ✅ |
+| 4-2 | `news_change_metrics` 테이블 마이그레이션 | `terminal/backend/src/db.ts` | `sqlite_master`에 테이블 존재, PK=`(news_id, metric_key)` 확인 | ⏳ |
 | 4-3 | Finnhub company news provider 구현 | `terminal/backend/src/services/finnhubNewsProvider.ts` | `/company-news` 매핑 결과가 `news_items` 스키마에 맞고 `source_type='company_news'` | ✅ |
 | 4-4 | Finnhub press release provider 구현 | `terminal/backend/src/services/finnhubNewsProvider.ts` | `/press-releases` 매핑 결과가 `news_items` 스키마에 맞고 `source_type='press_release'` | ✅ |
 | 4-5 | `GET /api/news` source_type 필터 파라미터 지원 | `server.ts`, `newsRepository.ts` | `?source_type=company_news`로 해당 type만 반환 | ✅ |
-| 4-6 | `newsChangeMerger` 서비스 구현 | `terminal/backend/src/services/newsChangeMerger.ts` | 뉴스 row에 OHLC 기반 change% 업데이트 | ✅ |
-| 4-7 | `POST /api/news/pull-finhub` 구현(양쪽 수집 + change% 병합) | `terminal/backend/src/server.ts` | `{inserted, skipped, source, details}` 반환 | ✅ |
+| 4-6 | `newsChangeMerger` 서비스 구현 | `terminal/backend/src/services/newsChangeMerger.ts` | 뉴스 row 기준으로 `news_change_metrics` 표준 row upsert | ⏳ |
+| 4-7 | `POST /api/news/pull-finhub` 구현(양쪽 수집 + change upsert) | `terminal/backend/src/server.ts` | `{inserted, skipped, source, details}` 반환 + change upsert count 포함 | ⏳ |
 | 4-8 | 성공 시 `update_status(finhub_news)` 갱신 | `updateStatusRepository` | `GET /api/updates/status`에서 lastSuccessAt 업데이트 | ✅ |
-| 4-9 | 적재 데이터 조회 + source_type 필터 + change% 검증 | (런타임) | `GET /api/news?source_names=FINNHUB&source_type=company_news` rows 확인, change% 값 존재 | ✅ |
+| 4-9 | 적재 데이터 조회 + source_type 필터 + change 검증 | (런타임) | `GET /api/news?source_names=FINNHUB&source_type=company_news` rows 확인, change 값 병합 확인 | ⏳ |
 
 **세부 단계 목적/설명 (4단계)**
 - `4-1` 목적: Finnhub 키를 안전하게 로드. 설명:
@@ -852,13 +927,13 @@ API 계약(초안)
   - 완료 조건(눈으로 확인): env var가 있으면 백엔드가 정상 동작하고, 없으면 “키 없음”이 명확한 에러로 실패한다(키 값 노출 없음).
   - 사람 검증(비개발자): 설정이 없을 때 인제션 호출이 “missing key”로 실패하는지, 그리고 키가 화면/로그에 노출되지 않는지 확인.
   - 흔한 문제/주의: 키를 로그로 찍거나, 키가 포함된 전체 URL을 로그로 찍어 유출; 여러 곳에서 키를 읽어 설정이 꼬임.
-- `4-2` 목적: `news_items` 테이블에 change% 관련 컬럼을 migration으로 추가. 설명:
-  - `db.ts`의 `initDb()` 안에서 `ensureColumn()` 헬퍼를 사용해 아래 컬럼을 idempotent하게 추가한다:
-    - `ohlc_ticker TEXT`, `ohlc_date TEXT`, `change_1d_pct REAL`, `change_from_open_pct REAL`, `change_7d_pct REAL`, `change_14d_pct REAL`, `change_30d_pct REAL`, `change_computed_at TEXT`
-  - 기존 row에 영향 없이 새 컬럼은 NULL default로 생성된다.
-  - 완료 조건(눈으로 확인): `PRAGMA table_info(news_items)`에 위 컬럼이 모두 존재.
-  - 사람 검증(비개발자): DB 파일을 SQLite 뷰어로 열어 news_items 테이블의 컬럼 목록 확인.
-  - 흔한 문제/주의: 컬럼명 오타로 유사 컬럼 중복 생성; ensureColumn 호출 순서가 initDb 밖에 있어 실행 안 됨.
+- `4-2` 목적: change 데이터를 `news_items`와 분리하여 별도 테이블에 저장. 설명:
+  - `db.ts`의 `initDb()` 안에서 `CREATE TABLE IF NOT EXISTS news_change_metrics (...)`를 추가한다.
+  - 표준 metric과 custom metric을 모두 같은 테이블에 저장할 수 있게 `(news_id, metric_key)` PK를 사용한다.
+  - 기존 news row에는 원본 데이터만 남기고, change는 별도 row로 관리한다.
+  - 완료 조건(눈으로 확인): `news_change_metrics` 테이블이 존재하고 PK가 `(news_id, metric_key)`로 설정된다.
+  - 사람 검증(비개발자): SQLite 뷰어에서 `news_change_metrics` 테이블 생성 여부와 컬럼 목록을 확인.
+  - 흔한 문제/주의: metric_key 네이밍 불일치로 같은 의미의 row가 중복 생성; FK 누락으로 고아 row 발생.
 - `4-3` 목적: Finnhub **company news** 응답을 DB 스키마로 변환. 설명:
   - Finnhub `/company-news?symbol=X&from=YYYY-MM-DD&to=YYYY-MM-DD` 호출을 수행한다.
   - 기존 `insertNewsItem()` 계약에 맞게 매핑하고, `source='FINNHUB'`, `source_type='company_news'`를 일관되게 설정한다.
@@ -885,23 +960,23 @@ API 계약(초안)
   - 완료 조건(눈으로 확인): 각 source_type 필터가 정확히 해당 type의 row만 반환.
   - 사람 검증(비개발자): curl로 source_type 유/무 2가지를 호출해 결과 개수가 다른지 확인.
   - 흔한 문제/주의: source_type 파라미터를 서버에서 꺼내지 않아 필터가 무시됨; SQL injection 주의(바인드 파라미터 사용).
-- `4-6` 목적: 뉴스 row에 OHLC 기반 change% 데이터를 병합하는 서비스. 설명:
+- `4-6` 목적: 뉴스 row 기준으로 OHLC 기반 change metric row를 upsert하는 서비스. 설명:
   - `newsChangeMerger.ts` 구현:
-    - 입력: 병합 대상 뉴스 row 목록 (또는 "change%가 NULL인 row" 자동 조회)
+    - 입력: 병합 대상 뉴스 row 목록 (또는 표준 metric row가 누락된 news_id 자동 조회)
     - 각 row의 `(tickers_csv 첫 번째 ticker, published_at 날짜)` 기준으로 OHLC DB(`ohlc_1d_watchlist.sqlite`)에서 해당 날짜의 OHLC를 조회
-    - change_1d_pct, change_from_open_pct, change_7d_pct, change_14d_pct, change_30d_pct를 계산 (7단계의 `ohlcDerivedMetrics`와 동일 로직 재사용 또는 OHLC DB에서 이미 계산된 값 읽어옴)
-    - 결과를 `news_items`의 해당 row에 UPDATE (ohlc_ticker, ohlc_date, change_*, change_computed_at)
+    - `change_1d_pct`, `change_from_open_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct`를 계산
+    - 결과를 `news_change_metrics`에 upsert (`metric_key`, `value_pct`, `ohlc_ticker`, `reference_date`, `anchor_date`, `computed_at`)
   - OHLC 데이터가 없는 날짜(휴장일 등)는 가장 가까운 이전 거래일의 데이터를 사용하거나 NULL로 남긴다.
-  - 완료 조건(눈으로 확인): OHLC 데이터가 있는 날짜의 뉴스 row에서 change_1d_pct 등이 실제 숫자로 채워진다.
-  - 사람 검증(비개발자): 특정 날짜/티커의 뉴스 row를 SQL로 조회해 change% 값이 그럴듯한 범위인지 확인.
+  - 완료 조건(눈으로 확인): OHLC 데이터가 있는 날짜의 news_id에 대해 `news_change_metrics`에 표준 metric row가 생긴다.
+  - 사람 검증(비개발자): 특정 news_id를 SQL로 조회해 `metric_key='change_7d_pct'` 같은 row가 생겼는지 확인.
   - 흔한 문제/주의: OHLC DB 경로를 잘못 열음; 주말/휴장일 날짜 매칭 실패; 0으로 나누기(Open=0).
-- `4-7` 목적: company news + press release 양쪽 수집을 한 번에 수행 + change% 병합 트리거. 설명:
+- `4-7` 목적: company news + press release 양쪽 수집을 한 번에 수행 + 표준 change metric upsert 트리거. 설명:
   - `POST /api/news/pull-finhub`:
     1. Default Ticker CSV에서 티커 로드
     2. 각 티커에 대해 `pullCompanyNews()` + `pullPressReleases()` 호출 (증분 수집)
     3. insert 결과를 source_type별로 집계
-    4. 새로 삽입된 뉴스 row에 대해 `newsChangeMerger`로 change% 병합 시도
-    5. 요약 반환: `{ inserted, skipped, source: "FINNHUB", details: { company_news: {..}, press_release: {..}, changeMerged: <n> } }`
+    4. 새로 삽입된 뉴스 row에 대해 `newsChangeMerger`로 표준 metric upsert 시도
+    5. 요약 반환: `{ inserted, skipped, source: "FINNHUB", details: { company_news: {..}, press_release: {..}, changeUpserted: <n> } }`
   - startup 자동 실행은 하지 않는다(명시적 트리거만).
   - 완료 조건(눈으로 확인): POST 호출이 합리적인 시간 내에 끝나고 요약 JSON을 반환한다.
   - 사람 검증(비개발자): Update 버튼 클릭 후 company_news + press_release 수치가 양쪽 모두 0 이상인지 확인.
@@ -913,16 +988,16 @@ API 계약(초안)
   - 완료 조건(눈으로 확인): 성공적인 pull 직후 `finhub_news.lastSuccessAt`가 null이 아닌 ISO timestamp가 된다.
   - 사람 검증(비개발자): (8단계 이후) Data Control Window에서 "마지막 성공" 시각이 실제로 바뀐다.
   - 흔한 문제/주의: insert 실패인데도 lastSuccessAt을 갱신해 오해를 유발; 표시하기 어려운 포맷(비 ISO) 저장.
-- `4-9` 목적: 적재 + 필터 + change% 전체 검증. 설명:
+- `4-9` 목적: 적재 + 필터 + change 전체 검증. 설명:
   - 아래를 확인한다:
     1. `GET /api/news?source_names=FINNHUB` → row 존재, 필수 필드 비어있지 않음
     2. `GET /api/news?source_names=FINNHUB&source_type=company_news` → company_news row만 반환
     3. `GET /api/news?source_names=FINNHUB&source_type=press_release` → press_release row만 반환
-    4. OHLC 데이터가 있는 날짜의 뉴스 row에서 `change_1d_pct` 등이 NULL이 아님
+    4. OHLC 데이터가 있는 날짜의 news_id에 대해 `news_change_metrics` row가 존재하고, `GET /api/news`에서 값이 병합되어 보임
   - 데이터가 없다면 UI 문제가 아니라 수집/저장/조회 경로를 먼저 의심한다.
   - 완료 조건(눈으로 확인): 위 4가지 체크가 모두 통과.
   - 사람 검증(비개발자): News 창에서 필터 전환(company news ↔ press release)이 되고, Change% 컬럼에 숫자가 있는지 확인.
-  - 흔한 문제/주의: source_type 오타로 필터 결과가 빔; change% 병합이 안 되어 전부 NULL.
+  - 흔한 문제/주의: source_type 오타로 필터 결과가 빔; change row는 저장됐지만 API join이 빠져 UI가 전부 NULL처럼 보임.
 
 **검증 훅 (4단계 마감):**
 ```
@@ -935,7 +1010,7 @@ API 계약(초안)
 ```
 - 사용자 확인 필요: **Yes**
 
-#### ✅ 5단계 — “News Feed: Brave API” → “news feed:finhub api” 전환(프론트)
+#### ⏳ 5단계 — “News Feed: Brave API” → “news feed:finhub api” 전환(프론트)
 목적
 - 기존 `brave-news`(mock 포함) UI를 제거하고 Finnhub 기반으로 교체한다.
 - 라벨을 정확히 `news feed:finhub api`로 바꾸고, UI가 Brave를 암시하지 않게 한다.
@@ -956,6 +1031,10 @@ API 계약(초안)
   - Update 버튼 옆에 **View Log** 버튼을 배치한다. **시작 시 자동 오픈 금지**  사용자가 눌러야만 로그 패널이 열린다.
   - 로그 패널: 진행률 바(처리된 ticker / 전체 ticker, %) + 실시간 로그 라인 + 에러 표시.
   - 잡 완료/실패 후에도 View Log로 최종 결과 확인 가능.
+- 창 툴바에 **`7D Change Update` 버튼**과 **`Custom Change Update` 버튼**도 함께 둔다.
+  - 두 버튼은 Data Control Window의 동일 버튼과 **같은 backend job/API**를 호출한다.
+  - News Feed Window는 변화율을 보면서 바로 재계산을 돌릴 수 있는 **편의 진입점**이고, Data Control Window는 운영 패널 역할을 유지한다.
+  - `Custom Change Update`는 lookback 거래일 수 입력(`N`)을 함께 받는다.
 
 프론트 파일:
 - `brave-news` 윈도우 타입을 `finhub-news`로 교체(권장):
@@ -1001,6 +1080,8 @@ API 계약(초안)
 | 5-17 | 백엔드 잡 큐 + `GET /api/jobs/:jobId` 폴링 엔드포인트 | `server.ts`, `jobManager.ts`(신규) | POST → `{ jobId }` 즉시 반환, GET 폴링 시 `{ status, progress, logs[] }` 응답 | ✅ |
 | 5-18 | View Log 버튼 + 로그 패널 UI(자동 오픈 금지) | `FinnhubNewsWindow.tsx` | Update 옆 View Log 클릭 → 진행률 바 + 실시간 로그 표시, 시작 시 자동 열림 없음 | ✅ |
 | 5-19 | Update UX 전면 리디자인: 7d/Recent/Custom 3모드 + preflight + date picker | `server.ts`, `finnhubNewsProvider.ts`, `FinnhubNewsWindow.tsx` | Entire 제거 → Custom(date picker + adaptive backfill), 기본 Update → 7d, Recent = per-ticker anchor + preflight 경고 모달, 메인 버튼 = 마지막 사용 모드 기억(localStorage) | ✅ |
+| 5-20 | News 툴바에 `7D Change Update` 버튼 추가 | `FinnhubNewsWindow.tsx` | 클릭 시 `POST /api/news/change/update-7d` → `{ jobId }` 반환, 완료 후 목록 재조회 | ⬜ |
+| 5-21 | News 툴바에 `Custom Change Update` 입력+버튼 추가 | `FinnhubNewsWindow.tsx` | `N` 입력 후 `POST /api/news/change/update-custom` 호출, 완료 후 목록 재조회 | ⬜ |
 
 **세부 단계 목적/설명 (5단계)**
 - `5-1` 목적: Brave 기반 창을 Finnhub 기반으로 전환. 설명:
@@ -1173,6 +1254,22 @@ API 계약(초안)
   - 사람 검증(비개발자): Update 클릭 → View Log 클릭 → 진행률이 올라가는지 확인. Update만 클릭하고 View Log를 누르지 않으면 로그 패널이 안 열리는지 확인.
   - 흔한 문제/주의: 폴링 중단 실패로 로그가 멈쵤; 로그 패널 z-index 부족으로 다른 요소에 가려짐; 잡이 없을 때 View Log 버튼 상태 처리.
 
+- `5-20` 목적: News Feed Window에서도 7일 변화율 재계산을 바로 실행할 수 있게 한다. 설명:
+  - 툴바에 `7D Change Update` 버튼을 추가한다.
+  - 클릭 시 Data Control Window와 동일한 `POST /api/news/change/update-7d` job을 호출한다.
+  - 성공 후 `GET /api/news`를 다시 호출하여 Changes % 셀을 최신 값으로 갱신한다.
+  - 완료 조건(눈으로 확인): News 창에서 `7D Change Update` 클릭 → `{ jobId }` 반환 → 완료 후 7D 값이 새로 반영된다.
+  - 사람 검증(비개발자): News 창에서 버튼 클릭 후 View Log로 진행률을 보고, 완료 뒤 목록 재조회 시 7D 값이 갱신되는지 확인.
+  - 흔한 문제/주의: Data Control과 News Window가 서로 다른 엔드포인트를 호출해 결과가 달라짐; 완료 후 목록 재조회 누락.
+
+- `5-21` 목적: News Feed Window에서도 custom lookback change 재계산을 직접 실행할 수 있게 한다. 설명:
+  - 툴바에 숫자 입력(`N` 거래일) + `Custom Change Update` 버튼을 추가한다.
+  - 입력값 검증: 양의 정수만 허용하고, 비어있거나 0/음수면 요청을 보내지 않는다.
+  - 클릭 시 Data Control Window와 동일한 `POST /api/news/change/update-custom` job을 호출한다.
+  - 완료 조건(눈으로 확인): News 창에서 `21` 입력 후 실행 → `{ jobId }` 반환 → 완료 후 custom metric 계산이 반영된다.
+  - 사람 검증(비개발자): `21` 입력 후 실행하고, 완료 뒤 대상 뉴스의 custom change 계산 결과가 backend에 저장됐는지 확인.
+  - 흔한 문제/주의: 입력값 검증 누락; News Window와 Data Control이 서로 다른 parameter 이름을 보내는 문제.
+
 **검증 훅 (5단계 마감):**
 ```
 1. news feed:finhub api 창 열기
@@ -1191,6 +1288,8 @@ API 계약(초안)
 14. Source 컬럼: 좌클릭으로 링크 열기, 우클릭 메뉴에서 Copy URL → 붙여넣기 확인
 15. Update 클릭 → 응답이 `{ jobId }` 로 즉시 반환되고, UI가 멈추지 않는지 확인
 16. View Log 버튼 클릭 → 로그 패널에 진행률 바 + 로그 표시 확인. Update만 클릭하고 View Log 안 누르면 패널 안 열리는지 확인
+17. News 창의 `7D Change Update` 클릭 → `{ jobId }` 반환, 완료 후 목록 재조회 확인
+18. News 창의 `Custom Change Update`에 `21` 입력 후 실행 → `{ jobId }` 반환, 완료 후 재조회 확인
 ```
 - 사용자 확인 필요: **Yes**
 
@@ -1299,7 +1398,7 @@ API 계약(초안)
   2) IBKR에서 누락된 **일봉(1D) OHLCV**를 가져온다
   3) 기존 canonical DB `OHLC_data/ohlc_1d_watchlist.sqlite`에 upsert 한다
   4) News Feed UI에 필요한 파생 % 변화 컬럼을 계산/저장한다
-  5) **news_items change% 백필**: OHLC 업데이트로 새 데이터가 들어온 심볼/날짜에 대해, `news_items` 테이블의 change% 컬럼(change_1d_pct 등)이 NULL인 row를 찾아 OHLC 기반으로 계산/업데이트한다.
+  5) **표준 change metric 백필**: OHLC 업데이트로 새 데이터가 들어온 심볼/날짜에 대해, `news_change_metrics`의 표준 metric row가 없는 news_id를 찾아 OHLC 기반으로 계산/upsert한다.
 
 기간 규칙(최소/증분)
 - DB 최신 날짜 `MAX(Datetime)`를 기준으로, 이후 구간만 가져온다.
@@ -1377,7 +1476,8 @@ API 계약(초안)
 | 7-5 | `GET /api/ibkr/ohlc1d/status` 연결 | `terminal/backend/src/server.ts` | `{ dbPath, overallMaxDate: "2026-02-20", lastSuccessAt }` 반환 | ⬜ |
 | 7-6 | `POST /api/ibkr/ohlc1d/update` 연결 | `terminal/backend/src/server.ts` | POST 후 `overallMaxDate`가 증가(새 거래일 존재 시) | ⬜ |
 | 7-7 | 파생 컬럼 샘플 점검 | (런타임) | `SELECT ... Change_1d_Pct ... WHERE Symbol='AAPL' ... LIMIT 5` → NULL 아님 | ⬜ |
-| 7-8 | OHLC 업데이트 후 news_items change% 백필 | `newsChangeMerger.ts`, `server.ts` | OHLC 업데이트 전에 change%가 NULL이었던 news row가 업데이트 후 실제 값으로 채워짐 | ⬜ |
+| 7-8 | OHLC 업데이트 후 표준 change metric 백필 | `newsChangeMerger.ts`, `server.ts` | `news_change_metrics`에 표준 metric row upsert 확인 | ⬜ |
+| 7-9 | Custom change 재계산 서비스/엔드포인트 | `newsChangeMerger.ts`, `server.ts` | custom `{N}d` metric row upsert 확인 | ⬜ |
 
 **세부 단계 목적/설명 (7단계)**
 - `7-1` 목적: canonical OHLC SQLite DB 접근을 한 곳으로 모아 안전하게 캡슐화한다. 설명:
@@ -1426,7 +1526,7 @@ API 계약(초안)
     - Default Ticker CSV에서 티커를 읽고 정규화+중복 제거
     - DB max date를 기준으로 심볼별 수집 기간을 결정
     - `ibkrOhlc1dProvider`로 bars fetch → upsert → 영향 구간 파생 지표 재계산
-    - **news_items change% 백필**: 새 OHLC가 들어온 심볼/날짜에 대해 `newsChangeMerger`를 호출하여 `news_items`의 change% 컬럼을 채움
+    - **표준 change metric 백필**: 새 OHLC가 들어온 심볼/날짜에 대해 `newsChangeMerger`를 호출하여 `news_change_metrics`의 표준 metric row를 채움
     - 전체 성공 시 `update_status(ibkr_ohlc_1d)`를 최소 details로 갱신
   - 부분 실패 정책을 명시해야 한다(코드에 문서화):
     - (a) 전체 실패로 처리, 또는 (b) 가능한 심볼은 계속 진행하고 per-symbol 실패를 리포트
@@ -1441,15 +1541,23 @@ API 계약(초안)
   - 완료 조건(눈으로 확인): SQL 결과에 행이 나오고 파생 컬럼 중 최소 1개가 숫자 값으로 채워져 있다.
   - 사람 검증(비개발자): SQLite 뷰어에 SQL을 붙여 넣고 값이 과도하게 크거나 NaN/inf처럼 보이지 않는지 확인.
   - 흔한 문제/주의: 다른 DB 파일을 열어 확인; `Datetime` 포맷이 어긋나 MAX(Datetime)가 잘못 계산.
-- `7-8` 목적: OHLC 업데이트 후 news_items의 change% 컬럼을 백필한다. 설명:
+- `7-8` 목적: OHLC 업데이트 후 표준 change metric row를 백필한다. 설명:
   - OHLC upsert + 파생 지표 계산이 완료된 후, `newsChangeMerger`를 호출한다.
-  - 대상: `news_items`에서 `change_1d_pct IS NULL` AND `tickers_csv`가 이번에 업데이트된 심볼을 포함하는 row.
-  - 각 row의 `published_at` 날짜에 대응하는 OHLC 데이터를 `ohlc_1d_watchlist.sqlite`에서 조회하고, change_1d_pct, change_from_open_pct, change_7d_pct, change_14d_pct, change_30d_pct를 계산하여 UPDATE.
+  - 대상: `news_items` 중 이번에 업데이트된 심볼을 포함하고, 표준 metric_key row가 누락된 news_id.
+  - 각 row의 `published_at` 날짜에 대응하는 OHLC 데이터를 `ohlc_1d_watchlist.sqlite`에서 조회하고, 표준 metric row를 `news_change_metrics`에 upsert.
   - OHLC에 해당 날짜가 없으면(휴장일 등): 가장 가까운 이전 거래일 데이터를 사용하거나 NULL 유지.
-  - `POST /api/ibkr/ohlc1d/update`의 반환 요약에 `newsChangesMerged: <n>`을 추가한다.
-  - 완료 조건(눈으로 확인): OHLC 업데이트 전에 change%가 NULL이었던 뉴스 row가, 업데이트 후 실제 숫자로 채워진다.
-  - 사람 검증(비개발자): OHLC 업데이트 전후로 `SELECT id, change_1d_pct FROM news_items WHERE ohlc_ticker='AAPL' LIMIT 5`를 비교.
-  - 흔한 문제/주의: newsChangeMerger가 잘못된 DB를 열어 매칭 실패; 심볼 매칭에서 대소문자/접미사 불일치; 대량 뉴스 row 업데이트 시 트랜잭션 없이 느려짐.
+  - `POST /api/ibkr/ohlc1d/update`의 반환 요약에 `newsChangeRowsUpserted: <n>`을 추가한다.
+  - 완료 조건(눈으로 확인): OHLC 업데이트 전에 없던 표준 metric row가, 업데이트 후 생성된다.
+  - 사람 검증(비개발자): OHLC 업데이트 전후로 `SELECT news_id, metric_key, value_pct FROM news_change_metrics WHERE metric_key='change_7d_pct' LIMIT 5`를 비교.
+  - 흔한 문제/주의: newsChangeMerger가 잘못된 DB를 열어 매칭 실패; 심볼 매칭에서 대소문자/접미사 불일치; 대량 upsert 시 트랜잭션 없이 느려짐.
+
+- `7-9` 목적: 운영 UI의 `Custom Change Update` 버튼이 호출할 재계산 엔드포인트를 제공한다. 설명:
+  - 입력: `lookbackTradingDays`, 선택적 `tickers[]`, 선택적 `from/to`.
+  - 대상 news_id를 필터링한 뒤 `metric_key = custom_{N}d_pct` row를 upsert한다.
+  - 동일한 custom window가 다시 실행되면 기존 row를 overwrite한다.
+  - 완료 조건(눈으로 확인): 같은 news_id에 대해 `custom_21d_pct` 같은 row가 생긴다.
+  - 사람 검증(비개발자): `Custom Change Update`에 21 입력 후, SQL 조회에서 `custom_21d_pct` row가 생기는지 확인.
+  - 흔한 문제/주의: custom window 파라미터 검증 누락; metric_key 포맷 불일치; 너무 넓은 범위로 실행되어 장시간 소요.
 
 `7-3` 구현 상세(옵션 B — Python child_process 확정)
 - Python 스크립트가 newline-delimited JSON bars를 출력하고, 오류 시 non-zero exit code로 종료.
@@ -1469,7 +1577,8 @@ API 계약(초안)
 3. GET /api/ibkr/ohlc1d/status → DB max date 확인
 4. POST /api/ibkr/ohlc1d/update → 업서트 및 max date 증가 확인
 5. AAPL 최근 5행 SELECT → 파생 컬럼이 실제 값인지 확인
-6. news_items에서 change_1d_pct가 이전에 NULL이었던 row → OHLC 업데이트 후 실제 값으로 백필 확인
+6. `news_change_metrics`에서 표준 metric row 백필 확인
+7. `news_change_metrics`에서 `custom_{N}d_pct` row 생성 확인
 ```
 - 사용자 확인 필요: **Yes**
 
@@ -1483,6 +1592,8 @@ UI 동작(최소)
 - 섹션별 구성:
   - `IBKR Price Data` → Update 버튼 + **View Log** 버튼 + last success + DB 최신 날짜
   - `IBKR Calendar Data` → Update 버튼 + **View Log** 버튼 + last success
+  - `7D Change Update` → Update 버튼 + **View Log** 버튼 + last success
+  - `Custom Change Update` → Update 버튼 + **View Log** 버튼 + last success + lookback 입력(`N` 거래일)
 - Update 클릭 시 **백그라운드 잡**으로 시작(`{ jobId }` 즉시 반환).
 - **View Log 버튼은 시작 시 자동 오픈 금지** — 사용자가 눌러야만 로그 패널이 열린다.
 - 상태 표시(읽기 전용):
@@ -1495,13 +1606,17 @@ UI 동작(최소)
 프론트 파일:
 - `src/app/types.ts`에 `data-control` 윈도우 타입 추가
 - `src/app/components/DataControlWindow.tsx` 신규
-  - 섹션 2개
+  - 섹션 4개
     - IBKR Price Data(OHLC 1D): Update 버튼 + **View Log** 버튼 + last updated + DB 최신 날짜
     - IBKR Calendar Data: Update 버튼 + **View Log** 버튼 + last updated
+    - 7D Change Update: Update 버튼 + **View Log** 버튼 + last updated
+    - Custom Change Update: 숫자 입력(`N`) + Update 버튼 + **View Log** 버튼 + last updated
   - 초기 로드: `GET /api/updates/status`
   - Update 클릭:
     - 가격: `POST /api/ibkr/ohlc1d/update` → `{ jobId }` 반환
     - 캘린더: `POST /api/ibkr/calendar/update` → `{ jobId }` 반환
+    - 7D change: `POST /api/news/change/update-7d` → `{ jobId }` 반환
+    - custom change: `POST /api/news/change/update-custom` with `{ lookbackTradingDays: N }` → `{ jobId }` 반환
     - 이후 `GET /api/updates/status` + `GET /api/ibkr/ohlc1d/status` 재조회
   - View Log 클릭: `GET /api/jobs/:jobId`로 폴링 → 로그 패널에 진행률 + 로그 표시 (자동 오픈 금지)
 - 등록:
@@ -1516,10 +1631,12 @@ UI 동작(최소)
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
 | 8-1 | 윈도우 타입 `data-control` 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/types.ts` | AddTab에서 선택 가능 | 🚫 |
-| 8-2 | `DataControlWindow.tsx` 구현(UI + API 호출) | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx` | 로드시 `GET /api/updates/status` 호출/렌더 | 🚫 |
+| 8-2 | `DataControlWindow.tsx` 구현(UI + API 호출) | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx` | 로드시 4개 섹션 + `GET /api/updates/status` 호출/렌더 | 🚫 |
 | 8-3 | 윈도우 시스템 연결 | `AddTabModal.tsx`, `App.tsx`, `DraggableWindow.tsx` | 창이 정상 렌더 | 🚫 |
 | 8-4 | 실행 중/에러 상태 표시 | same | 버튼 비활성화 + “Running…” + 에러 인라인 표시 | 🚫 |
 | 8-5 | 업데이트 후 status/DB date 재조회 | same | POST 성공 후 timestamp와 overallMaxDate 갱신 | 🚫 |
+| 8-6 | 4개 업데이트 잡 엔드포인트 연동 | same | 각 버튼 클릭 시 `{ jobId }` 즉시 반환 | 🚫 |
+| 8-7 | View Log 버튼 + 로그 패널 연동 | same | 각 섹션에서 View Log 클릭 시 진행률/로그 표시 | 🚫 |
 
 **세부 단계 목적/설명 (8단계)**
 - `8-1` 목적: 윈도우 타입을 UI에서 선택 가능하게 추가. 설명:
@@ -1530,10 +1647,10 @@ UI 동작(최소)
   - 사람 검증(비개발자): Add Tab에서 토글을 여러 번 해도 창이 중복으로 여러 개 생기지 않는지 확인.
   - 흔한 문제/주의: AddTab/DraggableWindow의 타입 문자열 불일치로 빈 창이 뜸.
 - `8-2` 목적: 운영용 컨트롤 UI 제공. 설명:
-  - `DataControlWindow.tsx`에 Price/Calendar 2개 섹션과 최소 컨트롤을 구현한다.
+  - `DataControlWindow.tsx`에 Price/Calendar/7D Change/Custom Change 4개 섹션과 최소 컨트롤을 구현한다.
   - mount 시 `GET /api/updates/status`를 호출해 `lastSuccessAt`를 렌더한다(null이면 `-`).
   - OHLC 최신 날짜 표시를 위해 `GET /api/ibkr/ohlc1d/status`도 로드한다.
-  - 완료 조건(눈으로 확인): 창을 열면 섹션 2개가 보이고, 타임스탬프/날짜가 `-` 또는 값으로 표시된다(비어있는 placeholder 금지).
+  - 완료 조건(눈으로 확인): 창을 열면 섹션 4개가 보이고, 타임스탬프/날짜가 `-` 또는 값으로 표시된다(비어있는 placeholder 금지).
   - 사람 검증(비개발자): 백엔드 실행 상태에서 새로고침 후, 버튼을 누르지 않아도 상태 값이 표시되는지 확인.
   - 흔한 문제/주의: 백엔드 base URL/포트가 달라 404; `lastSuccessAt`가 null일 때 렌더 크래시.
 - `8-3` 목적: 앱에서 접근/렌더가 되도록 연결. 설명:
@@ -1558,16 +1675,16 @@ UI 동작(최소)
   - 사람 검증(비개발자): “IBKR Price Data” 1회 실행 후, 완료되면 “DB 최신 날짜” 표시가 바뀌는지 확인.
   - 흔한 문제/주의: 한쪽만 refresh해서 timestamp는 바뀌는데 DB date는 안 바뀌는 등 불일치.
 
-- `8-6` 목적: IBKR 업데이트 요청을 동기 응답 대신 백그라운드 잡으로 전환하여 장시간 작업에도 UI가 멘추지 않게 한다. 설명:
-  - `POST /api/ibkr/ohlc1d/update` 및 `POST /api/ibkr/calendar/update` 응답을 즉시 `{ jobId }` 반환으로 변경한다.
+- `8-6` 목적: Data Control Window의 4개 업데이트 요청을 동기 응답 대신 백그라운드 잡으로 전환하여 장시간 작업에도 UI가 멘추지 않게 한다. 설명:
+  - `POST /api/ibkr/ohlc1d/update`, `POST /api/ibkr/calendar/update`, `POST /api/news/change/update-7d`, `POST /api/news/change/update-custom` 응답을 즉시 `{ jobId }` 반환으로 통일한다.
   - 5단계의 `jobManager.ts` 모듈을 공유해 잡 상태를 관리한다.
   - `GET /api/jobs/:jobId` 폴링으로 `{ status, progress, logs[] }` 응답.
   - 완료 조건(눈으로 확인): POST 응답이 1초 이내로 `{ jobId }` 반환. GET 폴링 시 progress가 증가.
   - 사람 검증(비개발자): Update 클릭 후 창이 멘추지 않고 다른 조작 가능한지 확인.
   - 흔한 문제/주의: 잡 상태가 누락되어 영원히 running 상태로 남음; IBKR 연결 끊김 시 잡 실패 처리.
 
-- `8-7` 목적: 사용자가 IBKR 업데이트 진행 상황을 원할 때만 확인할 수 있는 View Log 버튼과 로그 패널을 제공한다. 설명:
-  - 각 섹션(Price Data / Calendar Data) 우측에 **View Log** 버튼을 배치한다.
+- `8-7` 목적: 사용자가 4개 업데이트 작업의 진행 상황을 원할 때만 확인할 수 있는 View Log 버튼과 로그 패널을 제공한다. 설명:
+  - 각 섹션(Price Data / Calendar Data / 7D Change / Custom Change) 우측에 **View Log** 버튼을 배치한다.
   - **시작 시 로그 패널이 자동으로 열리지 않는다.** 사용자가 View Log를 눌러야만 열린다.
   - 로그 패널: 진행률 바(ticker 기준) + 실시간 로그 라인 + 에러 표시.
   - 닫기: X 버튼 또는 외부 클릭/ESC.
@@ -1582,8 +1699,10 @@ UI 동작(최소)
 3. 성공 후 ibkr_ohlc_1d lastSuccessAt 갱신 확인
 4. GET /api/ibkr/ohlc1d/status로 최신 DB date 갱신 확인
 5. IBKR Calendar Data Update 클릭 → `{ jobId }` 반환; 완료 후 lastSuccessAt 갱신 확인
-6. View Log 버튼 클릭 → 로그 패널에 진행률 바 + 로그 표시 확인
-7. Update만 클릭하고 View Log 안 누르면 패널 안 열리는지 확인 (자동 오픈 금지)
+6. 7D Change Update 클릭 → `{ jobId }` 반환; 완료 후 해당 lastSuccessAt 갱신 확인
+7. Custom Change Update에 `21` 입력 후 실행 → `{ jobId }` 반환; 완료 후 해당 lastSuccessAt 갱신 확인
+8. View Log 버튼 클릭 → 로그 패널에 진행률 바 + 로그 표시 확인
+9. Update만 클릭하고 View Log 안 누르면 패널 안 열리는지 확인 (자동 오픈 금지)
 ```
 - 사용자 확인 필요: **Yes**
 
@@ -1960,13 +2079,15 @@ API 계약(초안)
            │      7-5 GET /ibkr/ohlc1d/status
            │      7-6 POST /ibkr/ohlc1d/update
            │      7-7 파생 컨럼 검증
+          │      7-8 표준 change metric 백필
+          │      7-9 custom change 엔드포인트
            │
            ▼
    🚫 Step 8 (Data Control Window UI)
    │  ◄── Steps 6 + 7 완료 필요
    │  8-1 window type + 컴포넌트
    │  8-2 /api/updates/status에서 상태 fetch
-   │  8-3 소스별 update 버튼
+  │  8-3 4개 update 버튼
    │  8-4 진행률/에러 표시
    │  8-5 status/DB date 재조회
    │  8-6 백엔드 잡 큐 연동(IBKR)
