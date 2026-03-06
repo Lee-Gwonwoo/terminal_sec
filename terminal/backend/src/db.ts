@@ -109,6 +109,16 @@ export async function initDb(): Promise<void> {
   await db.exec(
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_calendar_events_type_unique_key ON calendar_events (event_type, unique_key);"
   );
+
+  // news_items change% columns (Step 4-2)
+  await ensureColumn("news_items", "ohlc_ticker", "TEXT");
+  await ensureColumn("news_items", "ohlc_date", "TEXT");
+  await ensureColumn("news_items", "change_1d_pct", "REAL");
+  await ensureColumn("news_items", "change_from_open_pct", "REAL");
+  await ensureColumn("news_items", "change_7d_pct", "REAL");
+  await ensureColumn("news_items", "change_14d_pct", "REAL");
+  await ensureColumn("news_items", "change_30d_pct", "REAL");
+  await ensureColumn("news_items", "change_computed_at", "TEXT");
 }
 
 async function ensureColumn(tableName: string, columnName: string, definition: string): Promise<void> {

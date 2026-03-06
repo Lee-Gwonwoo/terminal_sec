@@ -68,11 +68,11 @@ export function AddTabModal({ isOpen, onClose, onStart }: AddTabModalProps) {
             <label className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
               <input
                 type="checkbox"
-                checked={selectedWindows.includes('brave-news')}
-                onChange={() => toggleWindow('brave-news')}
+                checked={selectedWindows.includes('finhub-news')}
+                onChange={() => toggleWindow('finhub-news')}
                 className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               />
-              <span>News Feed: Brave API</span>
+              <span>News Feed: Finnhub API</span>
             </label>
 
             <label className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
@@ -83,6 +83,16 @@ export function AddTabModal({ isOpen, onClose, onStart }: AddTabModalProps) {
                 className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               />
               <span>Watch List</span>
+            </label>
+
+            <label className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={selectedWindows.includes('default-ticker')}
+                onChange={() => toggleWindow('default-ticker')}
+                className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span>Default Ticker</span>
             </label>
           </div>
         </div>

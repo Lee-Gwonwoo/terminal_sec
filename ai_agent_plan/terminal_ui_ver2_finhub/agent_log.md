@@ -381,3 +381,140 @@
 - plan.md에서 "⚠️ BLOCKED" 검색 → KO 섹션에서 6단계/7단계 관련 BLOCKED가 없을 것
 - plan.md에서 "확정: 옵션 B" 검색 → 3곳 일치 (결정 테이블, 7단계 메모, 결정 #6 상세)
 - plan.md에서 "IBKR 캘린더 우선" 검색 → 1곳 일치 (결정 테이블)
+
+---
+
+## 2026-03-05
+
+### Steps 1~5 구현 (Track A + Track B 비-IBKR 부분)
+
+**Status: done (awaiting user confirmation)**
+
+#### Step 1 — update_status 테이블 & API 검증
+
+**수행 내역:**
+1. `db.ts` (129줄) 확인 — `update_status` 테이블 CREATE 존재
+2. `updateStatusRepository.ts` (92줄) 확인 — CRUD 함수(getAll, getByKey, setLastSuccess 등) 완비
+3. `server.ts` (408줄) 확인 — `GET /api/updates/status` 라우트 연결됨
+4. `config.ts` (12줄) — Finnhub 키 아직 없음 (Step 4에서 추가 예정)
+5. TypeScript 컴파일: `npx.cmd tsc --noEmit` → **오류 0건**
+6. 백엔드 시작: `npm.cmd run dev` → port 8080 리스닝
+7. curl 테스트: `GET /api/updates/status` → `{"sources":{"tickers_csv":null,"finhub_news":null,"ibkr_calendar":null,"ibkr_ohlc_1d":null}}`
+
+**결과:** ✅ 4개 소스 키 모두 초기화 확인
+
+---
+
+#### Step 2 — Ticker CSV 백엔드 서비스
+
+**생성 파일:**
+- `terminal/backend/src/services/tickerCsvService.ts` (~170줄)
+  - `readTickersFromCsv(csvPath)` — CSV 파싱, Symbol 컬럼 첫 번째 열 읽기
+  - `appendTickerToCsv(csvPath, ticker)` — 원자적 임시파일→rename, Windows 락 재시도 10회
+  - 보안: allowlist root (`tradigview_screener/original_data/`), `.csv` only, `..` 금지, 티커 정규식 `^[A-Z0-9.\-]{1,20}$`
+  - `CsvServiceError` 커스텀 에러 클래스
+
+**수정 파일:**
+- `terminal/backend/src/server.ts` — `GET /api/tickers`, `POST /api/tickers/add` 엔드포인트 추가
+
+**검증:**
+1. `GET /api/tickers` → 1188개 티커 반환 (TXN, KLAC, T, ABT, ...)
+2. 보안 테스트: `../../EODHD/API TOKEN` → `"Path not allowed"` 정상 차단
+3. `POST /api/tickers/add` (ZZZTEST) → 추가 성공, 리스트에 표시됨
+4. `update_status.tickers_csv.lastSuccessAt` 업데이트 확인
+5. 테스트 티커 정리 완료
+
+**결과:** ✅ 정상 동작
+
+---
+
+#### Step 3 — Default Ticker 윈도우 (프론트엔드)
+
+**생성 파일:**
+- `termina_web/.../components/DefaultTickerWindow.tsx` (~160줄)
+  - CSV 경로 입력, Reload 버튼, 티커 추가 폼, 필터, 그리드 디스플레이
+
+**수정 파일:**
+- `types.ts` — `WindowType` 유니온에 `'default-ticker'` 추가
+- `DraggableWindow.tsx` — DefaultTickerWindow import + switch case
+- `AddTabModal.tsx` — "Default Ticker" 체크박스 추가
+- `App.tsx` — `'default-ticker'` → `'Default Ticker'` 타이틀 매핑
+
+**결과:** ✅ 오류 0건
+
+---
+
+#### Step 4 — Finnhub 뉴스 수집 백엔드
+
+**생성 파일:**
+
+| 파일 | 설명 |
+|------|------|
+| `config.ts` (수정) | `loadFinnhubApiKey()` — env var 우선, 파일 fallback (`finhub/finhub_api_key/finhub_api_key`) |
+| `db.ts` (수정) | 8개 change% 컬럼 `ensureColumn()` 추가 (ohlc_ticker, ohlc_date, change_1d/open/7/14/30d_pct, change_computed_at) |
+| `finnhubNewsProvider.ts` (신규, ~140줄) | `pullCompanyNews()`, `pullPressReleases()` — incremental pull, 429 rate limit 재시도, 7일 lookback |
+| `newsChangeMerger.ts` (신규, ~130줄) | `mergeChangeForNewsItem()`, `mergeChangeForNewItems()` — OHLC DB에서 change% 계산 |
+| `newsRepository.ts` (수정) | SELECT/mapNewsRow에 change% 8개 컬럼 추가 |
+| `types.ts` (수정) | `NewsItem`에 change% optional 필드 8개 추가 |
+| `server.ts` (수정) | `POST /api/news/pull-finhub` 엔드포인트, `parseNewsQuery()`에 `source_type` 파라미터 지원 |
+
+**검증:**
+1. TypeScript: **오류 0건**
+2. `POST /api/news/pull-finhub` (maxTickers=3) → `{"source":"FINNHUB","tickerCount":3,"inserted":42,"skipped":0,"changeMerged":0,"details":{"company_news":{"fetched":41,"inserted":41},"press_release":{"fetched":1,"inserted":1}}}`
+3. `GET /api/news?source_names=FINNHUB` → FINNHUB 뉴스 정상 반환
+4. `GET /api/news?source_type=press_release` → press_release만 필터링
+5. `update_status.finhub_news.lastSuccessAt` 업데이트 확인
+6. changeMerged=0 — OHLC 데이터(최신 2026-02-20)가 뉴스(2026년 3월)보다 오래됨 → 예상된 동작
+
+**결과:** ✅ 정상 동작
+
+---
+
+#### Step 5 — News Feed 프론트엔드 전환 (BraveNews → FinnhubNews)
+
+**생성 파일:**
+- `termina_web/.../components/FinnhubNewsWindow.tsx` (~470줄)
+  - 백엔드 `GET /api/news?source_names=FINNHUB` fetch (mock 데이터 제거)
+  - source_type 필터 토글 (All / Company News / Press Release)
+  - "Update" 버튼 → `POST /api/news/pull-finhub` 호출 후 자동 새로고침
+  - "Refresh" 버튼 → DB에서 재조회
+  - Change% 백엔드 필드 매핑 (change_1d_pct → Chg, change_from_open_pct → fr.Open, ...)
+  - 기존 가상화 리스트(react-window), 컬럼 드래그/리사이즈/정렬, 표시 모드 유지
+  - 날짜별 그룹핑, 검색, Save/Load 검색 유지
+
+**수정 파일:**
+
+| 파일 | 변경 |
+|------|------|
+| `types.ts` | `'brave-news'` → `'finhub-news'` |
+| `DraggableWindow.tsx` | BraveNewsWindow import → FinnhubNewsWindow import, switch case 변경 |
+| `AddTabModal.tsx` | 체크박스 라벨: "News Feed: Brave API" → "News Feed: Finnhub API" |
+| `App.tsx` | 타이틀 매핑: `'brave-news'` → `'finhub-news'`, "Finnhub API" |
+
+**검증:**
+1. `@types/react-window` 설치 (타입 오류 해결)
+2. `npx.cmd vite build` → **빌드 성공** (3.91s, 1931 modules)
+3. 모든 수정 파일 오류 0건
+4. 백엔드 API E2E 테스트: source_type=press_release 필터 정상 동작
+5. BraveNewsWindow.tsx는 dead code로 남음 (아무 곳에서도 import하지 않음)
+
+**결과:** ✅ 정상 동작
+
+---
+
+### 현재 진행 상황 요약
+
+| Step | 내용 | 상태 |
+|------|------|------|
+| 0 | 데이터 가용성 감사 | ✅ 완료 (사용자 확인 대기) |
+| 1 | update_status 테이블 + API | ✅ 완료 |
+| 2 | Ticker CSV 서비스 | ✅ 완료 |
+| 3 | Default Ticker 윈도우 | ✅ 완료 |
+| 4 | Finnhub 뉴스 수집 | ✅ 완료 |
+| 5 | News Feed 프론트엔드 전환 | ✅ 완료 |
+| 6 | IBKR Calendar | ⬜ 미착수 (결정 #5 확정됨, 구현 시작 가능) |
+| 7 | IBKR OHLC 1D | ⬜ 미착수 (결정 #6 확정됨, 옵션 B Python child_process) |
+| 8 | Update Pipeline 통합 | ⬜ 미착수 |
+| 9 | 테스트 & Acceptance | ⬜ 미착수 |
+
+**다음 작업**: Step 6 (IBKR Calendar) 또는 Step 7 (IBKR OHLC) — TWS 실행 + Python ib_insync 연동 필요

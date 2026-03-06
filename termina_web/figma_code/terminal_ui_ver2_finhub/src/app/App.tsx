@@ -86,8 +86,10 @@ export default function App() {
     const newWindows: WindowInstance[] = selectedWindows.map(
       (type, index) => {
         let title = '';
-        if (type === 'brave-news') {
-          title = 'News Feed: Brave API';
+        if (type === 'finhub-news') {
+          title = 'News Feed: Finnhub API';
+        } else if (type === 'default-ticker') {
+          title = 'Default Ticker';
         } else {
           title = type.charAt(0).toUpperCase() + type.slice(1) + ' Window';
         }

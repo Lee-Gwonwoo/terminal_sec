@@ -111,7 +111,9 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
 
   const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
   const sql = `
-    SELECT id, published_at, source, source_type, title, body, url, tickers_csv, tags_csv, created_at
+    SELECT id, published_at, source, source_type, title, body, url, tickers_csv, tags_csv, created_at,
+           ohlc_ticker, ohlc_date, change_1d_pct, change_from_open_pct,
+           change_7d_pct, change_14d_pct, change_30d_pct, change_computed_at
     FROM news_items
     ${whereSql}
     ORDER BY published_at DESC, id DESC
@@ -129,7 +131,9 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
 
 export async function getNewsById(id: string): Promise<NewsItem | null> {
   const row = await getDb().get<any>(
-    `SELECT id, published_at, source, source_type, title, body, url, tickers_csv, tags_csv, created_at
+    `SELECT id, published_at, source, source_type, title, body, url, tickers_csv, tags_csv, created_at,
+            ohlc_ticker, ohlc_date, change_1d_pct, change_from_open_pct,
+            change_7d_pct, change_14d_pct, change_30d_pct, change_computed_at
      FROM news_items
      WHERE id = ?`,
     [id]
@@ -199,7 +203,15 @@ function mapNewsRow(row: any): NewsItem {
     url: row.url,
     tickers: splitCsvEnvelope(row.tickers_csv),
     tags: splitCsvEnvelope(row.tags_csv),
-    created_at: row.created_at
+    created_at: row.created_at,
+    ohlc_ticker: row.ohlc_ticker ?? null,
+    ohlc_date: row.ohlc_date ?? null,
+    change_1d_pct: row.change_1d_pct ?? null,
+    change_from_open_pct: row.change_from_open_pct ?? null,
+    change_7d_pct: row.change_7d_pct ?? null,
+    change_14d_pct: row.change_14d_pct ?? null,
+    change_30d_pct: row.change_30d_pct ?? null,
+    change_computed_at: row.change_computed_at ?? null,
   };
 }
 

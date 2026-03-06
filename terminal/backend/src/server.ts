@@ -19,7 +19,10 @@ import { ensureSeedData } from "./seed.js";
 import { startCalendarIngestionWorkers } from "./services/calendarIngestion.js";
 import { pullEodhdNews, pullEodhdNewsAll } from "./services/eodhdNewsProvider.js";
 import { insertNewsItem } from "./services/newsRepository.js";
-import { listUpdateStatuses } from "./services/updateStatusRepository.js";
+import { listUpdateStatuses, setLastSuccess } from "./services/updateStatusRepository.js";
+import { readTickersFromCsv, appendTickerToCsv, CsvServiceError } from "./services/tickerCsvService.js";
+import { pullCompanyNews, pullPressReleases } from "./services/finnhubNewsProvider.js";
+import { mergeChangeForNewItems } from "./services/newsChangeMerger.js";
 import type { NewsQuery } from "./types.js";
 
 const app = express();
@@ -43,10 +46,14 @@ function parseList(input: unknown): string[] | undefined {
 function parseNewsQuery(query: Record<string, unknown>): NewsQuery {
   const parsedLimit = typeof query.limit === "string" ? Number(query.limit) : undefined;
   const limit = Number.isFinite(parsedLimit as number) ? (parsedLimit as number) : undefined;
+
+  // Support both `sources` (original) and `source_type` (Step 4-5 alias)
+  const sourcesRaw = parseList(query.sources) ?? parseList(query.source_type);
+
   return {
     keyword: typeof query.keyword === "string" ? query.keyword : undefined,
     tickers: parseList(query.tickers),
-    sources: parseList(query.sources),
+    sources: sourcesRaw,
     sourceNames: parseList(query.source_names),
     tags: parseList(query.tags),
     from: typeof query.from === "string" ? query.from : undefined,
@@ -72,6 +79,184 @@ app.get("/api/updates/status", async (_req, res, next) => {
   try {
     const sources = await listUpdateStatuses();
     res.json({ sources });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Ticker CSV endpoints ───────────────────────────────────
+app.get("/api/tickers", (req, res, next) => {
+  try {
+    const csvPath = typeof req.query.csvPath === "string" ? req.query.csvPath : "";
+    if (!csvPath) {
+      res.status(400).json({ error: "csvPath query parameter is required" });
+      return;
+    }
+    const result = readTickersFromCsv(csvPath);
+    res.json({ csvPath, tickers: result.tickers });
+  } catch (error) {
+    if (error instanceof CsvServiceError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    next(error);
+  }
+});
+
+app.post("/api/tickers/add", async (req, res, next) => {
+  try {
+    const { csvPath, ticker } = req.body ?? {};
+    if (typeof csvPath !== "string" || !csvPath) {
+      res.status(400).json({ error: "csvPath is required" });
+      return;
+    }
+    if (typeof ticker !== "string" || !ticker.trim()) {
+      res.status(400).json({ error: "ticker is required" });
+      return;
+    }
+    const result = await appendTickerToCsv(csvPath, ticker);
+    await setLastSuccess("tickers_csv", new Date().toISOString(), {
+      csvPath,
+      tickerAdded: result.tickerAdded,
+      count: result.tickers.length
+    });
+    res.json({ csvPath, tickerAdded: result.tickerAdded, tickers: result.tickers });
+  } catch (error) {
+    if (error instanceof CsvServiceError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    next(error);
+  }
+});
+
+// ── Finnhub News Pull ───────────────────────────────────
+const DEFAULT_TICKERS_CSV = "tradigview_screener/original_data/watch lists2_2026-02-22.csv";
+
+const pullFinnhubSchema = z.object({
+  csvPath: z.string().optional().default(DEFAULT_TICKERS_CSV),
+  maxTickers: z.number().int().min(1).max(500).optional().default(50),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+
+app.post("/api/news/pull-finhub", async (req, res, next) => {
+  try {
+    const input = pullFinnhubSchema.parse(req.body ?? {});
+
+    // Load tickers from CSV
+    let tickerList: string[];
+    try {
+      const csvResult = readTickersFromCsv(input.csvPath);
+      tickerList = csvResult.tickers.slice(0, input.maxTickers);
+    } catch {
+      tickerList = ["AAPL", "MSFT", "TSLA", "NVDA", "AMD"]; // fallback
+    }
+
+    let totalInserted = 0;
+    let totalSkipped = 0;
+    const newItems: Array<{ id: string; tickers: string[]; publishedAt: string }> = [];
+    const detailsPerType: Record<string, { fetched: number; inserted: number }> = {
+      company_news: { fetched: 0, inserted: 0 },
+      press_release: { fetched: 0, inserted: 0 },
+    };
+
+    // Rate limit: ~60 calls/min for free tier. Add small delays between tickers.
+    for (const ticker of tickerList) {
+      // Company news
+      try {
+        const items = await pullCompanyNews(ticker, input.from, input.to);
+        detailsPerType.company_news.fetched += items.length;
+        for (const rawItem of items) {
+          const inserted = await insertNewsItem({
+            publishedAt: rawItem.publishedAt,
+            source: rawItem.source,
+            sourceType: rawItem.sourceType,
+            title: rawItem.title,
+            body: rawItem.body,
+            url: rawItem.url,
+            tickers: rawItem.providerTickers,
+            tags: rawItem.tags,
+          });
+          if (inserted) {
+            totalInserted++;
+            detailsPerType.company_news.inserted++;
+            newItems.push({
+              id: inserted.id,
+              tickers: inserted.tickers,
+              publishedAt: inserted.published_at,
+            });
+            streamHub.publishNews(inserted);
+          } else {
+            totalSkipped++;
+          }
+        }
+      } catch (err: any) {
+        console.error(`[pull-finhub] company_news ${ticker}: ${err.message}`);
+      }
+
+      // Press releases
+      try {
+        const items = await pullPressReleases(ticker, input.from, input.to);
+        detailsPerType.press_release.fetched += items.length;
+        for (const rawItem of items) {
+          const inserted = await insertNewsItem({
+            publishedAt: rawItem.publishedAt,
+            source: rawItem.source,
+            sourceType: rawItem.sourceType,
+            title: rawItem.title,
+            body: rawItem.body,
+            url: rawItem.url,
+            tickers: rawItem.providerTickers,
+            tags: rawItem.tags,
+          });
+          if (inserted) {
+            totalInserted++;
+            detailsPerType.press_release.inserted++;
+            newItems.push({
+              id: inserted.id,
+              tickers: inserted.tickers,
+              publishedAt: inserted.published_at,
+            });
+            streamHub.publishNews(inserted);
+          } else {
+            totalSkipped++;
+          }
+        }
+      } catch (err: any) {
+        console.error(`[pull-finhub] press_release ${ticker}: ${err.message}`);
+      }
+
+      // Small delay between tickers to respect rate limits
+      await new Promise((r) => setTimeout(r, 250));
+    }
+
+    // Merge change% for newly inserted items
+    let changeMergeResult = { merged: 0, skipped: 0 };
+    if (newItems.length > 0) {
+      try {
+        changeMergeResult = await mergeChangeForNewItems(newItems);
+      } catch (err: any) {
+        console.error(`[pull-finhub] change merger error: ${err.message}`);
+      }
+    }
+
+    // Update status
+    await setLastSuccess("finhub_news", new Date().toISOString(), {
+      tickerCount: tickerList.length,
+      inserted: totalInserted,
+      skipped: totalSkipped,
+      changeMerged: changeMergeResult.merged,
+    });
+
+    res.json({
+      source: "FINNHUB",
+      tickerCount: tickerList.length,
+      inserted: totalInserted,
+      skipped: totalSkipped,
+      changeMerged: changeMergeResult.merged,
+      details: detailsPerType,
+    });
   } catch (error) {
     next(error);
   }

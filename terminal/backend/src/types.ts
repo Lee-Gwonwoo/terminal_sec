@@ -23,4 +23,13 @@ export type NewsItem = {
   tickers: string[];
   tags: string[];
   created_at: string;
+  // change% columns (Step 4)
+  ohlc_ticker?: string | null;
+  ohlc_date?: string | null;
+  change_1d_pct?: number | null;
+  change_from_open_pct?: number | null;
+  change_7d_pct?: number | null;
+  change_14d_pct?: number | null;
+  change_30d_pct?: number | null;
+  change_computed_at?: string | null;
 };

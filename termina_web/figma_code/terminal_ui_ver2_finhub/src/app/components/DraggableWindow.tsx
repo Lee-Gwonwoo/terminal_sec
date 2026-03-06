@@ -5,7 +5,8 @@ import { WindowInstance, WindowType } from '../types';
 import { NewsWindow } from './NewsWindow';
 import { WatchlistWindow } from './WatchlistWindow';
 import { CalendarWindow } from './CalendarWindow';
-import { BraveNewsWindow } from './BraveNewsWindow';
+import { FinnhubNewsWindow } from './FinnhubNewsWindow';
+import { DefaultTickerWindow } from './DefaultTickerWindow';
 
 interface DraggableWindowProps {
   window: WindowInstance;
@@ -87,8 +88,10 @@ export function DraggableWindow({
         return <WatchlistWindow onTickerClick={onTickerClick} />;
       case 'calendar':
         return <CalendarWindow onTickerClick={onTickerClick} />;
-      case 'brave-news':
-        return <BraveNewsWindow onTickerClick={onTickerClick} initialTicker={initialTicker} />;
+      case 'finhub-news':
+        return <FinnhubNewsWindow onTickerClick={onTickerClick} initialTicker={initialTicker} />;
+      case 'default-ticker':
+        return <DefaultTickerWindow onTickerClick={onTickerClick} />;
       default:
         return <div>Unknown window type</div>;
     }
