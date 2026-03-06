@@ -6,6 +6,10 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /** backend/ 루트를 기준으로 repo root 찾기 (dev: src/, prod: dist/src/ 모두 대응) */
 function findRepoRoot(): string {

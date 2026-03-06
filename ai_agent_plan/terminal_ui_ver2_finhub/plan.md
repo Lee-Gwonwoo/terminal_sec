@@ -658,7 +658,7 @@ Full Text Extraction(10단계)은 Finnhub 뉴스가 적재된 후(4단계) 독�
 
 > Legend: ✅ 구현+사용자확인 완료 · ⏳ 구현완료, 사용자확인 대기 · ⬜ 미착수 · 🚫 선행조건 미충족(차단)
 
-#### ⏳ 0단계 — 데이터 수집 가능 범위 점검(감사) (IBKR + Finnhub vs UI 컬럼)
+#### ✅ 0단계 — 데이터 수집 가능 범위 점검(감사) (IBKR + Finnhub vs UI 컬럼)
 목적(왜 먼저 하는가)
 - 이 프로젝트 UI 테이블은 market cap, industry, earnings 필드, analyst rating 등 특정 데이터를 “당연히 존재하는 것처럼” 전제한다. 구현에 들어가기 전에 IBKR/Finnhub가 실제로 제공하는지, 혹은 기존 1D OHLC DB로 계산 가능한지 확정해야 한다.
 - 이 단계는 **fail-fast 가드레일**이다. 필수 필드가 불가능하면 즉시 멈추고 의사결정을 해야 하며, UI에 가짜 placeholder를 넣지 않는다.
@@ -765,7 +765,7 @@ Full Text Extraction(10단계)은 Finnhub 뉴스가 적재된 후(4단계) 독�
 - 확인: `tmp/probes/`에 Finnhub/IBKR 프로브 산출물(JSON)이 존재하는지.
 - 게이트: 사용자가 2개 미결 결정을 확정해야 6-7단계 진행 가능.
 
-#### ⏳ 1단계 — 기반: update status 저장 + API
+#### ✅ 1단계 — 기반: update status 저장 + API
 목적
 - 데이터 소스별(CSV tickers, Finnhub news, IBKR calendar, IBKR OHLC) “마지막 성공 업데이트 시각”을 **영구 저장**한다.
 - Data Control Window(8단계)에서 재시작과 무관하게 동일한 상태를 표시할 수 있게 한다.
@@ -850,7 +850,7 @@ API 계약(초안)
 ```
 - 사용자 확인 필요: **Yes**
 
-#### ⏳ 2단계 — Default ticker CSV: read + append API(백엔드)
+#### ✅ 2단계 — Default ticker CSV: read + append API(백엔드)
 목적
 - 브라우저는 로컬 파일을 직접 읽기/쓰기가 어렵다. 따라서 백엔드가 아래를 책임진다:
   - CSV 경로에서 티커 목록 읽기
@@ -958,7 +958,7 @@ API 계약(초안)
 ```
 - 사용자 확인 필요: **Yes**
 
-#### ⏳ 3단계 — Default Ticker Window(프론트)
+#### ✅ 3단계 — Default Ticker Window(프론트)
 목적
 - CSV에 저장된 “기본 티커 리스트”를 UI에서 확인/갱신/추가할 수 있게 한다.
 - 프론트는 파일을 직접 만지지 않고(브라우저 제한), 2단계 백엔드 API만 호출한다.
@@ -2327,14 +2327,16 @@ API 계약(초안)
 ║  범례: ✅ 완료+확인  ⏳ 구현완료/확인대기  ⬜ 미착수  🚫 차단            ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
-⏳ Step 0 (데이터 가용성 감사)
-│   ├─ 0-1 Finnhub 프로브 .......................... ✅ 완료
-│   ├─ 0-2 IBKR TWS 프로브 ......................... ✅ 완료
-│   ├─ 0-3 능력 매트릭스 ............................ ✅ 완료
-│   └─ 0-4 결정 (#5, #6) .......................... ✅ 완료 (확정)
+✅ Step 0 (데이터 가용성 감사)
+│   ├─ 0-1  Finnhub 프로브 ......................... ✅ 완료
+│   ├─ 0-2  IBKR TWS 프로브 ....................... ✅ 완료
+│   ├─ 0-2b IBKR WSH 프로브 v2 .................... ✅ 완료
+│   ├─ 0-2c IBKR WSH 필드 프로브 v3 ............... ✅ 완료
+│   ├─ 0-3  능력 매트릭스 .......................... ✅ 완료
+│   └─ 0-4  결정 (#5, #6) ......................... ✅ 완료 (확정)
 │
 ▼
-⏳ Step 1 (기반: update_status + API)
+✅ Step 1 (기반: update_status + API)
 │   ├─ 1-1 update_status 테이블 ..................... ✅ 완료
 │   ├─ 1-2 updateStatusRepository.ts ................ ✅ 완료
 │   ├─ 1-3 GET /api/updates/status 연결 ............. ✅ 완료
@@ -2345,17 +2347,21 @@ API 계약(초안)
 │    (CSV / Ticker)    │         (Finnhub News)       │
 │                      │                              │
 ▼                      ▼                              │
-⏳ Step 2               ⏳ Step 4                      │
+✅ Step 2               ⏳ Step 4                      │
 (CSV 읽기+추가 API)    (Finnhub 수집 백엔드)          │
-│ ✅ 2-1 tickerCsvSvc  │ ✅ 4-1 finnhubApiKey 설정   │
-│ ✅ 2-2 appendTicker  │ ✅ 4-2 finnhubNewsProvider   │
-│ ✅ 2-3 atomic write  │ ✅ 4-3 POST /news/pull-finhub│
-│ ✅ 2-4 GET /tickers  │ ✅ 4-4 finhub_news 상태 갱신  │
-│ ✅ 2-5 POST /tickers │ ✅ 4-5 조회 검증              │
-│ ✅ 2-6 상태 갱신      │                              │
+│ ✅ 2-1 tickerCsvSvc  │ ✅ 4-1  finnhubApiKey 설정  │
+│ ✅ 2-2 appendTicker  │ ✅ 4-2  finnhubNewsProv    │
+│ ✅ 2-3 atomic write  │ ✅ 4-3  POST /news/pull    │
+│ ✅ 2-4 GET /tickers  │ ✅ 4-4  finhub_news 상태   │
+│ ✅ 2-5 POST /tickers │ ✅ 4-4a market news prov  │
+│ ✅ 2-6 상태 갱신      │ ✅ 4-5  조회 검증           │
+│                      │ ✅ 4-6  newsChangeMerger  │
+│                      │ ✅ 4-7  POST pull+change  │
+│                      │ ✅ 4-8  성공 시 상태 갱신    │
+│                      │ ⏳ 4-9  적재데이터 검증     │
 │                      │                              │
 ▼                      ▼                              │
-⏳ Step 3               ⏳ Step 5                      │
+✅ Step 3               ⏳ Step 5                      │
 (Default Ticker UI)    (news feed:finhub api UI)     │
 │ ✅ 3-1 window type   │ ✅ 5-1 brave-news 제거       │
 │ ✅ 3-2 컴포넌트       │ ✅ 5-2 FinnhubNews 이름변경  │
@@ -2365,14 +2371,21 @@ API 계약(초안)
 │ ✅ 3-6 스모크 테스트   │ ✅ 5-6 AddTabModal 라벨     │
 │                      │ ✅ 5-7 App.tsx 제목          │
 │                      │ ✅ 5-8 DraggableWindow switch│
-│                      │ ⏳ 5-9 source_type 필터 UI    │
+│                      │ ✅ 5-9 source_type 필터 UI    │
 │                      │ ✅ 5-10 서버사이드 검색      │
 │                      │ ✅ 5-11 Update 툴팁(5초)     │
+│                      │ ✅ 5-12 Ticker 전용 컬럼     │
+│                      │ ✅ 5-13 컬럼 가시성 토글     │
+│                      │ ✅ 5-14 entire 모드          │
 │                      │ ✅ 5-15 Update split-dropdown│
 │                      │ ✅ 5-16 Source 링크/Copy URL │
 │                      │ ✅ 5-17 백엔드 잡 큐 + 폴링  │
 │                      │ ✅ 5-18 View Log 버튼/패널 │
 │                      │ ✅ 5-19 Update UX 리디자인  │
+│                      │ ✅ 5-20 7D Change Update    │
+│                      │ ✅ 5-21 Custom Change Upd   │
+│                      │ ✅ 5-22 Industry 컬럼       │
+│                      │ 🚫 5-23 Keywords 컬럼       │
 │                      │ ✅ 5-24 Publisher 컬럼       │
 │                      │ ✅ 5-25 Source 기본 숨김     │
 │                      │                              │
@@ -2386,42 +2399,42 @@ API 계약(초안)
    ╚═══════════════════════════════════════╝           │
            │                                          │
            ├─► ⬜ Step 6 (캘린더 수집 + mock 정리)
-           │      6-1 mock worker 제거
-           │      6-2 startCalendarIngestionWorkers 제거
-           │      6-3 캘린더 데이터 pull 구현
-           │      6-4 POST /ibkr/calendar/update 연결
-           │      6-5 mock_provider 행 삭제
-           │      6-6 ibkr_calendar 상태 갱신
+           │      ⬜ 6-1 mock worker 제거
+           │      ⬜ 6-2 startCalendarIngestionWorkers 제거
+           │      ⬜ 6-3 캘린더 데이터 pull 구현
+           │      ⬜ 6-4 POST /ibkr/calendar/update 연결
+           │      ⬜ 6-5 mock_provider 행 삭제
+           │      ⬜ 6-6 ibkr_calendar 상태 갱신
            │
            ├─► ⬜ Step 7 (IBKR 1D OHLC 수집)
-           │      7-1 ohlcWatchlistRepository
-           │      7-2 ensureDerivedColumns 마이그레이션
-           │      7-3 ibkrOhlc1dProvider
-           │      7-4 ohlcDerivedMetrics
-           │      7-5 GET /ibkr/ohlc1d/status
-           │      7-6 POST /ibkr/ohlc1d/update
-           │      7-7 파생 컨럼 검증
-          │      7-8 표준 change metric 백필
-          │      7-9 custom change 엔드포인트
+           │      ⬜ 7-1 ohlcWatchlistRepository
+           │      ⬜ 7-2 ensureDerivedColumns 마이그레이션
+           │      ⬜ 7-3 ibkrOhlc1dProvider
+           │      ⬜ 7-4 ohlcDerivedMetrics
+           │      ⬜ 7-5 GET /ibkr/ohlc1d/status
+           │      ⬜ 7-6 POST /ibkr/ohlc1d/update
+           │      ⬜ 7-7 파생 컨럼 검증
+           │      ⬜ 7-8 표준 change metric 백필
+           │      ⬜ 7-9 custom change 엔드포인트
            │
            ▼
    🚫 Step 8 (Data Control Window UI)
    │  ◄── Steps 6 + 7 완료 필요
-   │  8-1 window type + 컴포넌트
-   │  8-2 /api/updates/status에서 상태 fetch
-  │  8-3 4개 update 버튼
-   │  8-4 진행률/에러 표시
-   │  8-5 status/DB date 재조회
-   │  8-6 백엔드 잡 큐 연동(IBKR)
-   │  8-7 View Log 버튼 + 로그 패널
+   │  🚫 8-1 window type + 컴포넌트
+   │  🚫 8-2 /api/updates/status에서 상태 fetch
+   │  🚫 8-3 4개 update 버튼
+   │  🚫 8-4 진행률/에러 표시
+   │  🚫 8-5 status/DB date 재조회
+   │  🚫 8-6 백엔드 잡 큐 연동(IBKR)
+   │  🚫 8-7 View Log 버튼 + 로그 패널
    │
    ▼
    ⬜ Step 9 (테스트 + 수락 검사)
-      9-1 백엔드 유닛 테스트 (서비스)
-      9-2 API 통합 스모크 테스트
-      9-3 mock 정리 검증
-      9-4 ACCEPTANCE_TESTS.md 갱신
-      9-5 최종 agent_log 검토
+      ⬜ 9-1 백엔드 유닛 테스트 (서비스)
+      ⬜ 9-2 API 통합 스모크 테스트
+      ⬜ 9-3 mock 정리 검증
+      ⬜ 9-4 ACCEPTANCE_TESTS.md 갱신
+      ⬜ 9-5 최종 agent_log 검토
 
                               │
    ╔══════════════════════════╧══════════════════════════╗
@@ -2430,22 +2443,23 @@ API 계약(초안)
    ╚═════════════════════════════════════════════════════╝
                               │
                               ▼
-   ⬜ Step 10 (Full Text Extraction: 백엔드 + 프론트)
+   ⏳ Step 10 (Full Text Extraction: 백엔드 + 프론트)
    │  ◄── Step 4 완료 필요 (news_items에 Finnhub 뉴스 적재)
-   │  10-1  news_fulltext 테이블 + publisher 컬럼 migration
-   │  10-2  fulltextRepository.ts 구현
-   │  10-3  기존 news_items publisher backfill
-   │  10-4  extractNasdaq (HTML scraping)
-   │  10-5  extractTmx (GraphQL API)
-   │  10-6  extractByDomain (도메인 dispatcher)
-   │  10-7  fulltextUpdateService (잡 오케스트레이터)
-   │  10-8  POST /api/news/fulltext/update 엔드포인트
-   │  10-9  GET /api/news/fulltext/:newsId 엔드포인트
-   │  10-10 GET /api/news 응답에 hasFullText 추가
-   │  10-11 프론트: O/X 컬럼 + 컬럼 토글
-   │  10-12 프론트: O 클릭 → full text 팝업
-   │  10-13 프론트: Full Text Update 버튼 + View Log
-   │  10-14 end-to-end 검증 (3개 도메인)
+   │  ⏳ 10-1  news_fulltext 테이블 + publisher 컬럼 migration
+   │  ⏳ 10-2  fulltextRepository.ts 구현
+   │  ⏳ 10-3  기존 news_items publisher backfill
+   │  ⏳ 10-4  extractNasdaq (HTML scraping)
+   │  ⏳ 10-5  extractTmx (GraphQL API)
+   │  ⏳ 10-6  extractByDomain (도메인 dispatcher)
+   │  ⏳ 10-7  fulltextUpdateService (잡 오케스트레이터)
+   │  ⏳ 10-8  POST /api/news/fulltext/update 엔드포인트
+   │  ⏳ 10-9  GET /api/news/fulltext/:newsId 엔드포인트
+   │  ⏳ 10-10 GET /api/news 응답에 hasFullText 추가
+   │  ⏳ 10-11 프론트: O/X 컬럼 + 컬럼 토글
+   │  ⏳ 10-12 프론트: O 클릭 → full text 팝업
+   │  ⏳ 10-13 프론트: Full Text Update 버튼 + View Log
+   │  ⏳ 10-14 end-to-end 검증 (3개 도메인)
+   │  ⬜ 10-15 extractPressRelease (GlobeNewsWire 등)
 ```
 
 **병렬 트랙 (IBKR 의존 없음):**
