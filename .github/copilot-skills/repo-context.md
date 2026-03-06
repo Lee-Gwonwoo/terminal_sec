@@ -23,6 +23,13 @@ This workspace appears to be a mixed-codebase repo that includes:
 
 Use the task/target directory to decide which conventions apply (Node app vs Python scripts).
 
+### Prompt/spec docs (authoritative)
+For implementation-aligned “prompt/spec” documentation that explains how the current code works:
+- Backend prompt/spec: `terminal/backend_prompt.md`
+- Frontend prompt/spec (Figma-derived UI): `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+
+If you find a mismatch between these docs and the code, update the docs in the same change.
+
 ---
 
 ## KO
@@ -47,3 +54,10 @@ Use the task/target directory to decide which conventions apply (Node app vs Pyt
 - Python 중심의 스크립트 파이프라인 영역(예: `EODHD/`, `original_data/`, `deep_learning_data/`) — script-first 워크플로우에 사용
 
 작업 대상/디렉토리(Node 앱 vs Python 스크립트)에 따라 적용할 관례를 선택하세요.
+
+### 프롬프트/스펙 문서(최신 기준)
+현재 구현과 정합된 “prompt/spec” 문서(코드가 어떻게 동작하는지 설명)는 아래를 우선 참고합니다:
+- 백엔드 프롬프트/스펙: `terminal/backend_prompt.md`
+- 프론트엔드 프롬프트/스펙(Figma 기반 UI): `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+
+만약 문서와 코드가 불일치하면, 같은 변경 작업에서 문서를 함께 업데이트하세요.

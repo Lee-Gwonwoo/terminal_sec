@@ -50,14 +50,35 @@ Failure modes:
 - Missing token file → request fails with a 400 `{error: "EODHD token file not found at ..."}`.
 - Empty token file → request fails with a 400 `{error: "EODHD token file is empty"}`.
 
+### Where the Finnhub API key lives
+The Finnhub API key is required for the backend to start.
+
+Lookup order (see `terminal/backend/src/config.ts`):
+1. Environment variable `FINNHUB_API_KEY`
+2. File fallback at repo root: `finhub/finhub_api_key/finhub_api_key`
+
+Failure modes:
+- Missing key → backend throws on startup with an error like:
+  - `FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/finhub_api_key/finhub_api_key`
+
+Security note:
+- Do not log or commit the API key.
+
 ### Data model (SQLite)
 DB init and schema live in `src/db.ts`.
 
 Key tables for news:
 - `news_items`
-  - Columns: `id`, `published_at`, `source`, `source_type`, `title`, `body`, `url`, `tickers_csv`, `tags_csv`, `created_at`
+  - Base columns: `id`, `published_at`, `source`, `source_type`, `title`, `body`, `url`, `tickers_csv`, `tags_csv`, `created_at`
+  - Change% columns (optional, computed post-ingest):
+    - `ohlc_ticker`, `ohlc_date`, `change_1d_pct`, `change_from_open_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct`, `change_computed_at`
   - Uniqueness: `UNIQUE (source, url)`
   - Index: `idx_news_items_published` on `(published_at DESC, id DESC)`
+
+Key table for update tracking:
+- `update_status`
+  - Tracks: last successful time and details for ingestion/update actions.
+  - Known keys (always returned by `GET /api/updates/status`): `tickers_csv`, `finhub_news`, `ibkr_calendar`, `ibkr_ohlc_1d`.
 
 Deduplication strategy:
 - Inserts use `INSERT OR IGNORE`.
@@ -73,6 +94,7 @@ Supported query params (see `NewsQuery` in `src/types.ts`):
 - `tickers`: CSV string, ex `tickers=TSLA,NVDA`
   - Stored in DB as an envelope like `,TSLA,NVDA,` and filtered via `tickers_csv LIKE '%,TSLA,%'`.
 - `sources`: filters `source_type IN (...)`
+  - Alias: `source_type` is also accepted as a query param (same meaning).
 - `source_names`: filters `source IN (...)`
 - `tags`: similar envelope strategy (`tags_csv LIKE '%,earnings,%'`)
 - `from`: published_at >= from
@@ -188,6 +210,103 @@ If the request is about EODHD import, specify:
 
 ---
 
+### News API (import from Finnhub)
+
+#### POST /api/news/pull-finhub
+Purpose:
+- Pull **company news** and **press releases** from Finnhub per ticker, dedupe into SQLite, and (optionally) merge Change% from the OHLC DB.
+
+Request body (Zod in `src/server.ts`):
+```json
+{
+  "csvPath": "tradigview_screener/original_data/watch lists2_2026-02-22.csv",
+  "maxTickers": 50,
+  "from": "YYYY-MM-DD",
+  "to": "YYYY-MM-DD"
+}
+```
+
+Notes:
+- `csvPath` is optional (defaults to the watchlist CSV above).
+- If reading the CSV fails, the server uses a small hard-coded ticker list fallback (AAPL/MSFT/TSLA/NVDA/AMD).
+- Dedupe is DB-level: `UNIQUE(source,url)` + `INSERT OR IGNORE`.
+- Inserted items are published to SSE (`GET /api/news/stream`).
+
+Response:
+```json
+{
+  "source": "FINNHUB",
+  "tickerCount": 3,
+  "inserted": 42,
+  "skipped": 0,
+  "changeMerged": 0,
+  "details": {
+    "company_news": { "fetched": 41, "inserted": 41 },
+    "press_release": { "fetched": 1, "inserted": 1 }
+  }
+}
+```
+
+Filtering after ingest:
+- Use `GET /api/news?source_names=FINNHUB`.
+- Use `GET /api/news?source_names=FINNHUB&source_type=press_release` (or `sources=press_release`).
+
+---
+
+### Ticker CSV API
+
+#### GET /api/tickers
+Reads tickers from a CSV file under the allowlisted root:
+- Allowed root: `tradigview_screener/original_data/`
+
+Query params:
+- `csvPath` (required) — repo-relative path under the allowlist.
+
+Response:
+```json
+{ "csvPath": "...", "tickers": ["AAPL", "MSFT"] }
+```
+
+#### POST /api/tickers/add
+Appends a new ticker into the CSV (atomic write + Windows lock retries).
+
+Request:
+```json
+{ "csvPath": "...", "ticker": "TSLA" }
+```
+
+Response:
+```json
+{ "csvPath": "...", "tickerAdded": "TSLA", "tickers": ["..."] }
+```
+
+This endpoint also updates `update_status` under key `tickers_csv`.
+
+---
+
+### Update status API
+
+#### GET /api/updates/status
+Returns the last successful timestamp + details per source.
+
+Response shape:
+```json
+{
+  "sources": {
+    "tickers_csv": null,
+    "finhub_news": null,
+    "ibkr_calendar": null,
+    "ibkr_ohlc_1d": null
+  }
+}
+```
+
+The backend updates:
+- `tickers_csv` on `POST /api/tickers/add`
+- `finhub_news` on `POST /api/news/pull-finhub`
+
+---
+
 ## KO
 
 ### 목적
@@ -238,14 +357,35 @@ EODHD 토큰은 레포 루트의 아래 파일에서 읽습니다.
 - 파일 없음 → 400 `{error: "EODHD token file not found at ..."}`
 - 파일은 있으나 빈 값 → 400 `{error: "EODHD token file is empty"}`
 
+### Finnhub API 키 위치
+Finnhub API 키는 **백엔드 기동에 필수**입니다.
+
+조회 순서(`terminal/backend/src/config.ts` 참고):
+1. 환경변수 `FINNHUB_API_KEY`
+2. 레포 루트 파일 fallback: `finhub/finhub_api_key/finhub_api_key`
+
+자주 나는 오류:
+- 키가 없으면 백엔드가 시작 시점에 에러를 던지며 종료합니다:
+  - `FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/finhub_api_key/finhub_api_key`
+
+보안 노트:
+- API 키는 로그로 남기지 말고 커밋하지 마세요.
+
 ### 데이터 모델 (SQLite)
 스키마는 `src/db.ts`에 있습니다.
 
 뉴스 핵심 테이블:
 - `news_items`
-  - 컬럼: `id`, `published_at`, `source`, `source_type`, `title`, `body`, `url`, `tickers_csv`, `tags_csv`, `created_at`
+  - 기본 컬럼: `id`, `published_at`, `source`, `source_type`, `title`, `body`, `url`, `tickers_csv`, `tags_csv`, `created_at`
+  - Change% 컬럼(옵션, 적재 후 계산/병합):
+    - `ohlc_ticker`, `ohlc_date`, `change_1d_pct`, `change_from_open_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct`, `change_computed_at`
   - 유니크: `UNIQUE (source, url)`
   - 인덱스: `idx_news_items_published` on `(published_at DESC, id DESC)`
+
+업데이트 추적 테이블:
+- `update_status`
+  - 적재/업데이트 액션의 마지막 성공 시각과 details를 기록합니다.
+  - 알려진 키(`GET /api/updates/status`에서 항상 반환): `tickers_csv`, `finhub_news`, `ibkr_calendar`, `ibkr_ohlc_1d`
 
 중복 제거(dedupe) 방식:
 - insert는 `INSERT OR IGNORE`로 수행
@@ -261,6 +401,7 @@ EODHD 토큰은 레포 루트의 아래 파일에서 읽습니다.
 - `tickers`: CSV 문자열, 예: `tickers=TSLA,NVDA`
   - DB에는 `,TSLA,NVDA,` 같은 envelope 형태로 저장되고, `tickers_csv LIKE '%,TSLA,%'`로 필터링
 - `sources`: `source_type IN (...)`
+  - 별칭(alias): `source_type`도 동일한 의미로 지원합니다.
 - `source_names`: `source IN (...)`
 - `tags`: `tags_csv LIKE '%,earnings,%'` 방식
 - `from`: published_at >= from
@@ -371,3 +512,100 @@ EODHD 적재 요청이면 아래도 명시해 주세요.
 - symbol 모드: 특정 심볼 vs global feed(`symbol: ""`)
 - chunk size/총량 기대
 - `offset` 기반 progressive pull을 쓸지, `fetch_all`로 서버가 내부 루프를 돌지
+
+---
+
+### 뉴스 API (Finnhub 적재)
+
+#### POST /api/news/pull-finhub
+목적:
+- 티커별로 Finnhub에서 **company news**와 **press releases**를 수집하고, SQLite에 dedupe insert한 뒤, (가능하면) OHLC DB를 이용해 Change%를 병합합니다.
+
+요청 바디(`src/server.ts`의 Zod):
+```json
+{
+  "csvPath": "tradigview_screener/original_data/watch lists2_2026-02-22.csv",
+  "maxTickers": 50,
+  "from": "YYYY-MM-DD",
+  "to": "YYYY-MM-DD"
+}
+```
+
+참고:
+- `csvPath`는 옵션이며 위 CSV가 기본값입니다.
+- CSV 읽기에 실패하면 서버는 작은 하드코딩 티커 목록(AAPL/MSFT/TSLA/NVDA/AMD)을 fallback으로 사용합니다.
+- dedupe는 DB 레벨: `UNIQUE(source,url)` + `INSERT OR IGNORE`.
+- 새로 insert된 아이템은 SSE(`GET /api/news/stream`)로 publish됩니다.
+
+응답:
+```json
+{
+  "source": "FINNHUB",
+  "tickerCount": 3,
+  "inserted": 42,
+  "skipped": 0,
+  "changeMerged": 0,
+  "details": {
+    "company_news": { "fetched": 41, "inserted": 41 },
+    "press_release": { "fetched": 1, "inserted": 1 }
+  }
+}
+```
+
+적재 후 조회/필터:
+- `GET /api/news?source_names=FINNHUB`
+- `GET /api/news?source_names=FINNHUB&source_type=press_release` (또는 `sources=press_release`)
+
+---
+
+### Ticker CSV API
+
+#### GET /api/tickers
+allowlist 루트 아래의 CSV에서 티커를 읽습니다:
+- 허용 루트: `tradigview_screener/original_data/`
+
+쿼리:
+- `csvPath` (필수) — allowlist 아래의 repo-relative 경로
+
+응답:
+```json
+{ "csvPath": "...", "tickers": ["AAPL", "MSFT"] }
+```
+
+#### POST /api/tickers/add
+CSV에 티커 1개를 추가합니다(원자적 write + Windows 락 재시도).
+
+요청:
+```json
+{ "csvPath": "...", "ticker": "TSLA" }
+```
+
+응답:
+```json
+{ "csvPath": "...", "tickerAdded": "TSLA", "tickers": ["..."] }
+```
+
+이 엔드포인트는 `update_status`의 `tickers_csv` 키를 업데이트합니다.
+
+---
+
+### 업데이트 상태 API
+
+#### GET /api/updates/status
+소스별 마지막 성공 시각과 details를 반환합니다.
+
+응답 형태:
+```json
+{
+  "sources": {
+    "tickers_csv": null,
+    "finhub_news": null,
+    "ibkr_calendar": null,
+    "ibkr_ohlc_1d": null
+  }
+}
+```
+
+백엔드에서 업데이트하는 키:
+- `tickers_csv` — `POST /api/tickers/add`
+- `finhub_news` — `POST /api/news/pull-finhub`

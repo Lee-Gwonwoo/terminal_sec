@@ -18,7 +18,7 @@
       "command": "npm.cmd",
       "args": ["run", "dev"],
       "options": {
-        "cwd": "${workspaceFolder}\\termina_web\\figma_code\\terminal ui"
+        "cwd": "${workspaceFolder}\\termina_web\\figma_code\\terminal_ui_ver2_finhub"
       },
       "isBackground": true,
       "problemMatcher": []
