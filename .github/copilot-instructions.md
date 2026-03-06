@@ -11,7 +11,7 @@
 
 **Execution discipline (must):**
 - Before starting work, use the TABLE OF CONTENTS to identify the most relevant section(s) for this task and prioritize following those instructions.
-- Before starting implementation, decide which `.github/copilot-skills/*.md` documents apply to this task and state your choice in chat (e.g., “Using: planning.md + web-ui.md”). Then start work.
+- Before starting implementation, decide which `.github/copilot-skills/*.md` documents apply to this task and state your choice in chat (e.g., “Using: planning.md + remote-vm-web-ui.md”). Then start work.
 - Always state a detailed plan in chat before implementation.
 - For each plan step:
   - Implement the step.
@@ -199,7 +199,7 @@ These rule sets apply only in specific situations; see `.github/copilot-skills/`
 - [Indicator calculators](copilot-skills/indicator-calculators.md)
 - [Deep learning trainers](copilot-skills/deep-learning-trainers.md)
 - [GUI scripts (PyQt)](copilot-skills/gui-pyqt.md)
-- [Web UI scripts](copilot-skills/web-ui.md)
+- [Remote VM Web UI operations](copilot-skills/remote-vm-web-ui.md)
 - [Config templates](copilot-skills/config-templates.md)
 - [EODHD rules](copilot-skills/datasource-eodhd.md)
 - [ThetaData / ThetaTerminal](copilot-skills/datasource-thetadata.md)
@@ -218,7 +218,7 @@ These rule sets apply only in specific situations; see `.github/copilot-skills/`
 
 **작업 수행 규율(필수):**
 - 작업 시작 전에 목차를 보고 이번 작업과 가장 연관된 섹션(들)을 먼저 확인하고, 해당 지침사항을 우선적으로 따른다.
-- 구현/수정 작업을 시작하기 전에, 이번 작업에 적용할 `.github/copilot-skills/*.md` 문서가 무엇인지 판단한 뒤 채팅에 먼저 명시한다(예: “참고: planning.md + web-ui.md”). 그 다음 작업을 시작한다.
+- 구현/수정 작업을 시작하기 전에, 이번 작업에 적용할 `.github/copilot-skills/*.md` 문서가 무엇인지 판단한 뒤 채팅에 먼저 명시한다(예: “참고: planning.md + remote-vm-web-ui.md”). 그 다음 작업을 시작한다.
 - 구현에 들어가기 전에 항상 “세부화된 계획”을 채팅에 먼저 명시한다.
 - 계획의 각 단계마다 다음을 반드시 수행한다:
   - 해당 단계를 구현한다.
@@ -393,7 +393,7 @@ These rule sets apply only in specific situations; see `.github/copilot-skills/`
 - [Indicator calculators](copilot-skills/indicator-calculators.md)
 - [딥러닝 트레이너](copilot-skills/deep-learning-trainers.md)
 - [GUI 스크립트(PyQt)](copilot-skills/gui-pyqt.md)
-- [Web UI 스크립트](copilot-skills/web-ui.md)
+- [원격 VM Web UI 운영](copilot-skills/remote-vm-web-ui.md)
 - [설정 템플릿 파일](copilot-skills/config-templates.md)
 - [EODHD 규칙](copilot-skills/datasource-eodhd.md)
 - [ThetaData / ThetaTerminal](copilot-skills/datasource-thetadata.md)

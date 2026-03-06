@@ -21,7 +21,7 @@ import { pullEodhdNews, pullEodhdNewsAll } from "./services/eodhdNewsProvider.js
 import { insertNewsItem } from "./services/newsRepository.js";
 import { listUpdateStatuses, setLastSuccess } from "./services/updateStatusRepository.js";
 import { readTickersFromCsv, appendTickerToCsv, CsvServiceError } from "./services/tickerCsvService.js";
-import { pullCompanyNews, pullPressReleases } from "./services/finnhubNewsProvider.js";
+import { pullCompanyNews, pullPressReleases, pullCompanyNewsBackfill, pullPressReleasesBackfill } from "./services/finnhubNewsProvider.js";
 import { mergeChangeForNewItems } from "./services/newsChangeMerger.js";
 import type { NewsQuery } from "./types.js";
 
@@ -135,23 +135,63 @@ const DEFAULT_TICKERS_CSV = "tradigview_screener/original_data/watch lists2_2026
 
 const pullFinnhubSchema = z.object({
   csvPath: z.string().optional().default(DEFAULT_TICKERS_CSV),
-  maxTickers: z.number().int().min(1).max(500).optional().default(50),
+  /** 0 or omitted = all tickers in CSV (no cap) */
+  maxTickers: z.number().int().min(0).optional().default(0),
   mode: z.enum(["recent", "entire"]).optional().default("recent"),
+  /** Which data types to pull. "all" = both, "company_news" = only company news, "press_release" = only press releases */
+  sourceType: z.enum(["all", "company_news", "press_release"]).optional().default("all"),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
 
+/** Helper: insert fetched items into DB, track counts, push SSE */
+async function insertFetchedItems(
+  items: Awaited<ReturnType<typeof pullCompanyNews>>,
+  detailBucket: { fetched: number; inserted: number },
+  newItems: Array<{ id: string; tickers: string[]; publishedAt: string }>,
+  counters: { totalInserted: number; totalSkipped: number },
+) {
+  detailBucket.fetched += items.length;
+  for (const rawItem of items) {
+    const inserted = await insertNewsItem({
+      publishedAt: rawItem.publishedAt,
+      source: rawItem.source,
+      sourceType: rawItem.sourceType,
+      title: rawItem.title,
+      body: rawItem.body,
+      url: rawItem.url,
+      tickers: rawItem.providerTickers,
+      tags: rawItem.tags,
+    });
+    if (inserted) {
+      counters.totalInserted++;
+      detailBucket.inserted++;
+      newItems.push({
+        id: inserted.id,
+        tickers: inserted.tickers,
+        publishedAt: inserted.published_at,
+      });
+      streamHub.publishNews(inserted);
+    } else {
+      counters.totalSkipped++;
+    }
+  }
+}
+
 app.post("/api/news/pull-finhub", async (req, res, next) => {
   try {
     const input = pullFinnhubSchema.parse(req.body ?? {});
+    const isEntire = input.mode === "entire";
+    const pullCompany = input.sourceType === "all" || input.sourceType === "company_news";
+    const pullPress = input.sourceType === "all" || input.sourceType === "press_release";
 
-    // If mode is "entire", compute from = 1 year ago (Finnhub max for free tier)
+    // If mode is "entire", compute from = 5 years ago (adaptive backfill will split ranges to defeat API cap)
     let effectiveFrom = input.from;
     let effectiveTo = input.to;
-    if (input.mode === "entire" && !input.from) {
-      const oneYearAgo = new Date();
-      oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-      effectiveFrom = oneYearAgo.toISOString().slice(0, 10);
+    if (isEntire && !input.from) {
+      const fiveYearsAgo = new Date();
+      fiveYearsAgo.setFullYear(fiveYearsAgo.getFullYear() - 5);
+      effectiveFrom = fiveYearsAgo.toISOString().slice(0, 10);
     }
     if (!effectiveTo) {
       effectiveTo = new Date().toISOString().slice(0, 10);
@@ -161,13 +201,14 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
     let tickerList: string[];
     try {
       const csvResult = readTickersFromCsv(input.csvPath);
-      tickerList = csvResult.tickers.slice(0, input.maxTickers);
+      tickerList = input.maxTickers > 0
+        ? csvResult.tickers.slice(0, input.maxTickers)
+        : csvResult.tickers;  // 0 = use all tickers
     } catch {
       tickerList = ["AAPL", "MSFT", "TSLA", "NVDA", "AMD"]; // fallback
     }
 
-    let totalInserted = 0;
-    let totalSkipped = 0;
+    const counters = { totalInserted: 0, totalSkipped: 0 };
     const newItems: Array<{ id: string; tickers: string[]; publishedAt: string }> = [];
     const detailsPerType: Record<string, { fetched: number; inserted: number }> = {
       company_news: { fetched: 0, inserted: 0 },
@@ -177,67 +218,27 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
     // Rate limit: ~60 calls/min for free tier. Add small delays between tickers.
     for (const ticker of tickerList) {
       // Company news
-      try {
-        const items = await pullCompanyNews(ticker, effectiveFrom, effectiveTo);
-        detailsPerType.company_news.fetched += items.length;
-        for (const rawItem of items) {
-          const inserted = await insertNewsItem({
-            publishedAt: rawItem.publishedAt,
-            source: rawItem.source,
-            sourceType: rawItem.sourceType,
-            title: rawItem.title,
-            body: rawItem.body,
-            url: rawItem.url,
-            tickers: rawItem.providerTickers,
-            tags: rawItem.tags,
-          });
-          if (inserted) {
-            totalInserted++;
-            detailsPerType.company_news.inserted++;
-            newItems.push({
-              id: inserted.id,
-              tickers: inserted.tickers,
-              publishedAt: inserted.published_at,
-            });
-            streamHub.publishNews(inserted);
-          } else {
-            totalSkipped++;
-          }
+      if (pullCompany) {
+        try {
+          const items = isEntire
+            ? await pullCompanyNewsBackfill(ticker, effectiveFrom!, effectiveTo)
+            : await pullCompanyNews(ticker, effectiveFrom, effectiveTo);
+          await insertFetchedItems(items, detailsPerType.company_news, newItems, counters);
+        } catch (err: any) {
+          console.error(`[pull-finhub] company_news ${ticker}: ${err.message}`);
         }
-      } catch (err: any) {
-        console.error(`[pull-finhub] company_news ${ticker}: ${err.message}`);
       }
 
       // Press releases
-      try {
-        const items = await pullPressReleases(ticker, effectiveFrom, effectiveTo);
-        detailsPerType.press_release.fetched += items.length;
-        for (const rawItem of items) {
-          const inserted = await insertNewsItem({
-            publishedAt: rawItem.publishedAt,
-            source: rawItem.source,
-            sourceType: rawItem.sourceType,
-            title: rawItem.title,
-            body: rawItem.body,
-            url: rawItem.url,
-            tickers: rawItem.providerTickers,
-            tags: rawItem.tags,
-          });
-          if (inserted) {
-            totalInserted++;
-            detailsPerType.press_release.inserted++;
-            newItems.push({
-              id: inserted.id,
-              tickers: inserted.tickers,
-              publishedAt: inserted.published_at,
-            });
-            streamHub.publishNews(inserted);
-          } else {
-            totalSkipped++;
-          }
+      if (pullPress) {
+        try {
+          const items = isEntire
+            ? await pullPressReleasesBackfill(ticker, effectiveFrom!, effectiveTo)
+            : await pullPressReleases(ticker, effectiveFrom, effectiveTo);
+          await insertFetchedItems(items, detailsPerType.press_release, newItems, counters);
+        } catch (err: any) {
+          console.error(`[pull-finhub] press_release ${ticker}: ${err.message}`);
         }
-      } catch (err: any) {
-        console.error(`[pull-finhub] press_release ${ticker}: ${err.message}`);
       }
 
       // Small delay between tickers to respect rate limits
@@ -257,18 +258,20 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
     // Update status
     await setLastSuccess("finhub_news", new Date().toISOString(), {
       mode: input.mode,
+      sourceType: input.sourceType,
       tickerCount: tickerList.length,
-      inserted: totalInserted,
-      skipped: totalSkipped,
+      inserted: counters.totalInserted,
+      skipped: counters.totalSkipped,
       changeMerged: changeMergeResult.merged,
     });
 
     res.json({
       source: "FINNHUB",
       mode: input.mode,
+      sourceType: input.sourceType,
       tickerCount: tickerList.length,
-      inserted: totalInserted,
-      skipped: totalSkipped,
+      inserted: counters.totalInserted,
+      skipped: counters.totalSkipped,
       changeMerged: changeMergeResult.merged,
       details: detailsPerType,
     });

@@ -1,14 +1,19 @@
-# Web UI scripts (skill)
+# Remote VM Web UI operations (skill)
 
 ## EN
 
 ### When to use
-- When the user asks for a browser-based UI served by a local/VM backend.
-- When the server/UI may be accessed remotely (VM) and bind/port/security rules matter.
-- When you need the “no external assets by default” and “debug visibility” policies for reliable debugging.
+- When the user is building or operating a browser UI that is served from a remote VM or another machine.
+- When remote access, bind host/port, SSH tunneling, firewall rules, or public exposure decisions matter.
+- When you need reliability rules for remote browser debugging, cache visibility, and in-page crash reporting.
 
-- **Web UI scripts (when the user requests a Web UI)**
-  - **Typical topology (important):** the server may run on a VM, while the user opens the UI from a different computer.
+### When not to use
+- Do not treat this as a default skill for ordinary local frontend work such as Vite/React/Next development on the same machine.
+- If the task is only about local UI layout, components, styling, state, or API wiring, this skill is usually unnecessary.
+- Only pull this skill in for local work when the task explicitly involves host binding, remote browser access, stale-cache problems, or WebView compatibility constraints.
+
+- **Remote VM Web UI operations (when the user requests remote-hosted Web UI behavior)**
+  - **Typical topology (important):** the server may run on Azure VM/other VM, while the user opens the UI from a different computer.
     - Do not assume `http://127.0.0.1:8000/` is reachable from another machine.
   - **Bind host/port policy (remote access correctness + safety):**
     - Default bind should be loopback only (`127.0.0.1`) to avoid accidentally exposing the UI to the Internet.
@@ -35,12 +40,17 @@
 ## KO
 
 ### 언제 쓰나
-- 사용자가 브라우저 기반 UI(Web UI)를 요청할 때.
-- 서버가 VM에서 돌 수 있고 원격 접속(바인딩/포트/보안)이 중요한 상황일 때.
-- 외부 에셋 금지/디버그 가시성 같은 “운영 규칙”을 일관되게 적용해야 할 때.
+- 사용자가 원격 VM 또는 다른 머신에서 서비스되는 브라우저 UI를 만들거나 운영할 때.
+- 원격 접속, bind host/port, SSH 터널링, 방화벽 규칙, 외부 공개 여부가 중요한 작업일 때.
+- 원격 브라우저 디버깅, 캐시 가시성, 화면 내 크래시 표시 같은 운영 규칙이 필요할 때.
 
-- **Web UI 스크립트(사용자가 Web UI 요청 시)**
-  - **전형적인 토폴로지(중요):** 서버는 VM에서 실행되고, 사용자는 다른 컴퓨터(로컬 PC)에서 브라우저로 접속하는 경우가 많습니다.
+### 언제 안 쓰나
+- 같은 머신에서 하는 일반적인 로컬 프론트엔드 작업(Vite/React/Next 개발)의 기본 스킬로 취급하지 마세요.
+- 작업이 로컬 UI 레이아웃, 컴포넌트, 스타일, 상태, API 연결에만 관한 경우 이 스킬은 대체로 불필요합니다.
+- 로컬 작업이라도 host binding, 원격 브라우저 접속, 오래된 캐시 문제, WebView 호환성 제약이 명시적으로 걸려 있을 때만 참고하세요.
+
+- **원격 VM Web UI 운영 지침(원격 호스팅 Web UI 동작이 필요한 경우)**
+  - **전형적인 토폴로지(중요):** 서버는 Azure VM/기타 VM에서 실행되고, 사용자는 다른 컴퓨터(로컬 PC)에서 브라우저로 접속하는 경우가 많습니다.
     - 다른 컴퓨터에서 `http://127.0.0.1:8000/`로 접속된다고 가정하면 안 됩니다.
   - **바인딩(host/port) 정책(원격 접속 정확성 + 안전):**
     - 기본 바인딩은 외부 노출을 막기 위해 `127.0.0.1`(loopback)로 두세요.

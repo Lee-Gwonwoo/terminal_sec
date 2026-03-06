@@ -1,4 +1,4 @@
-# Plan — terminal_ui_ver2_finhub (Frontend)
+﻿# Plan — terminal_ui_ver2_finhub (Frontend)
 
 ## EN
 
@@ -741,8 +741,8 @@ Verification
 | 5-11 | Update button tooltip (5-second hover delay) | `FinnhubNewsWindow.tsx` | Hovering Update button for 5s shows tooltip explaining scope | ✅ |
 | 5-12 | Add dedicated Ticker column | `FinnhubNewsWindow.tsx` | Ticker column appears between Date and Time; clicking ticker filters | ⏳ |
 | 5-13 | Column visibility toggle (show/hide columns) | `FinnhubNewsWindow.tsx` | Columns button opens checkbox dropdown to show/hide columns | ⏳ |
-| 5-14 | Backend “entire” mode (max 1-year history) | `terminal/backend/src/server.ts` | `POST /api/news/pull-finhub { mode: "entire" }` pulls ~1y without duplicates | ⏳ |
-| 5-15 | Update button → split-dropdown (Recent / Entire) | `FinnhubNewsWindow.tsx` | Main click = Recent(7d); arrow opens menu with Entire option | ⏳ |
+| 5-14 | Backend “entire” mode — adaptive date-splitting backfill | `server.ts`, `finnhubNewsProvider.ts` | `POST /api/news/pull-finhub { mode: “entire” }` → 5-year adaptive split, cap bypass | ✅ |
+| 5-15 | Update button → split-dropdown (6 options: sourceType × mode) | `FinnhubNewsWindow.tsx` | Dropdown: All/Company/Press × Recent/Entire = 6 menu items | ✅ |
 | 5-16 | Source cell: right-click Copy URL + click opens link | `FinnhubNewsWindow.tsx` | Right click Source → Copy URL; left click Source opens URL in browser | ⏳ |
 
 **Sub-step purpose & description (Step 5)**
@@ -828,13 +828,18 @@ Verification
   - Done when (observable): toggling a checkbox hides/shows that column without layout breakage.
   - Human check: hide multiple columns then re-enable them.
   - Common issues to watch: width mapping using wrong indices after filtering.
-- `5-14` Purpose: Support Finnhub “max history” pulls via `mode=entire`. Description:
-  - Extend `POST /api/news/pull-finhub` to accept `mode: recent|entire`; in entire mode default `from` to ~365 days ago.
-  - Done when (observable): request/response show `mode: "entire"` and DB grows with older history without duplicates.
-  - Human check: run Entire Update once and confirm older items appear.
-  - Common issues to watch: rate limits; accidentally setting `from` earlier than Finnhub allows.
-- `5-15` Purpose: Provide split-dropdown Update UX for Recent/Entire. Description:
-  - Main button triggers Recent (7-day incremental); arrow opens menu for Entire.
+- `5-14` Purpose: Adaptive date-splitting backfill to bypass Finnhub API cap (~200 items). Description:
+  - Extend `POST /api/news/pull-finhub` to accept `mode: recent|entire` and `sourceType: all|company_news|press_release`.
+  - `adaptiveBackfill()` recursively splits date ranges when response count >= `CAP_THRESHOLD` (190). Minimum window = 1 day.
+  - In `entire` mode, `effectiveFrom` = 5 years ago (not 1 year) since adaptive splitting defeats the API cap.
+  - **Ticker scope**: `maxTickers` defaults to 0 = **all tickers in the CSV** (no artificial cap). A non-zero value can be passed to limit.
+  - `MAX_RETRIES` raised from 3 → 10; 300ms sleep between split requests for rate-limit safety.
+  - Deduplication via existing `UNIQUE (source, url)` + `INSERT OR IGNORE`.
+  - Done when (observable): console shows `[backfill] ... splitting…` logs; DB grows with older history without duplicates.
+  - Human check: run Entire Update once and confirm older items appear across the full ticker list.
+  - Common issues to watch: rate limits (60 calls/min free tier); adaptive splitting multiplies API calls.
+- `5-15` Purpose: Provide split-dropdown Update UX with 6 menu options (sourceType × mode). Description:
+  - Main button triggers Recent (7-day incremental); arrow opens menu with 6 options (All/Company/Press × Recent/Entire).
   - Done when (observable): both actions callable; buttons disable during update.
   - Human check: choose Entire from the dropdown.
   - Common issues to watch: menu not closing on outside click; split borders misaligned.
@@ -856,8 +861,9 @@ Verification
 7. Update hover tooltip appears after 5s
 8. Ticker column visible; clicking ticker filters
 9. Columns menu hides/shows columns via checkboxes
-10. Update dropdown: choose "Entire Update" and confirm POST body includes mode="entire" and response includes mode
-11. Source cell: left click opens URL; right click → Copy URL; paste confirms
+10. Update dropdown: 6 options in 3 sections (All×2, Company×2, Press×2); each sends correct mode+sourceType in POST body
+11. Console shows `[backfill] ... splitting…` during Entire mode (adaptive splitting active)
+12. Source cell: left click opens URL; right click → Copy URL; paste confirms
 ```
 - User confirmation needed: **Yes**
 
@@ -2313,8 +2319,8 @@ API 계약(초안)
 | 5-11 | Update 버튼 툴팁(5초 hover 지연) | FinnhubNewsWindow.tsx | Update 버튼을 5초 hover하면 범위 설명 툴팁 노출 | ✅ |
 | 5-12 | Ticker 전용 컬럼 추가 | FinnhubNewsWindow.tsx | Date와 Time 사이에 Ticker 컬럼이 표시되고, 클릭 시 필터 동작 | ⏳ |
 | 5-13 | 컬럼 가시성 토글(show/hide columns) | FinnhubNewsWindow.tsx | Columns 버튼 클릭 → 체크박스 드롭다운으로 컬럼 표시/숨김 전환 | ⏳ |
-| 5-14 | 백엔드 "entire" 모드(최대 1년 히스토리 수집) | server.ts, finnhubNewsProvider.ts | `POST /api/news/pull-finhub { mode: "entire" }` → from=1년전 설정, 중복 없음 | ⏳ |
-| 5-15 | Update 버튼 → split-dropdown (Recent / Entire 선택) | FinnhubNewsWindow.tsx | 좌측 버튼=Recent(7일), 우측 화살표=드롭다운 메뉴(Recent / Entire 선택) | ⏳ |
+| 5-14 | 백엔드 "entire" 모드 — adaptive date-splitting backfill | server.ts, finnhubNewsProvider.ts | `POST /api/news/pull-finhub { mode: "entire" }` → 5년 범위 adaptive 분할 수집, cap 우회, 중복 없음 | ✅ |
+| 5-15 | Update 버튼 → split-dropdown (6개 옵션: sourceType별 × mode별) | FinnhubNewsWindow.tsx | 드롭다운에 All/Company/Press × Recent/Entire = 6개 메뉴 | ✅ |
 | 5-16 | Source 셀: 우클릭 Copy URL + 클릭 시 링크 열기 | FinnhubNewsWindow.tsx | Source 우클릭 → Copy URL → 클립보드 복사, Source 클릭 → 브라우저 새 탭으로 열림 | ⏳ |
 
 **세부 단계 목적/설명 (5단계)**
@@ -2416,27 +2422,46 @@ API 계약(초안)
   - 완료 조건(눈으로 확인): Columns 버튼 → 드롭다운 → 체크 해제한 컬럼이 테이블에서 사라짐.
   - 사람 검증: 여러 컬럼을 숨겼다 다시 켜서 테이블 레이아웃이 깨지지 않는지 확인.
   - 흔한 문제/주의: activeColumns 계산에서 width 인덱스가 원래 columns 기준이 아닌 filtered 기준이어야 함; 모든 컬럼을 끄면 빈 테이블.
-- `5-14` 목적: Finnhub 무료 티어의 최대 히스토리(~1년)를 한 번에 수집하는 모드를 백엔드에 추가한다. 설명:
-  - `POST /api/news/pull-finhub`의 요청 스키마에 `mode: z.enum(["recent", "entire"]).optional().default("recent")`를 추가한다.
-  - `mode === "entire"`이고 명시적 `from`이 없으면, `effectiveFrom`을 현재로부터 365일 전으로 설정한다.
+- `5-14` 목적: API cap(~200건)을 우회하여 가능한 전체 히스토리를 누락 없이 수집하는 adaptive date-splitting backfill을 백엔드에 추가한다. 설명:
+  - **기존 문제**: 긴 기간을 한 번에 요청하면 Finnhub API가 최대 ~200건만 반환 → 고빈도 ticker는 중간/과거 구간이 잘림(partial download).
+  - **해결**: `adaptiveBackfill()` 함수 추가 (`finnhubNewsProvider.ts`):
+    - 요청 결과가 `CAP_THRESHOLD`(190건) 이상이면 기간을 반으로 분할하여 재귀 호출.
+    - 각 leaf window가 cap 미만일 때까지 반복 → 누락 방지.
+    - 최소 window = 1일 (`MIN_WINDOW_DAYS`). 1일에서도 cap에 닿으면 경고 로그 출력 후 해당 구간은 그대로 반환.
+  - `pullCompanyNewsBackfill()` / `pullPressReleasesBackfill()` — entire 모드 전용 export 함수.
+  - `POST /api/news/pull-finhub` 스키마에 `sourceType: z.enum(["all", "company_news", "press_release"]).optional().default("all")` 추가.
+  - `mode === "entire"` 시 `effectiveFrom` = 5년 전(adaptive splitting이 cap을 우회하므로 1년 제한이 아님).
   - `mode === "recent"`(기본)은 기존 동작(7일 lookback) 그대로 유지.
-  - 백엔드 응답과 status update에 `mode`를 포함시켜 프론트에서 어떤 모드로 수집했는지 확인 가능.
-  - 중복 방지는 기존 `upsert` 로직으로 자동 처리(같은 headline + ticker + datetime은 무시).
-  - 완료 조건(눈으로 확인): `curl -X POST /api/news/pull-finhub -d '{"mode":"entire"}'` → 응답에 `mode: "entire"` 포함, from이 ~1년 전으로 설정됨.
-  - 흔한 문제/주의: Finnhub free tier rate limit(60 calls/min); entire 수집 시 ticker가 많으면 시간이 오래 걸림; `effectiveFrom`이 1년보다 멀면 Finnhub이 빈 배열 반환.
-- `5-15` 목적: Update 버튼을 split-dropdown으로 변경하여 Recent/Entire 선택을 제공한다. 설명:
+  - **티커 범위**: `maxTickers` 기본값 = 0 → **CSV 전체 티커**(인위적 제한 없음). 0이 아닌 값을 전달하면 해당 수만큼만 제한 가능.
+  - `MAX_RETRIES` 3 → 10으로 상향 (재시도 정책 준수).
+  - 중복 방지는 기존 DB `UNIQUE (source, url)` + `INSERT OR IGNORE`로 처리.
+  - 백엔드 응답과 status update에 `mode` + `sourceType`을 포함.
+  - 완료 조건(눈으로 확인): `POST /api/news/pull-finhub { mode: "entire", sourceType: "company_news" }` → 콘솔에 `[backfill] company_news AAPL ... splitting…` 로그가 보이며, DB에 과거 데이터가 저장됨.
+  - 흔한 문제/주의: adaptive splitting으로 API 호출 횟수가 증가하므로 rate limit(60 calls/min) 주의; 분할 간 300ms sleep 삽입; 빈 구간은 빈 배열 반환.
+  - 변경 파일: `terminal/backend/src/services/finnhubNewsProvider.ts`, `terminal/backend/src/server.ts`.
+- `5-15` 목적: Update 버튼을 split-dropdown으로 변경하여 **6개 메뉴 옵션**(sourceType별 × mode별)을 제공한다. 설명:
   - 기존 단일 Update 버튼을 두 부분으로 분리:
-    - **좌측 버튼**: "Update" 텍스트 + Download 아이콘 → 클릭 시 `handleUpdate('recent')` (기존 동작과 동일, 7일 수집).
+    - **좌측 버튼**: "Update" 텍스트 + Download 아이콘 → 클릭 시 `handleUpdate('recent', 'all')` (기존 동작과 동일, 7일 수집, 양쪽 다).
     - **우측 화살표 버튼**: ChevronDown 아이콘 → 클릭 시 드롭다운 메뉴 표시.
-  - 드롭다운 메뉴 항목:
-    - **Recent Update**: "Last 7 days (fast, incremental)" 부설명 → `handleUpdate('recent')`
-    - **Entire Update**: "Full year history (slow, no duplicates)" 부설명 + 주황색 아이콘 → `handleUpdate('entire')`
-  - 수집 중(`updating === true`)에는 양쪽 버튼 모두 disabled.
-  - 5초 hover 시 지연 툴팁도 유지(드롭다운 open 시에는 숨김).
-  - 드롭다운 외부 클릭 시 자동 닫힘.
-  - 완료 조건(눈으로 확인): Update 좌측 클릭=Recent 수집 실행, 우측 화살표 클릭=메뉴 열림, Entire Update 클릭=1년 수집 시작.
-  - 사람 검증: Entire Update 실행 후 네트워크 탭에서 `mode: "entire"` 확인; DB에 과거 1년 뉴스가 저장되는지 확인.
-  - 흔한 문제/주의: 드롭다운 z-index 부족으로 다른 요소에 가려짐; split 버튼 border 연결 부분 시각적 불일치; handleUpdate에서 mode 파라미터가 fetch body에 포함되지 않는 실수.
+  - `handleUpdate(mode, sourceType)` 시그니처 확장: `mode: 'recent' | 'entire'`, `sourceType: 'all' | 'company_news' | 'press_release'`.
+  - 드롭다운 메뉴는 3개 섹션으로 구분:
+    - **All Types 섹션**:
+      - Recent Update — Last 7 days · Company News + Press Releases
+      - Entire Update — Full backfill · Company News + Press Releases (slow)
+    - **Company News 섹션** (파란색 아이콘):
+      - Company Update — Last 7 days · Company News only
+      - Company Entire Update — Full backfill · Company News only (slow)
+    - **Press Releases 섹션** (초록색 아이콘):
+      - Press Release Update — Last 7 days · Press Releases only
+      - Press Release Entire Update — Full backfill · Press Releases only (slow)
+  - 각 Entire 옵션은 주황색 아이콘으로 구분.
+  - 수집 중(`updating === true`)에는 모든 버튼 disabled.
+  - 5초 hover 시 지연 툴팁 유지(드롭다운 open 시에는 숨김). 툴팁 내용 업데이트: adaptive backfill 설명 포함.
+  - 드롭다운 외부 클릭 시 자동 닫힘. `max-h-[400px] overflow-y-auto`로 스크롤 가능.
+  - 완료 조건(눈으로 확인): Update 우측 화살표 클릭 → 6개 메뉴가 3개 섹션으로 grouping되어 표시. Company Entire Update 클릭 → POST body에 `{mode:"entire", sourceType:"company_news"}` 확인.
+  - 사람 검증: 각 6개 옵션 클릭 → 네트워크 탭에서 mode/sourceType 조합이 올바른지 확인.
+  - 흔한 문제/주의: 드롭다운 z-index 부족으로 다른 요소에 가려짐; split 버튼 border 연결 부분 시각적 불일치; sourceType 파라미터가 fetch body에 빠지는 실수.
+  - 변경 파일: `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`.
 
 - `5-16` 목적: Source를 실제 링크로 사용 가능하게 하고 URL 복사를 제공한다. 설명:
   - Source 텍스트 **좌클릭** 시 해당 뉴스의 `url`을 `window.open(..., '_blank')`로 새 탭에서 연다.
@@ -2457,9 +2482,11 @@ API 계약(초안)
 7. Update 버튼에 5초 hover → 설명 툴팁 표시 확인 → 마우스 떼면 사라지는지 확인
 8. Ticker 컬럼이 Date 옆에 표시되고, 클릭 시 해당 ticker 필터링
 9. Columns 버튼 → 드롭다운에서 컬럼 체크 해제 → 테이블에서 해당 컬럼 숨겨짐
-10. Update 우측 화살표 → 드롭다운 메뉴에서 "Entire Update" 선택 → mode=entire로 수집 실행
-11. 네트워크 탭에서 POST body에 mode: "entire" 포함 확인, 응답에 mode 필드 확인
-12. Source 컬럼: 좌클릭으로 링크 열기, 우클릭 메뉴에서 Copy URL → 붙여넣기 확인
+10. Update 우측 화살표 → 드롭다운 메뉴에서 6개 옵션 확인 (All×2, Company×2, Press×2)
+11. Company Entire Update 클릭 → POST body에 `{mode:"entire", sourceType:"company_news"}` 확인
+12. 콘솔에 `[backfill] company_news ... splitting…` 로그 확인 (adaptive splitting 동작)
+13. Press Release Update 클릭 → POST body에 `{mode:"recent", sourceType:"press_release"}` 확인
+14. Source 컬럼: 좌클릭으로 링크 열기, 우클릭 메뉴에서 Copy URL → 붙여넣기 확인
 ```
 - 사용자 확인 필요: **Yes**
 

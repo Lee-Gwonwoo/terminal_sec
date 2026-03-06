@@ -287,14 +287,17 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
   }, [searchQuery]);
 
   // ─── Update (pull from Finnhub) ───
-  const handleUpdate = async (mode: 'recent' | 'entire' = 'recent') => {
+  const handleUpdate = async (
+    mode: 'recent' | 'entire' = 'recent',
+    sourceType: 'all' | 'company_news' | 'press_release' = 'all',
+  ) => {
     setUpdating(true);
     setError(null);
     try {
       const res = await fetch(`${API_BASE}/api/news/pull-finhub`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ maxTickers: 20, mode }),
+        body: JSON.stringify({ maxTickers: 20, mode, sourceType }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -687,28 +690,82 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
                 </button>
                 {/* Dropdown menu */}
                 {showUpdateMenu && (
-                  <div className="absolute top-full left-0 mt-1 w-64 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-lg z-50">
+                  <div className="absolute top-full left-0 mt-1 w-72 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-lg z-50 max-h-[400px] overflow-y-auto">
                     <div className="p-1.5">
+                      {/* ── All (both types) ── */}
+                      <div className="px-2 py-1 text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">All Types</div>
                       <button
-                        onClick={() => { setShowUpdateMenu(false); handleUpdate('recent'); }}
+                        onClick={() => { setShowUpdateMenu(false); handleUpdate('recent', 'all'); }}
                         disabled={updating}
                         className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50"
                       >
                         <Download className="w-3.5 h-3.5 shrink-0" />
                         <div>
                           <div className="font-medium">Recent Update</div>
-                          <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Last 7 days (fast, incremental)</div>
+                          <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Last 7 days · Company News + Press Releases</div>
                         </div>
                       </button>
                       <button
-                        onClick={() => { setShowUpdateMenu(false); handleUpdate('entire'); }}
+                        onClick={() => { setShowUpdateMenu(false); handleUpdate('entire', 'all'); }}
                         disabled={updating}
                         className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50"
                       >
                         <Download className="w-3.5 h-3.5 shrink-0 text-orange-500" />
                         <div>
                           <div className="font-medium">Entire Update</div>
-                          <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Full year history (slow, no duplicates)</div>
+                          <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Full backfill · Company News + Press Releases (slow)</div>
+                        </div>
+                      </button>
+
+                      {/* ── Company News only ── */}
+                      <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
+                      <div className="px-2 py-1 text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Company News</div>
+                      <button
+                        onClick={() => { setShowUpdateMenu(false); handleUpdate('recent', 'company_news'); }}
+                        disabled={updating}
+                        className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50"
+                      >
+                        <Download className="w-3.5 h-3.5 shrink-0 text-blue-500" />
+                        <div>
+                          <div className="font-medium">Company Update</div>
+                          <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Last 7 days · Company News only</div>
+                        </div>
+                      </button>
+                      <button
+                        onClick={() => { setShowUpdateMenu(false); handleUpdate('entire', 'company_news'); }}
+                        disabled={updating}
+                        className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50"
+                      >
+                        <Download className="w-3.5 h-3.5 shrink-0 text-orange-500" />
+                        <div>
+                          <div className="font-medium">Company Entire Update</div>
+                          <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Full backfill · Company News only (slow)</div>
+                        </div>
+                      </button>
+
+                      {/* ── Press Releases only ── */}
+                      <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
+                      <div className="px-2 py-1 text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Press Releases</div>
+                      <button
+                        onClick={() => { setShowUpdateMenu(false); handleUpdate('recent', 'press_release'); }}
+                        disabled={updating}
+                        className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50"
+                      >
+                        <Download className="w-3.5 h-3.5 shrink-0 text-green-500" />
+                        <div>
+                          <div className="font-medium">Press Release Update</div>
+                          <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Last 7 days · Press Releases only</div>
+                        </div>
+                      </button>
+                      <button
+                        onClick={() => { setShowUpdateMenu(false); handleUpdate('entire', 'press_release'); }}
+                        disabled={updating}
+                        className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50"
+                      >
+                        <Download className="w-3.5 h-3.5 shrink-0 text-orange-500" />
+                        <div>
+                          <div className="font-medium">Press Release Entire Update</div>
+                          <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Full backfill · Press Releases only (slow)</div>
                         </div>
                       </button>
                     </div>
@@ -717,7 +774,7 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
                 {/* Delayed tooltip */}
                 {showUpdateTooltip && !showUpdateMenu && (
                   <div className="absolute top-full left-0 mt-1 z-50 w-72 p-2.5 bg-gray-900 text-white text-[11px] leading-relaxed rounded-lg shadow-lg">
-                    <strong>Recent:</strong> fetches last 7 days (incremental). <strong>Entire:</strong> fetches max 1 year of history. Both skip duplicates.
+                    <strong>Recent:</strong> last 7 days (incremental). <strong>Entire:</strong> full adaptive backfill (splits date ranges to avoid API cap). Choose per data type or both.
                   </div>
                 )}
               </div>

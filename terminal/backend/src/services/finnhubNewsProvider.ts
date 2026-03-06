@@ -2,8 +2,21 @@ import { config } from "../config.js";
 import { getDb } from "../db.js";
 
 const FINNHUB_BASE = "https://finnhub.io/api/v1";
-const MAX_RETRIES = 3;
+const MAX_RETRIES = 10;
 const BASE_DELAY_MS = 500;
+
+/**
+ * Adaptive backfill cap threshold.
+ * When a single request returns >= this many items, we assume the response
+ * may be truncated and split the date range in half.
+ */
+const CAP_THRESHOLD = 190;
+
+/**
+ * Minimum window size (in days) before we stop splitting further.
+ * Even if the window is still hitting the cap at 1 day, we cannot split further.
+ */
+const MIN_WINDOW_DAYS = 1;
 
 async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -30,6 +43,34 @@ function toIsoDate(epoch: number): string {
 
 function formatDate(d: Date): string {
   return d.toISOString().slice(0, 10);
+}
+
+/** Parse YYYY-MM-DD → Date (UTC midnight) */
+function parseDate(s: string): Date {
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d));
+}
+
+/** Add N days to a YYYY-MM-DD string, return YYYY-MM-DD */
+function addDays(dateStr: string, n: number): string {
+  const d = parseDate(dateStr);
+  d.setUTCDate(d.getUTCDate() + n);
+  return formatDate(d);
+}
+
+/** midpoint date between two YYYY-MM-DD strings */
+function midDate(from: string, to: string): string {
+  const a = parseDate(from).getTime();
+  const b = parseDate(to).getTime();
+  const mid = new Date(a + Math.floor((b - a) / 2));
+  return formatDate(mid);
+}
+
+/** number of days in [from, to] inclusive */
+function daySpan(from: string, to: string): number {
+  const a = parseDate(from).getTime();
+  const b = parseDate(to).getTime();
+  return Math.floor((b - a) / 86_400_000) + 1;
 }
 
 async function fetchWithRetry(url: string): Promise<any> {
@@ -82,20 +123,15 @@ function computeFromDate(lastPublished: string | null, lookbackDays: number): st
   return formatDate(d);
 }
 
-// ---------- Company News (/company-news) ----------
+// ---------- Raw fetch helpers (single request, no splitting) ----------
 
-export async function pullCompanyNews(
+async function fetchCompanyNewsRaw(
   symbol: string,
-  fromOverride?: string,
-  toOverride?: string,
+  from: string,
+  to: string,
 ): Promise<FinnhubMappedItem[]> {
-  const lastPub = await getLastPublishedAt("company_news");
-  const from = fromOverride ?? computeFromDate(lastPub, 7);
-  const to = toOverride ?? formatDate(new Date());
-
   const url = `${FINNHUB_BASE}/company-news?symbol=${encodeURIComponent(symbol)}&from=${from}&to=${to}&token=${config.finnhubApiKey}`;
   const raw = await fetchWithRetry(url);
-
   if (!Array.isArray(raw)) return [];
 
   return raw.map((item: any) => ({
@@ -115,21 +151,14 @@ export async function pullCompanyNews(
   }));
 }
 
-// ---------- Press Releases (/press-releases) ----------
-
-export async function pullPressReleases(
+async function fetchPressReleasesRaw(
   symbol: string,
-  fromOverride?: string,
-  toOverride?: string,
+  from: string,
+  to: string,
 ): Promise<FinnhubMappedItem[]> {
-  const lastPub = await getLastPublishedAt("press_release");
-  const from = fromOverride ?? computeFromDate(lastPub, 7);
-  const to = toOverride ?? formatDate(new Date());
-
   const url = `${FINNHUB_BASE}/press-releases?symbol=${encodeURIComponent(symbol)}&from=${from}&to=${to}&token=${config.finnhubApiKey}`;
   const raw = await fetchWithRetry(url);
 
-  // press-releases returns { symbol, majorDevelopment: [...] }
   const items: any[] = raw?.majorDevelopment ?? raw?.pressReleases ?? [];
   if (!Array.isArray(items)) return [];
 
@@ -143,4 +172,101 @@ export async function pullPressReleases(
     providerTickers: [symbol.toUpperCase()],
     tags: item.category ? [item.category.toLowerCase()] : ["press_release"],
   }));
+}
+
+// ---------- Adaptive date-splitting backfill ----------
+
+/**
+ * Generic adaptive backfill: calls `fetcher(symbol, from, to)` and if the
+ * result count >= CAP_THRESHOLD, splits [from, to] in half and recurses.
+ * This ensures we collect all data even when the API truncates large responses.
+ */
+async function adaptiveBackfill(
+  symbol: string,
+  from: string,
+  to: string,
+  fetcher: (sym: string, f: string, t: string) => Promise<FinnhubMappedItem[]>,
+  label: string,
+): Promise<FinnhubMappedItem[]> {
+  const span = daySpan(from, to);
+  if (span <= 0) return [];
+
+  const items = await fetcher(symbol, from, to);
+
+  // If under cap or window is already minimum, return as-is
+  if (items.length < CAP_THRESHOLD || span <= MIN_WINDOW_DAYS) {
+    if (items.length >= CAP_THRESHOLD && span <= MIN_WINDOW_DAYS) {
+      console.warn(
+        `[backfill] ${label} ${symbol} window ${from}~${to} hit cap (${items.length}) at minimum window — cannot split further`,
+      );
+    }
+    return items;
+  }
+
+  // Result might be truncated — split the range in half and recurse
+  console.log(
+    `[backfill] ${label} ${symbol} ${from}~${to} returned ${items.length} items (>=cap ${CAP_THRESHOLD}), splitting…`,
+  );
+
+  const mid = midDate(from, to);
+  // Small delay between split requests to respect rate limits
+  await sleep(300);
+
+  const leftItems = await adaptiveBackfill(symbol, from, mid, fetcher, label);
+  await sleep(300);
+  const rightItems = await adaptiveBackfill(symbol, addDays(mid, 1), to, fetcher, label);
+
+  return [...leftItems, ...rightItems];
+}
+
+// ---------- Company News (/company-news) ----------
+
+export async function pullCompanyNews(
+  symbol: string,
+  fromOverride?: string,
+  toOverride?: string,
+): Promise<FinnhubMappedItem[]> {
+  const lastPub = await getLastPublishedAt("company_news");
+  const from = fromOverride ?? computeFromDate(lastPub, 7);
+  const to = toOverride ?? formatDate(new Date());
+
+  return fetchCompanyNewsRaw(symbol, from, to);
+}
+
+/**
+ * Backfill variant: adaptively splits date ranges to avoid API truncation.
+ * Use this for "entire" mode to guarantee completeness.
+ */
+export async function pullCompanyNewsBackfill(
+  symbol: string,
+  from: string,
+  to: string,
+): Promise<FinnhubMappedItem[]> {
+  return adaptiveBackfill(symbol, from, to, fetchCompanyNewsRaw, "company_news");
+}
+
+// ---------- Press Releases (/press-releases) ----------
+
+export async function pullPressReleases(
+  symbol: string,
+  fromOverride?: string,
+  toOverride?: string,
+): Promise<FinnhubMappedItem[]> {
+  const lastPub = await getLastPublishedAt("press_release");
+  const from = fromOverride ?? computeFromDate(lastPub, 7);
+  const to = toOverride ?? formatDate(new Date());
+
+  return fetchPressReleasesRaw(symbol, from, to);
+}
+
+/**
+ * Backfill variant: adaptively splits date ranges to avoid API truncation.
+ * Use this for "entire" mode to guarantee completeness.
+ */
+export async function pullPressReleasesBackfill(
+  symbol: string,
+  from: string,
+  to: string,
+): Promise<FinnhubMappedItem[]> {
+  return adaptiveBackfill(symbol, from, to, fetchPressReleasesRaw, "press_release");
 }
