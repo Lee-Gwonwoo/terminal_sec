@@ -13,7 +13,7 @@ const ROW_HEIGHT_WITH_ABSTRACT = 140;
 type DisplayMode = 'title-only' | 'title-abstract';
 
 // ─── Column definition ───
-type ColumnId = 'date' | 'ticker' | 'time' | 'title' | 'source' | 'changes' | 'fulltext' | 'keywords';
+type ColumnId = 'date' | 'ticker' | 'time' | 'title' | 'publisher' | 'source' | 'changes' | 'fulltext' | 'keywords';
 
 interface ColumnDef {
   id: ColumnId;
@@ -28,12 +28,13 @@ const DEFAULT_COLUMNS: ColumnDef[] = [
   { id: 'ticker',  label: 'Ticker',    defaultWidth: 72,  minWidth: 48 },
   { id: 'time',    label: 'Time',      defaultWidth: 52,  minWidth: 40 },
   { id: 'title',   label: 'Title',     defaultWidth: 300, minWidth: 100, flex: true },
+  { id: 'publisher', label: 'Publisher', defaultWidth: 96, minWidth: 60 },
   { id: 'source',  label: 'Sources',   defaultWidth: 90,  minWidth: 50 },
   { id: 'fulltext', label: 'Full Text', defaultWidth: 60,  minWidth: 40 },
   { id: 'changes', label: 'Changes %', defaultWidth: 280, minWidth: 160 },
 ];
 
-const DEFAULT_VISIBLE: Set<ColumnId> = new Set(DEFAULT_COLUMNS.map(c => c.id));
+const DEFAULT_VISIBLE: Set<ColumnId> = new Set(DEFAULT_COLUMNS.filter(c => c.id !== 'source').map(c => c.id));
 
 // ─── Sort ───
 type SortDir = 'asc' | 'desc' | null;
@@ -61,6 +62,7 @@ interface BackendNewsItem {
   id: string;
   published_at: string;
   source: string;
+  publisher?: string | null;
   source_type: string;
   title: string;
   body: string;
@@ -90,6 +92,7 @@ interface DisplayItem {
   title: string;
   body: string;
   ticker: string;
+  publisher: string | null;
   source: string;
   sourceType: string;
   url: string;
@@ -113,6 +116,7 @@ function mapBackendItem(item: BackendNewsItem): DisplayItem {
     title: item.title,
     body: item.body,
     ticker: item.tickers?.[0] ?? '',
+    publisher: item.publisher ?? null,
     source: item.source,
     sourceType: item.source_type,
     url: item.url,
@@ -563,6 +567,7 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
       case 'ticker': return item.ticker.toLowerCase();
       case 'time': return item.time;
       case 'title': return item.title.toLowerCase();
+      case 'publisher': return (item.publisher ?? '').toLowerCase();
       case 'source': return item.source.toLowerCase();
       case 'fulltext': return item.hasFullText ? 1 : 0;
       case 'changes': return item.changeFromOpenPct ?? 0;
@@ -702,6 +707,25 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
 
   // ─── Render cell by column id ───
   const renderCell = useCallback((colId: ColumnId, newsItem: DisplayItem, isExpanded: boolean) => {
+    const renderLinkCell = (label: string | null | undefined, fallbackClassName: string) => (
+      <span
+        className={`truncate cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 ${fallbackClassName}`}
+        title={newsItem.url ? 'Click to open link. Right click to copy URL.' : (label ?? '-')}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (newsItem.url) openExternalUrl(newsItem.url);
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (!newsItem.url) return;
+          setSourceCtxMenu({ x: e.clientX, y: e.clientY, url: newsItem.url });
+        }}
+      >
+        {label ?? '-'}
+      </span>
+    );
+
     switch (colId) {
       case 'date':
         return <span className="text-gray-600 dark:text-gray-400">{newsItem.date.replace(/, \d{4}$/, '')}</span>;
@@ -749,25 +773,10 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
             )}
           </div>
         );
+      case 'publisher':
+        return renderLinkCell(newsItem.publisher, 'text-gray-600 dark:text-gray-400');
       case 'source':
-        return (
-          <span
-            className="truncate text-gray-600 dark:text-gray-400 cursor-pointer hover:text-blue-600 dark:hover:text-blue-400"
-            title={newsItem.url ? 'Click to open link. Right click to copy URL.' : newsItem.source}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (newsItem.url) openExternalUrl(newsItem.url);
-            }}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              if (!newsItem.url) return;
-              setSourceCtxMenu({ x: e.clientX, y: e.clientY, url: newsItem.url });
-            }}
-          >
-            {newsItem.source}
-          </span>
-        );
+        return renderLinkCell(newsItem.source, 'text-gray-600 dark:text-gray-400');
       case 'fulltext':
         return newsItem.hasFullText ? (
           <span

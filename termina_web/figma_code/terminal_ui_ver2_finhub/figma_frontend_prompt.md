@@ -108,7 +108,8 @@ Current window behavior:
 - Dedicated `Ticker` column between Date and Time.
 - Clicking a ticker badge sets the search box to that ticker (and also calls `onTickerClick` if provided).
 - `Columns` dropdown can show/hide columns without changing persisted data.
-- `Source` cell supports left-click open + right-click `Copy URL` context menu.
+- `Publisher` cell supports left-click open + right-click `Copy URL` context menu.
+- `Source` cell supports the same interactions but is hidden by default in the `Columns` dropdown state.
 - Update requests do **not** send `maxTickers`; backend default `0` means full CSV ticker scope.
 
 Change% display:

@@ -69,7 +69,7 @@ DB init and schema live in `src/db.ts`.
 
 Key tables for news:
 - `news_items`
-  - Base columns: `id`, `published_at`, `source`, `source_type`, `title`, `body`, `url`, `tickers_csv`, `tags_csv`, `created_at`
+  - Base columns: `id`, `published_at`, `source`, `publisher`, `source_type`, `title`, `body`, `url`, `tickers_csv`, `tags_csv`, `created_at`
   - Change% columns (optional, computed post-ingest):
     - `ohlc_ticker`, `ohlc_date`, `change_1d_pct`, `change_from_open_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct`, `change_computed_at`
   - Uniqueness: `UNIQUE (source, url)`
@@ -119,6 +119,10 @@ Response shape:
 ```json
 { "items": [/* NewsItem[] */], "nextCursor": "..." }
 ```
+
+Important field semantics:
+- `source`: provider label, e.g. `FINNHUB`
+- `publisher`: original article site derived from URL when available, e.g. `NASDAQ`, `TMX`, `FINNHUB`
 
 `nextCursor` is only present when there are more rows.
 

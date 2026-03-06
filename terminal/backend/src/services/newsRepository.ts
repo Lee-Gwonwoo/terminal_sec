@@ -111,7 +111,7 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
 
   const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
   const sql = `
-    SELECT ni.id, ni.published_at, ni.source, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
+    SELECT ni.id, ni.published_at, ni.source, ni.publisher, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
            ni.ohlc_ticker, ni.ohlc_date, ni.change_1d_pct, ni.change_from_open_pct,
            ni.change_7d_pct, ni.change_14d_pct, ni.change_30d_pct, ni.change_computed_at,
            CASE WHEN nf.extraction_status = 'success' THEN 1 ELSE 0 END AS has_full_text,
@@ -134,7 +134,7 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
 
 export async function getNewsById(id: string): Promise<NewsItem | null> {
   const row = await getDb().get<any>(
-    `SELECT ni.id, ni.published_at, ni.source, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
+    `SELECT ni.id, ni.published_at, ni.source, ni.publisher, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
             ni.ohlc_ticker, ni.ohlc_date, ni.change_1d_pct, ni.change_from_open_pct,
             ni.change_7d_pct, ni.change_14d_pct, ni.change_30d_pct, ni.change_computed_at,
             CASE WHEN nf.extraction_status = 'success' THEN 1 ELSE 0 END AS has_full_text,
@@ -203,6 +203,7 @@ function mapNewsRow(row: any): NewsItem {
     id: row.id,
     published_at: row.published_at,
     source: row.source,
+    publisher: row.publisher ?? null,
     source_type: row.source_type,
     title: row.title,
     body: row.body,

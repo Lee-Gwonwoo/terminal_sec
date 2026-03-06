@@ -117,6 +117,56 @@
 
 ---
 
+### Step 0 최종 보완 — IBKR WSH v2 프로브 결과 반영 (2026-03-02)
+
+**배경**: WSH v1 프로브(`test_ibkr_wsh_probe.py`)가 빈 응답을 반환했으나, v2 프로브(`test_ibkr_wsh_probe_v2.py`)에서 올바른 API 호출 방식(blocking `get*` + `conId`)으로 풍부한 WSH 데이터를 확인함.
+
+**v1 실패 근본 원인:**
+- `ib.reqWshMetaData()` — 비동기 low-level 함수, 데이터 도착 전 null 반환
+- `ib.reqWshEventData()` — `conId` 파라미터 미지정
+- 이로 인해 "WSH API 엔타이틀먼트 없음 ($49/월 추가 구독 필요)" 라는 잘못된 결론 도출
+
+**v2 프로브 결과 (수정된 판정):**
+
+| 테스트 케이스 | 결과 | 건수 |
+|---|---|---|
+| Metadata (`getWshMetaData()`) | ✅ 성공 | 123,094 |
+| A: conId만 | ✅ 성공 | 265,309 |
+| B: conId + startDate/endDate (90일) | ✅ 성공 | 9,211 |
+| C: conId + fillWatchlist | ✅ 성공 | 265,309 |
+| D: fillWatchlist + fillPortfolio (conId 없음) | ❌ 에러 10309 | 0 |
+| E: filter JSON (symbol) | ✅ 성공 | 2 |
+
+**확인된 WSH 이벤트 타입:**
+- `wshe_cc` — 컨퍼런스콜(어닝콜): fiscal_year, replay URL, 전화번호
+- `wshe_ic` — 투자자 컨퍼런스: "Apple Experience 2026" (2026-03-04), 장소, 시간
+- `wshe_merg_acq` — M&A: "Shazam 인수" (2017), 인수자/대상 정보
+- `wshe_option` — 옵션 만기: 주간(W1/W2) 및 월간(M) 만기일
+
+**IBKR 최종 판정 (수정):**
+- **OHLCV** = ✅ `reqHistoricalData`로 신뢰 가능
+- **Reuters Fundamentals** = ❌ 이용 불가 (변동 없음)
+- **WSH 캘린더 이벤트** = ✅ **이용 가능** (`getWshEventData(WshEventData(conId=...))`)
+  - 기존 "❌ API 이용 불가" → **"✅ 이용 가능"으로 수정**
+  - WSH는 이벤트 날짜/타입/설명 제공, 재무 수치(EPS/Revenue)는 미포함 → Finnhub 보완
+
+**문서 업데이트:**
+1. `test_data_availability_audit.md` — EN/KO 양쪽:
+   - Section 3.2: WSH v1(잘못된 판정) + v2(수정된 판정) 병기, 올바른 API 호출 패턴 기록
+   - Section 4 기능 매트릭스: Calendar 행 → WSH 기본 + Finnhub 보완으로 수정
+   - Section 5 결정 #1: WSH 이용 가능 반영, 권장 옵션 수정
+   - Section 5 결정 #5: "IBKR 완전 제외" 옵션 삭제, Node.js 연동 방식만 남김
+2. `plan.md` — EN/KO 양쪽:
+   - Step 0 세부단계 테이블: 0-2b (WSH v2) 추가, 0-3 상태 업데이트
+   - WSH v2 핵심 발견 블록 추가
+   - Capability matrix: Calendar 행 세분화 (earnings dates/values, conference, M&A, option, analyst, dividend)
+
+**Step 0 상태**: done (awaiting user confirmation) — 모든 프로브 완료, 감사 문서 확정, 2개 결정만 대기
+
+---
+
+## 2026-03-03
+
 ### Step 0 종합 재감사 — Finnhub 전체 엔드포인트 프로브 (2026-03-03)
 
 **배경**: 사용자가 기존 Step 0 감사가 불완전함을 지적.
@@ -216,204 +266,6 @@
 
 ---
 
-## 2026-03-06
-
-**작성 시각:** 11:37 (local)
-
-### PLAN CHANGE — change 저장 구조 및 Data Control 버튼 확장
-
-**Status: done (awaiting user confirmation)**
-
-#### Actions taken
-
-1. `plan.md`의 목표 섹션을 수정하여 Data Control Window 버튼을 2개에서 4개로 확장함
-   - `IBKR Price Data`
-   - `IBKR Calendar Data`
-   - `7D Change Update`
-   - `Custom Change Update`
-
-2. change 데이터 저장 구조를 `news_items` 직접 컬럼 병합 방식에서 `news_change_metrics` 별도 테이블 방식으로 변경함
-   - 저장은 분리
-   - `GET /api/news` 응답에서만 표준 change 값을 join/병합
-   - custom change는 `custom_{N}d_pct` metric_key로 관리
-
-3. `plan.md`의 관련 섹션을 일관되게 갱신함
-   - 목표
-   - PLAN CHANGE 노트
-   - 아키텍처(상위) + Change Metrics 아키텍처
-   - 4단계(Finnhub 인제션 + change upsert)
-   - 7단계(OHLC 이후 표준/custom change 계산)
-   - 8단계(Data Control Window 4버튼 UI)
-   - 실행 의존성 그래프
-
-#### Verification
-
-1. `plan.md`에서 기존 "news_items change% 컬럼 직접 업데이트" 문구를 핵심 구현 구간에서 제거
-2. `plan.md`에서 Data Control Window 버튼 구성을 4개로 통일
-3. `plan.md`에 `PLAN CHANGE (2026-03-06 #3)` 노트 추가
-
-#### Risks / notes
-
-1. 기존 코드 구현은 아직 `news_items` 직접 컬럼 업데이트 방식을 사용 중일 수 있음
-   - 완화: 실제 구현 단계에서 DB 스키마/리포지토리/API join을 함께 바꾸는 migration step 필요
-2. `7D Change Update`와 기존 표준 프리셋(1d/open/14d/30d)의 역할 경계가 구현 시 다시 명확해져야 함
-   - 완화: Step 7 구현 시 "자동 표준 백필" vs "운영용 7D/custom 버튼" 책임을 주석/문서/API 이름으로 분리
-
----
-
-**작성 시각:** 2026-03-06 12:52 (local)
-
-### PLAN CHANGE — market news 타입 추가
-
-**Status: done (awaiting user confirmation)**
-
-#### Actions taken
-
-1. Finnhub 일반 시장 헤드라인 `/news`를 새 `source_type='market_news'`로 수집할 수 있도록 백엔드 provider와 pull API를 확장함
-   - `terminal/backend/src/services/finnhubNewsProvider.ts`
-   - `terminal/backend/src/server.ts`
-
-2. News Feed Window에서 `Market News`를 별도 메뉴 타입으로 선택할 수 있게 하고, Update split-dropdown에 `7d/recent/custom × market news`를 추가함
-   - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
-
-3. Full Text Update sourceType 메뉴에도 `market_news`를 추가하여 기존 source type 패턴과 맞춤
-   - 현재 extractor 지원 범위를 넘는 외부 도메인은 `unavailable` 또는 `skipped` 상태로 남도록 유지
-
-4. 계획/스펙 문서를 함께 갱신함
-   - `ai_agent_plan/terminal_ui_ver2_finhub/plan.md`
-   - `terminal/backend_prompt.md`
-   - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
-
-5. 런타임 검증 중 발견된 `market_news only` 경로의 job progress 버그를 즉시 수정함
-   - 문제: `sourceType='market_news'`일 때도 ticker loop를 먼저 돌아 job total이 CSV 전체 ticker 수로 잡히고 실제 market pull이 지연됨
-   - 수정: `company_news`/`press_release`를 당기지 않는 경우 `tickerList=[]`로 강제하여 market news 수집을 바로 시작하도록 변경
-   - 파일: `terminal/backend/src/server.ts`
-
-#### Verification
-
-1. 백엔드 타입체크 또는 빌드로 `market_news` enum 추가 이후 오류가 없는지 확인 필요
-2. `POST /api/news/pull-finhub`에 `{ "mode": "recent", "sourceType": "market_news" }` 요청 시 job이 생성되는지 확인 필요
-3. `GET /api/news?source_names=FINNHUB&source_type=market_news`로 row 조회 확인 필요
-4. 프론트 Update 메뉴와 source filter에 `Market News`가 추가되었는지 확인 필요
-
-#### Runtime verification result
-
-1. `POST /api/news/pull-finhub` with `{ "mode": "recent", "sourceType": "market_news" }` → `jobId` 정상 반환 확인
-2. job 로그에서 `[market] Processing market news...` 즉시 시작 확인
-3. `GET /api/news?source_names=FINNHUB&source_type=market_news&limit=5` → 실제 `market_news` row 조회 확인
-   - 샘플 row: CNBC 기사 제목 `We're buying more of our newest stock and upgrading our rating on a financial name`
-
-#### Risks / notes
-
-1. Finnhub `/news`는 날짜 파라미터가 없고 약 3일 안팎 히스토리 + `minId` 페이징에 의존함
-   - 완화: custom/recent는 UI는 동일하지만, 서버에서 페이지네이션 후 published_at 기준으로 절단하도록 구현
-2. market news는 ticker 비연결 기사 비율이 높아 `tickers=[]` row가 많을 수 있음
-   - 완화: 검색/필터는 `source_type`과 keyword 중심으로 사용
-3. full text extractor는 market news 외부 도메인을 아직 적극 지원하지 않음
-   - 완화: 현재는 status를 남기고 실패 원인/미지원 도메인을 로그에서 확인하도록 유지
-
----
-
-**작성 시각:** 11:47 (local)
-
-### PLAN CHANGE — News Feed Window에도 change update 버튼 추가
-
-**Status: done (awaiting user confirmation)**
-
-#### Actions taken
-
-1. `plan.md`의 Change Metrics 아키텍처에 `7D Change Update` / `Custom Change Update` 버튼을 Data Control Window와 News Feed Window 양쪽에 둔다는 원칙을 추가함
-2. 5단계(News Feed Window) 데이터 흐름과 세부 단계에 News 툴바용 change update 버튼 2개를 추가함
-3. `5-20`, `5-21` 서브스텝을 신설하여 News Window가 동일 backend job/API를 재사용하는 구조로 명시함
-
-#### Verification
-
-1. `plan.md`에 `PLAN CHANGE (2026-03-06 #4)` 노트 추가
-2. 5단계에 `7D Change Update`, `Custom Change Update` 버튼 설명 및 검증 항목 추가
-
-#### Risks / notes
-
-1. News Window와 Data Control Window의 버튼이 서로 다른 endpoint/body를 보내면 문서 취지와 달라짐
-   - 완화: 구현 시 공통 action creator 또는 공통 API helper 사용
-
----
-
-**작성 시각:** 11:50 (local)
-
-### PLAN CHANGE — News Feed에 Industry / Keywords 컬럼 추가
-
-**Status: done (awaiting user confirmation)**
-
-#### Actions taken
-
-1. `plan.md` 목표와 capability matrix에 News Feed Window의 `Industry`, `Keywords` 컬럼 요구를 추가함
-2. 5단계에 `Industry` 컬럼 표시와 `Keywords` 컬럼 표시 요구를 추가하고, `5-22`, `5-23` 서브스텝을 신설함
-3. 10단계 `news_fulltext` 저장 전략에 keyword 저장 컬럼(`keywords_json`, `keywords_status`, `keywords_updated_at`)을 추가함
-4. 키워드 생성 자체는 full text 추출과 분리된 **후속 AI keyword 분석 작업**임을 명시함
-
-#### Verification
-
-1. `plan.md`에 `PLAN CHANGE (2026-03-06 #5)` 노트 추가
-2. 5단계에 `Industry` / `Keywords` 컬럼 설명 및 검증 항목 추가
-3. 10단계에 keyword 저장 컬럼과 후속 AI 분석 규약 추가
-
-#### Risks / notes
-
-1. `Industry`는 News API에 실제 필드를 공급하는 backend enrichment 경로가 구현되어야 함
-   - 완화: 구현 단계에서 company profile source와 응답 필드명을 먼저 고정
-2. `Keywords`는 컬럼이 먼저 생기더라도, 후속 AI keyword 분석 전에는 값이 비어 있음
-   - 완화: UI에서 `-` 또는 pending으로 일관되게 표시하고, full text 완료와 keyword 완료를 구분
-
----
-
-### Step 0 최종 보완 — IBKR WSH v2 프로브 결과 반영 (2026-03-02)
-
-**배경**: WSH v1 프로브(`test_ibkr_wsh_probe.py`)가 빈 응답을 반환했으나, v2 프로브(`test_ibkr_wsh_probe_v2.py`)에서 올바른 API 호출 방식(blocking `get*` + `conId`)으로 풍부한 WSH 데이터를 확인함.
-
-**v1 실패 근본 원인:**
-- `ib.reqWshMetaData()` — 비동기 low-level 함수, 데이터 도착 전 null 반환
-- `ib.reqWshEventData()` — `conId` 파라미터 미지정
-- 이로 인해 "WSH API 엔타이틀먼트 없음 ($49/월 추가 구독 필요)" 라는 잘못된 결론 도출
-
-**v2 프로브 결과 (수정된 판정):**
-
-| 테스트 케이스 | 결과 | 건수 |
-|---|---|---|
-| Metadata (`getWshMetaData()`) | ✅ 성공 | 123,094 |
-| A: conId만 | ✅ 성공 | 265,309 |
-| B: conId + startDate/endDate (90일) | ✅ 성공 | 9,211 |
-| C: conId + fillWatchlist | ✅ 성공 | 265,309 |
-| D: fillWatchlist + fillPortfolio (conId 없음) | ❌ 에러 10309 | 0 |
-| E: filter JSON (symbol) | ✅ 성공 | 2 |
-
-**확인된 WSH 이벤트 타입:**
-- `wshe_cc` — 컨퍼런스콜(어닝콜): fiscal_year, replay URL, 전화번호
-- `wshe_ic` — 투자자 컨퍼런스: "Apple Experience 2026" (2026-03-04), 장소, 시간
-- `wshe_merg_acq` — M&A: "Shazam 인수" (2017), 인수자/대상 정보
-- `wshe_option` — 옵션 만기: 주간(W1/W2) 및 월간(M) 만기일
-
-**IBKR 최종 판정 (수정):**
-- **OHLCV** = ✅ `reqHistoricalData`로 신뢰 가능
-- **Reuters Fundamentals** = ❌ 이용 불가 (변동 없음)
-- **WSH 캘린더 이벤트** = ✅ **이용 가능** (`getWshEventData(WshEventData(conId=...))`)
-  - 기존 "❌ API 이용 불가" → **"✅ 이용 가능"으로 수정**
-  - WSH는 이벤트 날짜/타입/설명 제공, 재무 수치(EPS/Revenue)는 미포함 → Finnhub 보완
-
-**문서 업데이트:**
-1. `test_data_availability_audit.md` — EN/KO 양쪽:
-   - Section 3.2: WSH v1(잘못된 판정) + v2(수정된 판정) 병기, 올바른 API 호출 패턴 기록
-   - Section 4 기능 매트릭스: Calendar 행 → WSH 기본 + Finnhub 보완으로 수정
-   - Section 5 결정 #1: WSH 이용 가능 반영, 권장 옵션 수정
-   - Section 5 결정 #5: "IBKR 완전 제외" 옵션 삭제, Node.js 연동 방식만 남김
-2. `plan.md` — EN/KO 양쪽:
-   - Step 0 세부단계 테이블: 0-2b (WSH v2) 추가, 0-3 상태 업데이트
-   - WSH v2 핵심 발견 블록 추가
-   - Capability matrix: Calendar 행 세분화 (earnings dates/values, conference, M&A, option, analyst, dividend)
-
-**Step 0 상태**: done (awaiting user confirmation) — 모든 프로브 완료, 감사 문서 확정, 2개 결정만 대기
-
----
-
 ### Step 0 추가 보완 — IBKR WSH v3 필드 전수조사 (2026-03-03)
 
 **배경**: WSH v2 프로브에서 WSH API 이용 가능을 확인했으나, preview가 2000자로 잘려 저장되어 있어 전체 필드 구조를 볼 수 없었음. 사용자가 "재무 수치가 없다고? 확인해봐라" 요청 → v3 필드 프로브 실행.
@@ -456,7 +308,7 @@
 
 ---
 
-## 2026-03-03
+### Plan 수정 — 사용자 신규 요구사항 4가지 반영
 
 ### Plan 수정 — 사용자 신규 요구사항 4가지 반영
 
@@ -671,8 +523,6 @@
 
 ---
 
-## 2026-03-05
-
 ### 문서 정비 — 백엔드/프론트 프롬프트 + repo-context
 
 **Status: done (awaiting user confirmation)**
@@ -847,8 +697,6 @@
 | `agent_log.md` | 이 항목 기록 |
 
 ---
-
-## 2026-03-05
 
 ### 5단계 — CORS/프록시 수정 + Ticker 컬럼 + 컬럼 가시성 + split-dropdown Update 버튼 (entire 모드)
 
@@ -1170,6 +1018,214 @@
   - 드롭다운에 7d/Recent/Custom × All/Company/Press = 9개 옵션 표시 확인
   - Custom Update 클릭 → date picker 모달 열림/날짜 입력/Start 확인
   - Recent Update 클릭 → preflight 체크 → fallback ticker 있으면 경고 모달 표시 확인
+
+---
+
+**작성 시각:** 11:37 (local)
+
+### PLAN CHANGE — change 저장 구조 및 Data Control 버튼 확장
+
+**Status: done (awaiting user confirmation)**
+
+#### Actions taken
+
+1. `plan.md`의 목표 섹션을 수정하여 Data Control Window 버튼을 2개에서 4개로 확장함
+   - `IBKR Price Data`
+   - `IBKR Calendar Data`
+   - `7D Change Update`
+   - `Custom Change Update`
+
+2. change 데이터 저장 구조를 `news_items` 직접 컬럼 병합 방식에서 `news_change_metrics` 별도 테이블 방식으로 변경함
+   - 저장은 분리
+   - `GET /api/news` 응답에서만 표준 change 값을 join/병합
+   - custom change는 `custom_{N}d_pct` metric_key로 관리
+
+3. `plan.md`의 관련 섹션을 일관되게 갱신함
+   - 목표
+   - PLAN CHANGE 노트
+   - 아키텍처(상위) + Change Metrics 아키텍처
+   - 4단계(Finnhub 인제션 + change upsert)
+   - 7단계(OHLC 이후 표준/custom change 계산)
+   - 8단계(Data Control Window 4버튼 UI)
+   - 실행 의존성 그래프
+
+#### Verification
+
+1. `plan.md`에서 기존 "news_items change% 컬럼 직접 업데이트" 문구를 핵심 구현 구간에서 제거
+2. `plan.md`에서 Data Control Window 버튼 구성을 4개로 통일
+3. `plan.md`에 `PLAN CHANGE (2026-03-06 #3)` 노트 추가
+
+#### Risks / notes
+
+1. 기존 코드 구현은 아직 `news_items` 직접 컬럼 업데이트 방식을 사용 중일 수 있음
+   - 완화: 실제 구현 단계에서 DB 스키마/리포지토리/API join을 함께 바꾸는 migration step 필요
+2. `7D Change Update`와 기존 표준 프리셋(1d/open/14d/30d)의 역할 경계가 구현 시 다시 명확해져야 함
+   - 완화: Step 7 구현 시 "자동 표준 백필" vs "운영용 7D/custom 버튼" 책임을 주석/문서/API 이름으로 분리
+
+---
+
+**작성 시각:** 11:47 (local)
+
+### PLAN CHANGE — News Feed Window에도 change update 버튼 추가
+
+**Status: done (awaiting user confirmation)**
+
+#### Actions taken
+
+1. `plan.md`의 Change Metrics 아키텍처에 `7D Change Update` / `Custom Change Update` 버튼을 Data Control Window와 News Feed Window 양쪽에 둔다는 원칙을 추가함
+2. 5단계(News Feed Window) 데이터 흐름과 세부 단계에 News 툴바용 change update 버튼 2개를 추가함
+3. `5-20`, `5-21` 서브스텝을 신설하여 News Window가 동일 backend job/API를 재사용하는 구조로 명시함
+
+#### Verification
+
+1. `plan.md`에 `PLAN CHANGE (2026-03-06 #4)` 노트 추가
+2. 5단계에 `7D Change Update`, `Custom Change Update` 버튼 설명 및 검증 항목 추가
+
+#### Risks / notes
+
+1. News Window와 Data Control Window의 버튼이 서로 다른 endpoint/body를 보내면 문서 취지와 달라짐
+   - 완화: 구현 시 공통 action creator 또는 공통 API helper 사용
+
+---
+
+**작성 시각:** 11:50 (local)
+
+### PLAN CHANGE — News Feed에 Industry / Keywords 컬럼 추가
+
+**Status: done (awaiting user confirmation)**
+
+#### Actions taken
+
+1. `plan.md` 목표와 capability matrix에 News Feed Window의 `Industry`, `Keywords` 컬럼 요구를 추가함
+2. 5단계에 `Industry` 컬럼 표시와 `Keywords` 컬럼 표시 요구를 추가하고, `5-22`, `5-23` 서브스텝을 신설함
+3. 10단계 `news_fulltext` 저장 전략에 keyword 저장 컬럼(`keywords_json`, `keywords_status`, `keywords_updated_at`)을 추가함
+4. 키워드 생성 자체는 full text 추출과 분리된 **후속 AI keyword 분석 작업**임을 명시함
+
+#### Verification
+
+1. `plan.md`에 `PLAN CHANGE (2026-03-06 #5)` 노트 추가
+2. 5단계에 `Industry` / `Keywords` 컬럼 설명 및 검증 항목 추가
+3. 10단계에 keyword 저장 컬럼과 후속 AI 분석 규약 추가
+
+#### Risks / notes
+
+1. `Industry`는 News API에 실제 필드를 공급하는 backend enrichment 경로가 구현되어야 함
+   - 완화: 구현 단계에서 company profile source와 응답 필드명을 먼저 고정
+2. `Keywords`는 컬럼이 먼저 생기더라도, 후속 AI keyword 분석 전에는 값이 비어 있음
+   - 완화: UI에서 `-` 또는 pending으로 일관되게 표시하고, full text 완료와 keyword 완료를 구분
+
+---
+
+**작성 시각:** 2026-03-06 12:52 (local)
+
+### PLAN CHANGE — market news 타입 추가
+
+**Status: done (awaiting user confirmation)**
+
+#### Actions taken
+
+1. Finnhub 일반 시장 헤드라인 `/news`를 새 `source_type='market_news'`로 수집할 수 있도록 백엔드 provider와 pull API를 확장함
+   - `terminal/backend/src/services/finnhubNewsProvider.ts`
+   - `terminal/backend/src/server.ts`
+
+2. News Feed Window에서 `Market News`를 별도 메뉴 타입으로 선택할 수 있게 하고, Update split-dropdown에 `7d/recent/custom × market news`를 추가함
+   - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+
+3. Full Text Update sourceType 메뉴에도 `market_news`를 추가하여 기존 source type 패턴과 맞춤
+   - 현재 extractor 지원 범위를 넘는 외부 도메인은 `unavailable` 또는 `skipped` 상태로 남도록 유지
+
+4. 계획/스펙 문서를 함께 갱신함
+   - `ai_agent_plan/terminal_ui_ver2_finhub/plan.md`
+   - `terminal/backend_prompt.md`
+   - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+
+5. 런타임 검증 중 발견된 `market_news only` 경로의 job progress 버그를 즉시 수정함
+   - 문제: `sourceType='market_news'`일 때도 ticker loop를 먼저 돌아 job total이 CSV 전체 ticker 수로 잡히고 실제 market pull이 지연됨
+   - 수정: `company_news`/`press_release`를 당기지 않는 경우 `tickerList=[]`로 강제하여 market news 수집을 바로 시작하도록 변경
+   - 파일: `terminal/backend/src/server.ts`
+
+#### Verification
+
+1. 백엔드 타입체크 또는 빌드로 `market_news` enum 추가 이후 오류가 없는지 확인 필요
+2. `POST /api/news/pull-finhub`에 `{ "mode": "recent", "sourceType": "market_news" }` 요청 시 job이 생성되는지 확인 필요
+3. `GET /api/news?source_names=FINNHUB&source_type=market_news`로 row 조회 확인 필요
+4. 프론트 Update 메뉴와 source filter에 `Market News`가 추가되었는지 확인 필요
+
+#### Runtime verification result
+
+1. `POST /api/news/pull-finhub` with `{ "mode": "recent", "sourceType": "market_news" }` → `jobId` 정상 반환 확인
+2. job 로그에서 `[market] Processing market news...` 즉시 시작 확인
+3. `GET /api/news?source_names=FINNHUB&source_type=market_news&limit=5` → 실제 `market_news` row 조회 확인
+   - 샘플 row: CNBC 기사 제목 `We're buying more of our newest stock and upgrading our rating on a financial name`
+
+#### Risks / notes
+
+1. Finnhub `/news`는 날짜 파라미터가 없고 약 3일 안팎 히스토리 + `minId` 페이징에 의존함
+   - 완화: custom/recent는 UI는 동일하지만, 서버에서 페이지네이션 후 published_at 기준으로 절단하도록 구현
+2. market news는 ticker 비연결 기사 비율이 높아 `tickers=[]` row가 많을 수 있음
+   - 완화: 검색/필터는 `source_type`과 keyword 중심으로 사용
+3. full text extractor는 market news 외부 도메인을 아직 적극 지원하지 않음
+   - 완화: 현재는 status를 남기고 실패 원인/미지원 도메인을 로그에서 확인하도록 유지
+
+---
+
+### Step 5 보완 — Publisher 컬럼 추가 + Source 기본 숨김 (2026-03-06)
+
+**작성 시각:** 13:10 (local)
+
+**Status: completed (user-confirmed)**
+
+#### Actions taken
+
+1. **백엔드 뉴스 응답에 `publisher` 포함**
+    - 파일:
+       - `terminal/backend/src/services/newsRepository.ts`
+       - `terminal/backend/src/types.ts`
+       - `terminal/backend/src/server.ts`
+    - 변경:
+       - `GET /api/news`, `GET /api/news/:id` 조회 SQL에 `ni.publisher` 추가
+       - `NewsItem` 타입과 row mapper에 `publisher` 필드 추가
+       - 백엔드 시작 시 `publisher IS NULL` row를 자동 backfill하도록 보강
+    - 목적: 프론트가 source(provider)와 publisher(원문 사이트)를 구분해서 렌더할 수 있게 함
+
+2. **Finnhub 뉴스 창 컬럼 동작 조정**
+    - 파일: `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+    - 변경:
+       - `Publisher` 컬럼 추가
+       - `Source` 컬럼은 유지하되 기본 visible 집합에서 제외 → Columns 드롭다운 기본 unchecked
+       - `Publisher` 셀은 기존 `Source` 셀과 동일하게 좌클릭 새 탭 열기 + 우클릭 Copy URL 동작 재사용
+    - 목적: 초기 화면에는 사용자가 기대하는 원문 사이트 출처를 먼저 보여주고, provider 값은 필요 시만 열어보게 함
+
+3. **스펙/플랜 문서 동기화**
+    - 파일:
+       - `terminal/backend_prompt.md`
+       - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+       - `ai_agent_plan/terminal_ui_ver2_finhub/plan.md`
+    - 변경:
+       - `source` vs `publisher` 의미 차이 문서화
+       - Finnhub 창 기본 컬럼 동작 변경 반영
+       - plan에 `PLAN CHANGE (2026-03-06 #7)` 및 Step 5 세부 단계(5-24, 5-25) 추가
+
+#### Verification
+
+- 코드 확인 포인트:
+   - `GET /api/news` 응답 row에 `publisher`가 포함되는지 확인
+   - Finnhub News Window에서 `Publisher` 컬럼이 보이고 `Source`는 Columns 메뉴에서만 켤 수 있는지 확인
+   - `Publisher` 셀 클릭 시 링크 열기, 우클릭 시 URL 복사 동작이 유지되는지 확인
+
+#### Issues / risks
+
+1. `publisher`가 NULL인 기존 non-Finnhub row는 `-`로 보일 수 있음
+    - 완화: 현재 Finnhub row는 backfill 경로가 있어 대부분 채워짐. 필요 시 null row 점검 쿼리 추가 가능
+2. 컬럼 기본 순서가 기존 사용자 기대와 다를 수 있음
+    - 완화: Columns 메뉴와 drag-reorder가 그대로 있으므로 사용자가 즉시 조정 가능
+3. 프론트/백엔드 중 한쪽만 재기동하면 캐시된 구버전 응답/번들이 보일 수 있음
+    - 완화: backend/webui dev task가 최신 소스를 반영했는지 확인 후 새로고침
+
+#### User confirmation
+
+- **확인 시각:** 2026-03-06 13:17 (local)
+- 사용자 응답 `계속`을 현재 변경분(5-24, 5-25 및 관련 plan 반영)에 대한 진행 승인/확인으로 해석하여 `completed (user-confirmed)`로 상태를 업데이트함.
 
 ---
 

@@ -804,6 +804,10 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
 
 async function start(): Promise<void> {
   await initDb();
+  const publisherBackfilled = await backfillPublisher();
+  if (publisherBackfilled > 0) {
+    console.log(`[startup] backfilled publisher for ${publisherBackfilled} news_items rows`);
+  }
   await ensureSeedData();
   startCalendarIngestionWorkers();
 

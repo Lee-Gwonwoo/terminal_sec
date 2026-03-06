@@ -217,6 +217,16 @@ PLAN CHANGE (2026-03-06 #6)
   - Full Text Update sourceType 메뉴에도 `market_news` 추가
 - 영향: `market_news`는 ticker 기반이 아니라 Finnhub `/news?category=general` + `minId` 페이징 기반으로 수집한다. 따라서 custom/recent는 UI는 같지만, 서버 내부 구현은 stored timestamp + page cutoff 방식으로 동작한다.
 ```
+
+```
+PLAN CHANGE (2026-03-06 #7)
+- 왜: 사용자가 `source` 컬럼은 유지하되 기본 표시에서는 숨기고(unchecked), 대신 동일한 링크 동작을 가진 `publisher` 컬럼을 기본 컬럼으로 보이게 하라고 요청함.
+- 무엇이 바뀌었나:
+  - 5단계 News Feed Window 컬럼 동작을 `publisher` 중심으로 조정
+  - `GET /api/news` 응답에 `publisher` 필드 포함
+  - `source` 컬럼은 Columns 드롭다운에서 기본 unchecked 상태로 변경
+- 영향: provider(`source`)와 원문 사이트(`publisher`)를 UI에서 분리해 볼 수 있고, 초기 화면에서는 원문 사이트가 먼저 보인다.
+```
 ---
 
 ### 아키텍처(상위)
@@ -1125,6 +1135,8 @@ API 계약(초안)
 | 5-14 | 백엔드 "entire" 모드 — adaptive date-splitting backfill | server.ts, finnhubNewsProvider.ts | `POST /api/news/pull-finhub { mode: "entire" }` → 5년 범위 adaptive 분할 수집, cap 우회, 중복 없음 | ✅ |
 | 5-15 | Update 버튼 → split-dropdown (12개 옵션: sourceType별 × mode별) | FinnhubNewsWindow.tsx | 드롭다운에 All/Company/Press/Market × 7d/Recent/Custom 메뉴 | ⏳ |
 | 5-16 | Source 셀: 우클릭 Copy URL + 클릭 시 링크 열기 | FinnhubNewsWindow.tsx | Source 우클릭 → Copy URL → 클립보드 복사, Source 클릭 → 브라우저 새 탭으로 열림 | ✅ |
+| 5-24 | News 테이블에 `Publisher` 컬럼 추가 | `newsRepository.ts`, `FinnhubNewsWindow.tsx` | `publisher` 값 렌더, 클릭/우클릭 동작이 Source와 동일 | ✅ |
+| 5-25 | `Source` 컬럼 기본 가시성 해제 | `FinnhubNewsWindow.tsx` | Columns 메뉴에서 Source가 기본 unchecked 상태로 시작 | ✅ |
 | 5-17 | 백엔드 잡 큐 + `GET /api/jobs/:jobId` 폴링 엔드포인트 | `server.ts`, `jobManager.ts`(신규) | POST → `{ jobId }` 즉시 반환, GET 폴링 시 `{ status, progress, logs[] }` 응답 | ✅ |
 | 5-18 | View Log 버튼 + 로그 패널 UI(자동 오픈 금지) | `FinnhubNewsWindow.tsx` | Update 옆 View Log 클릭 → 진행률 바 + 실시간 로그 표시, 시작 시 자동 열림 없음 | ✅ |
 | 5-19 | Update UX 전면 리디자인: 7d/Recent/Custom 3모드 + preflight + date picker | `server.ts`, `finnhubNewsProvider.ts`, `FinnhubNewsWindow.tsx` | Entire 제거 → Custom(date picker + adaptive backfill), 기본 Update → 7d, Recent = per-ticker anchor + preflight 경고 모달, 메인 버튼 = 마지막 사용 모드 기억(localStorage) | ✅ |
@@ -1345,6 +1357,23 @@ API 계약(초안)
   - 사람 검증(비개발자): full text는 있지만 keyword 분석이 아직 없는 row에서 `-`가 표시되는지 확인.
   - 흔한 문제/주의: full text 추출 완료와 keyword 분석 완료를 혼동해 O/X만 보고 keywords가 있다고 가정하는 문제.
 
+- `5-24` 목적: 사용자가 provider가 아니라 원문 사이트 출처를 기본 화면에서 바로 볼 수 있게 한다. 설명:
+  - News 테이블에 `Publisher` 컬럼을 추가한다.
+  - 값은 backend `GET /api/news` 응답의 `publisher` 필드에서 렌더한다.
+  - 클릭/우클릭 동작은 기존 `Source` 셀과 동일하게 유지한다: 좌클릭 새 탭 열기, 우클릭 Copy URL.
+  - 값이 없으면 `-`, 알 수 없는 도메인은 `UNKNOWN`으로 표시될 수 있다.
+  - 완료 조건(눈으로 확인): Publisher 컬럼이 기본으로 보이고, row 클릭/우클릭 동작이 Source와 동일하게 동작한다.
+  - 사람 검증(비개발자): Publisher 텍스트를 클릭하면 기사 링크가 열리고, 우클릭 후 URL 복사로 주소가 붙여넣어지는지 확인.
+  - 흔한 문제/주의: 백엔드 응답에 `publisher` 필드가 없으면 컬럼이 전부 `-`로만 보이는 문제.
+
+- `5-25` 목적: provider 정보는 보존하되 초기 화면 복잡도를 낮춘다. 설명:
+  - `Source` 컬럼은 제거하지 않고 Columns 드롭다운에서만 다시 켤 수 있게 유지한다.
+  - 기본 visible set에서는 `Source`를 제외해 초기 상태를 unchecked로 만든다.
+  - 사용자가 `Source`를 다시 켜면 기존 클릭/우클릭 동작과 정렬 동작은 그대로 유지된다.
+  - 완료 조건(눈으로 확인): 첫 로드 시 Source 컬럼이 보이지 않고, Columns 메뉴에서만 켤 수 있다.
+  - 사람 검증(비개발자): 창을 새로 열었을 때 Source가 안 보이고, Columns 메뉴에서 체크하면 다시 나타나는지 확인.
+  - 흔한 문제/주의: 컬럼은 숨겼지만 DEFAULT_VISIBLE에 남아 있어 실제 초기 렌더에는 계속 보이는 문제.
+
 **검증 훅 (5단계 마감):**
 ```
 1. news feed:finhub api 창 열기
@@ -1356,17 +1385,18 @@ API 계약(초안)
 7. Update 버튼에 5초 hover → 설명 툴팁 표시 확인 → 마우스 떼면 사라지는지 확인
 8. Ticker 컬럼이 Date 옆에 표시되고, 클릭 시 해당 ticker 필터링
 9. Columns 버튼 → 드롭다운에서 컬럼 체크 해제 → 테이블에서 해당 컬럼 숨겨짐
-10. Update 우측 화살표 → 드롭다운 메뉴에서 6개 옵션 확인 (All×2, Company×2, Press×2)
-11. Company Entire Update 클릭 → POST body에 `{mode:"entire", sourceType:"company_news"}` 확인
-12. 콘솔에 `[backfill] company_news ... splitting…` 로그 확인 (adaptive splitting 동작)
-13. Press Release Update 클릭 → POST body에 `{mode:"recent", sourceType:"press_release"}` 확인
-14. Source 컬럼: 좌클릭으로 링크 열기, 우클릭 메뉴에서 Copy URL → 붙여넣기 확인
+10. Update 우측 화살표 → 드롭다운 메뉴에서 12개 옵션 확인 (All/Company/Press/Market × 7d/Recent/Custom)
+11. Custom Company Update 실행 → POST body에 `{mode:"custom", sourceType:"company_news", from:"...", to:"..."}` 확인
+12. Recent Market News 실행 → POST body에 `{mode:"recent", sourceType:"market_news"}` 확인
+13. Source 컬럼은 기본으로 숨겨져 있고, Columns 메뉴에서 체크해야 다시 보이는지 확인
+14. Publisher 컬럼: 좌클릭으로 링크 열기, 우클릭 메뉴에서 Copy URL → 붙여넣기 확인
 15. Update 클릭 → 응답이 `{ jobId }` 로 즉시 반환되고, UI가 멈추지 않는지 확인
 16. View Log 버튼 클릭 → 로그 패널에 진행률 바 + 로그 표시 확인. Update만 클릭하고 View Log 안 누르면 패널 안 열리는지 확인
 17. News 창의 `7D Change Update` 클릭 → `{ jobId }` 반환, 완료 후 목록 재조회 확인
 18. News 창의 `Custom Change Update`에 `21` 입력 후 실행 → `{ jobId }` 반환, 완료 후 재조회 확인
 19. Industry 컬럼 표시 확인 → 값이 없으면 `-`, 있으면 산업명 표시 확인
 20. Keywords 컬럼 표시 확인 → AI keyword 분석 전에는 `-`, 분석 후에는 키워드 목록 표시 확인
+21. Publisher 컬럼 값이 있는 row와 `UNKNOWN` row가 정책대로 보이는지 확인
 ```
 - 사용자 확인 필요: **Yes**
 
@@ -1961,7 +1991,7 @@ API 계약(초안)
 |-----------|------|------|------|------|
 | 10-1 | `news_fulltext` 테이블 CREATE + keyword 컬럼 + `news_items.publisher` 컬럼 migration | `terminal/backend/src/db.ts` | 백엔드 시작 후 테이블/컬럼 존재 확인 | ⏳ |
 | 10-2 | `fulltextRepository.ts` 구현 (CRUD + 미추출 목록 조회) | `terminal/backend/src/services/fulltextRepository.ts` | `npx tsc --noEmit` → 0 errors | ⏳ |
-| 10-3 | 기존 news_items `publisher` 컬럼 backfill (URL 도메인 파싱) | `terminal/backend/src/services/finnhubNewsProvider.ts` | 기존 707건에 대해 publisher가 NASDAQ/TMX/FINNHUB 중 하나로 세팅 | ⏳ |
+| 10-3 | 기존 news_items `publisher` 컬럼 backfill (URL 도메인 파싱) | `terminal/backend/src/services/finnhubNewsProvider.ts` | 기존 Finnhub row에 대해 publisher가 NASDAQ/TMX/FINNHUB/UNKNOWN 중 하나로 세팅 | ⏳ |
 | 10-4 | `extractNasdaq(url)` — Nasdaq HTML scraping 추출기 | `terminal/backend/src/services/fulltextExtractors.ts` | 샘플 Nasdaq URL로 article body 추출 성공 | ⏳ |
 | 10-5 | `extractTmx(url)` — TMX GraphQL API 추출기 | `terminal/backend/src/services/fulltextExtractors.ts` | 샘플 TMX URL로 story HTML 추출 성공 | ⏳ |
 | 10-6 | `extractByDomain(url, publisher)` — 도메인 dispatcher | `terminal/backend/src/services/fulltextExtractors.ts` | 각 도메인에 대해 올바른 추출기로 dispatch | ⏳ |
@@ -1994,8 +2024,9 @@ API 계약(초안)
 - `10-3` 목적: 기존 news_items에 publisher를 backfill. 설명:
   - `publisher IS NULL`인 모든 row에 대해 URL 도메인을 파싱하여 publisher를 세팅.
   - 매핑: `www.nasdaq.com` → `NASDAQ`, `money.tmx.com` → `TMX`, `finnhub.io` → `FINNHUB`.
+  - market news처럼 도메인 규칙에 바로 매핑되지 않는 row는 `UNKNOWN`으로 남을 수 있다.
   - 향후 Finnhub 인제션(4단계) 시 신규 뉴스 insert 시에도 자동으로 publisher를 세팅하도록 provider를 수정.
-  - 완료 조건(눈으로 확인): `SELECT publisher, COUNT(*) FROM news_items WHERE source='FINNHUB' GROUP BY publisher` → 3개 publisher가 각각 549/51/107 근사.
+  - 완료 조건(눈으로 확인): `SELECT publisher, COUNT(*) FROM news_items WHERE source='FINNHUB' GROUP BY publisher` 실행 시 `NASDAQ`/`TMX`/`FINNHUB` 외에 `UNKNOWN`이 나타날 수 있음을 확인하고, 각 값이 URL 도메인 규칙과 모순되지 않는지 점검한다.
   - 사람 검증(비개발자): 위 SQL 실행 결과 확인.
   - 흔한 문제/주의: URL이 NULL/비어있는 row 처리; 도메인 파싱 시 `https://` prefix 누락.
 - `10-4` 목적: Nasdaq 기사 full text를 HTML에서 추출. 설명:
@@ -2087,7 +2118,7 @@ API 계약(초안)
 **검증 훅 (10단계 마감):**
 ```
 1. npx tsc --noEmit → 0 errors
-2. SELECT publisher, COUNT(*) FROM news_items WHERE source='FINNHUB' GROUP BY publisher → 3개 publisher 확인
+2. SELECT publisher, COUNT(*) FROM news_items WHERE source='FINNHUB' GROUP BY publisher → `NASDAQ`/`TMX`/`FINNHUB`/`UNKNOWN` 분포 확인
 3. POST /api/news/fulltext/update → { jobId } 반환 → GET /api/jobs/:jobId 폴링 → done
 4. SELECT extraction_status, COUNT(*) FROM news_fulltext GROUP BY extraction_status → success/skipped/failed 분포 확인
 5. GET /api/news/fulltext/<nasdaq_newsId> → fullText 존재, wordCount > 0
@@ -2148,12 +2179,16 @@ API 계약(초안)
 │ ✅ 3-6 스모크 테스트   │ ✅ 5-6 AddTabModal 라벨     │
 │                      │ ✅ 5-7 App.tsx 제목          │
 │                      │ ✅ 5-8 DraggableWindow switch│
-│                      │ ✅ 5-9 Changes% 실시간 계산  │
+│                      │ ⏳ 5-9 source_type 필터 UI    │
 │                      │ ✅ 5-10 서버사이드 검색      │
 │                      │ ✅ 5-11 Update 툴팁(5초)     │
+│                      │ ✅ 5-15 Update split-dropdown│
+│                      │ ✅ 5-16 Source 링크/Copy URL │
 │                      │ ✅ 5-17 백엔드 잡 큐 + 폴링  │
 │                      │ ✅ 5-18 View Log 버튼/패널 │
 │                      │ ✅ 5-19 Update UX 리디자인  │
+│                      │ ✅ 5-24 Publisher 컬럼       │
+│                      │ ✅ 5-25 Source 기본 숨김     │
 │                      │                              │
 └──────────┬───────────┘                              │
            │                                          │
