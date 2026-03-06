@@ -844,3 +844,31 @@
 - **agent_log.md 즉시 기록 누락**: 코드 변경 시점에 기록하지 않고 사용자 지적 후 뒤늦게 작성. planning.md 규칙 2 위반.
 - **이전 답변에서 근거 오인**: 사용자에게 위반 이유를 설명할 때 `copilot-instructions.md`의 `*.py ↔ *.md` 동반 문서 규칙을 잘못 인용함. 실제 적용 규칙은 `planning.md`의 "plan/log 자동 동기화 규칙 1, 3"이었음.
 
+### 프론트엔드 maxTickers:20 하드코딩 제거 + 런타임 검증
+
+**작성 시각:** 02:13 (local)
+**Status: done (사용자 확인 후 완료)**
+
+#### 수행 내용
+
+1. **프론트엔드 `maxTickers: 20` 제거** (`FinnhubNewsWindow.tsx`)
+   - `handleUpdate` POST body: `{ maxTickers: 20, mode, sourceType }` → `{ mode, sourceType }`
+   - 백엔드 Zod schema `maxTickers` default(0) = 전체 CSV 사용
+
+2. **서버 로그 추가** (`server.ts`)
+   - tickerList 로드 직후 `console.log('[pull-finhub] mode=... sourceType=... maxTickers=... → tickerList.length=...')` 추가
+   - 운영 로그로 유지 (검증 겸 모니터링)
+
+3. **런타임 검증**
+   - 백엔드 재시작 후 `POST /api/news/pull-finhub { mode:"recent", sourceType:"company_news" }` (maxTickers 미전송)
+   - 서버 로그 출력: `[pull-finhub] mode=recent sourceType=company_news maxTickers=0 → tickerList.length=1188`
+   - **확인**: maxTickers 미전송 → Zod default 0 → CSV 전체 1,188개 티커 사용 확인
+
+#### 수정 파일
+
+| 파일 | 변경 |
+|------|------|
+| `termina_web/.../components/FinnhubNewsWindow.tsx` | `maxTickers: 20` 제거 |
+| `terminal/backend/src/server.ts` | tickerList.length 로그 추가 |
+| `agent_log.md` | 이 항목 기록 |
+

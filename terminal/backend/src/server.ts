@@ -207,6 +207,7 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
     } catch {
       tickerList = ["AAPL", "MSFT", "TSLA", "NVDA", "AMD"]; // fallback
     }
+    console.log(`[pull-finhub] mode=${input.mode} sourceType=${input.sourceType} maxTickers=${input.maxTickers} → tickerList.length=${tickerList.length}`);
 
     const counters = { totalInserted: 0, totalSkipped: 0 };
     const newItems: Array<{ id: string; tickers: string[]; publishedAt: string }> = [];

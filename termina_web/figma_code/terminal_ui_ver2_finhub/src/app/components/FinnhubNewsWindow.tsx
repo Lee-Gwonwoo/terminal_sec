@@ -297,7 +297,7 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
       const res = await fetch(`${API_BASE}/api/news/pull-finhub`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ maxTickers: 20, mode, sourceType }),
+        body: JSON.stringify({ mode, sourceType }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -490,8 +490,8 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
         return newsItem.ticker ? (
           <span
             className="inline-block px-1.5 py-0.5 text-[11px] font-medium bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900/60 truncate"
-            onClick={(e) => { e.stopPropagation(); onTickerClick?.(newsItem.ticker); }}
-            title={newsItem.ticker}
+            onClick={(e) => { e.stopPropagation(); setSearchQuery(newsItem.ticker); onTickerClick?.(newsItem.ticker); }}
+            title={`Click to filter by ${newsItem.ticker}`}
           >
             {newsItem.ticker}
           </span>
@@ -572,7 +572,7 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
           </div>
         );
     }
-  }, [displayMode, toggleExpand, onTickerClick, openExternalUrl]);
+  }, [displayMode, toggleExpand, onTickerClick, openExternalUrl, setSearchQuery]);
 
   // ─── Row renderer ───
   const Row = useCallback(({ index, style }: { index: number; style: React.CSSProperties }) => {
