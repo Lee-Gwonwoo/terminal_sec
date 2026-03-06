@@ -1,22 +1,5 @@
 # EODHD rules (skill)
 
-## EN
-
-### When to use
-- When writing or editing scripts that download, normalize, or store market data via EODHD.
-- When saving EODHD-derived datasets under `original_data/` or under `EODHD/<symbol>/` and you need to follow the repo’s strict timestamp/column/token rules.
-
-- **EODHD rules are strict**
-  - Follow `EODHD/INSTRUCTION.txt`:
-    - All saved timestamps must be `America/New_York` local time.
-    - Do **not** include `Timestamp` in saved outputs (drop it before saving).
-    - Read the API token from `EODHD/API TOKEN`.
-    - Put symbol-specific code + outputs under `EODHD/<symbol>/`.
-
----
-
-## KO
-
 ### 언제 쓰나
 - EODHD로 데이터를 다운로드/정규화/저장하는 스크립트를 만들거나 수정할 때.
 - `original_data/` 또는 `EODHD/<symbol>/` 아래로 데이터를 저장하면서, 시간/컬럼/토큰 관련 “엄격 규칙”을 반드시 지켜야 할 때.
