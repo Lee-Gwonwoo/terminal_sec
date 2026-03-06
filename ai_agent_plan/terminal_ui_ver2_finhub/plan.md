@@ -36,6 +36,14 @@
   - 표준 프리셋: `change_1d_pct`, `change_from_open_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct`
   - custom 프리셋: `custom_{N}d_pct` 형태로 저장
   - 조회: `GET /api/news` 응답에서 필요한 표준 change 값만 join/병합하여 내려준다
+8) **News Feed Earning Date Snapshot(뉴스 당시 기준 upcoming earning date 고정 저장)**
+  - 목적: 각 뉴스 row에서 보이는 `Earning: <date>`는 **현재 시점 기준**이 아니라, **그 뉴스가 발행된 당시 관점**에서의 가장 가까운 upcoming earning date여야 한다.
+  - 저장: `news_id` 기준 별도 snapshot 저장(`news_items` 직접 컬럼 확장 대신 별도 테이블 권장)
+  - 조회: `GET /api/news` 응답에 snapshot 필드를 join/병합하여 내려주고, 프론트는 live lookup 없이 저장된 snapshot만 표시한다.
+9) **Calendar Window 기간 프리셋 조회 버튼 추가**
+  - `/calendar` 툴바에 `Last Week`, `This Week`, `Next Week`, `This Month`, `Next Month` 버튼을 추가한다.
+  - 각 버튼은 새 pull/update를 발생시키는 것이 아니라, **이미 저장된 calendar data를 해당 기간으로 조회**하는 필터 역할을 한다.
+  - 기간 계산 기준은 `America/New_York` 로컬 날짜이며, 버튼별 범위 정의는 plan 본문에 명시한다.
 
 ### 현재 레포 상태(중요, 확인됨)
 - 프론트에는 이미 `brave-news` 윈도우 타입이 존재하며 구현 파일은 아래와 같다.
@@ -93,12 +101,20 @@
 - Data Control Window
   - 버튼은 정확히 4개: `IBKR Price Data`, `IBKR Calendar Data`, `7D Change Update`, `Custom Change Update`.
   - 버튼 클릭은 백엔드 업데이트를 트리거하고, “마지막 성공 업데이트 날짜/시각”이 갱신된다.
+- Calendar Window
+  - 툴바에 `Last Week`, `This Week`, `Next Week`, `This Month`, `Next Month` 버튼이 보인다.
+  - 버튼 클릭 시 현재 저장된 calendar row를 해당 기간만큼 필터링해서 보여준다(추가 update 자동 실행 금지).
+- News window
+  - `Earning: <date>`가 보이는 경우, 그 값은 **뉴스 발행 당시 기준**으로 고정된 snapshot 값이다.
+  - 시간이 지난 뒤 다시 열어도 과거 뉴스 row의 earning date가 현재 기준 값으로 바뀌지 않는다.
 
 빠른 검증 체크리스트(코드 안 읽고 확인)
 1) 앱을 실행(backend + web UI)하고, 터미널에 표시되는 UI URL로 접속.
 2) News 창 라벨이 `news feed:finhub api`인지 확인.
 3) Default Ticker 창에서 티커 목록이 보이고, 티커 추가 시 즉시 목록에 반영되는지 확인.
 4) IBKR 설정이 되어 있다면: `IBKR Price Data`/`IBKR Calendar Data`/`7D Change Update`/`Custom Change Update` 클릭 후 각 항목의 “마지막 성공 업데이트”가 바뀌는지 확인.
+5) Calendar Window에서 `Last Week`/`This Week`/`Next Week`/`This Month`/`Next Month` 버튼을 눌렀을 때, 같은 DB 데이터를 서로 다른 기간으로만 필터링하는지 확인.
+6) News 창에서 `Earning: <date>`가 보인다면, 같은 종목의 과거 뉴스와 최신 뉴스가 서로 다른 snapshot 날짜를 가질 수 있는 구조인지 확인.
 
 용어집(쉬운 정의)
 - 백엔드: 데이터베이스/CSV/외부 API와 통신하는 Node/TypeScript 서버(`terminal/backend`).
@@ -227,6 +243,22 @@ PLAN CHANGE (2026-03-06 #7)
   - `source` 컬럼은 Columns 드롭다운에서 기본 unchecked 상태로 변경
 - 영향: provider(`source`)와 원문 사이트(`publisher`)를 UI에서 분리해 볼 수 있고, 초기 화면에서는 원문 사이트가 먼저 보인다.
 ```
+
+```
+PLAN CHANGE (2026-03-06 #8)
+- 왜: 사용자가 News Feed의 `Earning: <date>`를 “현재 시점 기준”이 아니라 **각 뉴스 발행 당시 기준의 upcoming earning date**로 고정해서 보이게 해야 한다고 명확히 요구했고,
+  `/calendar` window에도 `Last Week` / `This Week` / `Next Week` / `This Month` / `Next Month` 기간 버튼을 두어 저장된 캘린더 데이터를 기간별로 조회하고 싶다고 요청함.
+- 무엇이 바뀌었나:
+  - 목표 #8 신설 — News Feed earning date를 `news_id` 기준 snapshot 저장으로 정의
+  - 목표 #9 신설 — `/calendar` 기간 프리셋 버튼 추가
+  - 아키텍처에 `News Earning Snapshot` 및 `Calendar 기간 프리셋 조회 원칙` 섹션 추가
+  - capability matrix의 News Feed `Earning date` 행을 live lookup이 아닌 snapshot 기반으로 수정
+  - 4단계/5단계 데이터 흐름 설명에 earning snapshot 저장/표시 규칙 추가
+  - Calendar window 요구사항에 기간 프리셋 버튼과 날짜 범위 정의 추가
+- 영향:
+  - News Feed의 earning 표시는 시간이 지나도 과거 뉴스 row 기준값이 유지된다.
+  - `/calendar` 버튼은 update 버튼이 아니라 조회 preset 버튼이므로, 저장된 이벤트를 빠르게 다른 기간으로 필터링하는 UX가 추가된다.
+```
 ---
 
 ### 아키텍처(상위)
@@ -237,6 +269,136 @@ PLAN CHANGE (2026-03-06 #7)
   - news 기준 change metric 계산/재계산 잡
   - 티커 CSV read/append + 경로 제한(보안)
   - last updated 시각 저장/조회
+
+  ### News Earning Snapshot 아키텍처
+  > News Feed의 `Earning: <date>`는 “지금 기준 가장 가까운 실적일”이 아니라, **각 뉴스가 저장되던 당시 시점**의 upcoming earning date snapshot을 보여준다.
+
+  1. **저장 위치: 별도 테이블 `news_earnings_snapshot`**
+    - 물리적으로는 같은 SQLite(app DB) 안에 저장하되, `news_items`에 직접 컬럼을 계속 추가하지 않고 **별도 테이블**로 관리한다.
+    - 기본 키: `news_id`
+    - 권장 스키마:
+      - `news_id TEXT PRIMARY KEY REFERENCES news_items(id)`
+      - `ticker TEXT NOT NULL`
+      - `news_published_at TEXT NOT NULL`
+      - `upcoming_earnings_date TEXT` — `YYYY-MM-DD`
+      - `upcoming_earnings_session TEXT` — `BMO` / `AMC` / `TBD` / `NULL`
+      - `earnings_source TEXT NOT NULL` — 예: `FINNHUB`
+      - `resolution_status TEXT NOT NULL` — `resolved` / `not_found`
+      - `resolved_at TEXT NOT NULL`
+
+  2. **해결 규칙(as-of snapshot, live lookup 금지)**
+    - 뉴스 row가 insert될 때(또는 insert 직후), 해당 news row의 대표 ticker와 `published_at`을 기준으로 earning snapshot을 **한 번 계산하여 저장**한다.
+    - 비교 기준은 `America/New_York` 로컬 날짜다.
+    - 운영적 정의:
+      - `news_local_date` = `published_at`을 `America/New_York`로 변환한 날짜
+      - `news_local_timestamp` = `published_at`을 `America/New_York`로 변환한 시각
+      - `upcoming_earnings_date` = 같은 ticker의 earning candidate 중 **그 뉴스 시점에서 아직 지나지 않은 candidate** 가운데 가장 이른 날짜
+    - 같은 날 발표이지만 세션 정보(BMO/AMC/TBD)가 있으면 날짜만이 아니라 **세션 시각까지** 비교한다.
+    - 세션 비교 기준(권장):
+      - `BMO` = `08:00 America/New_York`
+      - `AMC` = `16:00 America/New_York`
+      - `TBD` 또는 세션 미확인 = 시각이 확정되지 않은 상태. 같은 로컬 날짜 안에서는 upcoming으로 허용하되, 다음 날짜로 넘어가면 지난 이벤트로 본다.
+    - 즉, 같은 `earnings_date`라도 뉴스가 오전에 나왔는지, 장 마감 후에 나왔는지에 따라 snapshot 결과가 달라질 수 있다.
+    - 그 후 News Feed는 **저장된 snapshot만** 렌더하고, 화면 조회 시점에 다시 provider를 조회해 덮어쓰지 않는다.
+
+  3. **예시(뉴스 당시 관점)**
+    - 예시 A:
+      - 뉴스 시각: `2026-03-04 10:15 America/New_York`
+      - candidate: `2026-03-04 AMC`, `2026-05-07 AMC`
+      - 결과: 같은 날 AMC는 아직 지나지 않았으므로 snapshot = `2026-03-04`, session=`AMC`
+    - 예시 B:
+      - 뉴스 시각: `2026-03-04 17:20 America/New_York`
+      - candidate: `2026-03-04 AMC`, `2026-05-07 AMC`
+      - 결과: 같은 날 AMC는 이미 지난 이벤트이므로 snapshot = `2026-05-07`
+    - 예시 C:
+      - 뉴스 시각: `2026-03-04 11:00 America/New_York`
+      - candidate: `2026-03-04 BMO`, `2026-05-07 AMC`
+      - 결과: 같은 날 BMO는 이미 지난 이벤트이므로 snapshot = `2026-05-07`
+    - 예시 D:
+      - 뉴스 시각: `2026-03-04 11:00 America/New_York`
+      - candidate: `2026-03-04 TBD`, `2026-05-07 AMC`
+      - 결과: 세션 미확정이므로 같은 날짜 안에서는 `2026-03-04` snapshot을 허용한다.
+
+  4. **조회 방식: API에서 병합**
+    - `GET /api/news`는 `news_items`를 기준으로 조회하되, `news_earnings_snapshot`을 left join하여 아래 필드를 응답에 포함한다.
+      - `earning_snapshot_date`
+      - `earning_snapshot_session`
+      - `earning_snapshot_status`
+    - 프론트는 `earning_snapshot_status = 'resolved'`일 때만 `Earning: <date>` 라인을 렌더한다.
+    - snapshot row가 없거나 `not_found`면 렌더하지 않는다(가짜 값 금지).
+
+  5. **보정/재계산 규칙**
+    - 기본 원칙은 “뉴스 insert 시점 snapshot 고정”이다.
+    - provider 데이터 보정이 발생하더라도, 과거 뉴스 row를 무조건 현재 기준 값으로 덮어쓰지 않는다.
+    - 필요 시에만 명시적 백필/재해결 작업으로 특정 `news_id` 집합을 다시 계산한다.
+    - 이 원칙이 없으면 과거 뉴스를 다시 열 때 `Earning: <date>`가 현재 기준 upcoming value로 드리프트하게 된다.
+
+  6. **체크 항목(사람이 검증 가능한 기준)**
+    - 같은 ticker의 과거 뉴스와 최신 뉴스가 서로 다른 `earning_snapshot_date`를 가질 수 있어야 한다.
+    - 과거 뉴스 row를 오늘 다시 조회해도 snapshot 값이 “오늘 기준 upcoming value”로 바뀌지 않아야 한다.
+    - `earning_snapshot_status='not_found'`인 row는 `Earning:` 라인이 보이지 않아야 한다.
+
+  ### Calendar 기간 프리셋 조회 원칙
+  > `/calendar`의 기간 버튼은 데이터를 다시 수집하는 버튼이 아니라, **이미 저장된 `calendar_events`를 기간별로 조회하는 프리셋 필터**다.
+
+  1. **버튼 목록**
+    - `Last Week`
+    - `This Week`
+    - `Next Week`
+    - `This Month`
+    - `Next Month`
+
+  2. **기간 계산 기준(운영적 정의)**
+    - 기준 타임존: `America/New_York`
+    - 기준 필드: 각 calendar row의 발표일을 나타내는 로컬 날짜(`announcement_date_local` 또는 동등 필드)
+    - 포함 규칙: 시작일/종료일 **모두 포함**
+    - 주간 프리셋은 ISO week(월요일 시작, 일요일 종료) 기준으로 계산한다.
+      - `Last Week`: 현재 주 직전의 월요일~일요일
+      - `This Week`: 오늘이 속한 주의 월요일~일요일
+      - `Next Week`: 현재 주 다음의 월요일~일요일
+    - 월간 프리셋은 calendar month 기준으로 계산한다.
+      - `This Month`: 이번 달 1일~말일
+      - `Next Month`: 다음 달 1일~말일
+
+  3. **예시(기준 날짜 = 2026-03-06, 금요일, America/New_York)**
+    - `Last Week` = `2026-02-23` ~ `2026-03-01`
+    - `This Week` = `2026-03-02` ~ `2026-03-08`
+    - `Next Week` = `2026-03-09` ~ `2026-03-15`
+    - `This Month` = `2026-03-01` ~ `2026-03-31`
+    - `Next Month` = `2026-04-01` ~ `2026-04-30`
+    - 경계 사례:
+      - `2026-03-02` 이벤트는 `This Week`에 포함
+      - `2026-03-08` 이벤트도 `This Week`에 포함
+      - `2026-03-09` 이벤트는 `This Week`에서 제외되고 `Next Week`에 포함
+
+  4. **탭별 적용 규칙**
+    - 활성 preset은 Earnings/Conference/Dividend/Analyst Rating 탭 모두에 공통 적용한다.
+    - 탭을 바꾸더라도 현재 preset은 유지한다.
+    - preset 변경은 정렬, 컬럼 가시성, 선택된 탭 같은 다른 UI 상태를 초기화하지 않는다.
+
+  5. **조회 계약(권장)**
+    - `/calendar` 프론트는 버튼 클릭 시 update API가 아니라 조회 API에 preset 파라미터를 전달한다.
+    - 권장 예시:
+      - `GET /api/calendar/events?preset=last_week`
+      - `GET /api/calendar/events?preset=this_week`
+      - `GET /api/calendar/events?preset=next_week`
+      - `GET /api/calendar/events?preset=this_month`
+      - `GET /api/calendar/events?preset=next_month`
+    - 필요 시 서버는 내부적으로 `preset -> from/to` 로 변환해 동일 조회 로직을 재사용한다.
+    - 대안으로 프론트가 `from=YYYY-MM-DD&to=YYYY-MM-DD`를 직접 계산해 보낼 수는 있지만, v1 권장은 `preset` 문자열 전달이다.
+    - 이유: 주간 경계와 타임존 계산을 서버 한 곳에서 일관되게 유지하는 편이 drift를 줄인다.
+
+  6. **UI 원칙**
+    - 버튼은 `/calendar` 툴바의 빠른 조회 프리셋이다.
+    - 버튼 클릭은 `IBKR Calendar Data` update를 자동 실행하지 않는다.
+    - 현재 활성 preset은 시각적으로 표시하고, 같은 탭(Earnings/Conference/Dividend/Analyst Rating) 안에서 공통으로 적용한다.
+    - 기본 preset은 `This Week`를 권장한다.
+    - 나중에 Custom date range가 추가되더라도 위 5개 preset은 가장 빠른 조회 shortcut으로 유지한다.
+
+  7. **체크 항목(사람이 검증 가능한 기준)**
+    - 같은 DB row 집합을 두고 preset만 바꿨을 때 결과 건수와 날짜 범위만 달라져야 한다.
+    - `IBKR Calendar Data` update를 누르지 않아도 preset 버튼만으로 리스트가 바뀌어야 한다.
+    - `This Week`에서 보이던 `2026-03-08` 이벤트가 `Next Week`로 가면 사라지고, `2026-03-09` 이벤트가 새로 보여야 한다.
 
 ### 장시간 update UX 원칙(공통)
 
@@ -391,12 +553,15 @@ UI 컬럼이 요구하는 데이터(예: market cap, turnover, earnings calendar
     - `Chg` (1D % change)
     - `fr.Open` (오픈 대비 % change)
     - `+7D`, `+14D`, `+30D` (N 거래일(트레이딩 바) 전 대비 % change)
-    - 선택 라인: `Earning: <date>` (다음 실적 발표일)
+    - 선택 라인: `Earning: <date>` (뉴스 발행 당시 기준 upcoming earning date snapshot)
   - 필터 UI가 암시하는 추가 필드:
     - Market cap(시가총액, market-cap preset용)
     - Industry(산업, multi-select)
     - Keywords(후속 AI keyword 분석 결과)
 - Calendar window (`/calendar`는 IBKR-only 요구사항):
+  - 툴바 기간 프리셋 버튼:
+    - `Last Week`, `This Week`, `Next Week`, `This Month`, `Next Month`
+    - 버튼은 update가 아니라 저장된 `calendar_events` 조회 범위를 빠르게 바꾸는 preset 필터
   - Earnings 탭(표에 기본으로 보이는 컬럼):
     - `Date Announcement`, `Time`, `Symbol`, `Session`, `Period`, `Confirmed`, `EPS`, `Est. EPS`, `Surprise %`, `Revenue`, `Est. Revenue`
   - Conference 탭(표에 기본으로 보이는 컬럼):
@@ -425,7 +590,7 @@ capability matrix 초안 템플릿(감사 단계에서 채움)
 | News Feed | Industry | Finnhub company profile(우선) | `finnhubIndustry` 또는 동등 필드 매핑 필요 |
 | News Feed | Changes: `Chg` / `fr.Open` / `+7D` / `+14D` / `+30D` | `OHLC_data/ohlc_1d_watchlist.sqlite`의 `ohlc_1d` 기반 계산 | 히스토리 부족 시 `-`로 렌더(가짜 금지) |
 | News Feed | Keywords | `news_fulltext.keywords_json` | full text 추출 후, 별도 AI keyword 분석 작업이 완료된 row만 표시 |
-| News Feed | Earning date 라인 | Finnhub earnings/calendar(우선) | 불가하면 렌더하지 않음(가짜 금지) |
+| News Feed | Earning date 라인 | `news_earnings_snapshot` (원천 계산은 Finnhub earnings/calendar 우선) | 뉴스 발행 당시 기준 snapshot만 표시; live lookup 금지 |
 | News Feed | Market cap | Finnhub company profile(우선) | 단위 확인, numeric USD 저장 + 포맷 |
 | Calendar | 실적 발표일/시간 | IBKR WSH (`wshe_ed`) | ✅ v3 확인: 발표일, 시간대(BMO/AMC), 상태(CONFIRMED/UNCONFIRMED) |
 | Calendar | EPS actual + estimate | IBKR WSH (`wshe_eps`) | ✅ v3 확인: `amount_oc`(실제), `estimated_eps`(예상), `change_amount`, `change_percent` |
@@ -1080,6 +1245,9 @@ API 계약(초안)
   - 둘 다 선택(기본): `GET /api/news?source_names=FINNHUB` (source_type 파라미터 없이 전체 반환)
   - 필터 상태는 컴포넌트 state로 관리(URL/전역 상태 불필요).
 - **Change% 컬럼**: 각 뉴스 row의 `change_1d_pct`, `change_from_open_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct` 값을 백엔드 응답에서 그대로 렌더한다. 값이 없으면 `-`로 표시.
+- **Earning date 라인**: 각 뉴스 row의 earning date는 백엔드 응답의 snapshot 필드(`earning_snapshot_date`, `earning_snapshot_session`)를 사용한다.
+  - 이 값은 뉴스 발행 당시 기준으로 이미 저장된 snapshot이며, 프론트에서 현재 provider를 다시 조회해 계산하지 않는다.
+  - `earning_snapshot_status='resolved'`일 때만 `Earning: <date>` 라인을 표시한다.
 - **Industry 컬럼**: 각 뉴스 row의 `industry` 값을 백엔드 응답에서 렌더한다. 값이 없으면 `-`.
 - **Keywords 컬럼**: 각 뉴스 row의 `keywords` 값을 백엔드 응답에서 렌더한다.
   - 저장 원천은 `news_fulltext.keywords_json`.

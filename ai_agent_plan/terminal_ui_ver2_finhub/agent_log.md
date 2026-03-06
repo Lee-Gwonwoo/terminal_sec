@@ -176,6 +176,50 @@
 
 **수행 내역**:
 
+---
+
+## 2026-03-06
+
+### Plan 문서 수정 — earning snapshot + calendar 기간 프리셋 (2026-03-06 14:03)
+
+**Status: done (문서 수정만 수행, 코드 변경 없음)**
+
+#### Actions taken
+
+1. `ai_agent_plan/terminal_ui_ver2_finhub/plan.md` 수정
+   - News Feed의 `Earning: <date>`를 “뉴스 조회 시점 live lookup”이 아니라 **각 뉴스 발행 당시 기준 upcoming earning date snapshot**으로 명시
+   - snapshot 저장 위치를 `news_id` 기준 별도 테이블(`news_earnings_snapshot`) 권장 구조로 문서화
+   - `/calendar` window에 `Last Week`, `This Week`, `Next Week`, `This Month`, `Next Month` 버튼 추가 요구를 문서화
+   - 위 버튼이 update 트리거가 아니라 **저장된 calendar_events를 기간별로 조회하는 preset 필터**임을 명시
+   - `America/New_York` 기준의 기간 계산 규칙(주간/월간, inclusive 범위)을 plan에 추가
+
+2. 코드 파일은 수정하지 않음
+   - 사용자 요청: “일단 md만 작성, 코드수정은 하지말고”
+   - 따라서 `.ts`, `.tsx`, `.py` 등 구현 파일은 건드리지 않음
+
+#### Files modified
+
+- `ai_agent_plan/terminal_ui_ver2_finhub/plan.md`
+- `ai_agent_plan/terminal_ui_ver2_finhub/agent_log.md`
+
+#### Notes
+
+- 이번 변경은 설계/계획 문서 반영만 수행함.
+- 실제 구현 단계에서는 `news_earnings_snapshot` 테이블/API join 규칙과 `/calendar` preset 조회 API/UI를 별도 Step으로 코드에 반영해야 함.
+
+#### Follow-up doc expansion (same session)
+
+- 사용자가 “더 자세하게”를 요청하여 `plan.md`를 추가 보강함.
+   - `News Earning Snapshot 아키텍처`:
+      - BMO/AMC/TBD 경계 규칙 추가
+      - 뉴스 시각과 earning session 비교 예시 4개 추가
+      - snapshot drift 방지 의미와 사람 검증 체크 항목 추가
+   - `Calendar 기간 프리셋 조회 원칙`:
+      - 2026-03-06 기준 실제 날짜 예시 추가
+      - 탭 간 preset 유지 규칙 추가
+      - `preset` vs `from/to` 조회 계약 정리 및 v1 권장안 명시
+      - 사람이 확인할 수 있는 체크 항목 추가
+
 1. **종합 프로브 스크립트 작성**
    - 파일: `terminal/backend/test_finnhub_full_probe.mjs`
    - 67개 엔드포인트를 카테고리별로 정의 (Stock Fundamentals, News, Estimates, Price, ETFs, Alternative Data, Economic, Bank)
