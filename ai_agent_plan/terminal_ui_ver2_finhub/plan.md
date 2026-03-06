@@ -19,6 +19,12 @@
 3) `/calendar`는 **IBKR 캘린더 데이터만** 사용
 4) `news feed_brave api` 표기를 **`news feed:finhub api`**로 변경하고, 뉴스는 **Finnhub API**로 수집/표시(Brave 기반은 사용하지 않음)
 5) **장시간 업데이트 UX** — 모든 장시간 수집 작업(Finnhub 뉴스, IBKR 가격, IBKR 캘린더)은 **백그라운드 잡**으로 실행하고, 각 창에 **View Log** 버튼을 배치하여 진행률/로그를 확인할 수 있게 한다. **시작 시 로그 창 자동 오픈 금지** — 사용자가 View Log 버튼을 눌러야만 열린다.
+6) **Full Text Extraction(뉴스 원문 추출)** — 뉴스 피드 업데이트와 **별도 버튼/프로세스**로, 저장된 뉴스의 원본 기사를 크롤링하여 full text를 추출/저장한다.
+   - 대상: full text가 아직 없는 **모든 news_id** (press_release + company_news 구분 처리)
+   - 도메인별 추출기: **Nasdaq**(HTML scraping), **TMX**(GraphQL API), **finnhub.io**(skip — 외부 기사 페이지가 아님)
+   - 저장: 별도 `news_fulltext` 테이블 (news_items와 1:1 관계)
+   - `news_items`에 `publisher` 컬럼 추가: `source`(=데이터 공급자, 예: FINNHUB) vs `publisher`(=원본 사이트, 예: NASDAQ/TMX/FINNHUB)
+   - UI: News 테이블에 **O/X 컬럼**(full text 존재 여부), **O 클릭 시 팝업**으로 full text 표시, **"Full Text Update" 별도 버튼**
 
 ### 현재 레포 상태(중요, 확인됨)
 - 프론트에는 이미 `brave-news` 윈도우 타입이 존재하며 구현 파일은 아래와 같다.
@@ -30,6 +36,17 @@
   - `ohlc_1d`의 최신 `Datetime`은 현재 `2026-02-20`까지 들어있음(로컬에서 확인됨)
 - 백엔드는 SQLite에서 뉴스를 제공하며, EODHD 인제션 엔드포인트가 존재한다.
   - `terminal/backend/src/server.ts`: `POST /api/news/pull-eodhd`, `GET /api/news`
+- **Finnhub 뉴스 도메인 분포(확인됨, 2026-03-06)**:
+  - 현재 `news_items` 테이블에 Finnhub 소스 뉴스 총 707건 저장 중
+  - `press_release`: www.nasdaq.com 549건, money.tmx.com 51건
+  - `company_news`: finnhub.io 107건
+  - 이 3개 도메인만 존재하며, 각각 별도의 full text 추출 전략이 필요
+- **TMX GraphQL API 발견(확인됨, 2026-03-06)**:
+  - TMX(money.tmx.com)는 Next.js SPA로, 초기 HTML에 기사 본문이 없음(JS 렌더링 후 표시)
+  - 숨겨진 GraphQL 엔드포인트: `https://app-money.tmx.com/graphql`
+  - 쿼리: `getNewsStoryById($newsid: String!)` → `headline`, `story`(HTML full text), `datetime`, `source`, `qmsummary`, `thumbnailurl`
+  - `newsid`는 URL path에서 추출 (예: `/en/quote/news/4568018400043402` → `4568018400043402`)
+  - 직접 API 호출로 검증 완료 — NexGen 우라늄 기사의 full text(HTML)를 성공적으로 반환받음
 - 백엔드 캘린더 인제션은 현재 **완전 mock 생성**이다.
   - `terminal/backend/src/services/calendarIngestion.ts`가 `source = "mock_provider"` 이벤트를 주기적으로 insert.
   - `terminal/backend/src/server.ts`에서 `startCalendarIngestionWorkers()`를 startup에 호출.
@@ -126,6 +143,25 @@ PLAN CHANGE (2026-03-06)
   - 의존성 그래프에 신규 서브스텝 반영
 - 영향: 5단계·8단계 구현 범위 확대(백엔드 잡 큐 + 프론트 로그 패널). 기존 완료 서브스텝에는 영향 없음.
 ```
+
+```
+PLAN CHANGE (2026-03-06 #2)
+- 왜: 뉴스 full text(원문) 추출 기능 추가 요구. TMX 사이트가 SPA(Next.js)여서 HTML 직접 크롤링 불가였으나,
+  숨겨진 GraphQL API(`https://app-money.tmx.com/graphql`)를 발견하여 full text 추출이 가능해짐.
+  현재 Finnhub 뉴스 707건의 도메인 분포: www.nasdaq.com 549건(press_release), money.tmx.com 51건(press_release), finnhub.io 107건(company_news).
+- 무엇이 바뀌었나:
+  - 목표 #6 신설 — Full Text Extraction(뉴스 원문 추출)
+  - 현재 레포 상태에 TMX GraphQL API 발견 사항 추가
+  - 아키텍처에 "Full Text Extraction 아키텍처" 섹션 추가
+  - 10단계 신설 — Full Text Extraction (백엔드 + 프론트)
+  - news_items 테이블에 `publisher` 컬럼 추가 (source=데이터 공급자 vs publisher=원본 사이트)
+  - 별도 `news_fulltext` 테이블 신설 (1:1 관계)
+  - 도메인별 추출기: Nasdaq(HTML scraping), TMX(GraphQL API), finnhub.io(skip)
+  - UI: O/X 컬럼 + 클릭 시 팝업 + "Full Text Update" 별도 버튼
+  - 실행 의존성 그래프에 Step 10 반영
+- 영향: 4단계 이후에 진행 가능(Finnhub 뉴스가 news_items에 적재된 상태 필요).
+  기존 완료 서브스텝에는 영향 없음. news_items 마이그레이션(publisher 컬럼)은 10단계 초반에 수행.
+```
 ---
 
 ### 아키텍처(상위)
@@ -135,6 +171,57 @@ PLAN CHANGE (2026-03-06)
   - Finnhub 뉴스 수집
   - 티커 CSV read/append + 경로 제한(보안)
   - last updated 시각 저장/조회
+
+### 장시간 update UX 원칙(공통)
+
+### Full Text Extraction 아키텍처
+> 뉴스 원문(full text) 추출은 뉴스 피드 업데이트와 **완전히 분리된 별도 프로세스**로 동작한다.
+
+1. **source vs publisher 구분**
+   - `source` (기존): 데이터 공급자. 현재 `FINNHUB` / `EODHD`.
+   - `publisher` (신규): 뉴스 원본 사이트. URL 도메인에서 자동 추출.
+     - `www.nasdaq.com` → `NASDAQ`
+     - `money.tmx.com` → `TMX`
+     - `finnhub.io` → `FINNHUB`
+   - `news_items` 테이블에 `publisher TEXT` 컬럼을 migration으로 추가한다.
+   - Finnhub 인제션 시(4단계) 또는 full text 추출 시(10단계) URL 도메인을 파싱하여 자동 세팅.
+
+2. **별도 저장 테이블 `news_fulltext`**
+   - `news_items`와 1:1 관계(FK: `news_id` → `news_items.id`)
+   - 스키마:
+     - `news_id INTEGER PRIMARY KEY REFERENCES news_items(id)`
+     - `full_text TEXT` — 추출된 원문 (HTML 또는 plain text)
+     - `extraction_status TEXT NOT NULL` — `success` / `failed` / `skipped` / `unavailable`
+     - `extraction_note TEXT` — 실패/skip 사유 (예: `page-has-no-article-body`, `finnhub-no-external-page`)
+     - `word_count INTEGER` — 추출된 텍스트의 단어 수
+     - `extracted_at TEXT NOT NULL` — 추출 시각 (ISO 8601)
+   - full text가 없는 뉴스 = `news_fulltext`에 해당 `news_id` row가 없는 경우.
+
+3. **도메인별 추출기(extractor)**
+   - **Nasdaq** (`www.nasdaq.com`): HTTP GET → HTML 파싱 → article body 추출.
+     - 기존 `storage/press_release_fulltext_*.jsonl` 실험에서 확인된 패턴 활용.
+   - **TMX** (`money.tmx.com`): URL에서 `newsid` 추출 → GraphQL API 호출 → `story` 필드(HTML).
+     - 엔드포인트: `https://app-money.tmx.com/graphql`
+     - 쿼리: `getNewsStoryById($newsid: String!)` — `story` 필드가 full text HTML.
+   - **finnhub.io**: 외부 기사 페이지가 아님 → `extraction_status = 'skipped'`, `extraction_note = 'finnhub-no-external-page'`.
+     - 기존 `body` 필드(summary)를 그대로 사용.
+   - 새 도메인이 추가될 경우: `extraction_status = 'unavailable'`, `extraction_note = 'unknown-domain'`으로 기록.
+
+4. **Full Text Update 프로세스(별도 버튼)**
+   - 뉴스 피드 업데이트(Finnhub pull)와 **독립적으로 실행**.
+   - `news_items`에서 `news_fulltext`에 대응 row가 없는(= full text 미추출) 모든 news_id를 대상.
+   - press_release / company_news 모두 대상이지만, 실제 추출 동작은 `publisher`(도메인)에 따라 다름.
+   - 백그라운드 잡 패턴 사용(기존 `jobManager.ts` 재사용): POST → `{ jobId }` → 폴링.
+   - Rate limit / 예의: 도메인별 요청 간격 유지(예: 300~500ms). 동일 도메인에 대한 병렬 요청 금지.
+   - 실패 시 `extraction_status = 'failed'`로 기록하고 다음 news_id로 진행(전체 중단 금지).
+
+5. **UI**
+   - News 테이블에 **"Full Text" 컬럼** 추가: 각 row에 O/X 표시.
+     - `O`: `news_fulltext` row가 존재하고 `extraction_status = 'success'`
+     - `X`: 그 외 (미추출, 실패, skip, unavailable)
+   - **O 클릭 시 팝업**: full text를 모달/팝업으로 표시 (HTML 렌더 또는 plain text).
+   - **"Full Text Update" 버튼**: News 창 툴바에 배치. 클릭 시 백그라운드 잡 시작.
+     - View Log 버튼과 연동(진행률: 처리된 news_id / 전체 미추출 개수).
 
 ### 장시간 update UX 원칙(공통)
 > 아래 원칙은 Finnhub 뉴스, IBKR 가격, IBKR 캘린더 등 **모든 장시간 업데이트 작업**에 동일하게 적용한다.
@@ -255,12 +342,14 @@ Fail-fast 규칙
 
 ### 제안하는 구현 순서(이유)
 IBKR 연동이 가장 불확실(환경/자격증명/게이트웨이 의존)이므로, 먼저 DB/CSV/Finnhub 같은 저위험 요소로 기반을 만들고, IBKR는 별도 단계로 분리한다.
+Full Text Extraction(10단계)은 Finnhub 뉴스가 적재된 후(4단계) 독립적으로 진행 가능하며, IBKR 블록(6-7-8단계)과 병렬 진행 가능.
 0) 데이터 수집 가능 범위 점검(IBKR + Finnhub vs UI 컬럼)
 1) 기반(DB + status API)
 2) Default Ticker CSV API + 윈도우
 3) Finnhub 인제션 + “News Feed” 윈도우를 Finnhub로 교체(그리고 mock 제거)
 4) IBKR 캘린더 + 가격 업데이트 엔드포인트 + Data Control 윈도우
 5) mock 정리 + 테스트
+6) Full Text Extraction — 뉴스 원문 추출 + publisher 필드 + O/X 컬럼 + 팝업 (Step 4 이후, IBKR 블록과 독립)
 
 ### 단계별 계획(각 단계: 구현 → 검증)
 
@@ -1577,6 +1666,217 @@ UI 동작(최소)
 ```
 - 사용자 확인 필요: **Yes**
 
+#### ⬜ 10단계 — Full Text Extraction(뉴스 원문 추출: 백엔드 + 프론트)
+목적
+- 저장된 뉴스의 **원본 기사 전문(full text)**을 도메인별 추출기로 크롤링/API 호출하여 별도 테이블에 저장한다.
+- 뉴스 피드 업데이트(Finnhub pull)와 **완전 분리된 별도 프로세스**로, 이미 적재된 뉴스에 대해 사후적으로 full text를 추출한다.
+- `source`(데이터 공급자 = FINNHUB)와 별도로 `publisher`(원본 사이트 = NASDAQ/TMX/FINNHUB) 필드를 추가하여, 뉴스 원본의 출처를 명확히 구분한다.
+
+핵심 전제(확인됨)
+- 현재 Finnhub 뉴스 707건의 도메인 분포:
+  - `www.nasdaq.com` (549건, press_release) — HTML scraping으로 추출 가능
+  - `money.tmx.com` (51건, press_release) — TMX GraphQL API로 추출 가능 (검증 완료)
+  - `finnhub.io` (107건, company_news) — 외부 기사 페이지 아님, 기존 body 사용 (skip)
+- TMX GraphQL API: `https://app-money.tmx.com/graphql`, `getNewsStoryById($newsid)` → `story` 필드가 full text HTML
+
+저장 전략
+- 별도 테이블 `news_fulltext` (news_items와 1:1 관계)
+- `news_items`에 `publisher TEXT` 컬럼 migration 추가
+- full text가 없는 뉴스 = `news_fulltext`에 해당 news_id가 없는 경우
+
+추출 대상 결정 로직
+- `news_items`에서 `news_fulltext`에 해당 row가 없는 모든 news_id를 대상으로 한다.
+- press_release / company_news **모두** 대상이지만, 실제 추출 동작은 `publisher`(= URL 도메인)에 따라 다름:
+  - `NASDAQ` → HTML fetch + article body parsing
+  - `TMX` → URL에서 newsid 추출 → GraphQL API 호출
+  - `FINNHUB` (finnhub.io) → skip (extraction_status = 'skipped')
+  - 미지 도메인 → `extraction_status = 'unavailable'`
+
+API 계약(초안)
+- `POST /api/news/fulltext/update` → `{ jobId }` (백그라운드 잡 시작)
+  - 잡 내부: 미추출 news_id 순회 → 도메인별 추출 → `news_fulltext` INSERT
+- `GET /api/news/fulltext/:newsId` → `{ newsId, fullText, extractionStatus, extractionNote, wordCount, extractedAt }`
+- `GET /api/news` 응답에 `hasFullText: boolean` 필드 추가 (JOIN으로 계산)
+
+백엔드 파일:
+- `terminal/backend/src/db.ts`
+  - `news_fulltext` 테이블 CREATE (initDb 내)
+  - `news_items`에 `publisher TEXT` 컬럼 ensureColumn 추가
+- `terminal/backend/src/services/fulltextRepository.ts` 신규
+  - `getFulltext(newsId)` → full text row 조회
+  - `insertFulltext(newsId, data)` → extraction 결과 저장
+  - `getUnextractedNewsIds()` → news_fulltext에 없는 news_id 목록
+  - `getFulltextStatus(newsIds)` → 다건 hasFullText 조회 (news 목록 표시용)
+- `terminal/backend/src/services/fulltextExtractors.ts` 신규
+  - `extractNasdaq(url)` → HTTP GET + HTML parsing → article body text
+  - `extractTmx(url)` → newsid 파싱 → GraphQL 호출 → story HTML
+  - `extractByDomain(url, publisher)` → publisher에 따라 위 함수를 dispatch
+  - 공통: HTTP 요청 재시도(최대 10회, 백오프), 도메인별 rate limit(300~500ms 간격)
+- `terminal/backend/src/services/fulltextUpdateService.ts` 신규
+  - `runFulltextUpdate(jobId)` → 미추출 news_id 순회 → extractByDomain → insertFulltext
+  - 진행률 로그: `jobManager.addLog(jobId, ...)`
+  - 개별 실패 시 `extraction_status = 'failed'`로 기록하고 계속 진행(전체 중단 금지)
+- `terminal/backend/src/server.ts`
+  - `POST /api/news/fulltext/update` → jobManager로 백그라운드 잡 시작
+  - `GET /api/news/fulltext/:newsId` → fulltextRepository.getFulltext()
+  - `GET /api/news` 응답에 `hasFullText` 필드 추가
+- `terminal/backend/src/services/newsRepository.ts`
+  - `getNews()` 쿼리에 `news_fulltext` LEFT JOIN → `hasFullText` 계산
+  - `GET /api/news` 응답 각 row에 `hasFullText: boolean` 포함
+- `terminal/backend/src/services/finnhubNewsProvider.ts`
+  - 뉴스 insert 시 URL 도메인을 파싱하여 `publisher` 컬럼에 자동 세팅
+  - 기존 news_items 중 `publisher IS NULL`인 row에 대한 일괄 backfill 함수 추가
+
+프론트 파일:
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+  - 테이블에 **"Full Text" 컬럼** 추가
+    - `hasFullText === true` → **O** (초록색, 클릭 가능)
+    - `hasFullText === false` → **X** (회색)
+  - **O 클릭 시**: `GET /api/news/fulltext/:newsId` 호출 → 모달/팝업으로 full text 표시
+    - HTML full text인 경우: `dangerouslySetInnerHTML` 또는 iframe sandbox로 안전 렌더
+    - 팝업 닫기: X 버튼 / 외부 클릭 / ESC
+  - **"Full Text Update" 버튼** (툴바에 배치)
+    - 클릭 시 `POST /api/news/fulltext/update` → `{ jobId }` 반환
+    - View Log 연동: 진행률 바(처리된 news_id / 전체 미추출 개수)
+    - 완료 후 뉴스 목록 재조회(hasFullText 반영)
+  - 컬럼 가시성 토글(5-13)에 "Full Text" 컬럼 포함
+
+검증
+- 10단계 전체 완료 후:
+  - Nasdaq 뉴스의 full text가 `news_fulltext`에 저장됨
+  - TMX 뉴스의 full text가 GraphQL API를 통해 저장됨
+  - finnhub.io 뉴스는 `skipped`로 처리됨
+  - UI에서 O/X 컬럼이 정확히 표시되고, O 클릭 시 본문이 팝업으로 나옴
+
+**세부 단계 (10단계)**
+
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 10-1 | `news_fulltext` 테이블 CREATE + `news_items.publisher` 컬럼 migration | `terminal/backend/src/db.ts` | 백엔드 시작 후 테이블/컬럼 존재 확인 | ⬜ |
+| 10-2 | `fulltextRepository.ts` 구현 (CRUD + 미추출 목록 조회) | `terminal/backend/src/services/fulltextRepository.ts` | `npx tsc --noEmit` → 0 errors | ⬜ |
+| 10-3 | 기존 news_items `publisher` 컬럼 backfill (URL 도메인 파싱) | `terminal/backend/src/services/finnhubNewsProvider.ts` | 기존 707건에 대해 publisher가 NASDAQ/TMX/FINNHUB 중 하나로 세팅 | ⬜ |
+| 10-4 | `extractNasdaq(url)` — Nasdaq HTML scraping 추출기 | `terminal/backend/src/services/fulltextExtractors.ts` | 샘플 Nasdaq URL로 article body 추출 성공 | ⬜ |
+| 10-5 | `extractTmx(url)` — TMX GraphQL API 추출기 | `terminal/backend/src/services/fulltextExtractors.ts` | 샘플 TMX URL로 story HTML 추출 성공 | ⬜ |
+| 10-6 | `extractByDomain(url, publisher)` — 도메인 dispatcher | `terminal/backend/src/services/fulltextExtractors.ts` | 각 도메인에 대해 올바른 추출기로 dispatch | ⬜ |
+| 10-7 | `fulltextUpdateService.ts` — 백그라운드 잡 오케스트레이터 | `terminal/backend/src/services/fulltextUpdateService.ts` | 미추출 news_id 순회 + 도메인별 추출 + 진행률 로그 | ⬜ |
+| 10-8 | `POST /api/news/fulltext/update` 엔드포인트 (잡 시작) | `terminal/backend/src/server.ts` | POST → `{ jobId }` → 잡 실행 확인 | ⬜ |
+| 10-9 | `GET /api/news/fulltext/:newsId` 엔드포인트 | `terminal/backend/src/server.ts` | 특정 newsId에 대해 full text 반환 | ⬜ |
+| 10-10 | `GET /api/news` 응답에 `hasFullText` 필드 추가 | `newsRepository.ts`, `server.ts` | 응답 각 row에 `hasFullText: boolean` 포함 | ⬜ |
+| 10-11 | 프론트: Full Text 컬럼 (O/X) 추가 + 컬럼 토글 연동 | `FinnhubNewsWindow.tsx` | 테이블에 O/X 표시, Columns 드롭다운에 포함 | ⬜ |
+| 10-12 | 프론트: O 클릭 → full text 팝업 (안전 HTML 렌더) | `FinnhubNewsWindow.tsx` | O 클릭 시 모달에 full text 표시, XSS 방지 | ⬜ |
+| 10-13 | 프론트: "Full Text Update" 버튼 + View Log 연동 | `FinnhubNewsWindow.tsx` | 버튼 클릭 → 잡 시작 → View Log로 확인 → 완료 후 목록 재조회 | ⬜ |
+| 10-14 | end-to-end 검증: Nasdaq + TMX + finnhub.io 각각 추출 결과 확인 | (런타임) | 3개 도메인 모두 정상 처리 확인 | ⬜ |
+
+**세부 단계 목적/설명 (10단계)**
+- `10-1` 목적: full text 저장 인프라를 DB에 준비. 설명:
+  - `initDb()`에 `news_fulltext` 테이블을 idempotent하게 CREATE한다.
+  - `news_items`에 `publisher TEXT` 컬럼을 `ensureColumn()`으로 추가한다.
+  - `news_fulltext`의 FK(`news_id`)는 `news_items.id`를 참조한다.
+  - 완료 조건(눈으로 확인): 백엔드 시작 후 `sqlite_master`에 `news_fulltext` 테이블이 존재하고, `PRAGMA table_info(news_items)`에 `publisher` 컬럼이 있다.
+  - 사람 검증(비개발자): SQLite 뷰어에서 테이블/컬럼 존재 확인.
+  - 흔한 문제/주의: FK 컬럼 타입 불일치; ensureColumn 호출이 initDb 밖에 있어 실행 안 됨.
+- `10-2` 목적: full text 데이터 접근을 캡슐화. 설명:
+  - `getFulltext(newsId)`, `insertFulltext(newsId, data)`, `getUnextractedNewsIds()`, `getFulltextStatus(newsIds)` 구현.
+  - `getUnextractedNewsIds()`는 `news_items LEFT JOIN news_fulltext ON ... WHERE news_fulltext.news_id IS NULL`로 미추출 ID를 반환.
+  - `insertFulltext`는 이미 존재하면 skip(INSERT OR IGNORE) — 멱등성 보장.
+  - 완료 조건(눈으로 확인): `npx tsc --noEmit` 통과, repository 함수들이 DB와 정상 통신.
+  - 흔한 문제/주의: LEFT JOIN 방향 실수로 이미 추출된 ID도 반환; INSERT OR IGNORE 없이 중복 시 크래시.
+- `10-3` 목적: 기존 news_items에 publisher를 backfill. 설명:
+  - `publisher IS NULL`인 모든 row에 대해 URL 도메인을 파싱하여 publisher를 세팅.
+  - 매핑: `www.nasdaq.com` → `NASDAQ`, `money.tmx.com` → `TMX`, `finnhub.io` → `FINNHUB`.
+  - 향후 Finnhub 인제션(4단계) 시 신규 뉴스 insert 시에도 자동으로 publisher를 세팅하도록 provider를 수정.
+  - 완료 조건(눈으로 확인): `SELECT publisher, COUNT(*) FROM news_items WHERE source='FINNHUB' GROUP BY publisher` → 3개 publisher가 각각 549/51/107 근사.
+  - 사람 검증(비개발자): 위 SQL 실행 결과 확인.
+  - 흔한 문제/주의: URL이 NULL/비어있는 row 처리; 도메인 파싱 시 `https://` prefix 누락.
+- `10-4` 목적: Nasdaq 기사 full text를 HTML에서 추출. 설명:
+  - HTTP GET으로 Nasdaq 페이지를 가져오고, HTML을 파싱하여 article body를 추출한다.
+  - 추출 전략: `<div class="body__content">` 또는 유사 selector로 본문 영역을 특정.
+  - HTTP 요청 재시도: 최대 10회, 짧은 백오프. 429/5xx 시 재시도, 404/403은 즉시 실패.
+  - 추출 실패 시 `extraction_status = 'failed'`로 기록.
+  - 완료 조건(눈으로 확인): 샘플 Nasdaq URL 3~5개에 대해 full text가 추출되고 word_count > 0.
+  - 흔한 문제/주의: Nasdaq이 selector를 변경하면 추출 실패; User-Agent 없이 차단; HTML 인코딩 이슈.
+- `10-5` 목적: TMX 기사 full text를 GraphQL API로 추출. 설명:
+  - URL path에서 newsid를 추출 (예: `/en/quote/news/4568018400043402` → `4568018400043402`).
+  - `https://app-money.tmx.com/graphql`에 POST 요청: `query: getNewsStoryById($newsid)`.
+  - 응답의 `story` 필드가 HTML full text.
+  - newsid 추출 실패 시 `extraction_status = 'failed'`, `extraction_note = 'newsid-parse-failed'`.
+  - 완료 조건(눈으로 확인): 샘플 TMX URL 3~5개에 대해 story HTML이 추출되고 word_count > 0.
+  - 흔한 문제/주의: newsid가 URL에 없는 경우(다른 TMX URL 패턴); GraphQL 스키마 변경; CORS 관련 이슈(백엔드 서버 → TMX이므로 CORS 무관).
+- `10-6` 목적: publisher에 따라 올바른 추출기로 라우팅. 설명:
+  - `extractByDomain(url, publisher)`는 switch/map으로 `NASDAQ` → `extractNasdaq`, `TMX` → `extractTmx`, `FINNHUB` → skip 결과 반환.
+  - 미지 publisher → `{ extractionStatus: 'unavailable', extractionNote: 'unknown-domain' }`.
+  - 완료 조건(눈으로 확인): 각 도메인에 대해 올바른 추출기가 호출되는지 단위 테스트 또는 로그로 확인.
+  - 흔한 문제/주의: publisher가 NULL인 row 들어왔을 때 크래시.
+- `10-7` 목적: 전체 미추출 뉴스를 순회하며 추출 → 저장을 오케스트레이션. 설명:
+  - `getUnextractedNewsIds()`로 대상 목록을 가져온다.
+  - 각 news_id에 대해: news_items에서 url+publisher 조회 → `extractByDomain` 호출 → `insertFulltext` 저장.
+  - 진행률: `jobManager.updateProgress(jobId, { completed, total })` + `addLog()`.
+  - 도메인별 rate limit: 요청 간 300~500ms sleep. 동일 도메인에 순차 요청.
+  - 개별 실패 시 `extraction_status = 'failed'`로 기록하고 계속 진행(전체 중단 금지).
+  - 완료 조건(눈으로 확인): 잡 완료 후 `news_fulltext` 테이블에 row가 생기고, 진행률이 100%가 됨.
+  - 흔한 문제/주의: rate limit 미준수로 차단; 대량 실행 시 메모리 누수; 잡 중단 시 cleanup.
+- `10-8` 목적: Full Text Update를 트리거하는 API. 설명:
+  - `POST /api/news/fulltext/update`는 `jobManager`로 백그라운드 잡을 시작하고 즉시 `{ jobId }`를 반환.
+  - 잡 내부에서 `runFulltextUpdate(jobId)`를 실행.
+  - 이미 실행 중인 full text 잡이 있으면 중복 시작을 방지(409 또는 기존 jobId 반환).
+  - 완료 조건(눈으로 확인): POST → 1초 이내 `{ jobId }` 반환. GET /api/jobs/:jobId로 진행률 확인 가능.
+  - 흔한 문제/주의: 중복 잡 방지 로직 누락; 잡이 끝나도 status가 'running'으로 남는 경우.
+- `10-9` 목적: 특정 뉴스의 full text를 조회. 설명:
+  - `GET /api/news/fulltext/:newsId`는 `fulltextRepository.getFulltext(newsId)` 결과를 반환.
+  - 존재하지 않으면 404.
+  - HTML full text는 그대로 반환(프론트에서 안전 렌더 책임).
+  - 완료 조건(눈으로 확인): 추출 성공한 newsId로 호출 시 `{ fullText, extractionStatus: 'success', wordCount > 0 }` 반환.
+  - 흔한 문제/주의: newsId 타입 불일치(string vs number); 대용량 HTML 응답 시 timeout.
+- `10-10` 목적: 뉴스 목록 API에 full text 존재 여부를 포함. 설명:
+  - `newsRepository.getNews()` 쿼리에 `news_fulltext` LEFT JOIN을 추가.
+  - 각 row에 `hasFullText: boolean` 필드를 포함하여 반환 (JOIN 결과가 NULL이 아니고 `extraction_status = 'success'`이면 true).
+  - 기존 pagination/filter 로직에 영향 없도록 주의.
+  - 완료 조건(눈으로 확인): `GET /api/news?source_names=FINNHUB` 응답에 각 row마다 `hasFullText` 필드가 존재.
+  - 흔한 문제/주의: JOIN으로 인한 쿼리 성능 저하(인덱스 필요); `hasFullText` 계산 조건 실수.
+- `10-11` 목적: News 테이블에 O/X 컬럼을 추가하여 full text 존재 여부를 시각적으로 표시. 설명:
+  - `ColumnId` 타입에 `'fulltext'` 추가.
+  - `renderCell`에 `fulltext` 케이스: `hasFullText ? 'O'(초록) : 'X'(회색)`. O는 클릭 가능(커서 포인터).
+  - 컬럼 가시성 토글(Columns 드롭다운)에 "Full Text" 포함.
+  - 완료 조건(눈으로 확인): 뉴스 테이블에 O/X 컬럼이 표시되고, Columns 드롭다운에서 숨기기 가능.
+  - 흔한 문제/주의: hasFullText가 응답에 없으면 모든 행이 X로 표시; colWidths 배열 길이 불일치.
+- `10-12` 목적: full text를 안전하게 팝업으로 표시. 설명:
+  - O 클릭 시 `GET /api/news/fulltext/:newsId` 호출 → 모달에 full text 렌더.
+  - **XSS 방지**: HTML full text는 DOMPurify 등으로 sanitize 후 렌더. 또는 iframe sandbox 사용.
+  - 팝업 닫기: X 버튼, ESC, 외부 클릭.
+  - 로딩 중 스피너 표시.
+  - 완료 조건(눈으로 확인): O 클릭 → 팝업에 기사 본문이 표시됨. X 클릭 시 반응 없음.
+  - 사람 검증(비개발자): 팝업 내용이 뉴스 제목과 일치하는 실제 기사인지 확인.
+  - 흔한 문제/주의: sanitize 없이 `dangerouslySetInnerHTML` 사용 → XSS 위험; 대용량 HTML로 팝업 렌더 느림.
+- `10-13` 목적: Full Text Update 버튼으로 원문 추출을 트리거하고 진행률을 확인. 설명:
+  - 툴바에 "Full Text Update" 버튼 배치. 기존 Update 드롭다운과 별도.
+  - 클릭 시 `POST /api/news/fulltext/update` → `{ jobId }`.
+  - View Log 연동: 기존 View Log 패널을 재사용하여 진행률 바 + 로그 표시.
+  - 잡 완료 후 뉴스 목록을 재조회하여 hasFullText 변경을 반영.
+  - 완료 조건(눈으로 확인): 버튼 클릭 → 잡 시작 → View Log에서 진행 확인 → 완료 후 일부 X가 O로 변경.
+  - 흔한 문제/주의: View Log가 동시에 여러 잡을 표시할 때 혼동; 잡 완료 후 목록 재조회가 안 되어 UI 반영 안 됨.
+- `10-14` 목적: 3개 도메인 추출 결과를 end-to-end로 확인. 설명:
+  - Full Text Update 실행 후 아래 확인:
+    1. Nasdaq 뉴스 중 `extraction_status = 'success'` 건수 > 0, word_count > 50
+    2. TMX 뉴스 중 `extraction_status = 'success'` 건수 > 0, full_text에 `<` 포함(HTML)
+    3. finnhub.io 뉴스 전체 `extraction_status = 'skipped'`
+    4. UI에서 O/X가 정확히 반영되고, O 클릭 시 본문 팝업
+  - 완료 조건(눈으로 확인): 위 4가지 확인 통과.
+  - 사람 검증(비개발자): News 창에서 O 항목을 클릭하여 실제 기사 내용이 나오는지 확인.
+  - 흔한 문제/주의: 대부분의 Nasdaq URL이 추출 실패(selector 변경/차단); TMX newsid 추출 실패율.
+
+**검증 훅 (10단계 마감):**
+```
+1. npx tsc --noEmit → 0 errors
+2. SELECT publisher, COUNT(*) FROM news_items WHERE source='FINNHUB' GROUP BY publisher → 3개 publisher 확인
+3. POST /api/news/fulltext/update → { jobId } 반환 → GET /api/jobs/:jobId 폴링 → done
+4. SELECT extraction_status, COUNT(*) FROM news_fulltext GROUP BY extraction_status → success/skipped/failed 분포 확인
+5. GET /api/news/fulltext/<nasdaq_newsId> → fullText 존재, wordCount > 0
+6. GET /api/news/fulltext/<tmx_newsId> → fullText 존재(HTML), wordCount > 0
+7. GET /api/news?source_names=FINNHUB → 각 row에 hasFullText 필드 존재
+8. UI: O/X 컬럼 표시 확인 → O 클릭 → 팝업에 기사 본문 표시
+```
+- 사용자 확인 필요: **Yes**
+
 ### 미확정 사항(명시 결정 필요)
 1) CSV에서 티커가 들어있는 컬럼 규칙 → **결정됨**: 헤더 `Ticker` 또는 `Symbol`
 2) 중복 티커 처리(append vs reject) → **결정됨**: 중복 reject
@@ -1679,18 +1979,45 @@ UI 동작(최소)
       9-3 mock 정리 검증
       9-4 ACCEPTANCE_TESTS.md 갱신
       9-5 최종 agent_log 검토
+
+                              │
+   ╔══════════════════════════╧══════════════════════════╗
+   ║  트랙 C — Full Text Extraction (IBKR 무관)         ║
+   ║  선행조건: Step 4 완료 (news_items에 뉴스 적재됨)  ║
+   ╚═════════════════════════════════════════════════════╝
+                              │
+                              ▼
+   ⬜ Step 10 (Full Text Extraction: 백엔드 + 프론트)
+   │  ◄── Step 4 완료 필요 (news_items에 Finnhub 뉴스 적재)
+   │  10-1  news_fulltext 테이블 + publisher 컬럼 migration
+   │  10-2  fulltextRepository.ts 구현
+   │  10-3  기존 news_items publisher backfill
+   │  10-4  extractNasdaq (HTML scraping)
+   │  10-5  extractTmx (GraphQL API)
+   │  10-6  extractByDomain (도메인 dispatcher)
+   │  10-7  fulltextUpdateService (잡 오케스트레이터)
+   │  10-8  POST /api/news/fulltext/update 엔드포인트
+   │  10-9  GET /api/news/fulltext/:newsId 엔드포인트
+   │  10-10 GET /api/news 응답에 hasFullText 추가
+   │  10-11 프론트: O/X 컬럼 + 컬럼 토글
+   │  10-12 프론트: O 클릭 → full text 팝업
+   │  10-13 프론트: Full Text Update 버튼 + View Log
+   │  10-14 end-to-end 검증 (3개 도메인)
 ```
 
 **병렬 트랙 (IBKR 의존 없음):**
 - 트랙 A: Steps 1 → 2 → 3 (CSV/Ticker) — 즉시 시작 가능
 - 트랙 B: Steps 1 → 4 → 5 (Finnhub News) — 트랙 A와 병렬로 즉시 시작 가능
-- 두 트랙은 IBKR 의존 블록(Steps 6-7-8) 전에 합류
+- 트랙 C: Steps 4 → 10 (Full Text Extraction) — 트랙 B의 Step 4 완료 후 시작 가능, IBKR 무관
+- 트랙 A/B는 IBKR 의존 블록(Steps 6-7-8) 전에 합류
+- 트랙 C는 IBKR 블록과 독립적으로 병렬 진행 가능
 
 **차단 요약:**
 | 결정 | 차단 대상 | 선택지 |
 |------|-----------|--------|
 | #5: /calendar 데이터 소스 | Step 6 | **확정: IBKR 캘린더 우선 사용** → 추후 Finnhub Estimates 구독 시 전환 가능 |
 | #6: Node↔IBKR 연동 방식 | Step 7 | **확정: 옵션 B (Python child_process)** — MVP/빠른 통합 목적 |
+| Step 4 완료 | Step 10 | news_items에 Finnhub 뉴스가 적재되어 있어야 full text 추출 대상이 존재 |
 
 ### 결정 #6 — Node↔IBKR 연동 구현 방식(상세)
 > ✅ **확정: 옵션 B (Python child_process)** — MVP/빠른 통합 목적으로 채택 (2026-03-05)
