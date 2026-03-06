@@ -19,8 +19,12 @@
   - Create `C:\github_coding\terminal_sec\ai_agent_plan\<project_name>\plan.md` (unless the user explicitly forbids file changes)
 - If the user says “don’t execute/run” (e.g., “실행하지 말고”) and it’s ambiguous whether file writes are allowed, use the hook question flow (`ask_questions`) to confirm before creating/modifying files.
   - Default interpretation (unless the user says otherwise): “don’t execute/run” = no code execution (no tests/dev server/scripts), but creating/updating `plan.md` is allowed.
-- Write/update `agent_log.md` **only when the user explicitly tells you to execute a specific plan**.
+- Write/update `agent_log.md` **whenever the plan context is active and code changes occur** (i.e., when plan.md is being discussed/edited as the source of execution and you modify any code/docs as part of that plan).
 - **`agent_log.md` language rule (must):** `agent_log.md` is written in **Korean only** (한국어 단독). Do NOT write bilingual EN/KO sections in the log — Korean is sufficient.
+- **`agent_log.md` timestamp rule (must):** record not only the date but also the **time-of-day** for each new log entry.
+  - Preferred: keep the date heading (e.g., `## 2026-03-05`) and include a line like `**Time:** 23:23 (local)` immediately under each entry/section you add.
+  - Format: `YYYY-MM-DD HH:mm` (24-hour clock). Use the machine’s **local time** unless the user specifies a timezone.
+  - Do not rewrite old history just to add times; apply this rule to new entries going forward.
 - File storage: `C:\github_coding\terminal_sec\ai_agent_plan\<project_name>\`
   - `plan.md`: detailed step-by-step plan before starting (goal, approach, files to create/modify, order, risks). **See `plan.md writing conventions` below for language rules.**
   - `agent_log.md`: chronological record of every action taken (files created/modified, commands run, decisions, errors). **Korean only.**
@@ -192,6 +196,10 @@ When a plan has multiple major Steps (e.g., Step 0, Step 1, …, Step N), **each
   - 기본 해석(사용자가 별도 명시하지 않는 한): “실행하지 말고” = 코드 실행 금지(테스트/서버/스크립트 실행 금지)이며, `plan.md` 작성/갱신은 허용.
 - `agent_log.md`는 **채팅에서 plan이 논의·작업되고 있는 상태에서 코드 변경이 발생할 때마다** 작성/업데이트한다. 기존의 "사용자가 특정 plan을 수행하라고 지시할 때만" 조건은 삭제 — plan 컨텍스트가 활성 상태이면 코드 변경 시점에 자동으로 기록한다.
 - **`agent_log.md` 언어 규칙(필수):** `agent_log.md`는 **한국어 단독**으로 작성한다. 영/한 병기 불필요 — 한국어만으로 충분.
+- **`agent_log.md` 시각 기록 규칙(필수):** 날짜뿐 아니라 **시각(HH:mm)** 도 함께 기록한다.
+  - 권장: 날짜 헤딩(예: `## 2026-03-05`)은 유지하고, 새로 추가하는 항목/섹션 바로 아래에 `**작성 시각:** 23:23 (local)` 같은 1줄을 넣는다.
+  - 포맷: `YYYY-MM-DD HH:mm` (24시간제). 사용자가 타임존을 지정하지 않으면 **작성 시점의 로컬 시간**을 사용한다.
+  - 과거 기록을 시각 추가 목적으로 재작성/삭제하지 않는다. 이 규칙은 **새 로그부터** 적용한다.
 - 저장 위치: `C:\github_coding\terminal_sec\ai_agent_plan\<project_name>\`
   - `plan.md`: 작업 시작 전 상세 단계별 계획 (목표, 접근법, 생성/수정 파일, 순서, 위험 요소). **언어 규칙은 아래 `plan.md 작성 규칙` 참조.**
   - `agent_log.md`: 수행한 모든 작업을 시간순으로 기록 (생성/수정 파일, 실행 명령어, 결정, 오류). **한국어 단독.**

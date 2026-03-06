@@ -695,3 +695,75 @@
 | `ai_agent_plan/terminal_ui_ver2_finhub/plan.md` | EN Steps 1–9 + KO 1–9단계 세부단계 표에 상태 컬럼 추가, 5단계 신규 행 추가 |
 | `.github/copilot-skills/planning.md` | KO "상태 표기" 엄격 기준 전면 개정 + 3곳 일관성 규칙 신설 |
 | `agent_log.md` | 이 항목 기록 |
+
+---
+
+## 2026-03-05
+
+### 5단계 — CORS/프록시 수정 + Ticker 컬럼 + 컬럼 가시성 + split-dropdown Update 버튼 (entire 모드)
+
+**작성 시각:** 23:23 (local)
+
+**Status: done (awaiting user confirmation)**
+
+#### 수행 작업
+
+1. **CORS/프록시 수정 (5단계 기반 인프라)**
+   - `terminal/backend/src/config.ts` — `frontendOrigin`을 `http://localhost:5173` → `http://localhost:5174`로 변경 (프론트엔드 실제 포트와 일치)
+   - `FinnhubNewsWindow.tsx`, `DefaultTickerWindow.tsx` — `API_BASE`를 `http://localhost:8080` → `""` (빈 문자열)로 변경하여 Vite 프록시(`/api → localhost:8080`) 사용
+   - 원인: CORS origin 불일치 + 하드코딩된 백엔드 포트 → "Failed to fetch" 에러 발생
+
+2. **Ticker 전용 컬럼 추가 (5-12)**
+   - `FinnhubNewsWindow.tsx` — `ColumnId` 타입에 `'ticker'` 추가
+   - `DEFAULT_COLUMNS`에서 `date`와 `time` 사이에 `'ticker'` 배치
+   - `renderCell`에 `ticker` 케이스 추가: 클릭 가능한 배지로 렌더, 클릭 시 해당 ticker로 검색 필터
+   - `getSortValue`에 `ticker` 케이스 추가: 알파벳순 정렬 지원
+
+3. **컬럼 가시성 토글 (5-13)**
+   - `FinnhubNewsWindow.tsx` — `visibleCols` state (Set), `showColumnMenu` state, `toggleColumnVisibility` 함수 추가
+   - `activeColumns`/`activeColWidths`를 `visibleCols` 기준으로 computed 필터링
+   - 툴바에 `Columns3` 아이콘 버튼 + 드롭다운(체크박스 목록) 추가
+   - 테이블 헤더/행 렌더러를 `activeColumns`/`activeColWidths` 기준으로 변경
+   - 외부 클릭 시 드롭다운 자동 닫힘 (mousedown 이벤트 리스너)
+
+4. **백엔드 "entire" 모드 추가 (5-14)**
+   - `terminal/backend/src/server.ts` — `pullFinnhubSchema`에 `mode: z.enum(["recent", "entire"]).optional().default("recent")` 추가
+   - `mode === "entire"` && 명시적 `from` 없을 때: `effectiveFrom` = 현재로부터 365일 전 (`YYYY-MM-DD`)
+   - `mode === "recent"` (기본): 기존 동작 유지 (7일 lookback)
+   - `pullCompanyNews`/`pullPressReleases` 호출 시 `effectiveFrom`/`effectiveTo` 전달
+   - 응답 JSON과 status update에 `mode` 필드 포함
+
+5. **split-dropdown Update 버튼 (5-15)**
+   - `FinnhubNewsWindow.tsx` — 기존 단일 Update 버튼(IIFE + 5초 tooltip)을 split-dropdown으로 교체:
+     - 좌측 버튼: "Update" + Download 아이콘 → `handleUpdate('recent')` (7일 수집)
+     - 우측 화살표: ChevronDown → 드롭다운 메뉴 열기
+     - 메뉴 항목: "Recent Update (Last 7 days, fast, incremental)" / "Entire Update (Full year history, slow, no duplicates)"
+     - Entire Update 아이콘은 주황색으로 구분
+     - `handleUpdate` 시그니처: `async (mode: 'recent' | 'entire' = 'recent')` → fetch body에 `mode` 포함
+     - 수집 중(`updating === true`) 양쪽 버튼 모두 disabled
+     - 외부 클릭 시 메뉴 닫힘 + 5초 hover 지연 툴팁 유지(메뉴 열림 시 숨김)
+
+6. **plan.md 세부단계 추가**
+   - KO 5단계 세부단계 표에 5-12 ~ 5-15 행 추가 (상태: ⏳)
+   - KO 세부단계 목적/설명 블록에 5-12 ~ 5-15 항목별 상세 설명 추가
+   - KO 검증 훅에 항목 8~11 추가 (Ticker 컬럼, Columns 토글, Entire Update 검증)
+
+#### 수정 파일
+
+| 파일 | 변경 |
+|------|------|
+| `terminal/backend/src/config.ts` | `frontendOrigin` 포트 5173→5174 |
+| `terminal/backend/src/server.ts` | `pullFinnhubSchema`에 `mode` 필드 추가, `effectiveFrom`/`effectiveTo` 로직, 응답에 `mode` 포함 |
+| `termina_web/.../components/FinnhubNewsWindow.tsx` | API_BASE 변경, ticker 컬럼, 컬럼 가시성, handleUpdate mode 파라미터, split-dropdown UI |
+| `termina_web/.../components/DefaultTickerWindow.tsx` | API_BASE 변경 |
+| `ai_agent_plan/terminal_ui_ver2_finhub/plan.md` | KO 5단계 세부단계 5-12~5-15 추가 + 검증 훅 갱신 |
+| `agent_log.md` | 이 항목 기록 |
+
+#### 검증
+- `npx tsc --noEmit` → 백엔드/프론트엔드 모두 0 에러
+- Vite 프록시 정상 동작: `http://localhost:5174/api/tickers` → 200 OK
+- FinnhubNewsWindow: Ticker 컬럼 표시, Columns 드롭다운 동작, split-dropdown Update 버튼 렌더링
+- 백엔드 재시작 후 `POST /api/news/pull-finhub { mode: "entire" }` → from이 ~1년 전으로 설정 확인 필요
+
+#### 프로세스 위반 기록
+- **agent_log.md 갱신 누락**: 코드 변경 + plan.md 수정이 발생했으나 agent_log.md를 즉시 갱신하지 않음. 사용자 지적 후 뒤늦게 기록함. planning.md 규칙 위반: "plan 컨텍스트가 활성 상태이면 코드 변경 시점에 자동으로 기록"

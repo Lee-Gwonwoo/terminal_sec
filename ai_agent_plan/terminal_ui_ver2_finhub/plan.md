@@ -2258,6 +2258,10 @@ API 계약(초안)
 | 5-9 | source_type 필터 UI 구현 (Company News / Press Release 선택) | `FinnhubNewsWindow.tsx` | 필터 전환 시 해당 source_type만 표시, 둘 다 선택 시 전체 표시 | ✅ |
 | 5-10 | 서버사이드 키워드 검색(전체 DB 검색) | FinnhubNewsWindow.tsx | 검색어 입력 시 keyword 파라미터로 GET /api/news 호출, 백엔드가 전체 DB 필터링 | ✅ |
 | 5-11 | Update 버튼 툴팁(5초 hover 지연) | FinnhubNewsWindow.tsx | Update 버튼을 5초 hover하면 범위 설명 툴팁 노출 | ✅ |
+| 5-12 | Ticker 전용 컬럼 추가 | FinnhubNewsWindow.tsx | Date와 Time 사이에 Ticker 컬럼이 표시되고, 클릭 시 필터 동작 | ⏳ |
+| 5-13 | 컬럼 가시성 토글(show/hide columns) | FinnhubNewsWindow.tsx | Columns 버튼 클릭 → 체크박스 드롭다운으로 컬럼 표시/숨김 전환 | ⏳ |
+| 5-14 | 백엔드 "entire" 모드(최대 1년 히스토리 수집) | server.ts, finnhubNewsProvider.ts | `POST /api/news/pull-finhub { mode: "entire" }` → from=1년전 설정, 중복 없음 | ⏳ |
+| 5-15 | Update 버튼 → split-dropdown (Recent / Entire 선택) | FinnhubNewsWindow.tsx | 좌측 버튼=Recent(7일), 우측 화살표=드롭다운 메뉴(Recent / Entire 선택) | ⏳ |
 
 **세부 단계 목적/설명 (5단계)**
 - `5-1` 목적: Brave 기반 창을 Finnhub 기반으로 전환. 설명:
@@ -2342,6 +2346,43 @@ API 계약(초안)
   - 구현: IIFE 패턴으로 `useState`/`useRef`를 사용해 5초 `setTimeout` 후 표시, `onMouseLeave`에서 타이머 클리어 + 숨김.
   - 완료 조건(눈으로 확인): Update 버튼에 5초 hover → 설명 팝업 표시 → 마우스 떼면 사라짐.
   - 흔한 문제/주의: 타이머가 클리어되지 않아 마우스를 떼도 팝업이 남음; z-index 부족으로 다른 요소에 가려짐.
+- `5-12` 목적: Ticker 정보를 별도 컬럼으로 분리하여 가독성과 정렬을 개선한다. 설명:
+  - 기존에는 ticker가 Title 셀 안에 배지로만 표시되어, ticker 기준 정렬/필터가 직관적이지 않았다.
+  - `ColumnId` 타입에 `'ticker'`를 추가하고 `DEFAULT_COLUMNS`에서 `date`와 `time` 사이에 배치한다.
+  - `renderCell`에 `ticker` 케이스를 추가: 클릭 가능한 배지로 렌더하여 해당 ticker로 검색 필터 적용.
+  - `getSortValue`에 `ticker` 케이스를 추가해 알파벳순 정렬 지원.
+  - 완료 조건(눈으로 확인): 테이블에 Ticker 컬럼이 Date 옆에 표시되고, 헤더 클릭으로 정렬 가능.
+  - 사람 검증: Ticker 배지 클릭 → 해당 ticker 뉴스만 필터링되는지 확인.
+  - 흔한 문제/주의: colWidths 배열 길이와 columns 배열 길이 불일치; renderCell에서 ticker 케이스 누락 시 빈 셀.
+- `5-13` 목적: 사용자가 불필요한 컬럼을 숨겨 화면 공간을 효율적으로 사용할 수 있게 한다. 설명:
+  - 툴바에 `Columns3` 아이콘 버튼을 추가하고, 클릭 시 체크박스 드롭다운을 표시한다.
+  - 각 컬럼명 옆에 체크박스 → 체크 해제하면 해당 컬럼이 테이블에서 숨겨진다.
+  - `visibleCols` state(Set)로 가시성 관리; `activeColumns`/`activeColWidths`를 computed로 필터링.
+  - 드롭다운 외부 클릭 시 자동 닫힘(mousedown 이벤트 리스너).
+  - 완료 조건(눈으로 확인): Columns 버튼 → 드롭다운 → 체크 해제한 컬럼이 테이블에서 사라짐.
+  - 사람 검증: 여러 컬럼을 숨겼다 다시 켜서 테이블 레이아웃이 깨지지 않는지 확인.
+  - 흔한 문제/주의: activeColumns 계산에서 width 인덱스가 원래 columns 기준이 아닌 filtered 기준이어야 함; 모든 컬럼을 끄면 빈 테이블.
+- `5-14` 목적: Finnhub 무료 티어의 최대 히스토리(~1년)를 한 번에 수집하는 모드를 백엔드에 추가한다. 설명:
+  - `POST /api/news/pull-finhub`의 요청 스키마에 `mode: z.enum(["recent", "entire"]).optional().default("recent")`를 추가한다.
+  - `mode === "entire"`이고 명시적 `from`이 없으면, `effectiveFrom`을 현재로부터 365일 전으로 설정한다.
+  - `mode === "recent"`(기본)은 기존 동작(7일 lookback) 그대로 유지.
+  - 백엔드 응답과 status update에 `mode`를 포함시켜 프론트에서 어떤 모드로 수집했는지 확인 가능.
+  - 중복 방지는 기존 `upsert` 로직으로 자동 처리(같은 headline + ticker + datetime은 무시).
+  - 완료 조건(눈으로 확인): `curl -X POST /api/news/pull-finhub -d '{"mode":"entire"}'` → 응답에 `mode: "entire"` 포함, from이 ~1년 전으로 설정됨.
+  - 흔한 문제/주의: Finnhub free tier rate limit(60 calls/min); entire 수집 시 ticker가 많으면 시간이 오래 걸림; `effectiveFrom`이 1년보다 멀면 Finnhub이 빈 배열 반환.
+- `5-15` 목적: Update 버튼을 split-dropdown으로 변경하여 Recent/Entire 선택을 제공한다. 설명:
+  - 기존 단일 Update 버튼을 두 부분으로 분리:
+    - **좌측 버튼**: "Update" 텍스트 + Download 아이콘 → 클릭 시 `handleUpdate('recent')` (기존 동작과 동일, 7일 수집).
+    - **우측 화살표 버튼**: ChevronDown 아이콘 → 클릭 시 드롭다운 메뉴 표시.
+  - 드롭다운 메뉴 항목:
+    - **Recent Update**: "Last 7 days (fast, incremental)" 부설명 → `handleUpdate('recent')`
+    - **Entire Update**: "Full year history (slow, no duplicates)" 부설명 + 주황색 아이콘 → `handleUpdate('entire')`
+  - 수집 중(`updating === true`)에는 양쪽 버튼 모두 disabled.
+  - 5초 hover 시 지연 툴팁도 유지(드롭다운 open 시에는 숨김).
+  - 드롭다운 외부 클릭 시 자동 닫힘.
+  - 완료 조건(눈으로 확인): Update 좌측 클릭=Recent 수집 실행, 우측 화살표 클릭=메뉴 열림, Entire Update 클릭=1년 수집 시작.
+  - 사람 검증: Entire Update 실행 후 네트워크 탭에서 `mode: "entire"` 확인; DB에 과거 1년 뉴스가 저장되는지 확인.
+  - 흔한 문제/주의: 드롭다운 z-index 부족으로 다른 요소에 가려짐; split 버튼 border 연결 부분 시각적 불일치; handleUpdate에서 mode 파라미터가 fetch body에 포함되지 않는 실수.
 
 **검증 훅 (5단계 마감):**
 ```
@@ -2352,6 +2393,10 @@ API 계약(초안)
 5. Change% 컬럼에 OHLC 기반 값(또는 `-`) 표시 확인
 6. 검색창에 키워드 입력 → 300ms 디바운스 후 GET /api/news?keyword=... 요청 확인 → 전체 DB에서 매칭된 결과 표시
 7. Update 버튼에 5초 hover → 설명 툴팁 표시 확인 → 마우스 떼면 사라지는지 확인
+8. Ticker 컬럼이 Date 옆에 표시되고, 클릭 시 해당 ticker 필터링
+9. Columns 버튼 → 드롭다운에서 컬럼 체크 해제 → 테이블에서 해당 컬럼 숨겨짐
+10. Update 우측 화살표 → 드롭다운 메뉴에서 "Entire Update" 선택 → mode=entire로 수집 실행
+11. 네트워크 탭에서 POST body에 mode: "entire" 포함 확인, 응답에 mode 필드 확인
 ```
 - 사용자 확인 필요: **Yes**
 

@@ -241,14 +241,14 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
   }, [searchQuery]);
 
   // ─── Update (pull from Finnhub) ───
-  const handleUpdate = async () => {
+  const handleUpdate = async (mode: 'recent' | 'entire' = 'recent') => {
     setUpdating(true);
     setError(null);
     try {
       const res = await fetch(`${API_BASE}/api/news/pull-finhub`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ maxTickers: 20 }),
+        body: JSON.stringify({ maxTickers: 20, mode }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -577,12 +577,24 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
             ))}
           </div>
 
-          {/* Update button with delayed tooltip */}
+          {/* Update split-button with dropdown menu */}
           {(() => {
+            const [showUpdateMenu, setShowUpdateMenu] = React.useState(false);
             const [showUpdateTooltip, setShowUpdateTooltip] = React.useState(false);
             const tooltipTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+            const updateMenuRef = React.useRef<HTMLDivElement>(null);
+
+            React.useEffect(() => {
+              if (!showUpdateMenu) return;
+              const handler = (e: MouseEvent) => {
+                if (updateMenuRef.current && !updateMenuRef.current.contains(e.target as Node)) setShowUpdateMenu(false);
+              };
+              document.addEventListener('mousedown', handler);
+              return () => document.removeEventListener('mousedown', handler);
+            }, [showUpdateMenu]);
+
             return (
-              <div className="relative"
+              <div className="relative flex" ref={updateMenuRef}
                 onMouseEnter={() => {
                   tooltipTimerRef.current = setTimeout(() => setShowUpdateTooltip(true), 5000);
                 }}
@@ -591,18 +603,58 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
                   setShowUpdateTooltip(false);
                 }}
               >
+                {/* Main button — recent update (7 days) */}
                 <button
-                  onClick={handleUpdate}
+                  onClick={() => handleUpdate('recent')}
                   disabled={updating}
-                  className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 disabled:opacity-50"
-                  title="Pull latest news from Finnhub"
+                  className="px-3 py-1.5 border border-r-0 border-gray-300 dark:border-gray-600 rounded-l hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                  title="Pull latest news from Finnhub (last 7 days)"
                 >
                   <Download className={`w-3.5 h-3.5 ${updating ? 'animate-bounce' : ''}`} />
                   <span className="text-xs">{updating ? 'Pulling...' : 'Update'}</span>
                 </button>
-                {showUpdateTooltip && (
+                {/* Dropdown arrow */}
+                <button
+                  onClick={() => setShowUpdateMenu(!showUpdateMenu)}
+                  disabled={updating}
+                  className="px-1.5 py-1.5 border border-gray-300 dark:border-gray-600 rounded-r hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
+                  title="More update options"
+                >
+                  <ChevronDown className="w-3 h-3" />
+                </button>
+                {/* Dropdown menu */}
+                {showUpdateMenu && (
+                  <div className="absolute top-full left-0 mt-1 w-64 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-lg z-50">
+                    <div className="p-1.5">
+                      <button
+                        onClick={() => { setShowUpdateMenu(false); handleUpdate('recent'); }}
+                        disabled={updating}
+                        className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50"
+                      >
+                        <Download className="w-3.5 h-3.5 shrink-0" />
+                        <div>
+                          <div className="font-medium">Recent Update</div>
+                          <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Last 7 days (fast, incremental)</div>
+                        </div>
+                      </button>
+                      <button
+                        onClick={() => { setShowUpdateMenu(false); handleUpdate('entire'); }}
+                        disabled={updating}
+                        className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50"
+                      >
+                        <Download className="w-3.5 h-3.5 shrink-0 text-orange-500" />
+                        <div>
+                          <div className="font-medium">Entire Update</div>
+                          <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Full year history (slow, no duplicates)</div>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {/* Delayed tooltip */}
+                {showUpdateTooltip && !showUpdateMenu && (
                   <div className="absolute top-full left-0 mt-1 z-50 w-72 p-2.5 bg-gray-900 text-white text-[11px] leading-relaxed rounded-lg shadow-lg">
-                    This update fetches news from the last 7 days up to today, without duplicates. If data already exists, it resumes from the last stored date. To retrieve news older than 7 days, use a separate manual update with custom date range parameters.
+                    <strong>Recent:</strong> fetches last 7 days (incremental). <strong>Entire:</strong> fetches max 1 year of history. Both skip duplicates.
                   </div>
                 )}
               </div>

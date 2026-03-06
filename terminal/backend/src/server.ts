@@ -136,6 +136,7 @@ const DEFAULT_TICKERS_CSV = "tradigview_screener/original_data/watch lists2_2026
 const pullFinnhubSchema = z.object({
   csvPath: z.string().optional().default(DEFAULT_TICKERS_CSV),
   maxTickers: z.number().int().min(1).max(500).optional().default(50),
+  mode: z.enum(["recent", "entire"]).optional().default("recent"),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
@@ -143,6 +144,18 @@ const pullFinnhubSchema = z.object({
 app.post("/api/news/pull-finhub", async (req, res, next) => {
   try {
     const input = pullFinnhubSchema.parse(req.body ?? {});
+
+    // If mode is "entire", compute from = 1 year ago (Finnhub max for free tier)
+    let effectiveFrom = input.from;
+    let effectiveTo = input.to;
+    if (input.mode === "entire" && !input.from) {
+      const oneYearAgo = new Date();
+      oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+      effectiveFrom = oneYearAgo.toISOString().slice(0, 10);
+    }
+    if (!effectiveTo) {
+      effectiveTo = new Date().toISOString().slice(0, 10);
+    }
 
     // Load tickers from CSV
     let tickerList: string[];
@@ -165,7 +178,7 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
     for (const ticker of tickerList) {
       // Company news
       try {
-        const items = await pullCompanyNews(ticker, input.from, input.to);
+        const items = await pullCompanyNews(ticker, effectiveFrom, effectiveTo);
         detailsPerType.company_news.fetched += items.length;
         for (const rawItem of items) {
           const inserted = await insertNewsItem({
@@ -197,7 +210,7 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
 
       // Press releases
       try {
-        const items = await pullPressReleases(ticker, input.from, input.to);
+        const items = await pullPressReleases(ticker, effectiveFrom, effectiveTo);
         detailsPerType.press_release.fetched += items.length;
         for (const rawItem of items) {
           const inserted = await insertNewsItem({
@@ -243,6 +256,7 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
 
     // Update status
     await setLastSuccess("finhub_news", new Date().toISOString(), {
+      mode: input.mode,
       tickerCount: tickerList.length,
       inserted: totalInserted,
       skipped: totalSkipped,
@@ -251,6 +265,7 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
 
     res.json({
       source: "FINNHUB",
+      mode: input.mode,
       tickerCount: tickerList.length,
       inserted: totalInserted,
       skipped: totalSkipped,
