@@ -909,8 +909,9 @@ API 계약(초안)
 | 5-14 | 백엔드 "entire" 모드 — adaptive date-splitting backfill | server.ts, finnhubNewsProvider.ts | `POST /api/news/pull-finhub { mode: "entire" }` → 5년 범위 adaptive 분할 수집, cap 우회, 중복 없음 | ✅ |
 | 5-15 | Update 버튼 → split-dropdown (6개 옵션: sourceType별 × mode별) | FinnhubNewsWindow.tsx | 드롭다운에 All/Company/Press × Recent/Entire = 6개 메뉴 | ✅ |
 | 5-16 | Source 셀: 우클릭 Copy URL + 클릭 시 링크 열기 | FinnhubNewsWindow.tsx | Source 우클릭 → Copy URL → 클립보드 복사, Source 클릭 → 브라우저 새 탭으로 열림 | ✅ |
-| 5-17 | 백엔드 잡 큐 + `GET /api/jobs/:jobId` 폴링 엔드포인트 | `server.ts`, `jobManager.ts`(신규) | POST → `{ jobId }` 즉시 반환, GET 폴링 시 `{ status, progress, logs[] }` 응답 | ⏳ |
-| 5-18 | View Log 버튼 + 로그 패널 UI(자동 오픈 금지) | `FinnhubNewsWindow.tsx` | Update 옆 View Log 클릭 → 진행률 바 + 실시간 로그 표시, 시작 시 자동 열림 없음 | ⏳ |
+| 5-17 | 백엔드 잡 큐 + `GET /api/jobs/:jobId` 폴링 엔드포인트 | `server.ts`, `jobManager.ts`(신규) | POST → `{ jobId }` 즉시 반환, GET 폴링 시 `{ status, progress, logs[] }` 응답 | ✅ |
+| 5-18 | View Log 버튼 + 로그 패널 UI(자동 오픈 금지) | `FinnhubNewsWindow.tsx` | Update 옆 View Log 클릭 → 진행률 바 + 실시간 로그 표시, 시작 시 자동 열림 없음 | ✅ |
+| 5-19 | Update UX 전면 리디자인: 7d/Recent/Custom 3모드 + preflight + date picker | `server.ts`, `finnhubNewsProvider.ts`, `FinnhubNewsWindow.tsx` | Entire 제거 → Custom(date picker + adaptive backfill), 기본 Update → 7d, Recent = per-ticker anchor + preflight 경고 모달, 메인 버튼 = 마지막 사용 모드 기억(localStorage) | ✅ |
 
 **세부 단계 목적/설명 (5단계)**
 - `5-1` 목적: Brave 기반 창을 Finnhub 기반으로 전환. 설명:
@@ -1630,8 +1631,9 @@ UI 동작(최소)
 │                      │ ✅ 5-9 Changes% 실시간 계산  │
 │                      │ ✅ 5-10 서버사이드 검색      │
 │                      │ ✅ 5-11 Update 툴팁(5초)     │
-│                      │ ⏳ 5-17 백엔드 잡 큐 + 폴링  │
-│                      │ ⏳ 5-18 View Log 버튼/패널 │
+│                      │ ✅ 5-17 백엔드 잡 큐 + 폴링  │
+│                      │ ✅ 5-18 View Log 버튼/패널 │
+│                      │ ✅ 5-19 Update UX 리디자인  │
 │                      │                              │
 └──────────┬───────────┘                              │
            │                                          │

@@ -21,7 +21,15 @@ import { pullEodhdNews, pullEodhdNewsAll } from "./services/eodhdNewsProvider.js
 import { insertNewsItem } from "./services/newsRepository.js";
 import { listUpdateStatuses, setLastSuccess } from "./services/updateStatusRepository.js";
 import { readTickersFromCsv, appendTickerToCsv, CsvServiceError } from "./services/tickerCsvService.js";
-import { pullCompanyNews, pullPressReleases, pullCompanyNewsBackfill, pullPressReleasesBackfill } from "./services/finnhubNewsProvider.js";
+import {
+  fetchCompanyNewsRaw,
+  fetchPressReleasesRaw,
+  pullCompanyNewsBackfill,
+  pullPressReleasesBackfill,
+  getTickersWithNews,
+  getTickerAnchorMap,
+} from "./services/finnhubNewsProvider.js";
+import type { FinnhubMappedItem } from "./services/finnhubNewsProvider.js";
 import { mergeChangeForNewItems } from "./services/newsChangeMerger.js";
 import { createJob, getJob, updateProgress, appendLog, completeJob, failJob } from "./services/jobManager.js";
 import type { NewsQuery } from "./types.js";
@@ -138,7 +146,7 @@ const pullFinnhubSchema = z.object({
   csvPath: z.string().optional().default(DEFAULT_TICKERS_CSV),
   /** 0 or omitted = all tickers in CSV (no cap) */
   maxTickers: z.number().int().min(0).optional().default(0),
-  mode: z.enum(["recent", "entire"]).optional().default("recent"),
+  mode: z.enum(["7d", "recent", "custom"]).optional().default("7d"),
   /** Which data types to pull. "all" = both, "company_news" = only company news, "press_release" = only press releases */
   sourceType: z.enum(["all", "company_news", "press_release"]).optional().default("all"),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
@@ -147,7 +155,7 @@ const pullFinnhubSchema = z.object({
 
 /** Helper: insert fetched items into DB, track counts, push SSE */
 async function insertFetchedItems(
-  items: Awaited<ReturnType<typeof pullCompanyNews>>,
+  items: FinnhubMappedItem[],
   detailBucket: { fetched: number; inserted: number },
   newItems: Array<{ id: string; tickers: string[]; publishedAt: string }>,
   counters: { totalInserted: number; totalSkipped: number },
@@ -179,23 +187,61 @@ async function insertFetchedItems(
   }
 }
 
+// ── Preflight check for Recent Update ──
+app.get("/api/news/pull-finhub/preflight", async (req, res, next) => {
+  try {
+    const sourceType = (req.query.sourceType as string) || "all";
+    const csvPath = (req.query.csvPath as string) || DEFAULT_TICKERS_CSV;
+
+    let tickerList: string[];
+    try {
+      const csvResult = readTickersFromCsv(csvPath);
+      tickerList = csvResult.tickers;
+    } catch {
+      tickerList = ["AAPL", "MSFT", "TSLA", "NVDA", "AMD"];
+    }
+
+    const tickersWithNews = await getTickersWithNews(
+      sourceType === "all" ? undefined : sourceType,
+    );
+
+    const fallbackTickers = tickerList.filter(
+      (t) => !tickersWithNews.has(t.toUpperCase()),
+    );
+
+    res.json({
+      totalTickers: tickerList.length,
+      fallbackCount: fallbackTickers.length,
+      fallbackTickers: fallbackTickers.slice(0, 50),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/news/pull-finhub", async (req, res, next) => {
   try {
     const input = pullFinnhubSchema.parse(req.body ?? {});
-    const isEntire = input.mode === "entire";
+    const isCustom = input.mode === "custom";
+    const is7d = input.mode === "7d";
+    const isRecent = input.mode === "recent";
     const pullCompany = input.sourceType === "all" || input.sourceType === "company_news";
     const pullPress = input.sourceType === "all" || input.sourceType === "press_release";
 
-    // If mode is "entire", compute from = 5 years ago (adaptive backfill will split ranges to defeat API cap)
+    // Compute effective date range
     let effectiveFrom = input.from;
-    let effectiveTo = input.to;
-    if (isEntire && !input.from) {
-      const fiveYearsAgo = new Date();
-      fiveYearsAgo.setFullYear(fiveYearsAgo.getFullYear() - 5);
-      effectiveFrom = fiveYearsAgo.toISOString().slice(0, 10);
-    }
-    if (!effectiveTo) {
+    let effectiveTo = input.to ?? new Date().toISOString().slice(0, 10);
+
+    if (is7d) {
+      const d = new Date();
+      d.setDate(d.getDate() - 7);
+      effectiveFrom = d.toISOString().slice(0, 10);
       effectiveTo = new Date().toISOString().slice(0, 10);
+    }
+
+    if (isCustom && !input.from) {
+      res.status(400).json({ error: "Custom mode requires 'from' date" });
+      return;
     }
 
     // Load tickers from CSV
@@ -204,20 +250,39 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
       const csvResult = readTickersFromCsv(input.csvPath);
       tickerList = input.maxTickers > 0
         ? csvResult.tickers.slice(0, input.maxTickers)
-        : csvResult.tickers;  // 0 = use all tickers
+        : csvResult.tickers;
     } catch {
-      tickerList = ["AAPL", "MSFT", "TSLA", "NVDA", "AMD"]; // fallback
+      tickerList = ["AAPL", "MSFT", "TSLA", "NVDA", "AMD"];
     }
     console.log(`[pull-finhub] mode=${input.mode} sourceType=${input.sourceType} maxTickers=${input.maxTickers} → tickerList.length=${tickerList.length}`);
+
+    // For recent mode, load per-ticker anchor maps
+    let companyAnchorMap: Map<string, string> | undefined;
+    let pressAnchorMap: Map<string, string> | undefined;
+    if (isRecent) {
+      if (pullCompany) companyAnchorMap = await getTickerAnchorMap("company_news");
+      if (pullPress) pressAnchorMap = await getTickerAnchorMap("press_release");
+    }
 
     // ── Create background job and return immediately ──
     const jobId = createJob(tickerList.length);
     appendLog(jobId, `Starting ${input.mode}/${input.sourceType} pull for ${tickerList.length} tickers`);
 
-    // Return jobId immediately — the actual work runs in the background
+    if (isRecent) {
+      const fallbackCount = tickerList.filter((t) => {
+        const upper = t.toUpperCase();
+        return !(companyAnchorMap?.has(upper) || pressAnchorMap?.has(upper));
+      }).length;
+      if (fallbackCount > 0) {
+        appendLog(jobId, `${fallbackCount} tickers have no prior data → 7d fallback`);
+      }
+    }
+
     res.json({ jobId });
 
     // ── Background job execution (fire-and-forget) ──
+    const fallback7d = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10);
+
     (async () => {
       const counters = { totalInserted: 0, totalSkipped: 0 };
       const newItems: Array<{ id: string; tickers: string[]; publishedAt: string }> = [];
@@ -234,9 +299,17 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
           // Company news
           if (pullCompany) {
             try {
-              const items = isEntire
-                ? await pullCompanyNewsBackfill(ticker, effectiveFrom!, effectiveTo)
-                : await pullCompanyNews(ticker, effectiveFrom, effectiveTo);
+              let items: FinnhubMappedItem[];
+              if (isCustom) {
+                items = await pullCompanyNewsBackfill(ticker, effectiveFrom!, effectiveTo);
+              } else {
+                let tickerFrom = effectiveFrom!;
+                if (isRecent) {
+                  const anchor = companyAnchorMap?.get(ticker.toUpperCase());
+                  tickerFrom = anchor ? anchor.slice(0, 10) : fallback7d;
+                }
+                items = await fetchCompanyNewsRaw(ticker, tickerFrom, effectiveTo);
+              }
               await insertFetchedItems(items, detailsPerType.company_news, newItems, counters);
               if (items.length > 0) {
                 appendLog(jobId, `  company_news: ${items.length} fetched, ${detailsPerType.company_news.inserted} inserted so far`);
@@ -250,9 +323,17 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
           // Press releases
           if (pullPress) {
             try {
-              const items = isEntire
-                ? await pullPressReleasesBackfill(ticker, effectiveFrom!, effectiveTo)
-                : await pullPressReleases(ticker, effectiveFrom, effectiveTo);
+              let items: FinnhubMappedItem[];
+              if (isCustom) {
+                items = await pullPressReleasesBackfill(ticker, effectiveFrom!, effectiveTo);
+              } else {
+                let tickerFrom = effectiveFrom!;
+                if (isRecent) {
+                  const anchor = pressAnchorMap?.get(ticker.toUpperCase());
+                  tickerFrom = anchor ? anchor.slice(0, 10) : fallback7d;
+                }
+                items = await fetchPressReleasesRaw(ticker, tickerFrom, effectiveTo);
+              }
               await insertFetchedItems(items, detailsPerType.press_release, newItems, counters);
               if (items.length > 0) {
                 appendLog(jobId, `  press_release: ${items.length} fetched, ${detailsPerType.press_release.inserted} inserted so far`);

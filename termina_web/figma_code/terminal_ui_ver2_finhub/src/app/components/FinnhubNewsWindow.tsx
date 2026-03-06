@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { Search, Save, FolderOpen, Filter, ChevronDown, ArrowUp, ArrowDown, GripVertical, FileText, AlignLeft, RotateCw, Download, Columns3, Eye, X } from 'lucide-react';
+import { Search, Save, FolderOpen, Filter, ChevronDown, ArrowUp, ArrowDown, GripVertical, FileText, AlignLeft, RotateCw, Download, Columns3, Eye, X, Calendar } from 'lucide-react';
 import { VariableSizeList as List } from 'react-window';
 
 const API_BASE = "";
@@ -183,6 +183,23 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // ─── Update config (last used mode/sourceType) ───
+  type UpdateMode = '7d' | 'recent' | 'custom';
+  type UpdateSourceType = 'all' | 'company_news' | 'press_release';
+  const [lastUpdateConfig, setLastUpdateConfig] = useState<{ mode: UpdateMode; sourceType: UpdateSourceType }>(() => {
+    try {
+      const saved = localStorage.getItem('finnhub-last-update-config');
+      if (saved) return JSON.parse(saved);
+    } catch { /* ignore */ }
+    return { mode: '7d', sourceType: 'all' };
+  });
+  const [showCustomDateModal, setShowCustomDateModal] = useState(false);
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [showPreflightModal, setShowPreflightModal] = useState(false);
+  const [preflightData, setPreflightData] = useState<{ totalTickers: number; fallbackCount: number; fallbackTickers: string[] } | null>(null);
+  const [pendingUpdateSourceType, setPendingUpdateSourceType] = useState<UpdateSourceType>('all');
+
   // ─── Background job tracking ───
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [showLogPanel, setShowLogPanel] = useState(false);
@@ -300,17 +317,26 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
 
   // ─── Update (pull from Finnhub — background job) ───
   const handleUpdate = async (
-    mode: 'recent' | 'entire' = 'recent',
-    sourceType: 'all' | 'company_news' | 'press_release' = 'all',
+    mode: UpdateMode = '7d',
+    sourceType: UpdateSourceType = 'all',
+    from?: string,
+    to?: string,
   ) => {
+    const config = { mode, sourceType };
+    setLastUpdateConfig(config);
+    try { localStorage.setItem('finnhub-last-update-config', JSON.stringify(config)); } catch { /* ignore */ }
+
     setUpdating(true);
     setError(null);
     setJobStatus(null);
     try {
+      const body: Record<string, unknown> = { mode, sourceType };
+      if (from) body.from = from;
+      if (to) body.to = to;
       const res = await fetch(`${API_BASE}/api/news/pull-finhub`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode, sourceType }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -318,13 +344,54 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
         setUpdating(false);
         return;
       }
-      // Store jobId — polling effect picks up from here
-      // Panel does NOT auto-open; user must click View Log
       setCurrentJobId(data.jobId);
     } catch (err: any) {
       setError(err.message || 'Failed to start update');
       setUpdating(false);
     }
+  };
+
+  // ─── Recent Update with preflight check ───
+  const handleRecentWithPreflight = async (sourceType: UpdateSourceType) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/news/pull-finhub/preflight?sourceType=${sourceType}`);
+      if (!res.ok) { handleUpdate('recent', sourceType); return; }
+      const data = await res.json();
+      if (data.fallbackCount > 0) {
+        setPreflightData(data);
+        setPendingUpdateSourceType(sourceType);
+        setShowPreflightModal(true);
+      } else {
+        handleUpdate('recent', sourceType);
+      }
+    } catch {
+      handleUpdate('recent', sourceType);
+    }
+  };
+
+  // ─── Custom Update: open date picker ───
+  const handleCustomStart = (sourceType: UpdateSourceType) => {
+    setPendingUpdateSourceType(sourceType);
+    setCustomTo(new Date().toISOString().slice(0, 10));
+    setShowCustomDateModal(true);
+  };
+
+  // ─── Main button label (reflects last used config) ───
+  const mainBtnLabel = (() => {
+    const m = lastUpdateConfig.mode;
+    const s = lastUpdateConfig.sourceType;
+    const modeStr = m === '7d' ? '7d' : m === 'recent' ? 'Recent' : 'Custom';
+    if (s === 'all') return `${modeStr} Update`;
+    if (s === 'company_news') return `${modeStr} Co.`;
+    return `${modeStr} PR`;
+  })();
+
+  // ─── Main button click: repeat last used config ───
+  const handleMainButtonClick = () => {
+    const { mode, sourceType } = lastUpdateConfig;
+    if (mode === 'recent') { handleRecentWithPreflight(sourceType); }
+    else if (mode === 'custom') { handleCustomStart(sourceType); }
+    else { handleUpdate('7d', sourceType); }
   };
 
   // ─── Poll background job status ───
@@ -705,8 +772,6 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
           {/* Update split-button with dropdown menu */}
           {(() => {
             const [showUpdateMenu, setShowUpdateMenu] = React.useState(false);
-            const [showUpdateTooltip, setShowUpdateTooltip] = React.useState(false);
-            const tooltipTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
             const updateMenuRef = React.useRef<HTMLDivElement>(null);
 
             React.useEffect(() => {
@@ -719,24 +784,16 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
             }, [showUpdateMenu]);
 
             return (
-              <div className="relative flex" ref={updateMenuRef}
-                onMouseEnter={() => {
-                  tooltipTimerRef.current = setTimeout(() => setShowUpdateTooltip(true), 5000);
-                }}
-                onMouseLeave={() => {
-                  if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
-                  setShowUpdateTooltip(false);
-                }}
-              >
-                {/* Main button — recent update (7 days) */}
+              <div className="relative flex" ref={updateMenuRef}>
+                {/* Main button — repeats last used update */}
                 <button
-                  onClick={() => handleUpdate('recent')}
+                  onClick={handleMainButtonClick}
                   disabled={updating}
                   className="px-3 py-1.5 border border-r-0 border-gray-300 dark:border-gray-600 rounded-l hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 disabled:opacity-50"
-                  title="Pull latest news from Finnhub (last 7 days)"
+                  title={`Repeat last update: ${mainBtnLabel}`}
                 >
                   <Download className={`w-3.5 h-3.5 ${updating ? 'animate-bounce' : ''}`} />
-                  <span className="text-xs">{updating ? 'Pulling...' : 'Update'}</span>
+                  <span className="text-xs">{updating ? 'Pulling...' : mainBtnLabel}</span>
                 </button>
                 {/* Dropdown arrow */}
                 <button
@@ -749,91 +806,55 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
                 </button>
                 {/* Dropdown menu */}
                 {showUpdateMenu && (
-                  <div className="absolute top-full left-0 mt-1 w-72 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-lg z-50 max-h-[400px] overflow-y-auto">
+                  <div className="absolute top-full left-0 mt-1 w-72 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-lg z-50 max-h-[480px] overflow-y-auto">
                     <div className="p-1.5">
-                      {/* ── All (both types) ── */}
-                      <div className="px-2 py-1 text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">All Types</div>
-                      <button
-                        onClick={() => { setShowUpdateMenu(false); handleUpdate('recent', 'all'); }}
-                        disabled={updating}
-                        className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50"
-                      >
+                      {/* ── 7d Update ── */}
+                      <div className="px-2 py-1 text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">7d Update</div>
+                      <button onClick={() => { setShowUpdateMenu(false); handleUpdate('7d', 'all'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <Download className="w-3.5 h-3.5 shrink-0" />
-                        <div>
-                          <div className="font-medium">Recent Update</div>
-                          <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Last 7 days · Company News + Press Releases</div>
-                        </div>
+                        <div><div className="font-medium">7d Update (All)</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Last 7 days · Company News + Press Releases</div></div>
                       </button>
-                      <button
-                        onClick={() => { setShowUpdateMenu(false); handleUpdate('entire', 'all'); }}
-                        disabled={updating}
-                        className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50"
-                      >
-                        <Download className="w-3.5 h-3.5 shrink-0 text-orange-500" />
-                        <div>
-                          <div className="font-medium">Entire Update</div>
-                          <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Full backfill · Company News + Press Releases (slow)</div>
-                        </div>
-                      </button>
-
-                      {/* ── Company News only ── */}
-                      <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
-                      <div className="px-2 py-1 text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Company News</div>
-                      <button
-                        onClick={() => { setShowUpdateMenu(false); handleUpdate('recent', 'company_news'); }}
-                        disabled={updating}
-                        className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50"
-                      >
+                      <button onClick={() => { setShowUpdateMenu(false); handleUpdate('7d', 'company_news'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <Download className="w-3.5 h-3.5 shrink-0 text-blue-500" />
-                        <div>
-                          <div className="font-medium">Company Update</div>
-                          <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Last 7 days · Company News only</div>
-                        </div>
+                        <div><div className="font-medium">7d Company News</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Last 7 days · Company News only</div></div>
                       </button>
-                      <button
-                        onClick={() => { setShowUpdateMenu(false); handleUpdate('entire', 'company_news'); }}
-                        disabled={updating}
-                        className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50"
-                      >
-                        <Download className="w-3.5 h-3.5 shrink-0 text-orange-500" />
-                        <div>
-                          <div className="font-medium">Company Entire Update</div>
-                          <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Full backfill · Company News only (slow)</div>
-                        </div>
+                      <button onClick={() => { setShowUpdateMenu(false); handleUpdate('7d', 'press_release'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <Download className="w-3.5 h-3.5 shrink-0 text-green-500" />
+                        <div><div className="font-medium">7d Press Release</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Last 7 days · Press Releases only</div></div>
                       </button>
 
-                      {/* ── Press Releases only ── */}
+                      {/* ── Recent Update ── */}
                       <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
-                      <div className="px-2 py-1 text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Press Releases</div>
-                      <button
-                        onClick={() => { setShowUpdateMenu(false); handleUpdate('recent', 'press_release'); }}
-                        disabled={updating}
-                        className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50"
-                      >
-                        <Download className="w-3.5 h-3.5 shrink-0 text-green-500" />
-                        <div>
-                          <div className="font-medium">Press Release Update</div>
-                          <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Last 7 days · Press Releases only</div>
-                        </div>
+                      <div className="px-2 py-1 text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Recent Update</div>
+                      <button onClick={() => { setShowUpdateMenu(false); handleRecentWithPreflight('all'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <RotateCw className="w-3.5 h-3.5 shrink-0 text-purple-500" />
+                        <div><div className="font-medium">Recent Update (All)</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">From last collected date · per ticker</div></div>
                       </button>
-                      <button
-                        onClick={() => { setShowUpdateMenu(false); handleUpdate('entire', 'press_release'); }}
-                        disabled={updating}
-                        className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50"
-                      >
-                        <Download className="w-3.5 h-3.5 shrink-0 text-orange-500" />
-                        <div>
-                          <div className="font-medium">Press Release Entire Update</div>
-                          <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Full backfill · Press Releases only (slow)</div>
-                        </div>
+                      <button onClick={() => { setShowUpdateMenu(false); handleRecentWithPreflight('company_news'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <RotateCw className="w-3.5 h-3.5 shrink-0 text-purple-500" />
+                        <div><div className="font-medium">Recent Company News</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">From last collected · Company News only</div></div>
+                      </button>
+                      <button onClick={() => { setShowUpdateMenu(false); handleRecentWithPreflight('press_release'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <RotateCw className="w-3.5 h-3.5 shrink-0 text-purple-500" />
+                        <div><div className="font-medium">Recent Press Release</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">From last collected · Press Releases only</div></div>
+                      </button>
+
+                      {/* ── Custom Update ── */}
+                      <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
+                      <div className="px-2 py-1 text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Custom Update</div>
+                      <button onClick={() => { setShowUpdateMenu(false); handleCustomStart('all'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <Calendar className="w-3.5 h-3.5 shrink-0 text-orange-500" />
+                        <div><div className="font-medium">Custom Update (All)</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick date range · adaptive backfill</div></div>
+                      </button>
+                      <button onClick={() => { setShowUpdateMenu(false); handleCustomStart('company_news'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <Calendar className="w-3.5 h-3.5 shrink-0 text-orange-500" />
+                        <div><div className="font-medium">Custom Company News</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick date range · Company News only</div></div>
+                      </button>
+                      <button onClick={() => { setShowUpdateMenu(false); handleCustomStart('press_release'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <Calendar className="w-3.5 h-3.5 shrink-0 text-orange-500" />
+                        <div><div className="font-medium">Custom Press Release</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick date range · Press Releases only</div></div>
                       </button>
                     </div>
-                  </div>
-                )}
-                {/* Delayed tooltip */}
-                {showUpdateTooltip && !showUpdateMenu && (
-                  <div className="absolute top-full left-0 mt-1 z-50 w-72 p-2.5 bg-gray-900 text-white text-[11px] leading-relaxed rounded-lg shadow-lg">
-                    <strong>Recent:</strong> last 7 days (incremental). <strong>Entire:</strong> full adaptive backfill (splits date ranges to avoid API cap). Choose per data type or both.
                   </div>
                 )}
               </div>
@@ -1124,6 +1145,61 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
             <div className="flex justify-end gap-2">
               <button onClick={() => setShowSaveModal(false)} className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
               <button onClick={handleSaveSearch} className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Custom Date Picker Modal ─── */}
+      {showCustomDateModal && (
+        <div className="absolute inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-4 w-80 border border-gray-200 dark:border-gray-700">
+            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><Calendar className="w-4 h-4 text-orange-500" />Custom Update — Date Range</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">From</label>
+                <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)}
+                  className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">To</label>
+                <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)}
+                  className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+              </div>
+              <p className="text-[10px] text-gray-400">Adaptive backfill will split large date ranges to avoid API cap.</p>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setShowCustomDateModal(false)} className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
+              <button
+                onClick={() => { if (!customFrom || !customTo) return; setShowCustomDateModal(false); handleUpdate('custom', pendingUpdateSourceType, customFrom, customTo); }}
+                disabled={!customFrom || !customTo}
+                className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+              >Start Update</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Preflight Confirmation Modal (Recent Update) ─── */}
+      {showPreflightModal && preflightData && (
+        <div className="absolute inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-4 w-96 border border-gray-200 dark:border-gray-700">
+            <h3 className="text-sm font-semibold mb-2 flex items-center gap-2"><RotateCw className="w-4 h-4 text-purple-500" />Recent Update</h3>
+            <p className="text-xs text-gray-600 dark:text-gray-300 mb-2">
+              {preflightData.fallbackCount}개 ticker는 기존 뉴스가 없어 최근 7일만 조회됩니다.
+            </p>
+            {preflightData.fallbackTickers.length > 0 && (
+              <p className="text-[10px] text-gray-400 mb-3">
+                예: {preflightData.fallbackTickers.slice(0, 10).join(', ')}
+                {preflightData.fallbackCount > 10 && ` ... +${preflightData.fallbackCount - 10}개`}
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowPreflightModal(false)} className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
+              <button
+                onClick={() => { setShowPreflightModal(false); handleUpdate('recent', pendingUpdateSourceType); }}
+                className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+              >계속</button>
             </div>
           </div>
         </div>

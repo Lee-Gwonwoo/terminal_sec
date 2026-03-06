@@ -125,7 +125,7 @@ function computeFromDate(lastPublished: string | null, lookbackDays: number): st
 
 // ---------- Raw fetch helpers (single request, no splitting) ----------
 
-async function fetchCompanyNewsRaw(
+export async function fetchCompanyNewsRaw(
   symbol: string,
   from: string,
   to: string,
@@ -151,7 +151,7 @@ async function fetchCompanyNewsRaw(
   }));
 }
 
-async function fetchPressReleasesRaw(
+export async function fetchPressReleasesRaw(
   symbol: string,
   from: string,
   to: string,
@@ -269,4 +269,63 @@ export async function pullPressReleasesBackfill(
   to: string,
 ): Promise<FinnhubMappedItem[]> {
   return adaptiveBackfill(symbol, from, to, fetchPressReleasesRaw, "press_release");
+}
+
+// ---------- Preflight / per-ticker anchor helpers ----------
+
+/**
+ * Returns a Set of tickers that already have at least one FINNHUB news item.
+ * If sourceType is provided, filters by that source_type.
+ */
+export async function getTickersWithNews(sourceType?: string): Promise<Set<string>> {
+  const condition = sourceType
+    ? `WHERE source = 'FINNHUB' AND source_type = ?`
+    : `WHERE source = 'FINNHUB'`;
+  const params = sourceType ? [sourceType] : [];
+
+  const rows = await getDb().all<{ tickers_csv: string }[]>(
+    `SELECT DISTINCT tickers_csv FROM news_items ${condition}`,
+    params,
+  );
+
+  const tickerSet = new Set<string>();
+  for (const row of rows) {
+    const tickers = row.tickers_csv
+      .split(",")
+      .map((s: string) => s.trim().toUpperCase())
+      .filter(Boolean);
+    for (const t of tickers) tickerSet.add(t);
+  }
+  return tickerSet;
+}
+
+/**
+ * Returns a Map of ticker → most recent published_at for that ticker+sourceType.
+ * Used for per-ticker incremental (recent) updates.
+ */
+export async function getTickerAnchorMap(
+  sourceType: string,
+): Promise<Map<string, string>> {
+  const rows = await getDb().all<{ tickers_csv: string; max_pub: string }[]>(
+    `SELECT tickers_csv, MAX(published_at) as max_pub
+     FROM news_items
+     WHERE source = 'FINNHUB' AND source_type = ?
+     GROUP BY tickers_csv`,
+    [sourceType],
+  );
+
+  const map = new Map<string, string>();
+  for (const row of rows) {
+    const tickers = row.tickers_csv
+      .split(",")
+      .map((s: string) => s.trim().toUpperCase())
+      .filter(Boolean);
+    for (const t of tickers) {
+      const existing = map.get(t);
+      if (!existing || row.max_pub > existing) {
+        map.set(t, row.max_pub);
+      }
+    }
+  }
+  return map;
 }

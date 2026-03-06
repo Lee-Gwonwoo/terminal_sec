@@ -983,3 +983,41 @@
 - VS Code IDE 에러 검사 (FinnhubNewsWindow.tsx) — 에러 없음
 - 사용자 확인 필요: 실제 UI에서 Update 클릭 → jobId 반환 확인, View Log 클릭 → 패널 열림/진행률/로그 확인
 
+---
+
+### 5-19 구현: Update UX 전면 리디자인 (7d / Recent / Custom 3모드)
+
+| 항목 | 내용 |
+|------|------|
+| 시점 | 5-17/5-18 구현 완료 후 |
+| 상태 | 확인 대기(awaiting user confirmation) |
+| 관련 서브스텝 | 5-19 |
+
+#### 변경 요약
+
+기존 `Update (Recent)` / `Entire` 2모드를 → **7d Update** / **Recent Update** / **Custom Update** 3모드로 교체.
+
+| 모드 | 동작 | 비고 |
+|------|------|------|
+| **7d** | 오늘 기준 최근 7일 고정 범위 fetch | 기존 `recent` 대체 |
+| **Recent** | **ticker별** 마지막 수집 날짜 → 오늘 (per-ticker anchor) | 기존 뉴스 없는 ticker → 7d fallback, 시작 전 preflight 경고 모달 |
+| **Custom** | 사용자 지정 from/to date range, adaptive backfill | 기존 `entire` 대체, date picker 모달 |
+
+#### 변경 파일
+
+| 파일 | 변경 내용 |
+|------|------|
+| `terminal/backend/src/services/finnhubNewsProvider.ts` | (1) `fetchCompanyNewsRaw`, `fetchPressReleasesRaw` → `export` (2) `getTickersWithNews(sourceType?)` 추가 — DB에서 FINNHUB 뉴스 있는 ticker Set 반환 (3) `getTickerAnchorMap(sourceType)` 추가 — ticker별 최신 published_at Map 반환 |
+| `terminal/backend/src/server.ts` | (1) import 갱신 (`fetchCompanyNewsRaw`, `fetchPressReleasesRaw`, `getTickersWithNews`, `getTickerAnchorMap`) (2) `pullFinnhubSchema.mode` → `z.enum(["7d","recent","custom"])` (3) `insertFetchedItems` 타입 `FinnhubMappedItem[]`로 수정 (4) `GET /api/news/pull-finhub/preflight` 엔드포인트 신규 — fallbackCount/fallbackTickers 반환 (5) POST 핸들러 전면 재작성: 7d=고정7일, recent=per-ticker anchor+fallback, custom=adaptive backfill |
+| `termina_web/.../FinnhubNewsWindow.tsx` | (1) `Calendar` 아이콘 import 추가 (2) `lastUpdateConfig` (localStorage 연동), Custom date modal 상태, preflight modal 상태 추가 (3) `handleUpdate` 시그니처 `7d\|recent\|custom` + `from?`/`to?` (4) `handleRecentWithPreflight`, `handleCustomStart`, `mainBtnLabel`, `handleMainButtonClick` 함수 추가 (5) 드롭다운: 6옵션 → 9옵션 (3모드×3소스타입), 그룹 헤더+구분선 (6) Custom Date Picker Modal + Preflight Confirmation Modal 추가 |
+| `ai_agent_plan/.../plan.md` | 5-17/5-18 → ✅, 5-19 행 추가 및 ✅ 처리, 의존성 그래프 업데이트 |
+
+#### 검증
+- `npx tsc --noEmit` (backend) — 에러 없음
+- VS Code IDE 에러 검사 (FinnhubNewsWindow.tsx) — 에러 없음
+- 사용자 확인 필요:
+  - 메인 버튼 라벨이 마지막 사용 모드를 기억하는지 확인
+  - 드롭다운에 7d/Recent/Custom × All/Company/Press = 9개 옵션 표시 확인
+  - Custom Update 클릭 → date picker 모달 열림/날짜 입력/Start 확인
+  - Recent Update 클릭 → preflight 체크 → fallback ticker 있으면 경고 모달 표시 확인
+
