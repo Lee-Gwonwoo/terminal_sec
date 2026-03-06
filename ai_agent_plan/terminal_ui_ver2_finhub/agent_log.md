@@ -261,6 +261,59 @@
 
 ---
 
+**작성 시각:** 2026-03-06 12:52 (local)
+
+### PLAN CHANGE — market news 타입 추가
+
+**Status: done (awaiting user confirmation)**
+
+#### Actions taken
+
+1. Finnhub 일반 시장 헤드라인 `/news`를 새 `source_type='market_news'`로 수집할 수 있도록 백엔드 provider와 pull API를 확장함
+   - `terminal/backend/src/services/finnhubNewsProvider.ts`
+   - `terminal/backend/src/server.ts`
+
+2. News Feed Window에서 `Market News`를 별도 메뉴 타입으로 선택할 수 있게 하고, Update split-dropdown에 `7d/recent/custom × market news`를 추가함
+   - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+
+3. Full Text Update sourceType 메뉴에도 `market_news`를 추가하여 기존 source type 패턴과 맞춤
+   - 현재 extractor 지원 범위를 넘는 외부 도메인은 `unavailable` 또는 `skipped` 상태로 남도록 유지
+
+4. 계획/스펙 문서를 함께 갱신함
+   - `ai_agent_plan/terminal_ui_ver2_finhub/plan.md`
+   - `terminal/backend_prompt.md`
+   - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+
+5. 런타임 검증 중 발견된 `market_news only` 경로의 job progress 버그를 즉시 수정함
+   - 문제: `sourceType='market_news'`일 때도 ticker loop를 먼저 돌아 job total이 CSV 전체 ticker 수로 잡히고 실제 market pull이 지연됨
+   - 수정: `company_news`/`press_release`를 당기지 않는 경우 `tickerList=[]`로 강제하여 market news 수집을 바로 시작하도록 변경
+   - 파일: `terminal/backend/src/server.ts`
+
+#### Verification
+
+1. 백엔드 타입체크 또는 빌드로 `market_news` enum 추가 이후 오류가 없는지 확인 필요
+2. `POST /api/news/pull-finhub`에 `{ "mode": "recent", "sourceType": "market_news" }` 요청 시 job이 생성되는지 확인 필요
+3. `GET /api/news?source_names=FINNHUB&source_type=market_news`로 row 조회 확인 필요
+4. 프론트 Update 메뉴와 source filter에 `Market News`가 추가되었는지 확인 필요
+
+#### Runtime verification result
+
+1. `POST /api/news/pull-finhub` with `{ "mode": "recent", "sourceType": "market_news" }` → `jobId` 정상 반환 확인
+2. job 로그에서 `[market] Processing market news...` 즉시 시작 확인
+3. `GET /api/news?source_names=FINNHUB&source_type=market_news&limit=5` → 실제 `market_news` row 조회 확인
+   - 샘플 row: CNBC 기사 제목 `We're buying more of our newest stock and upgrading our rating on a financial name`
+
+#### Risks / notes
+
+1. Finnhub `/news`는 날짜 파라미터가 없고 약 3일 안팎 히스토리 + `minId` 페이징에 의존함
+   - 완화: custom/recent는 UI는 동일하지만, 서버에서 페이지네이션 후 published_at 기준으로 절단하도록 구현
+2. market news는 ticker 비연결 기사 비율이 높아 `tickers=[]` row가 많을 수 있음
+   - 완화: 검색/필터는 `source_type`과 keyword 중심으로 사용
+3. full text extractor는 market news 외부 도메인을 아직 적극 지원하지 않음
+   - 완화: 현재는 status를 남기고 실패 원인/미지원 도메인을 로그에서 확인하도록 유지
+
+---
+
 **작성 시각:** 11:47 (local)
 
 ### PLAN CHANGE — News Feed Window에도 change update 버튼 추가

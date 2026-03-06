@@ -40,7 +40,21 @@ type SortDir = 'asc' | 'desc' | null;
 interface SortState { column: ColumnId | null; dir: SortDir; }
 
 // ─── Source type filter ───
-type SourceTypeFilter = 'all' | 'company_news' | 'press_release';
+type SourceTypeFilter = 'all' | 'company_news' | 'press_release' | 'market_news';
+
+function getSourceTypeLabel(sourceType: SourceTypeFilter | string): string {
+  if (sourceType === 'company_news') return 'Company News';
+  if (sourceType === 'press_release') return 'Press Release';
+  if (sourceType === 'market_news') return 'Market News';
+  return 'All';
+}
+
+function getSourceTypeShortLabel(sourceType: SourceTypeFilter | string): string {
+  if (sourceType === 'company_news') return 'Co.';
+  if (sourceType === 'press_release') return 'PR';
+  if (sourceType === 'market_news') return 'Mkt.';
+  return 'All';
+}
 
 // ─── Backend news item ───
 interface BackendNewsItem {
@@ -203,7 +217,7 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
 
   // ─── Update config (last used mode/sourceType) ───
   type UpdateMode = '7d' | 'recent' | 'custom';
-  type UpdateSourceType = 'all' | 'company_news' | 'press_release';
+  type UpdateSourceType = 'all' | 'company_news' | 'press_release' | 'market_news';
   const [lastUpdateConfig, setLastUpdateConfig] = useState<{ mode: UpdateMode; sourceType: UpdateSourceType }>(() => {
     try {
       const saved = localStorage.getItem('finnhub-last-update-config');
@@ -371,6 +385,10 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
 
   // ─── Recent Update with preflight check ───
   const handleRecentWithPreflight = async (sourceType: UpdateSourceType) => {
+    if (sourceType === 'market_news') {
+      handleUpdate('recent', sourceType);
+      return;
+    }
     try {
       const res = await fetch(`${API_BASE}/api/news/pull-finhub/preflight?sourceType=${sourceType}`);
       if (!res.ok) { handleUpdate('recent', sourceType); return; }
@@ -420,7 +438,7 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
   }, []);
 
   // ─── Full text extraction (background job) ───
-  type FtSourceType = 'all' | 'company_news' | 'press_release';
+  type FtSourceType = 'all' | 'company_news' | 'press_release' | 'market_news';
   const [lastFtSourceType, setLastFtSourceType] = useState<FtSourceType>('all');
 
   const handleFulltextUpdate = async (sourceType: FtSourceType = 'all') => {
@@ -454,8 +472,7 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
     const s = lastUpdateConfig.sourceType;
     const modeStr = m === '7d' ? '7d' : m === 'recent' ? 'Recent' : 'Custom';
     if (s === 'all') return `${modeStr} Update`;
-    if (s === 'company_news') return `${modeStr} Co.`;
-    return `${modeStr} PR`;
+    return `${modeStr} ${getSourceTypeShortLabel(s)}`;
   })();
 
   // ─── Main button click: repeat last used config ───
@@ -727,7 +744,7 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
             )}
             {newsItem.sourceType && (
               <span className="text-[10px] text-gray-400 mt-0.5">
-                {newsItem.sourceType === 'company_news' ? 'Company News' : 'Press Release'}
+                {getSourceTypeLabel(newsItem.sourceType)}
               </span>
             )}
           </div>
@@ -857,7 +874,7 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
 
           {/* Source type filter toggle */}
           <div className="flex items-center border border-gray-300 dark:border-gray-600 rounded overflow-hidden">
-            {(['all', 'company_news', 'press_release'] as SourceTypeFilter[]).map(st => (
+            {(['all', 'company_news', 'press_release', 'market_news'] as SourceTypeFilter[]).map(st => (
               <button
                 key={st}
                 onClick={() => setSourceTypeFilter(st)}
@@ -867,7 +884,7 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
                     : 'hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400'
                 }`}
               >
-                {st === 'all' ? 'All' : st === 'company_news' ? 'Company News' : 'Press Release'}
+                {getSourceTypeLabel(st)}
               </button>
             ))}
           </div>
@@ -915,7 +932,7 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
                       <div className="px-2 py-1 text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">7d Update</div>
                       <button onClick={() => { setShowUpdateMenu(false); handleUpdate('7d', 'all'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <Download className="w-3.5 h-3.5 shrink-0" />
-                        <div><div className="font-medium">7d Update (All)</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Last 7 days · Company News + Press Releases</div></div>
+                        <div><div className="font-medium">7d Update (All)</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Last 7 days · Company + Press + Market News</div></div>
                       </button>
                       <button onClick={() => { setShowUpdateMenu(false); handleUpdate('7d', 'company_news'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <Download className="w-3.5 h-3.5 shrink-0 text-blue-500" />
@@ -924,6 +941,10 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
                       <button onClick={() => { setShowUpdateMenu(false); handleUpdate('7d', 'press_release'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <Download className="w-3.5 h-3.5 shrink-0 text-green-500" />
                         <div><div className="font-medium">7d Press Release</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Last 7 days · Press Releases only</div></div>
+                      </button>
+                      <button onClick={() => { setShowUpdateMenu(false); handleUpdate('7d', 'market_news'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <Download className="w-3.5 h-3.5 shrink-0 text-amber-500" />
+                        <div><div className="font-medium">7d Market News</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Last 7 days within Finnhub market headline history</div></div>
                       </button>
 
                       {/* ── Recent Update ── */}
@@ -941,6 +962,10 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
                         <RotateCw className="w-3.5 h-3.5 shrink-0 text-purple-500" />
                         <div><div className="font-medium">Recent Press Release</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">From last collected · Press Releases only</div></div>
                       </button>
+                      <button onClick={() => { setShowUpdateMenu(false); handleRecentWithPreflight('market_news'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <RotateCw className="w-3.5 h-3.5 shrink-0 text-amber-500" />
+                        <div><div className="font-medium">Recent Market News</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Continue paging Finnhub /news from last stored timestamp</div></div>
+                      </button>
 
                       {/* ── Custom Update ── */}
                       <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
@@ -956,6 +981,10 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
                       <button onClick={() => { setShowUpdateMenu(false); handleCustomStart('press_release'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <Calendar className="w-3.5 h-3.5 shrink-0 text-orange-500" />
                         <div><div className="font-medium">Custom Press Release</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick date range · Press Releases only</div></div>
+                      </button>
+                      <button onClick={() => { setShowUpdateMenu(false); handleCustomStart('market_news'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <Calendar className="w-3.5 h-3.5 shrink-0 text-amber-500" />
+                        <div><div className="font-medium">Custom Market News</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick date range · limited by Finnhub /news history depth</div></div>
                       </button>
                     </div>
                   </div>
@@ -1008,6 +1037,7 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
               ? 'Extracting...'
               : lastFtSourceType === 'company_news' ? 'FT Co.'
               : lastFtSourceType === 'press_release' ? 'FT PR'
+              : lastFtSourceType === 'market_news' ? 'FT Mkt.'
               : 'Full Text';
 
             return (
@@ -1017,7 +1047,7 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
                   onClick={() => handleFulltextUpdate(lastFtSourceType)}
                   disabled={updating || ftUpdating}
                   className="px-3 py-1.5 border border-r-0 border-gray-300 dark:border-gray-600 rounded-l hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 text-xs disabled:opacity-50"
-                  title={`Extract full text (${lastFtSourceType === 'all' ? 'All' : lastFtSourceType === 'company_news' ? 'Company News' : 'Press Release'})`}
+                  title={`Extract full text (${getSourceTypeLabel(lastFtSourceType)})`}
                 >
                   <FileText className={`w-3.5 h-3.5 text-orange-500 ${ftUpdating ? 'animate-pulse' : ''}`} />
                   <span>{ftLabel}</span>
@@ -1037,7 +1067,7 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
                     <div className="p-1.5">
                       <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('all'); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <FileText className="w-3.5 h-3.5 shrink-0 text-orange-500" />
-                        <div><div className="font-medium">Full Text (All)</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Company News + Press Releases</div></div>
+                        <div><div className="font-medium">Full Text (All)</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Company + Press + Market News</div></div>
                       </button>
                       <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('company_news'); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <FileText className="w-3.5 h-3.5 shrink-0 text-blue-500" />
@@ -1046,6 +1076,10 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
                       <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('press_release'); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <FileText className="w-3.5 h-3.5 shrink-0 text-green-500" />
                         <div><div className="font-medium">Press Release Only</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Extract for press_release items</div></div>
+                      </button>
+                      <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('market_news'); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <FileText className="w-3.5 h-3.5 shrink-0 text-amber-500" />
+                        <div><div className="font-medium">Market News Only</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Attempt extraction for market_news items</div></div>
                       </button>
                     </div>
                   </div>

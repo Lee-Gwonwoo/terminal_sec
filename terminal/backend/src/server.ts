@@ -24,6 +24,8 @@ import { readTickersFromCsv, appendTickerToCsv, CsvServiceError } from "./servic
 import {
   fetchCompanyNewsRaw,
   fetchPressReleasesRaw,
+  pullMarketNews,
+  pullMarketNewsBackfill,
   pullCompanyNewsBackfill,
   pullPressReleasesBackfill,
   getTickersWithNews,
@@ -150,8 +152,8 @@ const pullFinnhubSchema = z.object({
   /** 0 or omitted = all tickers in CSV (no cap) */
   maxTickers: z.number().int().min(0).optional().default(0),
   mode: z.enum(["7d", "recent", "custom"]).optional().default("7d"),
-  /** Which data types to pull. "all" = both, "company_news" = only company news, "press_release" = only press releases */
-  sourceType: z.enum(["all", "company_news", "press_release"]).optional().default("all"),
+  /** Which data types to pull. "market_news" = Finnhub /news general market headlines */
+  sourceType: z.enum(["all", "company_news", "press_release", "market_news"]).optional().default("all"),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
@@ -194,6 +196,10 @@ async function insertFetchedItems(
 app.get("/api/news/pull-finhub/preflight", async (req, res, next) => {
   try {
     const sourceType = (req.query.sourceType as string) || "all";
+    if (sourceType === "market_news") {
+      res.json({ totalTickers: 0, fallbackCount: 0, fallbackTickers: [] });
+      return;
+    }
     const csvPath = (req.query.csvPath as string) || DEFAULT_TICKERS_CSV;
 
     let tickerList: string[];
@@ -230,6 +236,7 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
     const isRecent = input.mode === "recent";
     const pullCompany = input.sourceType === "all" || input.sourceType === "company_news";
     const pullPress = input.sourceType === "all" || input.sourceType === "press_release";
+    const pullMarket = input.sourceType === "all" || input.sourceType === "market_news";
 
     // Compute effective date range
     let effectiveFrom = input.from;
@@ -257,6 +264,9 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
     } catch {
       tickerList = ["AAPL", "MSFT", "TSLA", "NVDA", "AMD"];
     }
+    if (!pullCompany && !pullPress) {
+      tickerList = [];
+    }
     console.log(`[pull-finhub] mode=${input.mode} sourceType=${input.sourceType} maxTickers=${input.maxTickers} → tickerList.length=${tickerList.length}`);
 
     // For recent mode, load per-ticker anchor maps
@@ -268,7 +278,7 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
     }
 
     // ── Create background job and return immediately ──
-    const jobId = createJob(tickerList.length);
+    const jobId = createJob(Math.max(tickerList.length + (pullMarket ? 1 : 0), 1));
     appendLog(jobId, `Starting ${input.mode}/${input.sourceType} pull for ${tickerList.length} tickers`);
 
     if (isRecent) {
@@ -292,6 +302,7 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
       const detailsPerType: Record<string, { fetched: number; inserted: number }> = {
         company_news: { fetched: 0, inserted: 0 },
         press_release: { fetched: 0, inserted: 0 },
+        market_news: { fetched: 0, inserted: 0 },
       };
 
       try {
@@ -352,6 +363,21 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
 
           // Small delay between tickers to respect rate limits
           await new Promise((r) => setTimeout(r, 250));
+        }
+
+        if (pullMarket) {
+          appendLog(jobId, `[market] Processing market news...`);
+          try {
+            const marketItems = isRecent
+              ? await pullMarketNews()
+              : await pullMarketNewsBackfill(effectiveFrom!, effectiveTo);
+            await insertFetchedItems(marketItems, detailsPerType.market_news, newItems, counters);
+            appendLog(jobId, `  market_news: ${marketItems.length} fetched, ${detailsPerType.market_news.inserted} inserted so far`);
+          } catch (err: any) {
+            console.error(`[pull-finhub] market_news: ${err.message}`);
+            appendLog(jobId, `  ⚠ market_news: ${err.message}`);
+          }
+          updateProgress(jobId, tickerList.length + 1);
         }
 
         // Merge change% for newly inserted items

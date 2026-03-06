@@ -234,12 +234,14 @@ Notes:
 - `mode` is optional: `recent | entire`.
   - `recent` = incremental pull. If data exists, resume from the last stored date for that `sourceType`; otherwise use the last 7 days.
   - `entire` = adaptive backfill from 5 years ago by default (unless explicit `from` is provided).
-- `sourceType` is optional: `all | company_news | press_release`.
+- `sourceType` is optional: `all | company_news | press_release | market_news`.
+- `market_news` uses Finnhub `/news?category=general` and is not ticker-scoped.
 - If reading the CSV fails, the server uses a small hard-coded ticker list fallback (AAPL/MSFT/TSLA/NVDA/AMD).
 - Entire mode uses adaptive date-range splitting to bypass Finnhub's per-request cap (~200 items).
 - Dedupe is DB-level: `UNIQUE(source,url)` + `INSERT OR IGNORE`.
 - The server logs the resolved scope at startup of a pull: `maxTickers=... → tickerList.length=...`.
 - Inserted items are published to SSE (`GET /api/news/stream`).
+- `market_news` pages older headlines through Finnhub `minId`, so reachable history is limited by the upstream `/news` endpoint rather than ticker date parameters.
 
 Response:
 ```json
@@ -253,7 +255,8 @@ Response:
   "changeMerged": 0,
   "details": {
     "company_news": { "fetched": 41, "inserted": 41 },
-    "press_release": { "fetched": 1, "inserted": 1 }
+    "press_release": { "fetched": 1, "inserted": 1 },
+    "market_news": { "fetched": 100, "inserted": 100 }
   }
 }
 ```
@@ -550,12 +553,14 @@ EODHD 적재 요청이면 아래도 명시해 주세요.
 - `mode`는 옵션: `recent | entire`.
   - `recent` = 증분 수집. 해당 `sourceType` 데이터가 이미 있으면 마지막 저장 날짜부터 재개하고, 없으면 최근 7일을 사용합니다.
   - `entire` = 기본적으로 5년 전부터 adaptive backfill을 수행합니다(`from` 명시 시 그 값을 우선).
-- `sourceType`는 옵션: `all | company_news | press_release`.
+- `sourceType`는 옵션: `all | company_news | press_release | market_news`.
+- `market_news`는 Finnhub `/news?category=general`을 사용하며 ticker 범위와 무관한 일반 시장 헤드라인입니다.
 - CSV 읽기에 실패하면 서버는 작은 하드코딩 티커 목록(AAPL/MSFT/TSLA/NVDA/AMD)을 fallback으로 사용합니다.
 - entire 모드는 Finnhub의 요청당 cap(~200건)를 우회하기 위해 adaptive date-range splitting을 사용합니다.
 - dedupe는 DB 레벨: `UNIQUE(source,url)` + `INSERT OR IGNORE`.
 - pull 시작 시 서버 로그에 실제 범위가 출력됩니다: `maxTickers=... → tickerList.length=...`.
 - 새로 insert된 아이템은 SSE(`GET /api/news/stream`)로 publish됩니다.
+- `market_news`는 Finnhub `minId` 페이지네이션으로 더 오래된 헤드라인을 따라가므로, 실제 도달 가능한 히스토리는 upstream `/news` 엔드포인트 보유 범위에 제한됩니다.
 
 응답:
 ```json
@@ -569,7 +574,8 @@ EODHD 적재 요청이면 아래도 명시해 주세요.
   "changeMerged": 0,
   "details": {
     "company_news": { "fetched": 41, "inserted": 41 },
-    "press_release": { "fetched": 1, "inserted": 1 }
+    "press_release": { "fetched": 1, "inserted": 1 },
+    "market_news": { "fetched": 100, "inserted": 100 }
   }
 }
 ```

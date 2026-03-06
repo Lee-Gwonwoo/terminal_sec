@@ -98,11 +98,11 @@ File: `src/app/components/FinnhubNewsWindow.tsx`
 Responsibilities:
 - Fetch persisted Finnhub items from SQLite:
   - `GET /api/news?source_names=FINNHUB&limit=200`
-- Filter by source type (company news vs press release):
-  - Uses `source_type=company_news|press_release`.
+- Filter by source type (company news vs press release vs market news):
+  - Uses `source_type=company_news|press_release|market_news`.
 - Trigger backend ingestion:
   - Main Update button sends `POST /api/news/pull-finhub` with `{ mode: 'recent', sourceType: 'all' }`, then refreshes.
-  - Split-dropdown offers 6 options: All/Company/Press × Recent/Entire.
+  - Split-dropdown offers source-type specific actions for `all`, `company_news`, `press_release`, and `market_news` across `7d`, `recent`, and `custom` modes.
 
 Current window behavior:
 - Dedicated `Ticker` column between Date and Time.
@@ -145,6 +145,7 @@ Backend security constraints (important):
 
 ### Read news
 - `GET /api/news?source_names=FINNHUB&source_type=press_release&limit=200`
+- `GET /api/news?source_names=FINNHUB&source_type=market_news&limit=200`
 
 ### Ingest Finnhub news
 - `POST /api/news/pull-finhub`
@@ -266,11 +267,11 @@ npm run dev
 책임:
 - SQLite에 저장된 Finnhub 아이템을 백엔드에서 조회:
   - `GET /api/news?source_names=FINNHUB&limit=200`
-- source_type별 필터(company news / press release):
-  - `source_type=company_news|press_release`
+- source_type별 필터(company news / press release / market news):
+  - `source_type=company_news|press_release|market_news`
 - 백엔드 적재 트리거:
   - 메인 Update 버튼은 `{ mode: 'recent', sourceType: 'all' }`로 `POST /api/news/pull-finhub` 호출 후 refresh
-  - split-dropdown에서 All/Company/Press × Recent/Entire = 6개 옵션 제공
+  - split-dropdown에서 `all`, `company_news`, `press_release`, `market_news` 각각에 대해 `7d`, `recent`, `custom` 옵션 제공
 
 현재 윈도우 동작:
 - Date와 Time 사이에 전용 `Ticker` 컬럼이 있습니다.
@@ -311,6 +312,7 @@ Change% 표시:
 
 ### 뉴스 조회
 - `GET /api/news?source_names=FINNHUB&source_type=press_release&limit=200`
+- `GET /api/news?source_names=FINNHUB&source_type=market_news&limit=200`
 
 ### Finnhub 뉴스 적재
 - `POST /api/news/pull-finhub`

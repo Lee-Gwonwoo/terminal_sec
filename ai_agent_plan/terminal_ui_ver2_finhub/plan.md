@@ -23,6 +23,7 @@
   - News Feed Window 표 컬럼에 `Industry`와 `Keywords`를 추가한다.
   - `Industry`는 Finnhub company profile 계열 데이터에서 온 값으로 표시한다.
   - `Keywords`는 `news_fulltext` 저장 위치 옆 컬럼에 저장된 후속 AI keyword 분석 결과를 표시한다.
+  - News source 메뉴는 `company_news`, `press_release`, `market news`를 각각 선택 가능해야 한다.
 5) **장시간 업데이트 UX** — 모든 장시간 수집 작업(Finnhub 뉴스, IBKR 가격, IBKR 캘린더)은 **백그라운드 잡**으로 실행하고, 각 창에 **View Log** 버튼을 배치하여 진행률/로그를 확인할 수 있게 한다. **시작 시 로그 창 자동 오픈 금지** — 사용자가 View Log 버튼을 눌러야만 열린다.
 6) **Full Text Extraction(뉴스 원문 추출)** — 뉴스 피드 업데이트와 **별도 버튼/프로세스**로, 저장된 뉴스의 원본 기사를 크롤링하여 full text를 추출/저장한다.
    - 대상: full text가 아직 없는 **모든 news_id** (press_release + company_news 구분 처리)
@@ -204,6 +205,17 @@ PLAN CHANGE (2026-03-06 #5)
   - 10단계 `news_fulltext` 스키마에 keyword 저장 컬럼 추가
   - 10단계에 "키워드 분석은 후속 AI enrichment 작업"이라는 비범위/후속 규칙 명시
 - 영향: UI는 `Keywords` 컬럼을 가지되, 실제 값은 full text 추출 이후의 별도 AI 분석이 완료되어야만 채워진다. 초기 상태는 빈 값/`-` 또는 pending 상태다.
+```
+
+```
+PLAN CHANGE (2026-03-06 #6)
+- 왜: 사용자가 Finnhub `/news` 일반 시장 헤드라인도 `press_release`, `company_news`와 같은 급의 새 타입으로 메뉴에 추가하고, update도 같은 방식으로 붙이라고 요청함. 표기 이름은 `market news`.
+- 무엇이 바뀌었나:
+  - Finnhub source type에 `market_news` 추가
+  - News Feed Window source filter에 `Market News` 버튼 추가
+  - Update split-dropdown에 `7d/recent/custom × market news` 옵션 추가
+  - Full Text Update sourceType 메뉴에도 `market_news` 추가
+- 영향: `market_news`는 ticker 기반이 아니라 Finnhub `/news?category=general` + `minId` 페이징 기반으로 수집한다. 따라서 custom/recent는 UI는 같지만, 서버 내부 구현은 stored timestamp + page cutoff 방식으로 동작한다.
 ```
 ---
 
@@ -860,7 +872,8 @@ UI 동작(최소/명확)
 - 두 종류의 데이터는 `source_type`으로 구분하여 **별도 저장**한다:
   - `source_type = 'company_news'` — Finnhub `/company-news` 엔드포인트
   - `source_type = 'press_release'` — Finnhub `/press-releases` 엔드포인트
-- 프론트는 `GET /api/news?source_names=FINNHUB`(전체) 또는 `&source_type=company_news`/`press_release`(필터)로 조회한다.
+-  - `source_type = 'market_news'` — Finnhub `/news?category=general` 엔드포인트
+- 프론트는 `GET /api/news?source_names=FINNHUB`(전체) 또는 `&source_type=company_news`/`press_release`/`market_news`(필터)로 조회한다.
 - 수집된 각 뉴스 row에 대해, 해당 날짜+티커의 OHLC 데이터가 이미 DB에 있으면 change% 컬럼을 즉시 병합한다.
 
 시크릿 처리
@@ -893,11 +906,12 @@ change 저장 구조(`news_change_metrics`)
   3. **8단계(Data Control Window)**: `7D Change Update`와 `Custom Change Update`로 선택적 재계산 실행.
 
 API 계약(초안)
-- `POST /api/news/pull-finhub` — company news + press release를 모두 수집하고 요약을 반환:
-  - `{ inserted: <n>, skipped: <n>, source: "FINNHUB", details: { company_news: { inserted, skipped }, press_release: { inserted, skipped } } }`
+- `POST /api/news/pull-finhub` — `company_news`, `press_release`, `market_news`를 선택적으로 수집하고 요약을 반환:
+  - `{ inserted: <n>, skipped: <n>, source: "FINNHUB", details: { company_news: { inserted, skipped }, press_release: { inserted, skipped }, market_news: { inserted, skipped } } }`
 - `GET /api/news?source_names=FINNHUB` — 전체 Finnhub 뉴스 조회
 - `GET /api/news?source_names=FINNHUB&source_type=company_news` — company news만 조회
 - `GET /api/news?source_names=FINNHUB&source_type=press_release` — press release만 조회
+- `GET /api/news?source_names=FINNHUB&source_type=market_news` — market news만 조회
 
 백엔드 파일:
 - `terminal/backend/src/config.ts`
@@ -907,6 +921,9 @@ API 계약(초안)
     - `source = 'FINNHUB'`, `source_type = 'company_news'`
   - **press release**: Finnhub `/press-releases?symbol=X&from=...&to=...` 호출 → `insertNewsItem()`에 매핑
     - `source = 'FINNHUB'`, `source_type = 'press_release'`
+  - **market news**: Finnhub `/news?category=general&minId=...` 호출 → `insertNewsItem()`에 매핑
+    - `source = 'FINNHUB'`, `source_type = 'market_news'`
+    - ticker 범위와 무관하며, `minId` 페이지네이션으로 더 오래된 헤드라인을 추적
   - 각 타입별 `MAX(published_at)` 조회 → 증분 수집 구현
 - 서비스 `terminal/backend/src/services/newsChangeMerger.ts` 추가
   - 뉴스 row의 `(ticker, published_at 날짜)` 기준으로 OHLC DB에서 해당 날짜의 change 데이터를 조회/계산
@@ -914,12 +931,12 @@ API 계약(초안)
   - 4단계 인제션 시(새 뉴스 insert 후)와 7단계 OHLC 업데이트 후(backfill) 양쪽에서 호출
 - `terminal/backend/src/server.ts`
   - `POST /api/news/pull-finhub` 추가(EODHD와 유사한 형태)
-  - company_news + press_release 모두 수집 후 표준 change metric upsert 시도
+  - company_news + press_release + market_news를 sourceType에 따라 수집 후 표준 change metric upsert 시도
   - 성공 시 `update_status`의 `finhub_news` 갱신
 
 검증
 - 인제션 후 `GET /api/news?source_names=FINNHUB`로 조회 가능
-- `source_type` 필터로 company_news / press_release를 각각 조회 가능
+- `source_type` 필터로 company_news / press_release / market_news를 각각 조회 가능
 - OHLC 데이터가 있는 날짜의 뉴스 row에 대응하는 `news_change_metrics` row가 생기고, `GET /api/news`에서는 change 값이 병합되어 보임
 
 **세부 단계 (4단계)**
@@ -929,11 +946,12 @@ API 계약(초안)
 | 4-2 | `news_change_metrics` 테이블 마이그레이션 | `terminal/backend/src/db.ts` | `sqlite_master`에 테이블 존재, PK=`(news_id, metric_key)` 확인 | ⏳ |
 | 4-3 | Finnhub company news provider 구현 | `terminal/backend/src/services/finnhubNewsProvider.ts` | `/company-news` 매핑 결과가 `news_items` 스키마에 맞고 `source_type='company_news'` | ✅ |
 | 4-4 | Finnhub press release provider 구현 | `terminal/backend/src/services/finnhubNewsProvider.ts` | `/press-releases` 매핑 결과가 `news_items` 스키마에 맞고 `source_type='press_release'` | ✅ |
+| 4-4a | Finnhub market news provider 구현 | `terminal/backend/src/services/finnhubNewsProvider.ts` | `/news?category=general` 매핑 결과가 `news_items` 스키마에 맞고 `source_type='market_news'` | ⏳ |
 | 4-5 | `GET /api/news` source_type 필터 파라미터 지원 | `server.ts`, `newsRepository.ts` | `?source_type=company_news`로 해당 type만 반환 | ✅ |
 | 4-6 | `newsChangeMerger` 서비스 구현 | `terminal/backend/src/services/newsChangeMerger.ts` | 뉴스 row 기준으로 `news_change_metrics` 표준 row upsert | ⏳ |
 | 4-7 | `POST /api/news/pull-finhub` 구현(양쪽 수집 + change upsert) | `terminal/backend/src/server.ts` | `{inserted, skipped, source, details}` 반환 + change upsert count 포함 | ⏳ |
 | 4-8 | 성공 시 `update_status(finhub_news)` 갱신 | `updateStatusRepository` | `GET /api/updates/status`에서 lastSuccessAt 업데이트 | ✅ |
-| 4-9 | 적재 데이터 조회 + source_type 필터 + change 검증 | (런타임) | `GET /api/news?source_names=FINNHUB&source_type=company_news` rows 확인, change 값 병합 확인 | ⏳ |
+| 4-9 | 적재 데이터 조회 + source_type 필터 + change 검증 | (런타임) | `GET /api/news?source_names=FINNHUB&source_type=company_news|press_release|market_news` rows 확인, change 값 병합 확인 | ⏳ |
 
 **세부 단계 목적/설명 (4단계)**
 - `4-1` 목적: Finnhub 키를 안전하게 로드. 설명:
@@ -968,10 +986,19 @@ API 계약(초안)
   - 완료 조건(눈으로 확인): `GET /api/news?source_names=FINNHUB&source_type=press_release`에서 rows가 나온다.
   - 사람 검증(비개발자): (5단계 이후) News 창 필터에서 "Press Release"를 선택하면 별도의 보도자료가 보인다.
   - 흔한 문제/주의: press release URL 구조가 company-news와 달라 dedup key 충돌; 빈 press release가 생기는 경우 처리.
+- `4-4a` 목적: Finnhub **market news** 응답을 DB 스키마로 변환. 설명:
+  - Finnhub `/news?category=general` 호출을 수행한다.
+  - `source='FINNHUB'`, `source_type='market_news'`로 매핑한다.
+  - `market_news`는 symbol 파라미터가 없으므로 ticker CSV를 돌지 않고, `minId` 기반으로 더 오래된 헤드라인을 순차 조회한다.
+  - `related`가 비어 있는 경우가 많으므로 `tickers=[]` row를 허용한다.
+  - 완료 조건(눈으로 확인): `GET /api/news?source_names=FINNHUB&source_type=market_news`에서 rows가 나온다.
+  - 사람 검증(비개발자): (5단계 이후) News 창 필터에서 "Market News"를 선택하면 CNBC/MarketWatch/Bloomberg 등의 일반 시장 기사들이 보인다.
+  - 흔한 문제/주의: 날짜 파라미터가 없으므로 custom/recent 의미를 company_news와 동일하게 구현하려고 하면 안 됨; `minId` 중복 페이지 처리 필요.
 - `4-5` 목적: `GET /api/news` API에 `source_type` 필터 파라미터를 추가. 설명:
   - `newsRepository.ts`의 조회 쿼리에 `source_type` 조건을 추가한다.
   - `GET /api/news?source_names=FINNHUB&source_type=company_news` → company_news만 반환.
   - `GET /api/news?source_names=FINNHUB&source_type=press_release` → press_release만 반환.
+  - `GET /api/news?source_names=FINNHUB&source_type=market_news` → market_news만 반환.
   - `source_type` 파라미터가 없으면 기존과 동일(모든 type 반환).
   - 완료 조건(눈으로 확인): 각 source_type 필터가 정확히 해당 type의 row만 반환.
   - 사람 검증(비개발자): curl로 source_type 유/무 2가지를 호출해 결과 개수가 다른지 확인.
@@ -990,12 +1017,13 @@ API 계약(초안)
   - `POST /api/news/pull-finhub`:
     1. Default Ticker CSV에서 티커 로드
     2. 각 티커에 대해 `pullCompanyNews()` + `pullPressReleases()` 호출 (증분 수집)
-    3. insert 결과를 source_type별로 집계
-    4. 새로 삽입된 뉴스 row에 대해 `newsChangeMerger`로 표준 metric upsert 시도
-    5. 요약 반환: `{ inserted, skipped, source: "FINNHUB", details: { company_news: {..}, press_release: {..}, changeUpserted: <n> } }`
+    3. `sourceType`에 `market_news`가 포함되면 별도로 `pullMarketNews()` 호출
+    4. insert 결과를 source_type별로 집계
+    5. 새로 삽입된 뉴스 row에 대해 `newsChangeMerger`로 표준 metric upsert 시도
+    6. 요약 반환: `{ inserted, skipped, source: "FINNHUB", details: { company_news: {..}, press_release: {..}, market_news: {..}, changeUpserted: <n> } }`
   - startup 자동 실행은 하지 않는다(명시적 트리거만).
   - 완료 조건(눈으로 확인): POST 호출이 합리적인 시간 내에 끝나고 요약 JSON을 반환한다.
-  - 사람 검증(비개발자): Update 버튼 클릭 후 company_news + press_release 수치가 양쪽 모두 0 이상인지 확인.
+  - 사람 검증(비개발자): Update 버튼 클릭 후 company_news + press_release + market_news 수치가 기대대로 갱신되는지 확인.
   - 흔한 문제/주의: 한쪽 endpoint 실패 시 전체 실패로 처리할지 부분 성공으로 처리할지 정책 필요; 티커가 많으면 rate limit.
 - `4-8` 목적: "마지막 성공 시각"을 기록. 설명:
   - 성공 시 `update_status(finhub_news).lastSuccessAt = now()`를 저장한다.
@@ -1089,13 +1117,13 @@ API 계약(초안)
 | 5-6 | AddTab 라벨을 정확히 `news feed:finhub api`로 변경 | `src/app/components/AddTabModal.tsx` | UI에 Brave 표기 없음 | ✅ |
 | 5-7 | `App.tsx` title 매핑 추가/수정 | `src/app/App.tsx` | `finhub-news` → `news feed:finhub api` | ✅ |
 | 5-8 | `DraggableWindow.tsx` 렌더 스위치 연결 | `src/app/components/DraggableWindow.tsx` | `finhub-news`가 `FinnhubNewsWindow`를 렌더 | ✅ |
-| 5-9 | source_type 필터 UI 구현 (Company News / Press Release 선택) | `FinnhubNewsWindow.tsx` | 필터 전환 시 해당 source_type만 표시, 둘 다 선택 시 전체 표시 | ✅ |
+| 5-9 | source_type 필터 UI 구현 (Company News / Press Release / Market News 선택) | `FinnhubNewsWindow.tsx` | 필터 전환 시 해당 source_type만 표시, `All` 선택 시 전체 표시 | ⏳ |
 | 5-10 | 서버사이드 키워드 검색(전체 DB 검색) | FinnhubNewsWindow.tsx | 검색어 입력 시 keyword 파라미터로 GET /api/news 호출, 백엔드가 전체 DB 필터링 | ✅ |
 | 5-11 | Update 버튼 툴팁(5초 hover 지연) | FinnhubNewsWindow.tsx | Update 버튼을 5초 hover하면 범위 설명 툴팁 노출 | ✅ |
 | 5-12 | Ticker 전용 컬럼 추가 | FinnhubNewsWindow.tsx | Date와 Time 사이에 Ticker 컬럼이 표시되고, 클릭 시 검색창 ticker 필터 동작 | ✅ |
 | 5-13 | 컬럼 가시성 토글(show/hide columns) | FinnhubNewsWindow.tsx | Columns 버튼 클릭 → 체크박스 드롭다운으로 컬럼 표시/숨김 전환 | ✅ |
 | 5-14 | 백엔드 "entire" 모드 — adaptive date-splitting backfill | server.ts, finnhubNewsProvider.ts | `POST /api/news/pull-finhub { mode: "entire" }` → 5년 범위 adaptive 분할 수집, cap 우회, 중복 없음 | ✅ |
-| 5-15 | Update 버튼 → split-dropdown (6개 옵션: sourceType별 × mode별) | FinnhubNewsWindow.tsx | 드롭다운에 All/Company/Press × Recent/Entire = 6개 메뉴 | ✅ |
+| 5-15 | Update 버튼 → split-dropdown (12개 옵션: sourceType별 × mode별) | FinnhubNewsWindow.tsx | 드롭다운에 All/Company/Press/Market × 7d/Recent/Custom 메뉴 | ⏳ |
 | 5-16 | Source 셀: 우클릭 Copy URL + 클릭 시 링크 열기 | FinnhubNewsWindow.tsx | Source 우클릭 → Copy URL → 클립보드 복사, Source 클릭 → 브라우저 새 탭으로 열림 | ✅ |
 | 5-17 | 백엔드 잡 큐 + `GET /api/jobs/:jobId` 폴링 엔드포인트 | `server.ts`, `jobManager.ts`(신규) | POST → `{ jobId }` 즉시 반환, GET 폴링 시 `{ status, progress, logs[] }` 응답 | ✅ |
 | 5-18 | View Log 버튼 + 로그 패널 UI(자동 오픈 금지) | `FinnhubNewsWindow.tsx` | Update 옆 View Log 클릭 → 진행률 바 + 실시간 로그 표시, 시작 시 자동 열림 없음 | ✅ |
@@ -1162,16 +1190,16 @@ API 계약(초안)
   - 완료 조건(눈으로 확인): 창을 열면 입력/목록/빈 상태 등 “내용 영역”이 보이고, 완전히 빈 프레임만 뜨지 않는다.
   - 사람 검증(비개발자): 빈 DB 상태에서도 빈 상태 UI가 보이고 에러/크래시가 없는지 확인.
   - 흔한 문제/주의: switch 연결 누락으로 창은 뜨지만 내용이 비어 있음.
-- `5-9` 목적: source_type 필터 UI를 구현하여 company news / press release를 선택적으로 표시. 설명:
-  - 창 상단(또는 툴바)에 "Company News" / "Press Release" 두 개의 토글/체크박스/버튼 그룹을 배치한다.
-  - **둘 다 선택**(기본 상태): `GET /api/news?source_names=FINNHUB` (source_type 파라미터 없이 요청) → 두 종류 모두 표시.
-  - **하나만 선택**: `GET /api/news?source_names=FINNHUB&source_type=company_news` 또는 `&source_type=press_release` → 선택된 종류만 표시.
+- `5-9` 목적: source_type 필터 UI를 구현하여 company news / press release / market news를 선택적으로 표시. 설명:
+  - 창 상단(또는 툴바)에 `All` / `Company News` / `Press Release` / `Market News` 버튼 그룹을 배치한다.
+  - **All 선택**(기본 상태): `GET /api/news?source_names=FINNHUB` (source_type 파라미터 없이 요청) → 세 종류 모두 표시.
+  - **하나만 선택**: `GET /api/news?source_names=FINNHUB&source_type=company_news` 또는 `&source_type=press_release` 또는 `&source_type=market_news` → 선택된 종류만 표시.
   - **Change% 컬럼 렌더**: 각 row의 `change_1d_pct`, `change_from_open_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct`를 해당 컬럼에 표시. NULL이면 `-`.
   - **Industry 컬럼 렌더**: 각 row의 `industry`를 표시. NULL이면 `-`.
   - **Keywords 컬럼 렌더**: 각 row의 `keywords`를 표시. 후속 AI keyword 분석 전이면 `-`.
   - 필터 전환 시 기존 데이터를 클리어하고 새 요청을 보낸다(stale 데이터 방지).
   - 완료 조건(눈으로 확인): 필터 UI가 보이고, 전환 시 목록이 해당 type에 맞게 바뀐다. Change% 컬럼에 실제 숫자(또는 `-`)가 표시된다.
-  - 사람 검증(비개발자): Company News만 선택 → press release가 안 보이는지 확인. 둘 다 선택 → 둘 다 보이는지 확인. Change% 값이 있는 row에서 숫자가 보이는지 확인.
+  - 사람 검증(비개발자): Market News만 선택 → 일반 시장 기사만 보이는지 확인. All 선택 → 세 종류가 함께 보이는지 확인. Change% 값이 있는 row에서 숫자가 보이는지 확인.
   - 흔한 문제/주의: 필터 state와 API 파라미터 불일치; 필터 전환 시 이전 응답이 잠깐 보이는 깜빡임; Change% 컬럼 필드명과 백엔드 응답 키 불일치.
 
 - `5-10` 목적: 검색을 서버사이드로 전환하여 전체 DB에서 검색되도록 한다. 설명:
@@ -1212,10 +1240,10 @@ API 계약(초안)
     - 요청 결과가 `CAP_THRESHOLD`(190건) 이상이면 기간을 반으로 분할하여 재귀 호출.
     - 각 leaf window가 cap 미만일 때까지 반복 → 누락 방지.
     - 최소 window = 1일 (`MIN_WINDOW_DAYS`). 1일에서도 cap에 닿으면 경고 로그 출력 후 해당 구간은 그대로 반환.
-  - `pullCompanyNewsBackfill()` / `pullPressReleasesBackfill()` — entire 모드 전용 export 함수.
-  - `POST /api/news/pull-finhub` 스키마에 `sourceType: z.enum(["all", "company_news", "press_release"]).optional().default("all")` 추가.
-  - `mode === "entire"` 시 `effectiveFrom` = 5년 전(adaptive splitting이 cap을 우회하므로 1년 제한이 아님).
-  - `mode === "recent"`(기본)은 기존 동작(7일 lookback) 그대로 유지.
+  - `pullCompanyNewsBackfill()` / `pullPressReleasesBackfill()` / `pullMarketNewsBackfill()` — custom 범위 조회에 사용.
+  - `POST /api/news/pull-finhub` 스키마에 `sourceType: z.enum(["all", "company_news", "press_release", "market_news"]).optional().default("all")` 추가.
+  - `mode === "custom"` 시 사용자가 선택한 `from`/`to`를 기준으로 adaptive backfill 또는 page cutoff를 수행한다.
+  - `mode === "recent"`는 마지막 저장 지점 이후 증분 수집, `mode === "7d"`는 최근 7일 기준 수집이다.
   - **티커 범위**: `maxTickers` 기본값 = 0 → **CSV 전체 티커**(인위적 제한 없음). 0이 아닌 값을 전달하면 해당 수만큼만 제한 가능.
   - `MAX_RETRIES` 3 → 10으로 상향 (재시도 정책 준수).
   - 중복 방지는 기존 DB `UNIQUE (source, url)` + `INSERT OR IGNORE`로 처리.
@@ -1223,28 +1251,35 @@ API 계약(초안)
   - 완료 조건(눈으로 확인): `POST /api/news/pull-finhub { mode: "entire", sourceType: "company_news" }` → 콘솔에 `[backfill] company_news AAPL ... splitting…` 로그가 보이며, DB에 과거 데이터가 저장됨.
   - 흔한 문제/주의: adaptive splitting으로 API 호출 횟수가 증가하므로 rate limit(60 calls/min) 주의; 분할 간 300ms sleep 삽입; 빈 구간은 빈 배열 반환.
   - 변경 파일: `terminal/backend/src/services/finnhubNewsProvider.ts`, `terminal/backend/src/server.ts`.
-- `5-15` 목적: Update 버튼을 split-dropdown으로 변경하여 **6개 메뉴 옵션**(sourceType별 × mode별)을 제공한다. 설명:
+- `5-15` 목적: Update 버튼을 split-dropdown으로 변경하여 **12개 메뉴 옵션**(sourceType별 × mode별)을 제공한다. 설명:
   - 기존 단일 Update 버튼을 두 부분으로 분리:
-    - **좌측 버튼**: "Update" 텍스트 + Download 아이콘 → 클릭 시 `handleUpdate('recent', 'all')` (기존 동작과 동일, 7일 수집, 양쪽 다).
+    - **좌측 버튼**: 마지막 사용 조합을 다시 실행하는 버튼. 기본 초기값은 `handleUpdate('7d', 'all')`.
     - **우측 화살표 버튼**: ChevronDown 아이콘 → 클릭 시 드롭다운 메뉴 표시.
-  - `handleUpdate(mode, sourceType)` 시그니처 확장: `mode: 'recent' | 'entire'`, `sourceType: 'all' | 'company_news' | 'press_release'`.
+  - `handleUpdate(mode, sourceType)` 시그니처 확장: `mode: '7d' | 'recent' | 'custom'`, `sourceType: 'all' | 'company_news' | 'press_release' | 'market_news'`.
+  - `market_news`는 ticker loop가 아니라 Finnhub `/news` 일반 시장 헤드라인(`category=general`)을 `minId`로 뒤로 페이징해 저장한다.
   - 프론트엔드는 더 이상 `maxTickers`를 보내지 않으며, 백엔드 기본값 `0`이 적용되어 CSV 전체 티커를 대상으로 수집한다.
   - 드롭다운 메뉴는 3개 섹션으로 구분:
-    - **All Types 섹션**:
-      - Recent Update — Last 7 days · Company News + Press Releases
-      - Entire Update — Full backfill · Company News + Press Releases (slow)
-    - **Company News 섹션** (파란색 아이콘):
-      - Company Update — Last 7 days · Company News only
-      - Company Entire Update — Full backfill · Company News only (slow)
-    - **Press Releases 섹션** (초록색 아이콘):
-      - Press Release Update — Last 7 days · Press Releases only
-      - Press Release Entire Update — Full backfill · Press Releases only (slow)
-  - 각 Entire 옵션은 주황색 아이콘으로 구분.
+    - **7d Update 섹션**:
+      - 7d Update (All)
+      - 7d Company News
+      - 7d Press Release
+      - 7d Market News
+    - **Recent Update 섹션**:
+      - Recent Update (All)
+      - Recent Company News
+      - Recent Press Release
+      - Recent Market News
+    - **Custom Update 섹션**:
+      - Custom Update (All)
+      - Custom Company News
+      - Custom Press Release
+      - Custom Market News
+  - `market_news`의 custom/recent는 날짜 파라미터 직접 전달이 아니라 서버 내부 `minId` 페이지네이션 + `published_at` cutoff로 처리된다.
   - 수집 중(`updating === true`)에는 모든 버튼 disabled.
   - 5초 hover 시 지연 툴팁 유지(드롭다운 open 시에는 숨김). 툴팁 내용 업데이트: adaptive backfill 설명 포함.
   - 드롭다운 외부 클릭 시 자동 닫힘. `max-h-[400px] overflow-y-auto`로 스크롤 가능.
-  - 완료 조건(눈으로 확인): Update 우측 화살표 클릭 → 6개 메뉴가 3개 섹션으로 grouping되어 표시. Company Entire Update 클릭 → POST body에 `{mode:"entire", sourceType:"company_news"}` 확인.
-  - 사람 검증: 각 6개 옵션 클릭 → 네트워크 탭에서 mode/sourceType 조합이 올바른지 확인.
+  - 완료 조건(눈으로 확인): Update 우측 화살표 클릭 → 12개 메뉴가 3개 섹션으로 grouping되어 표시. Market News 옵션 클릭 → POST body에 `{mode:"recent", sourceType:"market_news"}` 또는 대응 조합이 보인다.
+  - 사람 검증: 각 sourceType 옵션 클릭 → 네트워크 탭에서 mode/sourceType 조합이 올바른지 확인.
   - 흔한 문제/주의: 드롭다운 z-index 부족으로 다른 요소에 가려짐; split 버튼 border 연결 부분 시각적 불일치; sourceType 파라미터가 fetch body에 빠지는 실수.
   - 변경 파일: `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`.
 
@@ -1849,7 +1884,7 @@ UI 동작(최소)
 
 추출 대상 결정 로직
 - `news_items`에서 `news_fulltext`에 해당 row가 없는 모든 news_id를 대상으로 한다.
-- press_release / company_news **모두** 대상이지만, 실제 추출 동작은 `publisher`(= URL 도메인)에 따라 다름:
+- press_release / company_news / market_news **모두** 대상이지만, 실제 추출 동작은 `publisher`(= URL 도메인)에 따라 다름:
   - `NASDAQ` → HTML fetch + article body parsing
   - `TMX` → URL에서 newsid 추출 → GraphQL API 호출
   - `FINNHUB` (finnhub.io) → skip (extraction_status = 'skipped')
@@ -1916,6 +1951,7 @@ API 계약(초안)
   - Nasdaq 뉴스의 full text가 `news_fulltext`에 저장됨
   - TMX 뉴스의 full text가 GraphQL API를 통해 저장됨
   - finnhub.io 뉴스는 `skipped`로 처리됨
+  - market news 외부 도메인 중 extractor 미지원 사이트는 `unavailable` 또는 `failed`로 기록되며, 지원 도메인만 저장됨
   - 키워드 컬럼은 후속 AI keyword 분석 완료 전까지 `-` 또는 pending으로 보임
   - UI에서 O/X 컬럼이 정확히 표시되고, O 클릭 시 본문이 팝업으로 나옴
 
@@ -2032,6 +2068,7 @@ API 계약(초안)
   - 흔한 문제/주의: sanitize 없이 `dangerouslySetInnerHTML` 사용 → XSS 위험; 대용량 HTML로 팝업 렌더 느림.
 - `10-13` 목적: Full Text Update 버튼으로 원문 추출을 트리거하고 진행률을 확인. 설명:
   - 툴바에 "Full Text Update" 버튼 배치. 기존 Update 드롭다운과 별도.
+  - sourceType 메뉴에 `market_news`도 포함한다. 다만 초기 extractor 지원 도메인이 제한되어 있어 많은 row가 `unavailable`/`skipped`일 수 있다.
   - 클릭 시 `POST /api/news/fulltext/update` → `{ jobId }`.
   - View Log 연동: 기존 View Log 패널을 재사용하여 진행률 바 + 로그 표시.
   - 잡 완료 후 뉴스 목록을 재조회하여 hasFullText 변경을 반영.
