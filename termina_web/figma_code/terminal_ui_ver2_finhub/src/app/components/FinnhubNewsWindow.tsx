@@ -169,8 +169,8 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
   }
   const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
 
-  // ─── Fetch news from backend ───
-  const fetchNews = useCallback(async () => {
+  // ─── Fetch news from backend (server-side search via keyword param) ───
+  const fetchNews = useCallback(async (keyword?: string) => {
     setLoading(true);
     setError(null);
     try {
@@ -178,6 +178,9 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
       params.set('source_names', 'FINNHUB');
       if (sourceTypeFilter !== 'all') {
         params.set('source_type', sourceTypeFilter);
+      }
+      if (keyword) {
+        params.set('keyword', keyword);
       }
       params.set('limit', '200');
 
@@ -198,8 +201,17 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
 
   // Initial load + refresh on filter change
   useEffect(() => {
-    fetchNews();
+    fetchNews(searchQuery || undefined);
   }, [fetchNews]);
+
+  // ─── Debounced server-side search (300ms) ───
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchNews(searchQuery || undefined);
+    }, 300);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery]);
 
   // ─── Update (pull from Finnhub) ───
   const handleUpdate = async () => {
@@ -217,7 +229,7 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
         return;
       }
       // Reload after pull
-      await fetchNews();
+      await fetchNews(searchQuery || undefined);
     } catch (err: any) {
       setError(err.message || 'Failed to update');
     } finally {
@@ -269,15 +281,9 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
     });
   };
 
-  // ─── Filter + Sort + Group ───
+  // ─── Sort + Group (search is now server-side) ───
   const groupedNews = useMemo(() => {
-    let filtered = newsData.filter(item => {
-      if (searchQuery && !item.title.toLowerCase().includes(searchQuery.toLowerCase())
-        && !item.ticker.toLowerCase().includes(searchQuery.toLowerCase())) {
-        return false;
-      }
-      return true;
-    });
+    let filtered = [...newsData];
 
     if (sort.column && sort.dir) {
       const col = sort.column;
@@ -303,7 +309,7 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
       items.forEach(item => result.push({ type: 'item', item }));
     });
     return result;
-  }, [newsData, searchQuery, sort, getSortValue]);
+  }, [newsData, sort, getSortValue]);
 
   // Reset list on data/mode/expand changes
   useEffect(() => {
@@ -532,19 +538,40 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
             ))}
           </div>
 
-          {/* Update button */}
-          <button
-            onClick={handleUpdate}
-            disabled={updating}
-            className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 disabled:opacity-50"
-            title="Pull latest news from Finnhub"
-          >
-            <Download className={`w-3.5 h-3.5 ${updating ? 'animate-bounce' : ''}`} />
-            <span className="text-xs">{updating ? 'Pulling...' : 'Update'}</span>
-          </button>
+          {/* Update button with delayed tooltip */}
+          {(() => {
+            const [showUpdateTooltip, setShowUpdateTooltip] = React.useState(false);
+            const tooltipTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+            return (
+              <div className="relative"
+                onMouseEnter={() => {
+                  tooltipTimerRef.current = setTimeout(() => setShowUpdateTooltip(true), 5000);
+                }}
+                onMouseLeave={() => {
+                  if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+                  setShowUpdateTooltip(false);
+                }}
+              >
+                <button
+                  onClick={handleUpdate}
+                  disabled={updating}
+                  className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                  title="Pull latest news from Finnhub"
+                >
+                  <Download className={`w-3.5 h-3.5 ${updating ? 'animate-bounce' : ''}`} />
+                  <span className="text-xs">{updating ? 'Pulling...' : 'Update'}</span>
+                </button>
+                {showUpdateTooltip && (
+                  <div className="absolute top-full left-0 mt-1 z-50 w-72 p-2.5 bg-gray-900 text-white text-[11px] leading-relaxed rounded-lg shadow-lg">
+                    This update fetches news from the last 7 days up to today, without duplicates. If data already exists, it resumes from the last stored date. To retrieve news older than 7 days, use a separate manual update with custom date range parameters.
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Refresh button */}
-          <button onClick={fetchNews} disabled={loading} className="p-2 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors" title="Refresh from DB">
+          <button onClick={() => fetchNews(searchQuery || undefined)} disabled={loading} className="p-2 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors" title="Refresh from DB">
             <RotateCw className={`w-3.5 h-3.5 text-gray-600 dark:text-gray-400 ${loading ? 'animate-spin' : ''}`} />
           </button>
 

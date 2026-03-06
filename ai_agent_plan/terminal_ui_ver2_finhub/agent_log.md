@@ -518,3 +518,133 @@
 | 9 | 테스트 & Acceptance | ⬜ 미착수 |
 
 **다음 작업**: Step 6 (IBKR Calendar) 또는 Step 7 (IBKR OHLC) — TWS 실행 + Python ib_insync 연동 필요
+
+---
+
+## 2026-03-05
+
+### 문서 정비 — 백엔드/프론트 프롬프트 + repo-context
+
+**Status: done (awaiting user confirmation)**
+
+#### 수행 작업
+
+1. **`terminal/backend_prompt.md` 업데이트**
+   - Finnhub API 키 위치(env var + 파일 fallback + 실패 시 동작) 설명 추가
+   - 신규 엔드포인트 반영: `POST /api/news/pull-finhub`, `GET /api/tickers`, `POST /api/tickers/add`, `GET /api/updates/status`
+   - `news_items` 테이블 Change% 컬럼 (`change_1d_pct` 등) 설명 + `update_status` 테이블 known keys 설명
+   - `GET /api/news`의 `source_type` alias 지원 설명
+
+2. **`termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md` 신규 생성**
+   - EN/KO 병기, `---` 경계 1개
+   - 앱 구조(Tabs + DraggableWindow), 윈도우 타입 5개, 백엔드 API 계약, 기술 스택, 실행 방법 설명
+   - 하드코딩 API base URL 경고 포함
+
+3. **`.github/copilot-skills/repo-context.md` 업데이트**
+   - EN/KO 양쪽에 "Prompt/spec docs (authoritative)" / "프롬프트/스펙 문서(최신 기준)" 섹션 추가
+   - 백엔드: `terminal/backend_prompt.md`, 프론트: `figma_frontend_prompt.md` 경로 명시
+
+#### 검증
+- 파일 생성/수정 확인 완료
+- EN/KO 경계 분리 점검 완료 (내부 `---` 제거하여 경계용 1개만 남김)
+
+---
+
+### VS Code 태스크 수정 — 프론트엔드 폴더 오류
+
+**Status: done (user-confirmed)**
+
+#### 문제
+- VS Code 태스크 `webui: dev (npm.cmd)`의 cwd가 구버전 폴더 `terminal ui`를 가리키고 있어, 브라우저에서 구버전 프론트(Calendar/News/Watch List 3개만)가 표시됨
+
+#### 수행 작업
+- `.vscode/tasks.json`의 webui cwd를 `terminal_ui_ver2_finhub`로 변경
+
+#### 검증
+- `http://localhost:5174/`에서 5개 윈도우 항목(Calendar, News, News Feed: Finnhub API, Watch List, Default Ticker) 모두 표시 확인 → 사용자 스크린샷으로 확인됨
+
+---
+
+### Step 5-10 — 서버사이드 검색 전환
+
+**Status: done (awaiting user confirmation)**
+
+#### 문제
+- 기존: 백엔드에서 200건만 받아와 프론트 메모리 내 `.includes()` 필터 → 전체 DB가 아닌 200건 안에서만 검색됨
+
+#### 수행 작업
+
+1. **백엔드**: 수정 불필요 — `GET /api/news`에 `keyword` 파라미터가 이미 구현돼 있음 (SQL `WHERE LOWER(title || ' ' || body) LIKE '%keyword%'`)
+
+2. **프론트엔드 `FinnhubNewsWindow.tsx`**:
+   - `fetchNews(keyword?: string)` 시그니처 변경 → `keyword` 있으면 `params.set('keyword', keyword)` 전송
+   - 300ms 디바운스 `useEffect` 추가: `searchQuery` 변경 시 타이머 후 `fetchNews` 재호출
+   - `useMemo` 내 client-side 검색 필터(`.filter(item => ...)`) 제거
+   - Refresh 버튼 `onClick`을 래퍼 함수로 변경 (MouseEvent→keyword 타입 충돌 해소)
+
+3. **plan.md**: `5-10` 세부 단계 추가 + 검증 훅 6번 항목 추가
+
+4. **`figma_frontend_prompt.md`**: 검색 동작을 "서버사이드" 설명으로 업데이트 (EN/KO 양쪽)
+
+#### 수정 파일
+
+| 파일 | 변경 |
+|------|------|
+| `FinnhubNewsWindow.tsx` | fetchNews에 keyword param + 디바운스 + client-side 필터 제거 |
+| `plan.md` | 5-10 단계 추가 |
+| `figma_frontend_prompt.md` | 검색 동작 설명 (서버사이드) |
+
+#### 검증
+- 타입 에러 0건 확인
+- 검색창 입력 → 네트워크 탭에서 `keyword=...` 파라미터 전송 확인 필요
+
+---
+
+### Step 5-11 — Update 버튼 지연 툴팁 (5초 hover)
+
+**Status: done (awaiting user confirmation)**
+
+#### 수행 작업
+- `FinnhubNewsWindow.tsx`의 Update 버튼을 relative 컨테이너로 감싸고, IIFE 패턴으로 `useState`/`useRef` 사용
+- `onMouseEnter`시 5초 `setTimeout` → 툴팁 표시, `onMouseLeave`시 타이머 클리어 + 숨김
+- 툴팁 내용: "This update fetches news from the last 7 days up to today, without duplicates. If data already exists, it resumes from the last stored date. To retrieve news older than 7 days, use a separate manual update with custom date range parameters."
+- plan.md에 `5-11` 단계 + 검증 훅 7번 추가
+
+#### 수정 파일
+
+| 파일 | 변경 |
+|------|------|
+| `FinnhubNewsWindow.tsx` | Update 버튼 5초 hover 툴팁 추가 |
+| `plan.md` | 5-11 단계 + 검증 훅 7번 |
+
+#### 검증
+- 타입 에러 0건 확인
+- 브라우저에서 5초 hover 후 툴팁 표시 확인 필요
+
+---
+
+### planning.md 지침 보강 — plan/log 자동 동기화 규칙 4종 추가
+
+**Status: done (awaiting user confirmation)**
+
+#### 원인 분석
+- 기존 `planning.md`의 agent_log.md 트리거가 "사용자가 특정 plan을 수행하라고 지시할 때만"으로 너무 좁아, 중간 코드 수정(5-10, 5-11 등) 시 plan/log 자동 갱신이 누락됨
+- plan.md 동기화를 명시하는 규칙도 없었음
+- `copilot-instructions.md`의 "애매하면 사용자에게 질문" 규칙이 plan/log 영역에 명시적으로 연결되지 않았음
+
+#### 수행 작업 — `.github/copilot-skills/planning.md` 수정
+
+1. **EN 섹션**: `> ⚠️ EN section may be outdated` 배너 삽입 (Claude 규칙에 따라 KO만 갱신)
+2. **KO `agent_log.md` 트리거 문장 수정**: "사용자가 지시할 때만" → "채팅에서 plan이 논의·작업되고 있는 상태에서 코드 변경이 발생할 때마다"
+3. **KO에 `## plan/log 자동 동기화 규칙 (필수)` 블록 신설** (4개 규칙):
+   - **규칙 1 — plan.md 코드 변경 동기화 트리거**: 채팅에서 특정 plan이 논의 중이고 코드 수정 발생 시, 해당 plan.md에 세부 단계 추가/갱신. "다른 plan"이 아니라 현재 대화의 plan을 대상으로 함.
+   - **규칙 2 — agent_log.md 트리거 확대**: 기존 "사용자가 지시할 때만" 조건 삭제 → plan 컨텍스트 활성 시 코드 변경 자동 기록.
+   - **규칙 3 — 사후 체크리스트**: 코드 변경 완료 후 "작업 끝" 선언 전에 (a) plan.md 반영 여부, (b) agent_log.md 기록 여부 확인 필수.
+   - **규칙 4 — 사소해 보여도 애매하면 질문**: plan/log 기록 여부가 사소해 보이더라도 판단이 애매하면 즉시 `ask_questions`로 사용자에게 질문. 에이전트 독단으로 "사소하니 생략" 불가. `copilot-instructions.md`의 기존 "애매할 때 사용자에게 질문" 규칙을 plan/log에 명시적으로 확장 적용.
+
+#### 수정 파일
+
+| 파일 | 변경 |
+|------|------|
+| `.github/copilot-skills/planning.md` | EN 배너 + KO 트리거 문장 수정 + KO 신규 4규칙 블록 |
+| `agent_log.md` | 이 항목 기록 |

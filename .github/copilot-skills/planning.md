@@ -2,6 +2,8 @@
 
 ## EN
 
+> ⚠️ EN section may be outdated — KO section is the authoritative source.
+
 ### When to use
 - When the user explicitly asks for `plan.md`, a plan, or step-by-step execution.
 - When you need strict step gating (finish → verify → ask user confirmation) before proceeding.
@@ -188,7 +190,7 @@ When a plan has multiple major Steps (e.g., Step 0, Step 1, …, Step N), **each
   - `C:\github_coding\terminal_sec\ai_agent_plan\<project_name>\plan.md` 파일을 생성(단, 사용자가 ‘파일 변경 금지’를 명시한 경우 제외)
 - 사용자가 “실행하지 말고”(예: “실행하지 말고”)라고 말했을 때, 파일 작성까지 금지인지 애매하면 파일을 만들기/수정하기 전에 hook 질문 플로우(`ask_questions`)로 확인한다.
   - 기본 해석(사용자가 별도 명시하지 않는 한): “실행하지 말고” = 코드 실행 금지(테스트/서버/스크립트 실행 금지)이며, `plan.md` 작성/갱신은 허용.
-- `agent_log.md`는 **사용자가 특정 plan을 수행하라고 지시할 때만** 작성/업데이트.
+- `agent_log.md`는 **채팅에서 plan이 논의·작업되고 있는 상태에서 코드 변경이 발생할 때마다** 작성/업데이트한다. 기존의 "사용자가 특정 plan을 수행하라고 지시할 때만" 조건은 삭제 — plan 컨텍스트가 활성 상태이면 코드 변경 시점에 자동으로 기록한다.
 - **`agent_log.md` 언어 규칙(필수):** `agent_log.md`는 **한국어 단독**으로 작성한다. 영/한 병기 불필요 — 한국어만으로 충분.
 - 저장 위치: `C:\github_coding\terminal_sec\ai_agent_plan\<project_name>\`
   - `plan.md`: 작업 시작 전 상세 단계별 계획 (목표, 접근법, 생성/수정 파일, 순서, 위험 요소). **언어 규칙은 아래 `plan.md 작성 규칙` 참조.**
@@ -201,6 +203,31 @@ When a plan has multiple major Steps (e.g., Step 0, Step 1, …, Step N), **each
   - 해당 단계에 사용자 확인이 필요하면, 채팅에서 명확히 확인을 요청한다.
   - `agent_log.md`에서는 사용자 확인 전에는 “확인 대기”로 표시하고, 확인 후에만 “사용자 확인 후 완료”로 업데이트한다.
   - 문제점이 발견되면 로그에 기록하고, 다음 행동/선택지를 구체적으로 제안한다.
+
+## plan/log 자동 동기화 규칙 (필수)
+
+> ℹ️ 아래 규칙은 채팅에서 특정 plan.md가 논의/작업 대상인 상태에서 코드 수정이 발생할 때 적용됩니다.
+
+### 규칙 1 — plan.md 코드 변경 동기화 트리거
+- 채팅에서 특정 plan.md가 논의·작업 대상이 되고 있는 상태에서 코드 수정(기능 추가, 버그 수정, 리팩터링, UI 변경 등)이 발생하면:
+  - 해당 코드 변경에 대응하는 세부 단계를 **현재 채팅에서 논의 중인 plan.md**에 추가/업데이트한다.
+  - "다른 프로젝트의 plan"이 아니라, **현재 대화 컨텍스트에서 작업 중인 plan**을 대상으로 한다.
+  - 구현 **전** 또는 구현과 **동시에** plan.md를 갱신한다 — 구현 완료 후 plan 미반영 상태를 만들지 않는다.
+
+### 규칙 2 — agent_log.md 트리거 확대
+- 채팅에서 plan이 논의되고 있고 코드 변경이 발생하면, `agent_log.md`에도 해당 변경을 기록한다.
+- 기존 제한("사용자가 특정 plan을 수행하라고 지시할 때만")은 삭제됨 → plan 컨텍스트가 활성이면 코드 변경 시점에 자동으로 agent_log에 기록.
+
+### 규칙 3 — 사후 체크리스트 (작업 완료 선언 전 필수)
+코드 변경을 완료한 후 "작업 끝" 선언 전에 반드시 아래를 확인:
+  1. 현재 채팅에서 논의 중인 **plan.md**에 이번 변경이 반영되었는가?
+  2. **agent_log.md**에 이번 변경이 기록되었는가?
+- 하나라도 미완이면 완료 처리 전에 갱신한다.
+
+### 규칙 4 — 사소해 보여도 애매하면 질문
+- plan/log 기록 범위, 세부 단계 반영 여부, 기록 수준(간략 vs 상세) 등이 **사소해 보이더라도** 에이전트가 "이걸 기록해야 하나?", "plan에 넣어야 하나?" 등의 판단에 애매함을 느끼면 즉시 `ask_questions` 플로우를 사용하여 사용자에게 질문한다.
+- 에이전트가 독단으로 "사소하니 생략"이라고 결정하지 않는다.
+- 이 규칙은 `copilot-instructions.md`의 기존 "애매할 땐 사용자에게 질문" 규칙(`ask_questions` hook question flow)을 plan/log 영역에 명시적으로 확장 적용한 것임.
 
 ## 플랜 세부 단계 작성법
 plan에 여러 대단계(Step 0, Step 1, …, Step N)가 있을 때, **각 Step을 반드시 번호 매긴 세부 단계(sub-step)로 추가 분해**해야 합니다.

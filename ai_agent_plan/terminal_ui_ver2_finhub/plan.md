@@ -208,7 +208,9 @@ Non-engineer milestones (what you can visually confirm, and when)
 | “Changes %” has real computed numbers | Step 7 | Open News window and inspect “Changes %” cell | Values match OHLC-derived calculations; missing history shows blank/`null` |
 | Data Control Window buttons update timestamps | Step 8 (+ Step 6/7/IBKR configured) | Click `IBKR Price Data` / `IBKR Calendar Data` | “last successful update” updates on success; failures are shown clearly |
 
-#### Step 0 — Data availability audit (IBKR + Finnhub vs UI columns)
+> Legend (step status): ✅ Done · ⏳ Awaiting user · ⬜ Not started · 🚫 Blocked
+
+#### ⏳ Step 0 — Data availability audit (IBKR + Finnhub vs UI columns)
 Purpose (why this step exists)
 - This project’s UI tables imply specific fields (market cap, industry, earnings fields, analyst ratings, etc.). Before we implement UI or DB schemas, we must confirm which fields are actually obtainable from IBKR/Finnhub, and which can be computed from the existing 1D OHLC DB.
 - This is a **fail-fast guardrail**: if a required field is not available, we stop and decide rather than shipping “fake” placeholders.
@@ -297,7 +299,7 @@ Deliverables
 - Check: probe JSON files exist in `tmp/probes/` for Finnhub and IBKR (v1 + v2).
 - Gate: User must confirm the 2 pending decisions before Steps 6-7 can proceed.
 
-#### Step 1 — Foundations: update status storage + API
+#### ✅ Step 1 — Foundations: update status storage + API
 Purpose
 - Provide a persistent “last successful update” timestamp per data source (CSV tickers, Finnhub news, IBKR calendar, IBKR OHLC).
 - Enable the Data Control Window (Step 8) to display stable, restart-safe status.
@@ -387,7 +389,7 @@ Verification
 
 > **NOTE**: Sub-steps 1-1, 1-2 were pre-written during a process violation (before Step 0 confirmation). Code is in-place but needs formal verification as documented above. Sub-step 1-3 endpoint wiring is NOT yet done (only import was added).
 
-#### Step 2 — Default ticker CSV: read + append APIs (backend)
+#### ✅ Step 2 — Default ticker CSV: read + append APIs (backend)
 Purpose
 - The browser cannot directly read/write local files. Therefore the backend must own:
   - reading tickers from a CSV path
@@ -496,7 +498,7 @@ Verification
 ```
 - User confirmation needed: **Yes**
 
-#### Step 3 — Default Ticker Window (frontend)
+#### ✅ Step 3 — Default Ticker Window (frontend)
 Purpose
 - Provide a small UI to view and edit the “default ticker list” stored in a CSV file.
 - The window is just a thin client: it calls the backend APIs from Step 2.
@@ -594,7 +596,7 @@ Verification
 ```
 - User confirmation needed: **Yes**
 
-#### Step 4 — Finnhub ingestion (backend)
+#### ✅ Step 4 — Finnhub ingestion (backend)
 Purpose
 - Replace any Brave/mock news ingestion with a real provider: Finnhub.
 - Backend fetches news and stores it into the existing `news_items` table so the frontend can query it consistently.
@@ -685,7 +687,7 @@ Verification
 ```
 - User confirmation needed: **Yes**
 
-#### Step 5 — Migrate “News Feed: Brave API” → “news feed:finhub api” (frontend)
+#### ✅ Step 5 — Migrate “News Feed: Brave API” → “news feed:finhub api” (frontend)
 Purpose
 - Remove synthetic/mock “Brave News” UI and rewire it to the backend’s Finnhub-backed news.
 - Ensure the label is exactly `news feed:finhub api` and the UI no longer implies Brave is used.
@@ -803,7 +805,7 @@ Verification
 ```
 - User confirmation needed: **Yes**
 
-#### Step 6 — IBKR calendar ingestion (backend) + stop mock calendar generator
+#### ⬜ Step 6 — IBKR calendar ingestion (backend) + stop mock calendar generator
 Purpose
 - Enforce the product rule: `/calendar` must use **IBKR calendar data only**.
 - Stop the current mock generator so the DB does not keep filling with `mock_provider` rows.
@@ -902,7 +904,7 @@ Verification
 ```
 - User confirmation needed: **Yes**
 
-#### Step 7 — IBKR 1D OHLC ingestion into `ohlc_1d_watchlist.sqlite` (backend)
+#### ⬜ Step 7 — IBKR 1D OHLC ingestion into `ohlc_1d_watchlist.sqlite` (backend)
 Purpose
 - Implement “IBKR Price Data update” as a backend operation that:
   1) reads tickers (from the Default Ticker CSV)
@@ -1075,7 +1077,7 @@ Option-specific small steps for `7-3` (Decision #6)
 ```
 - User confirmation needed: **Yes**
 
-#### Step 8 — Data Control Window (frontend)
+#### ⬜ Step 8 — Data Control Window (frontend)
 Purpose
 - Provide a minimal “operations” window to manually run backend updates and confirm freshness.
 - Show per-source last success timestamps from Step 1.
@@ -1167,7 +1169,7 @@ Verification
 ```
 - User confirmation needed: **Yes**
 
-#### Step 9 — Tests / acceptance checks (minimal but real)
+#### ⬜ Step 9 — Tests / acceptance checks (minimal but real)
 Purpose
 - Ensure the foundational APIs are correct, and we don’t regress on safety constraints (path restrictions, persistence, no mock data).
 
@@ -1631,7 +1633,9 @@ IBKR 연동이 가장 불확실(환경/자격증명/게이트웨이 의존)이�
 | “Changes %”가 실제 계산값 표시 | 7단계 이후 | News 창에서 “Changes %” 셀 확인 | OHLC 기반 계산값이 보이고, 히스토리 부족은 빈 값/`null`로 표시 |
 | Data Control Window 버튼이 타임스탬프를 갱신 | 8단계 이후(+ 6/7단계 + IBKR 설정 완료) | `IBKR Price Data` / `IBKR Calendar Data` 클릭 | 성공 시 “마지막 성공 업데이트”가 갱신되고, 실패는 명확히 표시 |
 
-#### 0단계 — 데이터 수집 가능 범위 점검(감사) (IBKR + Finnhub vs UI 컬럼)
+> Legend (단계 상태): ✅ 완료 · ⏳ 사용자 대기 · ⬜ 미착수 · 🚫 차단됨
+
+#### ⏳ 0단계 — 데이터 수집 가능 범위 점검(감사) (IBKR + Finnhub vs UI 컬럼)
 목적(왜 먼저 하는가)
 - 이 프로젝트 UI 테이블은 market cap, industry, earnings 필드, analyst rating 등 특정 데이터를 “당연히 존재하는 것처럼” 전제한다. 구현에 들어가기 전에 IBKR/Finnhub가 실제로 제공하는지, 혹은 기존 1D OHLC DB로 계산 가능한지 확정해야 한다.
 - 이 단계는 **fail-fast 가드레일**이다. 필수 필드가 불가능하면 즉시 멈추고 의사결정을 해야 하며, UI에 가짜 placeholder를 넣지 않는다.
@@ -1738,7 +1742,7 @@ IBKR 연동이 가장 불확실(환경/자격증명/게이트웨이 의존)이�
 - 확인: `tmp/probes/`에 Finnhub/IBKR 프로브 산출물(JSON)이 존재하는지.
 - 게이트: 사용자가 2개 미결 결정을 확정해야 6-7단계 진행 가능.
 
-#### 1단계 — 기반: update status 저장 + API
+#### ✅ 1단계 — 기반: update status 저장 + API
 목적
 - 데이터 소스별(CSV tickers, Finnhub news, IBKR calendar, IBKR OHLC) “마지막 성공 업데이트 시각”을 **영구 저장**한다.
 - Data Control Window(8단계)에서 재시작과 무관하게 동일한 상태를 표시할 수 있게 한다.
@@ -1823,7 +1827,7 @@ API 계약(초안)
 ```
 - 사용자 확인 필요: **Yes**
 
-#### 2단계 — Default ticker CSV: read + append API(백엔드)
+#### ✅ 2단계 — Default ticker CSV: read + append API(백엔드)
 목적
 - 브라우저는 로컬 파일을 직접 읽기/쓰기가 어렵다. 따라서 백엔드가 아래를 책임진다:
   - CSV 경로에서 티커 목록 읽기
@@ -1931,7 +1935,7 @@ API 계약(초안)
 ```
 - 사용자 확인 필요: **Yes**
 
-#### 3단계 — Default Ticker Window(프론트)
+#### ✅ 3단계 — Default Ticker Window(프론트)
 목적
 - CSV에 저장된 “기본 티커 리스트”를 UI에서 확인/갱신/추가할 수 있게 한다.
 - 프론트는 파일을 직접 만지지 않고(브라우저 제한), 2단계 백엔드 API만 호출한다.
@@ -2027,7 +2031,7 @@ UI 동작(최소/명확)
 ```
 - 사용자 확인 필요: **Yes**
 
-#### 4단계 — Finnhub 인제션(백엔드)
+#### ✅ 4단계 — Finnhub 인제션(백엔드)
 목적
 - Brave/mock 기반 뉴스 대신, Finnhub에서 **company news**(회사 뉴스)와 **press release**(보도자료)를 모두 수집해 기존 `news_items` 저장소에 적재한다.
 - 두 종류의 데이터는 `source_type`으로 구분하여 **별도 저장**한다:
@@ -2196,7 +2200,7 @@ API 계약(초안)
 ```
 - 사용자 확인 필요: **Yes**
 
-#### 5단계 — “News Feed: Brave API” → “news feed:finhub api” 전환(프론트)
+#### ✅ 5단계 — “News Feed: Brave API” → “news feed:finhub api” 전환(프론트)
 목적
 - 기존 `brave-news`(mock 포함) UI를 제거하고 Finnhub 기반으로 교체한다.
 - 라벨을 정확히 `news feed:finhub api`로 바꾸고, UI가 Brave를 암시하지 않게 한다.
@@ -2316,6 +2320,23 @@ API 계약(초안)
   - 사람 검증(비개발자): Company News만 선택 → press release가 안 보이는지 확인. 둘 다 선택 → 둘 다 보이는지 확인. Change% 값이 있는 row에서 숫자가 보이는지 확인.
   - 흔한 문제/주의: 필터 state와 API 파라미터 불일치; 필터 전환 시 이전 응답이 잠깐 보이는 깜빡임; Change% 컬럼 필드명과 백엔드 응답 키 불일치.
 
+- `5-10` 목적: 검색을 서버사이드로 전환하여 전체 DB에서 검색되도록 한다. 설명:
+  - **문제**: 기존에는 `GET /api/news`에서 200건만 받아온 뒤, 프론트에서 `title`/`ticker`에 대해 `.includes()` 클라이언트 필터링 → DB에 수천 건이 있어도 200건 안에서만 검색됨.
+  - **해결**: 백엔드 `GET /api/news`에 이미 구현된 `keyword` 쿼리 파라미터를 활용. 프론트에서 검색어 입력 시 `keyword=검색어`를 붙여 백엔드에 재요청 → SQL `WHERE LOWER(title || ' ' || body) LIKE '%검색어%'`로 전체 DB 검색 후 200건 반환.
+  - **디바운스**: 타이핑할 때마다 API 호출하면 과도하므로, 300ms 디바운스를 적용. 타이핑이 멈춘 후 300ms 뒤에만 fetch 실행.
+  - **기존 client-side 필터 제거**: `useMemo` 내의 `searchQuery` 기반 `.filter()` 로직을 제거하고, `searchQuery`가 바뀌면 디바운스 후 `fetchNews()`를 재호출하도록 변경.
+  - **렉 방지**: SQLite LIKE 검색은 수만 건에서도 밀리초 단위; 전송은 200건 이하; `react-window` 가상화 유지.
+  - 완료 조건(눈으로 확인): 검색창에 티커/키워드 입력 → 네트워크 탭에서 `keyword=...` 파라미터가 붙은 GET 요청 확인 → DB 전체에서 매칭된 결과가 표시됨.
+  - 사람 검증(비개발자): DB에 200건 넘게 저장된 상태에서 특정 티커로 검색 → 최근 200건에 없던 과거 뉴스도 검색되는지 확인.
+  - 흔한 문제/주의: 디바운스 미적용 시 타이핑 중 과도한 API 호출; 빈 검색어일 때 keyword 파라미터를 보내지 않아야 함(전체 리스트 반환); source_type 필터와 keyword가 동시에 적용되어야 함.
+- `5-11` 목적: Update 버튼에 지연 툴팁(5초 hover)을 추가하여 동작 범위를 설명한다. 설명:
+  - Update 버튼에 마우스를 5초 이상 올려두면, 버튼 아래에 다크 팝업 툴팁이 표시된다.
+  - 내용(영어): "This update fetches news from the last 7 days up to today, without duplicates. If data already exists, it resumes from the last stored date. To retrieve news older than 7 days, use a separate manual update with custom date range parameters."
+  - 마우스를 떼면 즉시 사라진다.
+  - 구현: IIFE 패턴으로 `useState`/`useRef`를 사용해 5초 `setTimeout` 후 표시, `onMouseLeave`에서 타이머 클리어 + 숨김.
+  - 완료 조건(눈으로 확인): Update 버튼에 5초 hover → 설명 팝업 표시 → 마우스 떼면 사라짐.
+  - 흔한 문제/주의: 타이머가 클리어되지 않아 마우스를 떼도 팝업이 남음; z-index 부족으로 다른 요소에 가려짐.
+
 **검증 훅 (5단계 마감):**
 ```
 1. news feed:finhub api 창 열기
@@ -2323,10 +2344,12 @@ API 계약(초안)
 3. UI에 mock 항목이 나타나지 않는지 확인
 4. source_type 필터 전환 → Company News만 / Press Release만 / 둘 다 각각 렌더 확인
 5. Change% 컬럼에 OHLC 기반 값(또는 `-`) 표시 확인
+6. 검색창에 키워드 입력 → 300ms 디바운스 후 GET /api/news?keyword=... 요청 확인 → 전체 DB에서 매칭된 결과 표시
+7. Update 버튼에 5초 hover → 설명 툴팁 표시 확인 → 마우스 떼면 사라지는지 확인
 ```
 - 사용자 확인 필요: **Yes**
 
-#### 6단계 — IBKR 캘린더 인제션(백엔드) + mock 캘린더 생성기 중지
+#### ⬜ 6단계 — IBKR 캘린더 인제션(백엔드) + mock 캘린더 생성기 중지
 목적
 - 요구사항: `/calendar`는 **IBKR 데이터만** 사용해야 한다.
 - 현재 백엔드는 startup 시 mock 캘린더를 자동 생성하므로, 이를 제거하고 명시적 업데이트로 전환한다.
@@ -2424,7 +2447,7 @@ API 계약(초안)
 ```
 - 사용자 확인 필요: **Yes**
 
-#### 7단계 — IBKR 1D OHLC를 `ohlc_1d_watchlist.sqlite`에 저장(백엔드)
+#### ⬜ 7단계 — IBKR 1D OHLC를 `ohlc_1d_watchlist.sqlite`에 저장(백엔드)
 목적
 - “IBKR Price Data 업데이트”는 백엔드 작업으로 아래를 수행한다:
   1) Default Ticker CSV에서 티커를 읽는다
@@ -2605,7 +2628,7 @@ API 계약(초안)
 ```
 - 사용자 확인 필요: **Yes**
 
-#### 8단계 — Data Control Window(프론트)
+#### ⬜ 8단계 — Data Control Window(프론트)
 목적
 - 백엔드 업데이트를 수동으로 실행하고, 최신 상태를 확인할 수 있는 최소 운영 창을 제공한다.
 - 1단계의 update status를 읽어 각 항목의 “마지막 성공 시각”을 보여준다.
@@ -2697,7 +2720,7 @@ UI 동작(최소)
 ```
 - 사용자 확인 필요: **Yes**
 
-#### 9단계 — 테스트/검증(최소지만 실제)
+#### ⬜ 9단계 — 테스트/검증(최소지만 실제)
 목적
 - 기반 API들이 정확히 동작하고(특히 보안 제약/영구 저장), mock 데이터가 다시 들어오지 않도록 최소한의 테스트로 안전망을 만든다.
 

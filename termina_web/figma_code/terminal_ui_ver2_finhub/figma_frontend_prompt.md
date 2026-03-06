@@ -115,6 +115,11 @@ UX/features intentionally kept from the previous virtualized feed:
 - Display mode: Title Only vs Title + Body excerpt
 - Save/Load search settings (local UI state)
 
+Search behavior:
+- Search is **server-side**: typing in the search box sends `keyword=...` to `GET /api/news`, which runs `WHERE LOWER(title || ' ' || body) LIKE '%keyword%'` against the **entire DB**.
+- A 300ms debounce prevents excessive API calls while typing.
+- The backend returns up to 200 matching results; `react-window` virtualizes the render.
+
 ### Default Ticker
 File: `src/app/components/DefaultTickerWindow.tsx`
 
@@ -267,7 +272,10 @@ Change% 표시:
 - 컬럼 드래그 재정렬/리사이즈/정렬
 - 표시 모드: Title Only vs Title + Body 일부 표시
 - Save/Load 검색 설정(로컬 UI state)
-
+검색 동작:
+- 검색은 **서버사이드**: 검색창에 입력하면 `keyword=...`를 `GET /api/news`에 전달하고, 백엔드가 `WHERE LOWER(title || ' ' || body) LIKE '%keyword%'`로 **전체 DB**를 검색합니다.
+- 300ms 디바운스를 적용하여 타이핑 중 과도한 API 호출을 방지합니다.
+- 백엔드는 매칭된 결과 중 최대 200건을 반환하고, `react-window`가 렌더를 가상화합니다.
 ### Default Ticker
 파일: `src/app/components/DefaultTickerWindow.tsx`
 
