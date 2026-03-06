@@ -739,6 +739,11 @@ Verification
 | 5-9 | Changes% live calc (OHLC-based change% on news items) | `FinnhubNewsWindow.tsx` | News items display change% values when OHLC data is available | ✅ |
 | 5-10 | Server-side keyword search (full DB search) | `FinnhubNewsWindow.tsx` | Search input sends `keyword` param to `GET /api/news`, backend filters across entire DB | ✅ |
 | 5-11 | Update button tooltip (5-second hover delay) | `FinnhubNewsWindow.tsx` | Hovering Update button for 5s shows tooltip explaining scope | ✅ |
+| 5-12 | Add dedicated Ticker column | `FinnhubNewsWindow.tsx` | Ticker column appears between Date and Time; clicking ticker filters | ⏳ |
+| 5-13 | Column visibility toggle (show/hide columns) | `FinnhubNewsWindow.tsx` | Columns button opens checkbox dropdown to show/hide columns | ⏳ |
+| 5-14 | Backend “entire” mode (max 1-year history) | `terminal/backend/src/server.ts` | `POST /api/news/pull-finhub { mode: "entire" }` pulls ~1y without duplicates | ⏳ |
+| 5-15 | Update button → split-dropdown (Recent / Entire) | `FinnhubNewsWindow.tsx` | Main click = Recent(7d); arrow opens menu with Entire option | ⏳ |
+| 5-16 | Source cell: right-click Copy URL + click opens link | `FinnhubNewsWindow.tsx` | Right click Source → Copy URL; left click Source opens URL in browser | ⏳ |
 
 **Sub-step purpose & description (Step 5)**
 - `5-1` Purpose: Switch the window identity away from Brave. Description:
@@ -798,13 +803,61 @@ Verification
   - Human check: open the window on a clean DB (empty list) and confirm you see an empty state, not a blank frame.
   - Common issues to watch: forgetting to wire the render switch (window opens but content area is empty).
 
+- `5-9` Purpose: Display OHLC-derived change% fields per row. Description:
+  - Render backend-provided `change_*_pct` values in the Changes% column; show `-` when missing.
+  - Done when (observable): some rows show numeric change% values when OHLC data exists.
+  - Human check: find a ticker/date with OHLC data and confirm non-`-` numbers appear.
+  - Common issues to watch: mismatch between backend keys and frontend field mapping.
+- `5-10` Purpose: Make search cover the entire DB (server-side keyword search). Description:
+  - Send `keyword` query param to `GET /api/news` instead of filtering only within the last 200 client-side rows.
+  - Done when (observable): Network tab shows `GET /api/news?...&keyword=...` and results include older DB matches.
+  - Human check: search a ticker/keyword known to exist outside the most recent 200.
+  - Common issues to watch: forgetting to omit `keyword` when empty (should return full list).
+- `5-11` Purpose: Explain update scope with a delayed tooltip. Description:
+  - Hover Update for 5 seconds to show tooltip describing what Recent/Entire do.
+  - Done when (observable): tooltip appears after ~5s hover and disappears on mouse leave.
+  - Human check: hover for 5 seconds and confirm tooltip text appears.
+  - Common issues to watch: timeout not cleared; tooltip hidden behind other elements (z-index).
+- `5-12` Purpose: Improve readability by separating ticker into its own column. Description:
+  - Add a dedicated `Ticker` column between Date and Time; enable sorting and click-to-filter.
+  - Done when (observable): Ticker column visible and sortable.
+  - Human check: click ticker badge to filter.
+  - Common issues to watch: column widths array not staying aligned after filtering/reordering.
+- `5-13` Purpose: Let users hide unnecessary columns. Description:
+  - Add a Columns dropdown with checkboxes; unchecked columns are removed from the table.
+  - Done when (observable): toggling a checkbox hides/shows that column without layout breakage.
+  - Human check: hide multiple columns then re-enable them.
+  - Common issues to watch: width mapping using wrong indices after filtering.
+- `5-14` Purpose: Support Finnhub “max history” pulls via `mode=entire`. Description:
+  - Extend `POST /api/news/pull-finhub` to accept `mode: recent|entire`; in entire mode default `from` to ~365 days ago.
+  - Done when (observable): request/response show `mode: "entire"` and DB grows with older history without duplicates.
+  - Human check: run Entire Update once and confirm older items appear.
+  - Common issues to watch: rate limits; accidentally setting `from` earlier than Finnhub allows.
+- `5-15` Purpose: Provide split-dropdown Update UX for Recent/Entire. Description:
+  - Main button triggers Recent (7-day incremental); arrow opens menu for Entire.
+  - Done when (observable): both actions callable; buttons disable during update.
+  - Human check: choose Entire from the dropdown.
+  - Common issues to watch: menu not closing on outside click; split borders misaligned.
+- `5-16` Purpose: Make Source usable as a link and support copying the URL. Description:
+  - Left click Source opens the item URL in a new browser tab.
+  - Right click Source shows a small context menu with “Copy URL” which copies the URL to clipboard.
+  - Done when (observable): click opens; right-click copies.
+  - Human check: copy then paste URL into Notepad; click opens the same URL.
+  - Common issues to watch: clipboard API blocked; context menu positioning off-screen.
+
 **Verification hook (Step 5 closeout):**
 ```
 1. grep -r "generateMockData\|mock\|brave-news\|BraveNews" src/ → 0 results (no mock/brave references)
 2. npx tsc --noEmit → 0 errors
 3. npm run dev → Open `news feed:finhub api` window
-4. Window shows real Finnhub news (requires Step 4 data to be ingested first)
-5. "Update" button triggers backend pull
+4. Network tab: GET /api/news?source_names=FINNHUB returns items
+5. Source type filter toggles: All / Company News / Press Release
+6. Search: typing triggers GET /api/news?...&keyword=... (server-side)
+7. Update hover tooltip appears after 5s
+8. Ticker column visible; clicking ticker filters
+9. Columns menu hides/shows columns via checkboxes
+10. Update dropdown: choose "Entire Update" and confirm POST body includes mode="entire" and response includes mode
+11. Source cell: left click opens URL; right click → Copy URL; paste confirms
 ```
 - User confirmation needed: **Yes**
 
@@ -2262,6 +2315,7 @@ API 계약(초안)
 | 5-13 | 컬럼 가시성 토글(show/hide columns) | FinnhubNewsWindow.tsx | Columns 버튼 클릭 → 체크박스 드롭다운으로 컬럼 표시/숨김 전환 | ⏳ |
 | 5-14 | 백엔드 "entire" 모드(최대 1년 히스토리 수집) | server.ts, finnhubNewsProvider.ts | `POST /api/news/pull-finhub { mode: "entire" }` → from=1년전 설정, 중복 없음 | ⏳ |
 | 5-15 | Update 버튼 → split-dropdown (Recent / Entire 선택) | FinnhubNewsWindow.tsx | 좌측 버튼=Recent(7일), 우측 화살표=드롭다운 메뉴(Recent / Entire 선택) | ⏳ |
+| 5-16 | Source 셀: 우클릭 Copy URL + 클릭 시 링크 열기 | FinnhubNewsWindow.tsx | Source 우클릭 → Copy URL → 클립보드 복사, Source 클릭 → 브라우저 새 탭으로 열림 | ⏳ |
 
 **세부 단계 목적/설명 (5단계)**
 - `5-1` 목적: Brave 기반 창을 Finnhub 기반으로 전환. 설명:
@@ -2384,6 +2438,14 @@ API 계약(초안)
   - 사람 검증: Entire Update 실행 후 네트워크 탭에서 `mode: "entire"` 확인; DB에 과거 1년 뉴스가 저장되는지 확인.
   - 흔한 문제/주의: 드롭다운 z-index 부족으로 다른 요소에 가려짐; split 버튼 border 연결 부분 시각적 불일치; handleUpdate에서 mode 파라미터가 fetch body에 포함되지 않는 실수.
 
+- `5-16` 목적: Source를 실제 링크로 사용 가능하게 하고 URL 복사를 제공한다. 설명:
+  - Source 텍스트 **좌클릭** 시 해당 뉴스의 `url`을 `window.open(..., '_blank')`로 새 탭에서 연다.
+  - Source 셀 **우클릭** 시 작은 컨텍스트 메뉴를 띄우고, "Copy URL" 클릭 시 URL을 클립보드에 복사한다.
+  - 컨텍스트 메뉴는 외부 클릭 또는 ESC로 닫힌다.
+  - 완료 조건(눈으로 확인): Source 클릭 시 새 탭이 열리고, Copy URL 후 메모장에 붙여넣으면 URL이 들어간다.
+  - 사람 검증(비개발자): 우클릭→Copy URL→붙여넣기, 좌클릭→브라우저 열림을 각각 확인.
+  - 흔한 문제/주의: 브라우저 권한/정책으로 clipboard API가 막혀 fallback 필요; 메뉴가 화면 밖으로 나가는 포지셔닝.
+
 **검증 훅 (5단계 마감):**
 ```
 1. news feed:finhub api 창 열기
@@ -2397,6 +2459,7 @@ API 계약(초안)
 9. Columns 버튼 → 드롭다운에서 컬럼 체크 해제 → 테이블에서 해당 컬럼 숨겨짐
 10. Update 우측 화살표 → 드롭다운 메뉴에서 "Entire Update" 선택 → mode=entire로 수집 실행
 11. 네트워크 탭에서 POST body에 mode: "entire" 포함 확인, 응답에 mode 필드 확인
+12. Source 컬럼: 좌클릭으로 링크 열기, 우클릭 메뉴에서 Copy URL → 붙여넣기 확인
 ```
 - 사용자 확인 필요: **Yes**
 

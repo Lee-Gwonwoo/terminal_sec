@@ -133,6 +133,10 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
   const [listHeight, setListHeight] = useState(500);
   const [saveName, setSaveName] = useState('');
 
+  // Source cell context menu (Copy URL)
+  const [sourceCtxMenu, setSourceCtxMenu] = useState<null | { x: number; y: number; url: string }>(null);
+  const sourceCtxMenuRef = useRef<HTMLDivElement>(null);
+
   // Display mode
   const [displayMode, setDisplayMode] = useState<DisplayMode>('title-only');
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
@@ -186,6 +190,48 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
   const loadMenuRef = useRef<HTMLDivElement>(null);
   const displayModeMenuRef = useRef<HTMLDivElement>(null);
   // columnMenuRef declared above with column state
+
+  const copyToClipboard = useCallback(async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // fallback for environments where Clipboard API is unavailable
+    }
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    textarea.style.top = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textarea);
+  }, []);
+
+  const openExternalUrl = useCallback((url: string) => {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }, []);
+
+  useEffect(() => {
+    if (!sourceCtxMenu) return;
+
+    const onMouseDown = (e: MouseEvent) => {
+      if (sourceCtxMenuRef.current && sourceCtxMenuRef.current.contains(e.target as Node)) return;
+      setSourceCtxMenu(null);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSourceCtxMenu(null);
+    };
+
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [sourceCtxMenu]);
 
   // ─── Saved searches (local state) ───
   interface SavedSearch {
@@ -482,7 +528,24 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
           </div>
         );
       case 'source':
-        return <span className="truncate text-gray-600 dark:text-gray-400">{newsItem.source}</span>;
+        return (
+          <span
+            className="truncate text-gray-600 dark:text-gray-400 cursor-pointer hover:text-blue-600 dark:hover:text-blue-400"
+            title={newsItem.url ? 'Click to open link. Right click to copy URL.' : newsItem.source}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (newsItem.url) openExternalUrl(newsItem.url);
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (!newsItem.url) return;
+              setSourceCtxMenu({ x: e.clientX, y: e.clientY, url: newsItem.url });
+            }}
+          >
+            {newsItem.source}
+          </span>
+        );
       case 'changes':
         return (
           <div className="flex flex-col justify-center gap-0 w-full">
@@ -506,7 +569,7 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
           </div>
         );
     }
-  }, [displayMode, toggleExpand, onTickerClick]);
+  }, [displayMode, toggleExpand, onTickerClick, openExternalUrl]);
 
   // ─── Row renderer ───
   const Row = useCallback(({ index, style }: { index: number; style: React.CSSProperties }) => {
@@ -867,6 +930,35 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
               <button onClick={handleSaveSearch} className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">Save</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Source cell context menu */}
+      {sourceCtxMenu && (
+        <div
+          ref={sourceCtxMenuRef}
+          className="fixed z-[60] bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-lg"
+          style={(() => {
+            const menuW = 160;
+            const menuH = 40;
+            const maxX = typeof window !== 'undefined' ? window.innerWidth - menuW - 8 : sourceCtxMenu.x;
+            const maxY = typeof window !== 'undefined' ? window.innerHeight - menuH - 8 : sourceCtxMenu.y;
+            return {
+              left: Math.max(8, Math.min(sourceCtxMenu.x, maxX)),
+              top: Math.max(8, Math.min(sourceCtxMenu.y, maxY)),
+            } as React.CSSProperties;
+          })()}
+        >
+          <button
+            className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
+            onClick={async (e) => {
+              e.stopPropagation();
+              await copyToClipboard(sourceCtxMenu.url);
+              setSourceCtxMenu(null);
+            }}
+          >
+            Copy URL
+          </button>
         </div>
       )}
     </div>

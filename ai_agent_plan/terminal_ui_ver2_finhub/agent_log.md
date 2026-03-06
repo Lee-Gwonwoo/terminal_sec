@@ -743,6 +743,17 @@
      - 수집 중(`updating === true`) 양쪽 버튼 모두 disabled
      - 외부 클릭 시 메뉴 닫힘 + 5초 hover 지연 툴팁 유지(메뉴 열림 시 숨김)
 
+6. **추가 변경 (23:30)** — Source 셀: 우클릭 Copy URL + 클릭 시 링크 열기
+    - `FinnhubNewsWindow.tsx`
+       - Source 텍스트 좌클릭 → `window.open(url)`로 새 탭에서 링크 열기
+       - Source 셀 우클릭 → 컨텍스트 메뉴 표시 → "Copy URL" 클릭 시 클립보드에 URL 복사
+       - 메뉴는 외부 클릭 또는 ESC로 닫힘
+
+7. **추가 변경 (23:32)** — plan.md 반영(EN/KO 동기화)
+    - `ai_agent_plan/terminal_ui_ver2_finhub/plan.md`
+       - Step 5 서브스텝에 `5-16`(Source 셀: 우클릭 Copy URL + 클릭 시 링크 열기) 추가
+       - EN Step 5에 누락되어 있던 `5-12~5-15`도 함께 추가하여 EN/KO 서브스텝 테이블/검증 훅을 동기화
+
 6. **plan.md 세부단계 추가**
    - KO 5단계 세부단계 표에 5-12 ~ 5-15 행 추가 (상태: ⏳)
    - KO 세부단계 목적/설명 블록에 5-12 ~ 5-15 항목별 상세 설명 추가
