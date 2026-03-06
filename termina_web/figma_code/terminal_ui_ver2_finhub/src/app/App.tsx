@@ -90,6 +90,8 @@ export default function App() {
           title = 'News Feed: Finnhub API';
         } else if (type === 'default-ticker') {
           title = 'Default Ticker';
+        } else if (type === 'data-control') {
+          title = 'Data Control';
         } else {
           title = type.charAt(0).toUpperCase() + type.slice(1) + ' Window';
         }

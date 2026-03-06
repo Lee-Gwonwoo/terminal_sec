@@ -94,6 +94,16 @@ export function AddTabModal({ isOpen, onClose, onStart }: AddTabModalProps) {
               />
               <span>Default Ticker</span>
             </label>
+
+            <label className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={selectedWindows.includes('data-control')}
+                onChange={() => toggleWindow('data-control')}
+                className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span>Data Control</span>
+            </label>
           </div>
         </div>
 

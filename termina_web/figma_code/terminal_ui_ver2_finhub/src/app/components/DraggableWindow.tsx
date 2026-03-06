@@ -7,6 +7,7 @@ import { WatchlistWindow } from './WatchlistWindow';
 import { CalendarWindow } from './CalendarWindow';
 import { FinnhubNewsWindow } from './FinnhubNewsWindow';
 import { DefaultTickerWindow } from './DefaultTickerWindow';
+import { DataControlWindow } from './DataControlWindow';
 
 interface DraggableWindowProps {
   window: WindowInstance;
@@ -92,6 +93,8 @@ export function DraggableWindow({
         return <FinnhubNewsWindow onTickerClick={onTickerClick} initialTicker={initialTicker} />;
       case 'default-ticker':
         return <DefaultTickerWindow onTickerClick={onTickerClick} />;
+      case 'data-control':
+        return <DataControlWindow />;
       default:
         return <div>Unknown window type</div>;
     }

@@ -118,6 +118,14 @@ export async function upsertCalendarEvent(params: {
   );
 }
 
+/** Step 6-5: mock_provider rows를 삭제하고 삭제된 row 수를 반환. */
+export async function deleteMockCalendarRows(): Promise<number> {
+  const result = await getDb().run(
+    `DELETE FROM calendar_events WHERE source = 'mock_provider'`
+  );
+  return result.changes ?? 0;
+}
+
 export async function listCalendarEvents(query: CalendarEventsQuery): Promise<{
   items: Array<Record<string, unknown>>;
   nextCursor?: string;

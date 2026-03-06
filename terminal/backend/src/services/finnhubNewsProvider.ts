@@ -461,28 +461,59 @@ export async function getTickerAnchorMap(
 
 /**
  * Extract publisher label from a news URL.
- * www.nasdaq.com → NASDAQ, money.tmx.com → TMX, finnhub.io → FINNHUB, else → UNKNOWN
+ * Known domains are mapped to short labels; unknown domains fall back to
+ * the hostname with "www." stripped (e.g. "example.com").
  */
+const PUBLISHER_MAP: [test: (h: string) => boolean, label: string][] = [
+  [(h) => h.includes("yahoo.com"), "YAHOO FINANCE"],
+  [(h) => h.includes("nasdaq.com"), "NASDAQ"],
+  [(h) => h.includes("globenewswire.com"), "GLOBENEWSWIRE"],
+  [(h) => h.includes("seekingalpha.com"), "SEEKING ALPHA"],
+  [(h) => h.includes("fxstreet.com"), "FXSTREET"],
+  [(h) => h.includes("u.today"), "U.TODAY"],
+  [(h) => h.includes("news.google.com"), "GOOGLE NEWS"],
+  [(h) => h.includes("finnhub.io"), "FINNHUB"],
+  [(h) => h.includes("tmx.com"), "TMX"],
+  [(h) => h.includes("cnbc.com"), "CNBC"],
+  [(h) => h.includes("thecurrencyanalytics.com"), "CURRENCY ANALYTICS"],
+  [(h) => h.includes("dailyhodl.com"), "DAILY HODL"],
+  [(h) => h.includes("bloomberg.com"), "BLOOMBERG"],
+  [(h) => h.includes("investorplace.com"), "INVESTORPLACE"],
+  [(h) => h.includes("reuters.com"), "REUTERS"],
+  [(h) => h.includes("barrons.com"), "BARRONS"],
+  [(h) => h.includes("marketwatch.com"), "MARKETWATCH"],
+  [(h) => h.includes("wsj.com"), "WSJ"],
+  [(h) => h.includes("fool.com"), "MOTLEY FOOL"],
+  [(h) => h.includes("businesswire.com"), "BUSINESS WIRE"],
+  [(h) => h.includes("prnewswire.com"), "PR NEWSWIRE"],
+  [(h) => h.includes("accesswire.com"), "ACCESSWIRE"],
+  [(h) => h.includes("benzinga.com"), "BENZINGA"],
+  [(h) => h.includes("zacks.com"), "ZACKS"],
+  [(h) => h.includes("thestreet.com"), "THE STREET"],
+  [(h) => h.includes("investopedia.com"), "INVESTOPEDIA"],
+];
+
 export function derivePublisher(url: string): string {
   if (!url) return "UNKNOWN";
   try {
     const hostname = new URL(url).hostname.toLowerCase();
-    if (hostname.includes("nasdaq.com")) return "NASDAQ";
-    if (hostname.includes("tmx.com")) return "TMX";
-    if (hostname.includes("finnhub.io")) return "FINNHUB";
-    return "UNKNOWN";
+    for (const [test, label] of PUBLISHER_MAP) {
+      if (test(hostname)) return label;
+    }
+    // Fallback: strip "www." and return hostname as-is
+    return hostname.replace(/^www\./, "").toUpperCase();
   } catch {
     return "UNKNOWN";
   }
 }
 
 /**
- * Backfill publisher column for all news_items where publisher IS NULL.
+ * Backfill publisher column for all news_items where publisher IS NULL or 'UNKNOWN'.
  * Returns the number of rows updated.
  */
 export async function backfillPublisher(): Promise<number> {
   const rows = await getDb().all<{ id: string; url: string }[]>(
-    `SELECT id, url FROM news_items WHERE publisher IS NULL`,
+    `SELECT id, url FROM news_items WHERE publisher IS NULL OR publisher = 'UNKNOWN'`,
   );
   let updated = 0;
   for (const row of rows) {

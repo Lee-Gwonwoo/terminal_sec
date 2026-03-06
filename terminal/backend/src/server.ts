@@ -11,12 +11,14 @@ import {
   exportCalendarEventsCsv,
   getCalendarEventById,
   getCalendarTypes,
-  listCalendarEvents
+  listCalendarEvents,
+  upsertCalendarEvent,
+  deleteMockCalendarRows
 } from "./services/calendarRepository.js";
 import { listAlertRules, upsertAlertRule } from "./services/alertsRepository.js";
 import { StreamHub } from "./realtime/streamHub.js";
 import { ensureSeedData } from "./seed.js";
-import { startCalendarIngestionWorkers } from "./services/calendarIngestion.js";
+import { pullIbkrCalendar } from "./services/calendarIngestion.js";
 import { pullEodhdNews, pullEodhdNewsAll } from "./services/eodhdNewsProvider.js";
 import { insertNewsItem } from "./services/newsRepository.js";
 import { listUpdateStatuses, setLastSuccess } from "./services/updateStatusRepository.js";
@@ -37,6 +39,15 @@ import { createJob, getJob, updateProgress, appendLog, completeJob, failJob } fr
 import { getFulltext, getUnextractedNewsIds } from "./services/fulltextRepository.js";
 import { runFulltextUpdate } from "./services/fulltextUpdateService.js";
 import { backfillPublisher } from "./services/finnhubNewsProvider.js";
+import {
+  getOhlcDbPath,
+  getOverallMaxDate,
+  ensureDerivedColumns,
+  upsertBars,
+  getSymbolMaxDate,
+} from "./services/ohlcWatchlistRepository.js";
+import { fetchOhlcBars } from "./services/ibkrOhlc1dProvider.js";
+import { computeDerivedForAffectedSymbols } from "./services/ohlcDerivedMetrics.js";
 import type { NewsQuery } from "./types.js";
 
 const app = express();
@@ -498,6 +509,7 @@ app.post("/api/news/change/update-7d", async (_req, res, next) => {
         await bulkUpdate7dChange((done, total) => {
           updateProgress(jobId, done, total);
         });
+        await setLastSuccess("news_change_7d", new Date().toISOString());
         completeJob(jobId);
       } catch (err: any) {
         failJob(jobId, err?.message ?? String(err));
@@ -522,6 +534,7 @@ app.post("/api/news/change/update-custom", async (req, res, next) => {
         await bulkUpdateCustomChange(lookbackDays, (done, total) => {
           updateProgress(jobId, done, total);
         });
+        await setLastSuccess("news_change_custom", new Date().toISOString(), { lookbackDays });
         completeJob(jobId);
       } catch (err: any) {
         failJob(jobId, err?.message ?? String(err));
@@ -781,6 +794,199 @@ app.get("/api/calendar/events/:id", async (req, res, next) => {
   }
 });
 
+// Step 6-4/6-5/6-6: IBKR 캘린더 업데이트 엔드포인트
+app.post("/api/ibkr/calendar/update", async (_req, res, next) => {
+  try {
+    // 6-3: pullIbkrCalendar는 IBKR TWS 미연결 시 에러를 던짐 (Step 6-3 구현 전)
+    const result = await pullIbkrCalendar([]);
+
+    // 6-4: 이벤트 upsert
+    let upserted = 0;
+    for (const ev of result.events) {
+      await upsertCalendarEvent({
+        type: ev.type,
+        eventTime: ev.eventTime,
+        ticker: ev.ticker,
+        title: ev.title,
+        fieldsJson: ev.fieldsJson,
+        source: "IBKR",
+        uniqueKey: ev.uniqueKey
+      });
+      upserted++;
+    }
+
+    // 6-5: 첫 성공 후 mock_provider rows 삭제
+    const deletedMockRows = await deleteMockCalendarRows();
+    if (deletedMockRows > 0) {
+      console.log(`[ibkr-calendar] mock_provider rows 삭제: ${deletedMockRows}건`);
+    }
+
+    // 6-6: update_status 갱신
+    await setLastSuccess("ibkr_calendar", new Date().toISOString(), {
+      upserted,
+      deletedMockRows
+    });
+
+    res.json({ upserted, deletedMockRows, source: "IBKR" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Step 7-5: GET /api/ibkr/ohlc1d/status
+app.get("/api/ibkr/ohlc1d/status", async (_req, res, next) => {
+  try {
+    const overallMaxDate = await getOverallMaxDate();
+    const statuses = await listUpdateStatuses();
+    const ibkrOhlcStatus = statuses["ibkr_ohlc_1d"];
+    res.json({
+      dbPath: "OHLC_data/ohlc_1d_watchlist.sqlite",
+      overallMaxDate,
+      lastSuccessAt: ibkrOhlcStatus?.lastSuccessAt ?? null,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Step 7-6: POST /api/ibkr/ohlc1d/update
+app.post("/api/ibkr/ohlc1d/update", async (req, res, next) => {
+  try {
+    const jobId = createJob(0);
+    res.json({ jobId });
+
+    // Run in background
+    (async () => {
+      try {
+        // 1. Read tickers from CSV
+        const csvPath = req.body?.csvPath ?? "tradigview_screener/original_data/watch lists2_2026-02-22.csv";
+        const csvResult = readTickersFromCsv(csvPath);
+        const tickers = [...new Set(csvResult.tickers)];
+        appendLog(jobId, `Loaded ${tickers.length} tickers from CSV`);
+        updateProgress(jobId, 0, tickers.length);
+
+        // 2. Get current max date
+        const overallMaxDateBefore = await getOverallMaxDate();
+        const today = new Date().toISOString().slice(0, 10);
+
+        let totalRowsUpserted = 0;
+        let tickersUpdated = 0;
+        let tickersFailed = 0;
+        const affectedSymbols = new Map<string, { minDate: string; maxDate: string }>();
+
+        // 3. Fetch + upsert per symbol
+        for (let i = 0; i < tickers.length; i++) {
+          const symbol = tickers[i];
+          try {
+            const symbolMaxDate = await getSymbolMaxDate(symbol);
+            const startDate = symbolMaxDate
+              ? nextDay(symbolMaxDate)
+              : "2020-01-01";
+
+            if (startDate > today) {
+              appendLog(jobId, `${symbol}: already up to date (max=${symbolMaxDate})`);
+              updateProgress(jobId, i + 1, tickers.length);
+              continue;
+            }
+
+            const result = await fetchOhlcBars(symbol, startDate, today);
+            if (result.bars.length === 0) {
+              appendLog(jobId, `${symbol}: no new bars`);
+              updateProgress(jobId, i + 1, tickers.length);
+              continue;
+            }
+
+            const upserted = await upsertBars(symbol, result.bars);
+            totalRowsUpserted += upserted;
+            tickersUpdated++;
+
+            const dates = result.bars.map((b) => b.Datetime).sort();
+            affectedSymbols.set(symbol, {
+              minDate: dates[0],
+              maxDate: dates[dates.length - 1],
+            });
+
+            appendLog(jobId, `${symbol}: ${upserted} bars upserted (${dates[0]}~${dates[dates.length - 1]})`);
+          } catch (err) {
+            tickersFailed++;
+            appendLog(jobId, `${symbol}: FAILED — ${err instanceof Error ? err.message : String(err)}`);
+          }
+          updateProgress(jobId, i + 1, tickers.length);
+
+          // IBKR pacing: small delay between symbols
+          if (i < tickers.length - 1) {
+            await new Promise((r) => setTimeout(r, 300));
+          }
+        }
+
+        // 4. Compute derived metrics
+        if (affectedSymbols.size > 0) {
+          appendLog(jobId, `Computing derived metrics for ${affectedSymbols.size} symbols...`);
+          const derived = await computeDerivedForAffectedSymbols(affectedSymbols);
+          appendLog(jobId, `Derived metrics: ${derived.totalUpdated} rows updated`);
+        }
+
+        // 5. Standard change metric backfill (Step 7-8)
+        if (affectedSymbols.size > 0) {
+          appendLog(jobId, `Backfilling news change metrics...`);
+          const newsRows = await (await import("./db.js")).getDb().all<
+            { id: string; tickers_csv: string; published_at: string }[]
+          >(
+            `SELECT id, tickers_csv, published_at FROM news_items
+             WHERE tickers_csv != '' ORDER BY published_at DESC`,
+          );
+          const affectedTickers = new Set(affectedSymbols.keys());
+          const toMerge = newsRows
+            .filter((r) => {
+              const t = r.tickers_csv.split(",").map((s) => s.trim()).filter(Boolean);
+              return t.some((tk) => affectedTickers.has(tk));
+            })
+            .map((r) => ({
+              id: r.id,
+              tickers: r.tickers_csv.split(",").map((s) => s.trim()).filter(Boolean),
+              publishedAt: r.published_at,
+            }));
+          if (toMerge.length > 0) {
+            const cm = await mergeChangeForNewItems(toMerge);
+            appendLog(jobId, `News change backfill: merged=${cm.merged} skipped=${cm.skipped}`);
+          }
+        }
+
+        const overallMaxDateAfter = await getOverallMaxDate();
+
+        // 6. Update status
+        await setLastSuccess("ibkr_ohlc_1d", new Date().toISOString(), {
+          tickersRequested: tickers.length,
+          tickersUpdated,
+          tickersFailed,
+          totalRowsUpserted,
+          overallMaxDateBefore,
+          overallMaxDateAfter,
+        });
+
+        completeJob(jobId, {
+          tickersRequested: tickers.length,
+          tickersUpdated,
+          tickersFailed,
+          totalRowsUpserted,
+          overallMaxDateBefore,
+          overallMaxDateAfter,
+        });
+      } catch (err) {
+        failJob(jobId, err instanceof Error ? err.message : String(err));
+      }
+    })();
+  } catch (error) {
+    next(error);
+  }
+});
+
+function nextDay(dateStr: string): string {
+  const d = new Date(dateStr + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
 const alertRuleSchema = z.object({
   id: z.string().uuid().optional(),
   tool: z.enum(["news", "watchlists", "calendar"]),
@@ -853,8 +1059,13 @@ async function start(): Promise<void> {
   if (publisherBackfilled > 0) {
     console.log(`[startup] backfilled publisher for ${publisherBackfilled} news_items rows`);
   }
+  // Step 7-2: ensure derived columns exist in ohlc_1d
+  const addedCols = await ensureDerivedColumns();
+  if (addedCols.length > 0) {
+    console.log(`[startup] added derived columns to ohlc_1d: ${addedCols.join(", ")}`);
+  }
   await ensureSeedData();
-  startCalendarIngestionWorkers();
+  // startCalendarIngestionWorkers() removed — Step 6-2 (mock 생성기 중지)
 
   app.listen(config.port, () => {
     console.log(`Backend listening on http://localhost:${config.port}`);

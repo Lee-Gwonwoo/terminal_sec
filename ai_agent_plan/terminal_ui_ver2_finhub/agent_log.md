@@ -1126,6 +1126,72 @@
 
 #### 검증
 - `npx tsc --noEmit` (backend) — 에러 없음
+
+---
+
+## 2026-03-06
+
+### Step 7 — IBKR 1D OHLC 수집 완료
+
+| 항목 | 내용 |
+|------|------|
+| 시점 | 2026-03-06 |
+| 상태 | 사용자 확인 후 완료(user-confirmed) |
+| 관련 서브스텝 | 7-1 ~ 7-9 전체 |
+
+#### 요약
+- CSV 워치리스트 1188 tickers 대상 IBKR TWS (port 4001, ib_insync) 통해 1D OHLC 데이터 수집
+- 증분 방식: 심볼별 `MAX(Datetime)+1` ~ today, 신규 심볼은 2020-01-01 시작
+- 첫 번째 잡은 tsx watch 재시작으로 555/1188에서 중단, 두 번째 잡 `0c547ee5`에서 1188/1188 완료
+- 624 tickers 업데이트 (나머지는 이미 up to date), 0 실패, 6336 rows upserted
+
+#### 검증 결과
+
+| 검증 항목 | 결과 |
+|-----------|------|
+| Derived 컬럼 (7-7) | 624 symbols, 31,203 rows에 `Change_1d_Pct` 등 6개 컬럼 채워짐 ✅ |
+| News backfill (7-8) | `news_change_metrics` 8,115 rows (5 standard metrics × 1,623 뉴스) ✅ |
+| Custom change (7-9) | `custom_21d_pct` 3,655 rows 생성, `update_status` 기록됨 ✅ |
+| `update_status(ibkr_ohlc_1d)` | `last_success_at = 2026-03-06T22:41:04.846Z` ✅ |
+
+#### 변경 파일
+
+| 파일 | 변경 내용 |
+|------|------|
+| `ohlcWatchlistRepository.ts` | **신규** — SQLite 래퍼 |
+| `ibkr_fetch_ohlc.py` | **신규** — Python 브리지 |
+| `ibkrOhlc1dProvider.ts` | **신규** — child_process spawn |
+| `ohlcDerivedMetrics.ts` | **신규** — 파생 metrics 계산 |
+| `server.ts` | OHLC status/update 엔드포인트 추가 |
+
+---
+
+### Step 8 — Data Control Window (운영 UI) 완료
+
+| 항목 | 내용 |
+|------|------|
+| 시점 | 2026-03-06 |
+| 상태 | 사용자 확인 후 완료(user-confirmed) |
+| 관련 서브스텝 | 8-1 ~ 8-7 전체 |
+
+#### 요약
+- `DataControlWindow.tsx` 신규 생성: 4개 섹션 (Price/Calendar/7D Change/Custom Change)
+- 각 섹션별 Update → 비동기 잡 → 2.5초 폴링 → View Log 오버레이
+- Custom Change에 `lookbackDays` 입력 (1-252, default 21)
+
+#### 변경 파일
+
+| 파일 | 변경 내용 |
+|------|------|
+| `DataControlWindow.tsx` | **신규** — 운영 UI 윈도우 |
+| `types.ts` | `'data-control'` WindowType 추가 |
+| `AddTabModal.tsx` | Data Control 체크박스 추가 |
+| `App.tsx` | title 매핑 추가 |
+| `DraggableWindow.tsx` | import + case 추가 |
+| `server.ts` | `setLastSuccess` 호출 추가 |
+
+#### 검증
+- `npx tsc --noEmit` (frontend + backend) — 에러 0개
 - VS Code IDE 에러 검사 (FinnhubNewsWindow.tsx) — 에러 없음
 - 사용자 확인 필요: 실제 UI에서 Update 클릭 → jobId 반환 확인, View Log 클릭 → 패널 열림/진행률/로그 확인
 
@@ -1431,4 +1497,97 @@
   - 브라우저에서 Full Text 컬럼 O/X 표시
   - O 클릭 시 모달에 전문 표시
   - "Full Text" 버튼 클릭 → 작업 시작 → View Log에서 진행 상황 확인
+
+---
+
+### Step 10 — e2e 검증 (2026-03-06)
+
+**작성 시각:** 2026-03-06 (local)
+**Status: API 검증 완료 / 브라우저 사용자 확인 대기**
+
+#### API 검증 결과
+
+| 항목 | 결과 |
+|------|------|
+| `GET /api/news` 응답 hasFullText 필드 | ✅ 존재 |
+| `GET /api/news` 응답 keywords 필드 | ✅ 존재 (빈 배열) |
+| `GET /api/news` 응답 keywordsStatus 필드 | ✅ 존재 (null) |
+| `GET /api/news` 응답 publisher 필드 | ✅ CNBC/GOOGLE NEWS 등 정상 |
+| press_release NASDAQ hasFullText | ✅ True (wordCount ~1768) |
+| press_release TMX hasFullText | ✅ True |
+| company_news finnhub.io hasFullText | ✅ False (skipped 정상) |
+| `GET /api/news/fulltext/:newsId` | ✅ extractionStatus=success, wordCount>0 |
+| 백엔드 TypeScript 빌드 | ✅ 0 errors |
+| 프론트엔드 Vite 빌드 | ✅ 0 errors |
+
+---
+
+### Step 6-1 ~ 6-6 구현 (2026-03-06)
+
+**작성 시각:** 2026-03-06 (local)
+**Status: done (확인 대기 / awaiting user confirmation)**
+
+#### 수행 작업
+
+1. **6-1: mock 캘린더 worker 로직 전면 제거** — `calendarIngestion.ts`에서 `tickers`, `countries`, `pickRandom`, `runEarningsWorker`, `runDividendsWorker`, `runSplitsWorker`, `runAnalystRatingsWorker`, `runSecFilingsWorker`, `runEconomicsWorker`, `startCalendarIngestionWorkers()` 완전 삭제
+2. **6-2: startup 호출 제거** — `server.ts`의 `start()` 함수에서 `startCalendarIngestionWorkers()` 호출 삭제, import도 제거
+3. **6-3: `pullIbkrCalendar()` stub** — `calendarIngestion.ts`에 `IbkrCalendarEvent`, `IbkrCalendarResult` 타입 + `pullIbkrCalendar(tickers)` stub 추가. IBKR TWS 미실행 시 명확한 에러 던짐. TODO 주석으로 Python child_process bridge 구현 명세 포함
+4. **6-4: `POST /api/ibkr/calendar/update`** — `server.ts`에 엔드포인트 추가. pullIbkrCalendar() 호출 → 이벤트 upsert → mock 행 삭제 → status 갱신 → `{ upserted, deletedMockRows, source: "IBKR" }` 반환
+5. **6-5: mock_provider rows 삭제** — `calendarRepository.ts`에 `deleteMockCalendarRows()` 추가. 엔드포인트 성공 시 자동 호출
+6. **6-6: ibkr_calendar 상태 갱신** — 엔드포인트 성공 시 `setLastSuccess("ibkr_calendar", ...)` 호출
+
+#### 변경 파일
+
+| 파일 | 변경 |
+|------|------|
+| `terminal/backend/src/services/calendarIngestion.ts` | mock 코드 전면 제거 → IbkrCalendarEvent/Result 타입 + pullIbkrCalendar() stub |
+| `terminal/backend/src/services/calendarRepository.ts` | `deleteMockCalendarRows()` 함수 추가 |
+| `terminal/backend/src/server.ts` | startCalendarIngestionWorkers import/call 제거 → pullIbkrCalendar import + POST /api/ibkr/calendar/update 추가 |
+| `ai_agent_plan/.../plan.md` | 6단계 heading ⬜→⏳, 6-1~6-6 상태 ⬜→⏳, 의존성 그래프 업데이트 |
+
+#### 빌드 검증
+- `npx tsc --noEmit` → 0 errors ✅
+
+#### 제약 / 주의
+- 6-3 (`pullIbkrCalendar`)은 IBKR TWS 미연결 상태이므로 현재 에러를 던짐. IBKR TWS가 연결되고 Python script가 구현되면 Step 6-3을 실제 구현으로 교체해야 함.
+- `POST /api/ibkr/calendar/update` 호출 시 IBKR 미연결 상태에서는 400 에러가 반환됨 (정상 동작).
+
+#### 사용자 확인 필요
+- 백엔드 재시작 후 캘린더 이벤트가 자동 증가하지 않는지 확인 (mock 생성기 중지 확인)
+- `POST /api/ibkr/calendar/update` 호출 시 "IBKR 캘린더 미구현" 에러 반환 확인 (정상 동작)
+
+---
+
+### Step 9 — 테스트/검증 (9-1 ~ 9-4 자동, 9-5 수동 대기)
+
+| 항목 | 내용 |
+|------|------|
+| 시점 | 2026-03-06 |
+| 상태 | 확인 대기(awaiting user confirmation) — 9-5 수동 스모크 미완 |
+| 관련 서브스텝 | 9-1 ~ 9-4 완료, 9-5 수동 대기 |
+
+#### 테스트 결과
+`npx vitest run` → **5 파일, 40 테스트 모두 통과**
+
+| 테스트 파일 | 테스트 수 | 대상 | 주요 검증 |
+|-------------|-----------|------|-----------|
+| `updateStatusRepository.test.ts` | 9 | 9-1 | set/get upsert, listAll + SOURCE_KEYS, malformed JSON → {}, persistence |
+| `tickerCsvService.test.ts` | 14 | 9-2 | path allowlist 거절, traversal 차단, .csv만 허용, read/append/duplicate/normalize |
+| `finnhubNewsProvider.test.ts` | 11 | 9-3 | company/press/market 매핑, missing fields → defaults, API 키 누출 없음, epoch→ISO |
+| `calendarMockCleanup.test.ts` | 4 | 9-4 | mock_provider 삭제, 다른 source 보존, idempotent, empty table |
+| `newsFilterMatcher.test.ts` | 2 | 기존 | ticker+keyword 매칭 |
+
+#### 신규 파일
+
+| 파일 | 용도 |
+|------|------|
+| `tests/setupTestDb.ts` | 공용 헬퍼: temp SQLite + config mock + initDb/teardown |
+| `tests/updateStatusRepository.test.ts` | 9-1 테스트 |
+| `tests/tickerCsvService.test.ts` | 9-2 테스트 |
+| `tests/finnhubNewsProvider.test.ts` | 9-3 테스트 |
+| `tests/calendarMockCleanup.test.ts` | 9-4 테스트 |
+
+#### 남은 작업
+- **9-5 수동 스모크**: Data Control / Default Ticker / News 윈도우 UI 동작 확인 (사용자 수동)
+
 
