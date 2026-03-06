@@ -397,6 +397,29 @@
 
 ---
 
+### Plan 문서 수정 — Industry 소스 정책 변경 (2026-03-06)
+
+**Status: done (문서 수정만 수행, 코드 변경 없음)**
+
+#### 배경
+사용자가 `Industry`는 Finnhub company profile보다 **기본 참조 CSV(`tradigview_screener/original_data/watch lists2_2026-02-22.csv`)를 우선 참조하는 편이 낫다**고 요청함.
+
+#### 수정된 파일
+- `ai_agent_plan/terminal_ui_ver2_finhub/plan.md`
+
+#### 변경 내역
+- 목표 #4의 `Industry` 정의를 CSV 우선, Finnhub fallback으로 수정
+- capability matrix의 `News Feed | Industry`와 `Watchlist | Name/Mkt Cap/Industry` 행 수정
+- 5단계 News Feed Window 데이터 흐름의 `Industry 컬럼` 설명 수정
+- 5-22 세부 단계 설명을 CSV 우선 / Finnhub fallback 규칙으로 수정
+
+#### 검증 방법
+- plan.md에서 `watch lists2_2026-02-22.csv` 검색 → `Industry` 관련 설명에 반영되었는지 확인
+- plan.md에서 `News Feed | Industry` 검색 → CSV 우선 정책으로 바뀌었는지 확인
+- plan.md에서 `5-22` 검색 → 세부 설명이 CSV 우선 / Finnhub fallback으로 바뀌었는지 확인
+
+---
+
 ### 결정 #5, #6 확정 — plan.md 반영
 
 **Status: done (awaiting user confirmation)**

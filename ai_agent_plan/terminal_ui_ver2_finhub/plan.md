@@ -21,7 +21,8 @@
 3) `/calendar`는 **IBKR 캘린더 데이터만** 사용
 4) `news feed_brave api` 표기를 **`news feed:finhub api`**로 변경하고, 뉴스는 **Finnhub API**로 수집/표시(Brave 기반은 사용하지 않음)
   - News Feed Window 표 컬럼에 `Industry`와 `Keywords`를 추가한다.
-  - `Industry`는 Finnhub company profile 계열 데이터에서 온 값으로 표시한다.
+  - `Industry`는 **기본 참조 CSV(`tradigview_screener/original_data/watch lists2_2026-02-22.csv`)의 해당 ticker row를 우선 참조**하여 표시한다.
+  - 기본 참조 CSV에 적절한 `Industry` 계열 컬럼이 없거나 해당 ticker row가 없을 때만 Finnhub company profile 계열 값을 fallback으로 사용한다.
   - `Keywords`는 `news_fulltext` 저장 위치 옆 컬럼에 저장된 후속 AI keyword 분석 결과를 표시한다.
   - News source 메뉴는 `company_news`, `press_release`, `market news`를 각각 선택 가능해야 한다.
 5) **장시간 업데이트 UX** — 모든 장시간 수집 작업(Finnhub 뉴스, IBKR 가격, IBKR 캘린더)은 **백그라운드 잡**으로 실행하고, 각 창에 **View Log** 버튼을 배치하여 진행률/로그를 확인할 수 있게 한다. **시작 시 로그 창 자동 오픈 금지** — 사용자가 View Log 버튼을 눌러야만 열린다.
@@ -258,6 +259,18 @@ PLAN CHANGE (2026-03-06 #8)
 - 영향:
   - News Feed의 earning 표시는 시간이 지나도 과거 뉴스 row 기준값이 유지된다.
   - `/calendar` 버튼은 update 버튼이 아니라 조회 preset 버튼이므로, 저장된 이벤트를 빠르게 다른 기간으로 필터링하는 UX가 추가된다.
+```
+
+```
+PLAN CHANGE (2026-03-06 #9)
+- 왜: 사용자가 `Industry`는 Finnhub company profile보다 **기본 참조 CSV(`tradigview_screener/original_data/watch lists2_2026-02-22.csv`)를 우선 참조하는 편이 낫다**고 요청함.
+- 무엇이 바뀌었나:
+  - 목표 #4의 `Industry` 정의를 CSV 우선, Finnhub fallback으로 변경
+  - capability matrix의 `Industry` 소스 정의를 CSV 우선으로 수정
+  - 5단계 News Feed Window의 `industry` 렌더 설명을 CSV 우선 / Finnhub fallback으로 수정
+- 영향:
+  - `Industry` 값은 운영자가 기준으로 삼는 watchlist CSV와 더 일관되게 보인다.
+  - CSV에 값이 없을 때만 Finnhub를 보조 소스로 사용하므로, 기존 provider 의존성을 완전히 제거하지는 않는다.
 ```
 ---
 
@@ -587,7 +600,7 @@ capability matrix 초안 템플릿(감사 단계에서 채움)
 | News Feed | Title | Finnhub |  |
 | News Feed | Sources | Finnhub | 필드명(`source` 등) 확인 |
 | News Feed | Ticker | Finnhub(심볼 파라미터) | 보통 심볼별로 요청; 실제 동작 확인 |
-| News Feed | Industry | Finnhub company profile(우선) | `finnhubIndustry` 또는 동등 필드 매핑 필요 |
+| News Feed | Industry | 기본 참조 CSV 우선, 없으면 Finnhub company profile fallback | CSV 컬럼명 확인 필요 (`Industry` 또는 동등 컬럼) |
 | News Feed | Changes: `Chg` / `fr.Open` / `+7D` / `+14D` / `+30D` | `OHLC_data/ohlc_1d_watchlist.sqlite`의 `ohlc_1d` 기반 계산 | 히스토리 부족 시 `-`로 렌더(가짜 금지) |
 | News Feed | Keywords | `news_fulltext.keywords_json` | full text 추출 후, 별도 AI keyword 분석 작업이 완료된 row만 표시 |
 | News Feed | Earning date 라인 | `news_earnings_snapshot` (원천 계산은 Finnhub earnings/calendar 우선) | 뉴스 발행 당시 기준 snapshot만 표시; live lookup 금지 |
@@ -602,7 +615,7 @@ capability matrix 초안 템플릿(감사 단계에서 채움)
 | Calendar | 배당 | IBKR WSH (`wshe_div`) | ✅ v3 확인: `dividend_oc`(금액), `dividend_currency`, `ex_div_date`, `pay_date` |
 | Calendar | Analyst rating 필드 | 이용 불가 | ❌ Finnhub `/stock/upgrade-downgrade` 403; WSH에도 없음 |
 | Watchlist | Price/Change/% | `ohlc_1d` 최신 close vs 이전 close로 계산 | 최신 rows에 derived metrics backfill 필요 |
-| Watchlist | Name/Mkt Cap/Industry | Finnhub company profile(우선) | 불가하면 `-` 표시(진짜 unknown), 가짜 금지 |
+| Watchlist | Name/Mkt Cap/Industry | `Industry`는 기본 참조 CSV 우선, 나머지는 Finnhub company profile(우선) | CSV에 값이 없을 때만 `Industry` fallback 허용 |
 
 프로빙 접근(구현 가이드)
 - Finnhub 프로브(백엔드에서만):
@@ -1248,7 +1261,10 @@ API 계약(초안)
 - **Earning date 라인**: 각 뉴스 row의 earning date는 백엔드 응답의 snapshot 필드(`earning_snapshot_date`, `earning_snapshot_session`)를 사용한다.
   - 이 값은 뉴스 발행 당시 기준으로 이미 저장된 snapshot이며, 프론트에서 현재 provider를 다시 조회해 계산하지 않는다.
   - `earning_snapshot_status='resolved'`일 때만 `Earning: <date>` 라인을 표시한다.
-- **Industry 컬럼**: 각 뉴스 row의 `industry` 값을 백엔드 응답에서 렌더한다. 값이 없으면 `-`.
+- **Industry 컬럼**: 각 뉴스 row의 `industry` 값을 백엔드 응답에서 렌더한다.
+  - 값은 **기본 참조 CSV(`tradigview_screener/original_data/watch lists2_2026-02-22.csv`)의 해당 ticker row를 우선 참조**한 결과여야 한다.
+  - CSV에 `Industry` 값이 없거나 ticker 매칭이 실패한 경우에만 Finnhub company profile 계열 값을 fallback으로 사용한다.
+  - 둘 다 없으면 `-`로 표시한다.
 - **Keywords 컬럼**: 각 뉴스 row의 `keywords` 값을 백엔드 응답에서 렌더한다.
   - 저장 원천은 `news_fulltext.keywords_json`.
   - 후속 AI keyword 분석이 아직 수행되지 않은 row는 빈 배열 또는 `pending` 상태로 남고, UI에서는 `-`로 표시한다.
@@ -1511,10 +1527,12 @@ API 계약(초안)
 
 - `5-22` 목적: News Feed Window에서 산업 정보를 뉴스 row와 함께 볼 수 있게 한다. 설명:
   - 테이블 컬럼에 `Industry`를 추가한다.
-  - 값은 backend가 제공하는 `industry` 필드에서 렌더하며, 일반적으로 Finnhub company profile 계열 값이 들어온다.
+  - 값은 backend가 제공하는 `industry` 필드에서 렌더한다.
+  - `industry`는 **기본 참조 CSV(`tradigview_screener/original_data/watch lists2_2026-02-22.csv`)의 해당 ticker row를 우선 참조**한 결과를 사용한다.
+  - CSV에서 ticker를 찾지 못하거나 `Industry` 계열 컬럼이 비어 있을 때만 Finnhub company profile 계열 값을 fallback으로 허용한다.
   - 완료 조건(눈으로 확인): Industry 컬럼이 보이고, 값이 없는 row는 `-`로 표시된다.
-  - 사람 검증(비개발자): 서로 다른 ticker 뉴스 row에서 산업명이 보이거나, 없으면 `-`로 일관되게 보이는지 확인.
-  - 흔한 문제/주의: industry 필드가 백엔드 응답에 없는데 프론트만 먼저 렌더하여 빈 컬럼이 되는 문제.
+  - 사람 검증(비개발자): 표 몇 행을 기본 참조 CSV와 대조해 industry 문자열이 일치하는지 확인하고, CSV에 없는 종목만 fallback 또는 `-`가 나오는지 확인.
+  - 흔한 문제/주의: CSV ticker 매칭 규칙이 news row ticker 형식과 다르면 industry가 과도하게 비게 됨; industry 필드가 백엔드 응답에 없는데 프론트만 먼저 렌더하여 빈 컬럼이 되는 문제.
 
 - `5-23` 목적: News Feed Window에서 후속 AI keyword 분석 결과를 볼 수 있게 한다. 설명:
   - 테이블 컬럼에 `Keywords`를 추가한다.
