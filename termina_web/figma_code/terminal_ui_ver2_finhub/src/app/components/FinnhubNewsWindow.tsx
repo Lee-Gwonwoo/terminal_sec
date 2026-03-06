@@ -13,7 +13,7 @@ const ROW_HEIGHT_WITH_ABSTRACT = 140;
 type DisplayMode = 'title-only' | 'title-abstract';
 
 // ─── Column definition ───
-type ColumnId = 'date' | 'ticker' | 'time' | 'title' | 'source' | 'changes';
+type ColumnId = 'date' | 'ticker' | 'time' | 'title' | 'source' | 'changes' | 'fulltext' | 'keywords';
 
 interface ColumnDef {
   id: ColumnId;
@@ -29,6 +29,7 @@ const DEFAULT_COLUMNS: ColumnDef[] = [
   { id: 'time',    label: 'Time',      defaultWidth: 52,  minWidth: 40 },
   { id: 'title',   label: 'Title',     defaultWidth: 300, minWidth: 100, flex: true },
   { id: 'source',  label: 'Sources',   defaultWidth: 90,  minWidth: 50 },
+  { id: 'fulltext', label: 'Full Text', defaultWidth: 60,  minWidth: 40 },
   { id: 'changes', label: 'Changes %', defaultWidth: 280, minWidth: 160 },
 ];
 
@@ -61,6 +62,9 @@ interface BackendNewsItem {
   change_14d_pct?: number | null;
   change_30d_pct?: number | null;
   change_computed_at?: string | null;
+  hasFullText?: boolean;
+  keywords?: string[];
+  keywordsStatus?: string | null;
 }
 
 // ─── Display item ───
@@ -80,6 +84,9 @@ interface DisplayItem {
   change7dPct: number | null;
   change14dPct: number | null;
   change30dPct: number | null;
+  hasFullText: boolean;
+  keywords: string[];
+  keywordsStatus: string | null;
 }
 
 function mapBackendItem(item: BackendNewsItem): DisplayItem {
@@ -100,6 +107,9 @@ function mapBackendItem(item: BackendNewsItem): DisplayItem {
     change7dPct: item.change_7d_pct ?? null,
     change14dPct: item.change_14d_pct ?? null,
     change30dPct: item.change_30d_pct ?? null,
+    hasFullText: !!item.hasFullText,
+    keywords: item.keywords ?? [],
+    keywordsStatus: item.keywordsStatus ?? null,
   };
 }
 
@@ -136,6 +146,14 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
   // Source cell context menu (Copy URL)
   const [sourceCtxMenu, setSourceCtxMenu] = useState<null | { x: number; y: number; url: string }>(null);
   const sourceCtxMenuRef = useRef<HTMLDivElement>(null);
+
+  // Full text popup
+  const [showFulltextModal, setShowFulltextModal] = useState(false);
+  const [fulltextData, setFulltextData] = useState<{ title: string; text: string; wordCount: number; status: string } | null>(null);
+  const [fulltextLoading, setFulltextLoading] = useState(false);
+
+  // Full text extraction job
+  const [ftUpdating, setFtUpdating] = useState(false);
 
   // Display mode
   const [displayMode, setDisplayMode] = useState<DisplayMode>('title-only');
@@ -376,6 +394,60 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
     setShowCustomDateModal(true);
   };
 
+  // ─── Fetch full text for a single news item ───
+  const fetchFulltext = useCallback(async (newsId: string, title: string) => {
+    setFulltextLoading(true);
+    setFulltextData(null);
+    setShowFulltextModal(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/news/fulltext/${encodeURIComponent(newsId)}`);
+      if (!res.ok) {
+        setFulltextData({ title, text: `Failed to load (HTTP ${res.status})`, wordCount: 0, status: 'error' });
+        return;
+      }
+      const data = await res.json();
+      setFulltextData({
+        title,
+        text: data.fullText || '(no content)',
+        wordCount: data.wordCount ?? 0,
+        status: data.extractionStatus ?? 'unknown',
+      });
+    } catch (err: any) {
+      setFulltextData({ title, text: `Error: ${err.message}`, wordCount: 0, status: 'error' });
+    } finally {
+      setFulltextLoading(false);
+    }
+  }, []);
+
+  // ─── Full text extraction (background job) ───
+  type FtSourceType = 'all' | 'company_news' | 'press_release';
+  const [lastFtSourceType, setLastFtSourceType] = useState<FtSourceType>('all');
+
+  const handleFulltextUpdate = async (sourceType: FtSourceType = 'all') => {
+    if (updating || ftUpdating) return;
+    setLastFtSourceType(sourceType);
+    setFtUpdating(true);
+    setError(null);
+    setJobStatus(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/news/fulltext/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourceType }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || `HTTP ${res.status}`);
+        setFtUpdating(false);
+        return;
+      }
+      setCurrentJobId(data.jobId);
+    } catch (err: any) {
+      setError(err.message || 'Failed to start fulltext extraction');
+      setFtUpdating(false);
+    }
+  };
+
   // ─── Main button label (reflects last used config) ───
   const mainBtnLabel = (() => {
     const m = lastUpdateConfig.mode;
@@ -407,9 +479,11 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
         setJobStatus(data);
         if (data.status === 'done') {
           setUpdating(false);
+          setFtUpdating(false);
           fetchNews(searchQuery || undefined);
         } else if (data.status === 'failed') {
           setUpdating(false);
+          setFtUpdating(false);
           setError(data.error || 'Job failed');
         }
       } catch {
@@ -473,7 +547,9 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
       case 'time': return item.time;
       case 'title': return item.title.toLowerCase();
       case 'source': return item.source.toLowerCase();
+      case 'fulltext': return item.hasFullText ? 1 : 0;
       case 'changes': return item.changeFromOpenPct ?? 0;
+      case 'keywords': return item.keywords.length;
     }
   }, []);
 
@@ -675,6 +751,18 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
             {newsItem.source}
           </span>
         );
+      case 'fulltext':
+        return newsItem.hasFullText ? (
+          <span
+            className="text-green-600 dark:text-green-400 font-semibold cursor-pointer hover:underline"
+            title="Click to view full text"
+            onClick={(e) => { e.stopPropagation(); fetchFulltext(newsItem.id, newsItem.title); }}
+          >
+            O
+          </span>
+        ) : (
+          <span className="text-gray-300 dark:text-gray-600">X</span>
+        );
       case 'changes':
         return (
           <div className="flex flex-col justify-center gap-0 w-full">
@@ -697,8 +785,23 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
             </div>
           </div>
         );
+      case 'keywords':
+        return newsItem.keywords.length > 0 ? (
+          <div className="flex flex-wrap gap-0.5 overflow-hidden">
+            {newsItem.keywords.slice(0, 3).map((kw, i) => (
+              <span key={i} className="inline-block px-1 py-0 text-[9px] bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded truncate max-w-[80px]" title={kw}>
+                {kw}
+              </span>
+            ))}
+            {newsItem.keywords.length > 3 && (
+              <span className="text-[9px] text-gray-400">+{newsItem.keywords.length - 3}</span>
+            )}
+          </div>
+        ) : (
+          <span className="text-gray-300 dark:text-gray-600">-</span>
+        );
     }
-  }, [displayMode, toggleExpand, onTickerClick, openExternalUrl, setSearchQuery]);
+  }, [displayMode, toggleExpand, onTickerClick, openExternalUrl, setSearchQuery, fetchFulltext]);
 
   // ─── Row renderer ───
   const Row = useCallback(({ index, style }: { index: number; style: React.CSSProperties }) => {
@@ -886,6 +989,70 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
               <span className="ml-1 w-2 h-2 rounded-full bg-red-500 inline-block" />
             )}
           </button>
+
+          {/* Full Text Extract split-button */}
+          {(() => {
+            const [showFtMenu, setShowFtMenu] = React.useState(false);
+            const ftMenuRef = React.useRef<HTMLDivElement>(null);
+
+            React.useEffect(() => {
+              if (!showFtMenu) return;
+              const handler = (e: MouseEvent) => {
+                if (ftMenuRef.current && !ftMenuRef.current.contains(e.target as Node)) setShowFtMenu(false);
+              };
+              document.addEventListener('mousedown', handler);
+              return () => document.removeEventListener('mousedown', handler);
+            }, [showFtMenu]);
+
+            const ftLabel = ftUpdating
+              ? 'Extracting...'
+              : lastFtSourceType === 'company_news' ? 'FT Co.'
+              : lastFtSourceType === 'press_release' ? 'FT PR'
+              : 'Full Text';
+
+            return (
+              <div className="relative flex" ref={ftMenuRef}>
+                {/* Main button — repeats last used sourceType */}
+                <button
+                  onClick={() => handleFulltextUpdate(lastFtSourceType)}
+                  disabled={updating || ftUpdating}
+                  className="px-3 py-1.5 border border-r-0 border-gray-300 dark:border-gray-600 rounded-l hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 text-xs disabled:opacity-50"
+                  title={`Extract full text (${lastFtSourceType === 'all' ? 'All' : lastFtSourceType === 'company_news' ? 'Company News' : 'Press Release'})`}
+                >
+                  <FileText className={`w-3.5 h-3.5 text-orange-500 ${ftUpdating ? 'animate-pulse' : ''}`} />
+                  <span>{ftLabel}</span>
+                </button>
+                {/* Dropdown arrow */}
+                <button
+                  onClick={() => setShowFtMenu(!showFtMenu)}
+                  disabled={updating || ftUpdating}
+                  className="px-1.5 py-1.5 border border-gray-300 dark:border-gray-600 rounded-r hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
+                  title="Choose source type for full text extraction"
+                >
+                  <ChevronDown className="w-3 h-3" />
+                </button>
+                {/* Dropdown menu */}
+                {showFtMenu && (
+                  <div className="absolute top-full left-0 mt-1 w-56 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-lg z-50">
+                    <div className="p-1.5">
+                      <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('all'); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <FileText className="w-3.5 h-3.5 shrink-0 text-orange-500" />
+                        <div><div className="font-medium">Full Text (All)</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Company News + Press Releases</div></div>
+                      </button>
+                      <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('company_news'); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <FileText className="w-3.5 h-3.5 shrink-0 text-blue-500" />
+                        <div><div className="font-medium">Company News Only</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Extract for company_news items</div></div>
+                      </button>
+                      <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('press_release'); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <FileText className="w-3.5 h-3.5 shrink-0 text-green-500" />
+                        <div><div className="font-medium">Press Release Only</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Extract for press_release items</div></div>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Refresh button */}
           <button onClick={() => fetchNews(searchQuery || undefined)} disabled={loading} className="p-2 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors" title="Refresh from DB">
@@ -1128,7 +1295,10 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
           {/* Result summary when done */}
           {jobStatus.status === 'done' && jobStatus.result && (
             <div className="px-3 py-2 border-t border-gray-200 dark:border-gray-700 bg-green-50 dark:bg-green-900/20 text-xs text-green-700 dark:text-green-300 shrink-0">
-              ✓ Completed — {(jobStatus.result as Record<string, unknown>).inserted as number ?? 0} inserted, {(jobStatus.result as Record<string, unknown>).skipped as number ?? 0} skipped, {(jobStatus.result as Record<string, unknown>).changeMerged as number ?? 0} change% merged
+              {(jobStatus.result as Record<string, unknown>).success !== undefined
+                ? `✓ Full Text — ${(jobStatus.result as Record<string, unknown>).success ?? 0} extracted, ${(jobStatus.result as Record<string, unknown>).skipped ?? 0} skipped, ${(jobStatus.result as Record<string, unknown>).failed ?? 0} failed`
+                : `✓ Completed — ${(jobStatus.result as Record<string, unknown>).inserted ?? 0} inserted, ${(jobStatus.result as Record<string, unknown>).skipped ?? 0} skipped, ${(jobStatus.result as Record<string, unknown>).changeMerged ?? 0} change% merged`
+              }
             </div>
           )}
         </div>
@@ -1200,6 +1370,43 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
                 onClick={() => { setShowPreflightModal(false); handleUpdate('recent', pendingUpdateSourceType); }}
                 className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
               >계속</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Full Text Modal ─── */}
+      {showFulltextModal && (
+        <div
+          className="absolute inset-0 bg-black/30 flex items-center justify-center z-50"
+          onClick={() => setShowFulltextModal(false)}
+          onKeyDown={(e) => { if (e.key === 'Escape') setShowFulltextModal(false); }}
+        >
+          <div
+            className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-[90%] max-w-2xl max-h-[80%] flex flex-col border border-gray-200 dark:border-gray-700"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700 shrink-0">
+              <div className="min-w-0 flex-1 mr-3">
+                <h3 className="text-sm font-semibold truncate">{fulltextData?.title ?? 'Loading...'}</h3>
+                {fulltextData && (
+                  <span className="text-[10px] text-gray-400">
+                    {fulltextData.wordCount} words · {fulltextData.status}
+                  </span>
+                )}
+              </div>
+              <button onClick={() => setShowFulltextModal(false)} className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors shrink-0" title="Close (Esc)">
+                <X className="w-4 h-4 text-gray-500" />
+              </button>
+            </div>
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto px-4 py-3 text-xs leading-relaxed text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+              {fulltextLoading ? (
+                <div className="flex items-center justify-center py-8 text-gray-400">Loading...</div>
+              ) : (
+                fulltextData?.text ?? ''
+              )}
             </div>
           </div>
         </div>

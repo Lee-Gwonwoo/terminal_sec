@@ -119,6 +119,24 @@ export async function initDb(): Promise<void> {
   await ensureColumn("news_items", "change_14d_pct", "REAL");
   await ensureColumn("news_items", "change_30d_pct", "REAL");
   await ensureColumn("news_items", "change_computed_at", "TEXT");
+
+  // Step 10: publisher column on news_items
+  await ensureColumn("news_items", "publisher", "TEXT");
+
+  // Step 10: news_fulltext table
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS news_fulltext (
+      news_id TEXT PRIMARY KEY REFERENCES news_items(id),
+      full_text TEXT NOT NULL,
+      extraction_status TEXT NOT NULL,
+      extraction_note TEXT,
+      word_count INTEGER,
+      extracted_at TEXT NOT NULL,
+      keywords_json TEXT NOT NULL DEFAULT '[]',
+      keywords_status TEXT NOT NULL DEFAULT 'pending',
+      keywords_updated_at TEXT
+    );
+  `);
 }
 
 async function ensureColumn(tableName: string, columnName: string, definition: string): Promise<void> {

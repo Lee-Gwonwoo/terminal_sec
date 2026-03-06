@@ -1827,7 +1827,7 @@ UI 동작(최소)
 ```
 - 사용자 확인 필요: **Yes**
 
-#### ⬜ 10단계 — Full Text Extraction(뉴스 원문 추출: 백엔드 + 프론트)
+#### ⏳ 10단계 — Full Text Extraction(뉴스 원문 추출: 백엔드 + 프론트)
 목적
 - 저장된 뉴스의 **원본 기사 전문(full text)**을 도메인별 추출기로 크롤링/API 호출하여 별도 테이블에 저장한다.
 - 뉴스 피드 업데이트(Finnhub pull)와 **완전 분리된 별도 프로세스**로, 이미 적재된 뉴스에 대해 사후적으로 full text를 추출한다.
@@ -1923,20 +1923,20 @@ API 계약(초안)
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 10-1 | `news_fulltext` 테이블 CREATE + keyword 컬럼 + `news_items.publisher` 컬럼 migration | `terminal/backend/src/db.ts` | 백엔드 시작 후 테이블/컬럼 존재 확인 | ⬜ |
-| 10-2 | `fulltextRepository.ts` 구현 (CRUD + 미추출 목록 조회) | `terminal/backend/src/services/fulltextRepository.ts` | `npx tsc --noEmit` → 0 errors | ⬜ |
-| 10-3 | 기존 news_items `publisher` 컬럼 backfill (URL 도메인 파싱) | `terminal/backend/src/services/finnhubNewsProvider.ts` | 기존 707건에 대해 publisher가 NASDAQ/TMX/FINNHUB 중 하나로 세팅 | ⬜ |
-| 10-4 | `extractNasdaq(url)` — Nasdaq HTML scraping 추출기 | `terminal/backend/src/services/fulltextExtractors.ts` | 샘플 Nasdaq URL로 article body 추출 성공 | ⬜ |
-| 10-5 | `extractTmx(url)` — TMX GraphQL API 추출기 | `terminal/backend/src/services/fulltextExtractors.ts` | 샘플 TMX URL로 story HTML 추출 성공 | ⬜ |
-| 10-6 | `extractByDomain(url, publisher)` — 도메인 dispatcher | `terminal/backend/src/services/fulltextExtractors.ts` | 각 도메인에 대해 올바른 추출기로 dispatch | ⬜ |
-| 10-7 | `fulltextUpdateService.ts` — 백그라운드 잡 오케스트레이터 | `terminal/backend/src/services/fulltextUpdateService.ts` | 미추출 news_id 순회 + 도메인별 추출 + 진행률 로그 | ⬜ |
-| 10-8 | `POST /api/news/fulltext/update` 엔드포인트 (잡 시작) | `terminal/backend/src/server.ts` | POST → `{ jobId }` → 잡 실행 확인 | ⬜ |
-| 10-9 | `GET /api/news/fulltext/:newsId` 엔드포인트 | `terminal/backend/src/server.ts` | 특정 newsId에 대해 full text 반환 | ⬜ |
-| 10-10 | `GET /api/news` 응답에 `hasFullText`, `keywords`, `keywordsStatus` 필드 추가 | `newsRepository.ts`, `server.ts` | 응답 각 row에 관련 필드 포함 | ⬜ |
-| 10-11 | 프론트: Full Text 컬럼 (O/X) + Keywords 컬럼 추가 + 컬럼 토글 연동 | `FinnhubNewsWindow.tsx` | 테이블에 O/X와 Keywords 표시, Columns 드롭다운에 포함 | ⬜ |
-| 10-12 | 프론트: O 클릭 → full text 팝업 (안전 HTML 렌더) | `FinnhubNewsWindow.tsx` | O 클릭 시 모달에 full text 표시, XSS 방지 | ⬜ |
-| 10-13 | 프론트: "Full Text Update" 버튼 + View Log 연동 | `FinnhubNewsWindow.tsx` | 버튼 클릭 → 잡 시작 → View Log로 확인 → 완료 후 목록 재조회 | ⬜ |
-| 10-14 | end-to-end 검증: Nasdaq + TMX + finnhub.io 각각 추출 결과 확인 | (런타임) | 3개 도메인 모두 정상 처리 확인 | ⬜ |
+| 10-1 | `news_fulltext` 테이블 CREATE + keyword 컬럼 + `news_items.publisher` 컬럼 migration | `terminal/backend/src/db.ts` | 백엔드 시작 후 테이블/컬럼 존재 확인 | ⏳ |
+| 10-2 | `fulltextRepository.ts` 구현 (CRUD + 미추출 목록 조회) | `terminal/backend/src/services/fulltextRepository.ts` | `npx tsc --noEmit` → 0 errors | ⏳ |
+| 10-3 | 기존 news_items `publisher` 컬럼 backfill (URL 도메인 파싱) | `terminal/backend/src/services/finnhubNewsProvider.ts` | 기존 707건에 대해 publisher가 NASDAQ/TMX/FINNHUB 중 하나로 세팅 | ⏳ |
+| 10-4 | `extractNasdaq(url)` — Nasdaq HTML scraping 추출기 | `terminal/backend/src/services/fulltextExtractors.ts` | 샘플 Nasdaq URL로 article body 추출 성공 | ⏳ |
+| 10-5 | `extractTmx(url)` — TMX GraphQL API 추출기 | `terminal/backend/src/services/fulltextExtractors.ts` | 샘플 TMX URL로 story HTML 추출 성공 | ⏳ |
+| 10-6 | `extractByDomain(url, publisher)` — 도메인 dispatcher | `terminal/backend/src/services/fulltextExtractors.ts` | 각 도메인에 대해 올바른 추출기로 dispatch | ⏳ |
+| 10-7 | `fulltextUpdateService.ts` — 백그라운드 잡 오케스트레이터 | `terminal/backend/src/services/fulltextUpdateService.ts` | 미추출 news_id 순회 + 도메인별 추출 + 진행률 로그 | ⏳ |
+| 10-8 | `POST /api/news/fulltext/update` 엔드포인트 (잡 시작) | `terminal/backend/src/server.ts` | POST → `{ jobId }` → 잡 실행 확인 | ⏳ |
+| 10-9 | `GET /api/news/fulltext/:newsId` 엔드포인트 | `terminal/backend/src/server.ts` | 특정 newsId에 대해 full text 반환 | ⏳ |
+| 10-10 | `GET /api/news` 응답에 `hasFullText`, `keywords`, `keywordsStatus` 필드 추가 | `newsRepository.ts`, `server.ts` | 응답 각 row에 관련 필드 포함 | ⏳ |
+| 10-11 | 프론트: Full Text 컬럼 (O/X) + Keywords 컬럼 추가 + 컬럼 토글 연동 | `FinnhubNewsWindow.tsx` | 테이블에 O/X와 Keywords 표시, Columns 드롭다운에 포함 | ⏳ |
+| 10-12 | 프론트: O 클릭 → full text 팝업 (안전 HTML 렌더) | `FinnhubNewsWindow.tsx` | O 클릭 시 모달에 full text 표시, XSS 방지 | ⏳ |
+| 10-13 | 프론트: "Full Text Update" 버튼 + View Log 연동 | `FinnhubNewsWindow.tsx` | 버튼 클릭 → 잡 시작 → View Log로 확인 → 완료 후 목록 재조회 | ⏳ |
+| 10-14 | end-to-end 검증: Nasdaq + TMX + finnhub.io 각각 추출 결과 확인 | (런타임) | 3개 도메인 모두 정상 처리 확인 | ⏳ |
 | 10-15 | 후속 AI keyword 분석 결과 저장 규약 정의 | `fulltextRepository.ts`, `plan.md` | `keywords_json`/`keywords_status` 사용 규약 문서화 | ⬜ |
 
 **세부 단계 목적/설명 (10단계)**

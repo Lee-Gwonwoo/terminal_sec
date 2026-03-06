@@ -32,6 +32,9 @@ import {
 import type { FinnhubMappedItem } from "./services/finnhubNewsProvider.js";
 import { mergeChangeForNewItems } from "./services/newsChangeMerger.js";
 import { createJob, getJob, updateProgress, appendLog, completeJob, failJob } from "./services/jobManager.js";
+import { getFulltext, getUnextractedNewsIds } from "./services/fulltextRepository.js";
+import { runFulltextUpdate } from "./services/fulltextUpdateService.js";
+import { backfillPublisher } from "./services/finnhubNewsProvider.js";
 import type { NewsQuery } from "./types.js";
 
 const app = express();
@@ -411,6 +414,52 @@ app.get("/api/jobs/:jobId", (req, res) => {
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
   });
+});
+
+// ── Full Text Extraction endpoints (Step 10) ──
+
+app.post("/api/news/fulltext/update", async (req, res, next) => {
+  try {
+    const sourceType: string | undefined = req.body?.sourceType; // 'all' | 'company_news' | 'press_release'
+
+    // backfill publisher for any rows missing it
+    await backfillPublisher();
+
+    const unextracted = await getUnextractedNewsIds(sourceType);
+    const total = unextracted.length;
+    const jobId = createJob(total);
+
+    // Fire-and-forget background job
+    runFulltextUpdate(jobId, sourceType).catch((err) => {
+      console.error("[fulltext-update] unhandled:", err);
+    });
+
+    res.json({ jobId, total });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/news/fulltext/:newsId", async (req, res, next) => {
+  try {
+    const row = await getFulltext(req.params.newsId);
+    if (!row) {
+      res.status(404).json({ error: "Full text not found" });
+      return;
+    }
+    res.json({
+      newsId: row.news_id,
+      fullText: row.full_text,
+      extractionStatus: row.extraction_status,
+      extractionNote: row.extraction_note,
+      wordCount: row.word_count,
+      extractedAt: row.extracted_at,
+      keywords: JSON.parse(row.keywords_json || "[]"),
+      keywordsStatus: row.keywords_status,
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get("/api/news", async (req, res, next) => {

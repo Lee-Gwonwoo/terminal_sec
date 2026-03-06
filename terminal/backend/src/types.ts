@@ -32,4 +32,8 @@ export type NewsItem = {
   change_14d_pct?: number | null;
   change_30d_pct?: number | null;
   change_computed_at?: string | null;
+  // fulltext columns (Step 10)
+  hasFullText?: boolean;
+  keywords?: string[];
+  keywordsStatus?: string | null;
 };

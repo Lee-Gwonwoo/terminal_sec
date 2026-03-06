@@ -329,3 +329,39 @@ export async function getTickerAnchorMap(
   }
   return map;
 }
+
+// ---------- Publisher helpers (Step 10) ----------
+
+/**
+ * Extract publisher label from a news URL.
+ * www.nasdaq.com → NASDAQ, money.tmx.com → TMX, finnhub.io → FINNHUB, else → UNKNOWN
+ */
+export function derivePublisher(url: string): string {
+  if (!url) return "UNKNOWN";
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    if (hostname.includes("nasdaq.com")) return "NASDAQ";
+    if (hostname.includes("tmx.com")) return "TMX";
+    if (hostname.includes("finnhub.io")) return "FINNHUB";
+    return "UNKNOWN";
+  } catch {
+    return "UNKNOWN";
+  }
+}
+
+/**
+ * Backfill publisher column for all news_items where publisher IS NULL.
+ * Returns the number of rows updated.
+ */
+export async function backfillPublisher(): Promise<number> {
+  const rows = await getDb().all<{ id: string; url: string }[]>(
+    `SELECT id, url FROM news_items WHERE publisher IS NULL`,
+  );
+  let updated = 0;
+  for (const row of rows) {
+    const publisher = derivePublisher(row.url);
+    await getDb().run(`UPDATE news_items SET publisher = ? WHERE id = ?`, [publisher, row.id]);
+    updated++;
+  }
+  return updated;
+}

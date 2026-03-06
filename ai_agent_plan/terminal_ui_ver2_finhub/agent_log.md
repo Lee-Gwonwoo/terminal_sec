@@ -1118,3 +1118,60 @@
   - Custom Update 클릭 → date picker 모달 열림/날짜 입력/Start 확인
   - Recent Update 클릭 → preflight 체크 → fallback ticker 있으면 경고 모달 표시 확인
 
+---
+
+### Step 10 — Full Text Extraction (전문 추출) 구현
+
+**작성 시각:** 2026-03-06 17:30 (local)
+
+**Status: done (확인 대기 / awaiting user confirmation)**
+
+#### 수행 작업
+
+**백엔드 (10-1 ~ 10-10):**
+
+1. **DB 스키마 확장 (10-1)** — `db.ts`에 `news_fulltext` 테이블 CREATE (news_id PK, full_text, extraction_status, extraction_note, word_count, extracted_at, keywords_json, keywords_status, keywords_updated_at) + `news_items.publisher` 컬럼 ensureColumn
+2. **fulltextRepository.ts (10-2)** — CRUD: `getFulltext`, `insertFulltext` (INSERT OR IGNORE), `getUnextractedNewsIds` (LEFT JOIN), `getFulltextStatusSet`, `updateKeywords`
+3. **publisher 유틸 (10-3)** — `finnhubNewsProvider.ts`에 `derivePublisher(url)` (hostname→NASDAQ/TMX/FINNHUB/UNKNOWN) + `backfillPublisher()` (publisher IS NULL 일괄 업데이트)
+4. **Nasdaq 추출기 (10-4)** — `fulltextExtractors.ts`에 `extractNasdaq(url)`: cheerio로 HTML 파싱, selector `div.body__content` + fallback `article`, User-Agent 헤더 설정
+5. **TMX 추출기 (10-5)** — `extractTmx(url)`: TMX GraphQL API (`https://app-money.tmx.com/graphql`, query `getNewsStoryById`) → HTML story → cheerio text 추출
+6. **도메인 디스패처 (10-6)** — `extractByDomain(url, publisher)`: NASDAQ→extractNasdaq, TMX→extractTmx, FINNHUB→skipped, UNKNOWN→unavailable
+7. **백그라운드 작업 (10-7)** — `fulltextUpdateService.ts`의 `runFulltextUpdate(jobId)`: unextracted 목록 순회, extractByDomain 호출, 결과 DB 저장, 10건마다 로그, 400ms 딜레이, 개별 실패 시 계속 진행
+8. **API 엔드포인트 (10-8/9)** — `server.ts`에 `POST /api/news/fulltext/update` (backfillPublisher → 작업 시작 → jobId 반환) + `GET /api/news/fulltext/:newsId` (풀텍스트 데이터 반환)
+9. **뉴스 API 응답 확장 (10-10)** — `newsRepository.ts`의 `getNews`/`getNewsById`에 LEFT JOIN news_fulltext 추가, `hasFullText`/`keywords`/`keywordsStatus` 필드 반환, WHERE 절 `ni.` prefix 일괄 수정
+
+**프론트엔드 (10-11 ~ 10-13):**
+
+10. **Full Text O/X 컬럼 (10-11)** — `ColumnId`에 `'fulltext'`/`'keywords'` 추가, DEFAULT_COLUMNS에 배치, renderCell에 O(녹색 클릭)/X(회색) + keywords 배지 구현
+11. **Full Text 팝업 모달 (10-12)** — O 클릭 시 `GET /api/news/fulltext/:newsId` fetch → 모달에 전문 표시 (word count, status 포함), ESC/외부 클릭으로 닫기
+12. **Full Text Extract 버튼 (10-13)** — 툴바에 "Full Text" 버튼 추가, `POST /api/news/fulltext/update` 호출, 기존 job polling/View Log 패턴 재활용
+13. **Job 결과 표시** — Log Panel 하단 결과 요약에 fulltext 작업 결과(success/skipped/failed) 감지 + 기존 pull 결과(inserted/skipped/changeMerged)와 분기 표시
+
+**의존성 설치:** `cheerio` (HTML 파싱용, backend)
+
+#### 변경 파일
+
+| 파일 | 변경 |
+|------|------|
+| `terminal/backend/src/db.ts` | news_fulltext 테이블 CREATE + publisher ensureColumn |
+| `terminal/backend/src/services/fulltextRepository.ts` | **신규** — 풀텍스트 CRUD |
+| `terminal/backend/src/services/fulltextExtractors.ts` | **신규** — Nasdaq/TMX/도메인별 추출기 |
+| `terminal/backend/src/services/fulltextUpdateService.ts` | **신규** — 백그라운드 추출 작업 오케스트레이터 |
+| `terminal/backend/src/services/finnhubNewsProvider.ts` | derivePublisher + backfillPublisher 추가 |
+| `terminal/backend/src/services/newsRepository.ts` | LEFT JOIN news_fulltext + hasFullText/keywords/keywordsStatus 반환 + WHERE ni. prefix |
+| `terminal/backend/src/server.ts` | fulltext import + 2 엔드포인트 추가 |
+| `terminal/backend/src/types.ts` | NewsItem에 hasFullText/keywords/keywordsStatus 추가 |
+| `terminal/backend/package.json` | cheerio 의존성 추가 |
+| `termina_web/.../FinnhubNewsWindow.tsx` | fulltext/keywords 컬럼 + 팝업 모달 + Full Text 버튼 + job 결과 분기 |
+
+#### 검증
+- `npx tsc --noEmit` (backend) — 에러 없음
+- `npx vite build` (frontend) — 에러 없음
+- `GET /api/news` — hasFullText/keywords/keywordsStatus 필드 정상 반환
+- `POST /api/news/fulltext/update` — jobId 반환, 백그라운드 추출 시작
+- Job 실행 중 확인: FINNHUB → skipped, NASDAQ → success
+- 사용자 확인 필요:
+  - 브라우저에서 Full Text 컬럼 O/X 표시
+  - O 클릭 시 모달에 전문 표시
+  - "Full Text" 버튼 클릭 → 작업 시작 → View Log에서 진행 상황 확인
+

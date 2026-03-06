@@ -56,11 +56,11 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
 
   if (query.keyword) {
     values.push(`%${query.keyword.toLowerCase()}%`);
-    where.push(`LOWER(title || ' ' || body) LIKE ?`);
+    where.push(`LOWER(ni.title || ' ' || ni.body) LIKE ?`);
   }
 
   if (query.tickers?.length) {
-    const tickerClauses = query.tickers.map(() => "tickers_csv LIKE ?");
+    const tickerClauses = query.tickers.map(() => "ni.tickers_csv LIKE ?");
     for (const ticker of query.tickers) {
       values.push(`%,${ticker.toUpperCase()},%`);
     }
@@ -70,17 +70,17 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
   if (query.sources?.length) {
     const sourcePlaceholders = query.sources.map(() => "?").join(",");
     values.push(...query.sources);
-    where.push(`source_type IN (${sourcePlaceholders})`);
+    where.push(`ni.source_type IN (${sourcePlaceholders})`);
   }
 
   if (query.sourceNames?.length) {
     const sourcePlaceholders = query.sourceNames.map(() => "?").join(",");
     values.push(...query.sourceNames);
-    where.push(`source IN (${sourcePlaceholders})`);
+    where.push(`ni.source IN (${sourcePlaceholders})`);
   }
 
   if (query.tags?.length) {
-    const tagClauses = query.tags.map(() => "tags_csv LIKE ?");
+    const tagClauses = query.tags.map(() => "ni.tags_csv LIKE ?");
     for (const tag of query.tags) {
       values.push(`%,${tag.toLowerCase()},%`);
     }
@@ -89,18 +89,18 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
 
   if (query.from) {
     values.push(query.from);
-    where.push(`published_at >= ?`);
+    where.push(`ni.published_at >= ?`);
   }
 
   if (query.to) {
     values.push(query.to);
-    where.push(`published_at <= ?`);
+    where.push(`ni.published_at <= ?`);
   }
 
   const cursor = decodeCursor(query.cursor);
   if (cursor) {
     values.push(cursor.publishedAt, cursor.publishedAt, cursor.id);
-    where.push(`(published_at < ? OR (published_at = ? AND id < ?))`);
+    where.push(`(ni.published_at < ? OR (ni.published_at = ? AND ni.id < ?))`);
   }
 
   const requestedLimit = typeof query.limit === "number" && Number.isFinite(query.limit) ? query.limit : 200;
@@ -111,12 +111,15 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
 
   const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
   const sql = `
-    SELECT id, published_at, source, source_type, title, body, url, tickers_csv, tags_csv, created_at,
-           ohlc_ticker, ohlc_date, change_1d_pct, change_from_open_pct,
-           change_7d_pct, change_14d_pct, change_30d_pct, change_computed_at
-    FROM news_items
+    SELECT ni.id, ni.published_at, ni.source, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
+           ni.ohlc_ticker, ni.ohlc_date, ni.change_1d_pct, ni.change_from_open_pct,
+           ni.change_7d_pct, ni.change_14d_pct, ni.change_30d_pct, ni.change_computed_at,
+           CASE WHEN nf.extraction_status = 'success' THEN 1 ELSE 0 END AS has_full_text,
+           nf.keywords_json, nf.keywords_status
+    FROM news_items ni
+    LEFT JOIN news_fulltext nf ON nf.news_id = ni.id
     ${whereSql}
-    ORDER BY published_at DESC, id DESC
+    ORDER BY ni.published_at DESC, ni.id DESC
     LIMIT ?
   `;
 
@@ -131,11 +134,14 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
 
 export async function getNewsById(id: string): Promise<NewsItem | null> {
   const row = await getDb().get<any>(
-    `SELECT id, published_at, source, source_type, title, body, url, tickers_csv, tags_csv, created_at,
-            ohlc_ticker, ohlc_date, change_1d_pct, change_from_open_pct,
-            change_7d_pct, change_14d_pct, change_30d_pct, change_computed_at
-     FROM news_items
-     WHERE id = ?`,
+    `SELECT ni.id, ni.published_at, ni.source, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
+            ni.ohlc_ticker, ni.ohlc_date, ni.change_1d_pct, ni.change_from_open_pct,
+            ni.change_7d_pct, ni.change_14d_pct, ni.change_30d_pct, ni.change_computed_at,
+            CASE WHEN nf.extraction_status = 'success' THEN 1 ELSE 0 END AS has_full_text,
+            nf.keywords_json, nf.keywords_status
+     FROM news_items ni
+     LEFT JOIN news_fulltext nf ON nf.news_id = ni.id
+     WHERE ni.id = ?`,
     [id]
   );
   return row ? mapNewsRow(row) : null;
@@ -212,6 +218,9 @@ function mapNewsRow(row: any): NewsItem {
     change_14d_pct: row.change_14d_pct ?? null,
     change_30d_pct: row.change_30d_pct ?? null,
     change_computed_at: row.change_computed_at ?? null,
+    hasFullText: row.has_full_text === 1,
+    keywords: row.keywords_json ? JSON.parse(row.keywords_json) : [],
+    keywordsStatus: row.keywords_status ?? null,
   };
 }
 
