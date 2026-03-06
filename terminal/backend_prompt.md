@@ -220,7 +220,9 @@ Request body (Zod in `src/server.ts`):
 ```json
 {
   "csvPath": "tradigview_screener/original_data/watch lists2_2026-02-22.csv",
-  "maxTickers": 50,
+  "maxTickers": 0,
+  "mode": "recent",
+  "sourceType": "all",
   "from": "YYYY-MM-DD",
   "to": "YYYY-MM-DD"
 }
@@ -228,14 +230,23 @@ Request body (Zod in `src/server.ts`):
 
 Notes:
 - `csvPath` is optional (defaults to the watchlist CSV above).
+- `maxTickers` is optional. `0` or omission means **use all tickers in the CSV**. A positive value limits the ticker count.
+- `mode` is optional: `recent | entire`.
+  - `recent` = incremental pull. If data exists, resume from the last stored date for that `sourceType`; otherwise use the last 7 days.
+  - `entire` = adaptive backfill from 5 years ago by default (unless explicit `from` is provided).
+- `sourceType` is optional: `all | company_news | press_release`.
 - If reading the CSV fails, the server uses a small hard-coded ticker list fallback (AAPL/MSFT/TSLA/NVDA/AMD).
+- Entire mode uses adaptive date-range splitting to bypass Finnhub's per-request cap (~200 items).
 - Dedupe is DB-level: `UNIQUE(source,url)` + `INSERT OR IGNORE`.
+- The server logs the resolved scope at startup of a pull: `maxTickers=... → tickerList.length=...`.
 - Inserted items are published to SSE (`GET /api/news/stream`).
 
 Response:
 ```json
 {
   "source": "FINNHUB",
+  "mode": "recent",
+  "sourceType": "all",
   "tickerCount": 3,
   "inserted": 42,
   "skipped": 0,
@@ -525,7 +536,9 @@ EODHD 적재 요청이면 아래도 명시해 주세요.
 ```json
 {
   "csvPath": "tradigview_screener/original_data/watch lists2_2026-02-22.csv",
-  "maxTickers": 50,
+  "maxTickers": 0,
+  "mode": "recent",
+  "sourceType": "all",
   "from": "YYYY-MM-DD",
   "to": "YYYY-MM-DD"
 }
@@ -533,14 +546,23 @@ EODHD 적재 요청이면 아래도 명시해 주세요.
 
 참고:
 - `csvPath`는 옵션이며 위 CSV가 기본값입니다.
+- `maxTickers`는 옵션입니다. `0` 또는 미전송이면 **CSV 전체 티커**를 사용합니다. 양수를 보내면 그 개수만큼 제한합니다.
+- `mode`는 옵션: `recent | entire`.
+  - `recent` = 증분 수집. 해당 `sourceType` 데이터가 이미 있으면 마지막 저장 날짜부터 재개하고, 없으면 최근 7일을 사용합니다.
+  - `entire` = 기본적으로 5년 전부터 adaptive backfill을 수행합니다(`from` 명시 시 그 값을 우선).
+- `sourceType`는 옵션: `all | company_news | press_release`.
 - CSV 읽기에 실패하면 서버는 작은 하드코딩 티커 목록(AAPL/MSFT/TSLA/NVDA/AMD)을 fallback으로 사용합니다.
+- entire 모드는 Finnhub의 요청당 cap(~200건)를 우회하기 위해 adaptive date-range splitting을 사용합니다.
 - dedupe는 DB 레벨: `UNIQUE(source,url)` + `INSERT OR IGNORE`.
+- pull 시작 시 서버 로그에 실제 범위가 출력됩니다: `maxTickers=... → tickerList.length=...`.
 - 새로 insert된 아이템은 SSE(`GET /api/news/stream`)로 publish됩니다.
 
 응답:
 ```json
 {
   "source": "FINNHUB",
+  "mode": "recent",
+  "sourceType": "all",
   "tickerCount": 3,
   "inserted": 42,
   "skipped": 0,

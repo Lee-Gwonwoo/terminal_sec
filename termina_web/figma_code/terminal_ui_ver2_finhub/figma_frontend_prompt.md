@@ -101,7 +101,15 @@ Responsibilities:
 - Filter by source type (company news vs press release):
   - Uses `source_type=company_news|press_release`.
 - Trigger backend ingestion:
-  - `POST /api/news/pull-finhub` then refresh.
+  - Main Update button sends `POST /api/news/pull-finhub` with `{ mode: 'recent', sourceType: 'all' }`, then refreshes.
+  - Split-dropdown offers 6 options: All/Company/Press × Recent/Entire.
+
+Current window behavior:
+- Dedicated `Ticker` column between Date and Time.
+- Clicking a ticker badge sets the search box to that ticker (and also calls `onTickerClick` if provided).
+- `Columns` dropdown can show/hide columns without changing persisted data.
+- `Source` cell supports left-click open + right-click `Copy URL` context menu.
+- Update requests do **not** send `maxTickers`; backend default `0` means full CSV ticker scope.
 
 Change% display:
 - Reads optional fields returned by `GET /api/news`:
@@ -140,7 +148,9 @@ Backend security constraints (important):
 
 ### Ingest Finnhub news
 - `POST /api/news/pull-finhub`
-  - Body: `{ csvPath?, maxTickers?, from?, to? }`
+  - Body: `{ csvPath?, maxTickers?, mode?, sourceType?, from?, to? }`
+  - Frontend currently sends only `{ mode, sourceType }`
+  - If `maxTickers` is omitted, backend default `0` = all tickers in the CSV
 
 ### Read tickers from CSV
 - `GET /api/tickers?csvPath=tradigview_screener/original_data/...csv`
@@ -259,7 +269,15 @@ npm run dev
 - source_type별 필터(company news / press release):
   - `source_type=company_news|press_release`
 - 백엔드 적재 트리거:
-  - `POST /api/news/pull-finhub` 호출 후 refresh
+  - 메인 Update 버튼은 `{ mode: 'recent', sourceType: 'all' }`로 `POST /api/news/pull-finhub` 호출 후 refresh
+  - split-dropdown에서 All/Company/Press × Recent/Entire = 6개 옵션 제공
+
+현재 윈도우 동작:
+- Date와 Time 사이에 전용 `Ticker` 컬럼이 있습니다.
+- ticker 배지 클릭 시 검색창이 해당 ticker로 설정됩니다(`onTickerClick`도 함께 호출).
+- `Columns` 드롭다운으로 컬럼 표시/숨김을 전환할 수 있습니다.
+- `Source` 셀은 좌클릭으로 링크 열기, 우클릭으로 `Copy URL` 컨텍스트 메뉴를 지원합니다.
+- Update 요청은 `maxTickers`를 보내지 않으며, 백엔드 기본값 `0`이 적용되어 CSV 전체 티커를 대상으로 합니다.
 
 Change% 표시:
 - `GET /api/news`가 내려주는 optional 필드 사용:
@@ -296,7 +314,9 @@ Change% 표시:
 
 ### Finnhub 뉴스 적재
 - `POST /api/news/pull-finhub`
-  - 바디: `{ csvPath?, maxTickers?, from?, to? }`
+  - 바디: `{ csvPath?, maxTickers?, mode?, sourceType?, from?, to? }`
+  - 프론트엔드는 현재 `{ mode, sourceType }`만 전송
+  - `maxTickers`를 생략하면 백엔드 기본값 `0` = CSV 전체 티커
 
 ### CSV 티커 조회
 - `GET /api/tickers?csvPath=tradigview_screener/original_data/...csv`

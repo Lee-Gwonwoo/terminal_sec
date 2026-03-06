@@ -872,3 +872,48 @@
 | `terminal/backend/src/server.ts` | tickerList.length 로그 추가 |
 | `agent_log.md` | 이 항목 기록 |
 
+### 프론트/백엔드 MD 동기화 + plan 코드상태 반영
+
+**작성 시각:** 02:30 (local)
+**Status: done (확인 대기)**
+
+#### 수행 내용
+
+1. **백엔드 문서 동기화** (`terminal/backend_prompt.md`)
+   - `POST /api/news/pull-finhub` 요청 바디를 실제 코드 기준으로 수정
+   - `maxTickers: 50` → `maxTickers: 0`
+   - `mode`, `sourceType` 필드 추가
+   - `recent` / `entire` 동작, `sourceType` 선택, 전체 CSV 티커 범위, adaptive splitting, 서버 로그(`tickerList.length`)를 문서에 반영
+   - 응답 예시에 `mode`, `sourceType` 추가
+
+2. **프론트 문서 동기화** (`figma_frontend_prompt.md`)
+   - Update 동작을 실제 코드와 맞춤: 메인 버튼 recent, split-dropdown 6개 옵션
+   - `POST /api/news/pull-finhub` 바디 계약을 `{ csvPath?, maxTickers?, mode?, sourceType?, from?, to? }`로 수정
+   - 현재 프론트는 실제로 `{ mode, sourceType }`만 전송한다는 점 명시
+   - `maxTickers` 미전송 시 백엔드 기본값 `0` = CSV 전체 티커 사용 문서화
+   - Ticker 컬럼, ticker 클릭 검색, Columns 드롭다운, Source 좌클릭/우클릭 메뉴를 현재 UI 기준으로 반영
+
+3. **plan.md 코드 상태 반영**
+   - 5-12 `Ticker 전용 컬럼 추가` → ✅
+   - 5-13 `컬럼 가시성 토글` → ✅
+   - 5-16 `Source 셀 링크/Copy URL` → ✅
+   - 5-12 설명에 `setSearchQuery(ticker)` 기반 검색 동작 반영
+   - 5-15 설명에 프론트가 `maxTickers`를 보내지 않고 백엔드 기본값 `0`을 사용한다는 점 반영
+   - 5-16 설명에 outside click / `Escape` 닫기, clipboard fallback 반영
+
+#### 수정 파일
+
+| 파일 | 변경 |
+|------|------|
+| `terminal/backend_prompt.md` | pull-finhub API 계약/기본값/모드/범위 문서 최신화 |
+| `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md` | Finnhub 창 UX/API 계약을 실제 코드 기준으로 동기화 |
+| `ai_agent_plan/terminal_ui_ver2_finhub/plan.md` | 5-12/5-13/5-16 상태 및 설명을 현재 코드 기준으로 반영 |
+| `agent_log.md` | 이 항목 기록 |
+
+#### 검증
+- `get_errors` → `server.ts`, `FinnhubNewsWindow.tsx` 모두 에러 없음
+- 문서 확인:
+  - `backend_prompt.md`에 `maxTickers: 0`, `mode`, `sourceType` 반영 확인
+  - `figma_frontend_prompt.md`에 6개 Update 옵션, `maxTickers` 미전송, Ticker/Columns/Source UX 반영 확인
+  - `plan.md`에 5-12/5-13/5-16 상태가 ✅로 반영됨 확인
+

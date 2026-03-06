@@ -860,11 +860,11 @@ API 계약(초안)
 | 5-9 | source_type 필터 UI 구현 (Company News / Press Release 선택) | `FinnhubNewsWindow.tsx` | 필터 전환 시 해당 source_type만 표시, 둘 다 선택 시 전체 표시 | ✅ |
 | 5-10 | 서버사이드 키워드 검색(전체 DB 검색) | FinnhubNewsWindow.tsx | 검색어 입력 시 keyword 파라미터로 GET /api/news 호출, 백엔드가 전체 DB 필터링 | ✅ |
 | 5-11 | Update 버튼 툴팁(5초 hover 지연) | FinnhubNewsWindow.tsx | Update 버튼을 5초 hover하면 범위 설명 툴팁 노출 | ✅ |
-| 5-12 | Ticker 전용 컬럼 추가 | FinnhubNewsWindow.tsx | Date와 Time 사이에 Ticker 컬럼이 표시되고, 클릭 시 필터 동작 | ⏳ |
-| 5-13 | 컬럼 가시성 토글(show/hide columns) | FinnhubNewsWindow.tsx | Columns 버튼 클릭 → 체크박스 드롭다운으로 컬럼 표시/숨김 전환 | ⏳ |
+| 5-12 | Ticker 전용 컬럼 추가 | FinnhubNewsWindow.tsx | Date와 Time 사이에 Ticker 컬럼이 표시되고, 클릭 시 검색창 ticker 필터 동작 | ✅ |
+| 5-13 | 컬럼 가시성 토글(show/hide columns) | FinnhubNewsWindow.tsx | Columns 버튼 클릭 → 체크박스 드롭다운으로 컬럼 표시/숨김 전환 | ✅ |
 | 5-14 | 백엔드 "entire" 모드 — adaptive date-splitting backfill | server.ts, finnhubNewsProvider.ts | `POST /api/news/pull-finhub { mode: "entire" }` → 5년 범위 adaptive 분할 수집, cap 우회, 중복 없음 | ✅ |
 | 5-15 | Update 버튼 → split-dropdown (6개 옵션: sourceType별 × mode별) | FinnhubNewsWindow.tsx | 드롭다운에 All/Company/Press × Recent/Entire = 6개 메뉴 | ✅ |
-| 5-16 | Source 셀: 우클릭 Copy URL + 클릭 시 링크 열기 | FinnhubNewsWindow.tsx | Source 우클릭 → Copy URL → 클립보드 복사, Source 클릭 → 브라우저 새 탭으로 열림 | ⏳ |
+| 5-16 | Source 셀: 우클릭 Copy URL + 클릭 시 링크 열기 | FinnhubNewsWindow.tsx | Source 우클릭 → Copy URL → 클립보드 복사, Source 클릭 → 브라우저 새 탭으로 열림 | ✅ |
 
 **세부 단계 목적/설명 (5단계)**
 - `5-1` 목적: Brave 기반 창을 Finnhub 기반으로 전환. 설명:
@@ -952,7 +952,7 @@ API 계약(초안)
 - `5-12` 목적: Ticker 정보를 별도 컬럼으로 분리하여 가독성과 정렬을 개선한다. 설명:
   - 기존에는 ticker가 Title 셀 안에 배지로만 표시되어, ticker 기준 정렬/필터가 직관적이지 않았다.
   - `ColumnId` 타입에 `'ticker'`를 추가하고 `DEFAULT_COLUMNS`에서 `date`와 `time` 사이에 배치한다.
-  - `renderCell`에 `ticker` 케이스를 추가: 클릭 가능한 배지로 렌더하여 해당 ticker로 검색 필터 적용.
+  - `renderCell`에 `ticker` 케이스를 추가: 클릭 가능한 배지로 렌더하여 `setSearchQuery(ticker)`로 검색창 필터를 적용하고, 필요 시 `onTickerClick`도 함께 호출한다.
   - `getSortValue`에 `ticker` 케이스를 추가해 알파벳순 정렬 지원.
   - 완료 조건(눈으로 확인): 테이블에 Ticker 컬럼이 Date 옆에 표시되고, 헤더 클릭으로 정렬 가능.
   - 사람 검증: Ticker 배지 클릭 → 해당 ticker 뉴스만 필터링되는지 확인.
@@ -987,6 +987,7 @@ API 계약(초안)
     - **좌측 버튼**: "Update" 텍스트 + Download 아이콘 → 클릭 시 `handleUpdate('recent', 'all')` (기존 동작과 동일, 7일 수집, 양쪽 다).
     - **우측 화살표 버튼**: ChevronDown 아이콘 → 클릭 시 드롭다운 메뉴 표시.
   - `handleUpdate(mode, sourceType)` 시그니처 확장: `mode: 'recent' | 'entire'`, `sourceType: 'all' | 'company_news' | 'press_release'`.
+  - 프론트엔드는 더 이상 `maxTickers`를 보내지 않으며, 백엔드 기본값 `0`이 적용되어 CSV 전체 티커를 대상으로 수집한다.
   - 드롭다운 메뉴는 3개 섹션으로 구분:
     - **All Types 섹션**:
       - Recent Update — Last 7 days · Company News + Press Releases
@@ -1008,6 +1009,8 @@ API 계약(초안)
 
 - `5-16` 목적: Source를 실제 링크로 사용 가능하게 하고 URL 복사를 제공한다. 설명:
   - Source 텍스트 **좌클릭** 시 해당 뉴스의 `url`을 `window.open(..., '_blank')`로 새 탭에서 연다.
+  - Source 텍스트 **우클릭** 시 작은 컨텍스트 메뉴를 띄우고 `Copy URL` 클릭으로 클립보드 복사를 수행한다(Clipboard API 실패 시 textarea fallback).
+  - 메뉴 바깥 클릭 또는 `Escape` 입력 시 컨텍스트 메뉴를 닫는다.
   - Source 셀 **우클릭** 시 작은 컨텍스트 메뉴를 띄우고, "Copy URL" 클릭 시 URL을 클립보드에 복사한다.
   - 컨텍스트 메뉴는 외부 클릭 또는 ESC로 닫힌다.
   - 완료 조건(눈으로 확인): Source 클릭 시 새 탭이 열리고, Copy URL 후 메모장에 붙여넣으면 URL이 들어간다.
