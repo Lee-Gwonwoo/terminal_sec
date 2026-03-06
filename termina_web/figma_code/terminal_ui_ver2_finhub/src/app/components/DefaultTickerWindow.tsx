@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { RefreshCw, Plus, Search, AlertCircle } from "lucide-react";
 
-const API_BASE = "http://localhost:8080";
+const API_BASE = "";
 const DEFAULT_CSV_PATH = "tradigview_screener/original_data/watch lists2_2026-02-22.csv";
 
 interface DefaultTickerWindowProps {

@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { Search, Save, FolderOpen, Filter, ChevronDown, ArrowUp, ArrowDown, GripVertical, FileText, AlignLeft, RotateCw, Download } from 'lucide-react';
+import { Search, Save, FolderOpen, Filter, ChevronDown, ArrowUp, ArrowDown, GripVertical, FileText, AlignLeft, RotateCw, Download, Columns3 } from 'lucide-react';
 import { VariableSizeList as List } from 'react-window';
 
-const API_BASE = "http://localhost:8080";
+const API_BASE = "";
 
 // ─── Heights ───
 const STICKY_DATE_HEADER_HEIGHT = 32;
@@ -13,7 +13,7 @@ const ROW_HEIGHT_WITH_ABSTRACT = 140;
 type DisplayMode = 'title-only' | 'title-abstract';
 
 // ─── Column definition ───
-type ColumnId = 'date' | 'time' | 'title' | 'source' | 'changes';
+type ColumnId = 'date' | 'ticker' | 'time' | 'title' | 'source' | 'changes';
 
 interface ColumnDef {
   id: ColumnId;
@@ -25,11 +25,14 @@ interface ColumnDef {
 
 const DEFAULT_COLUMNS: ColumnDef[] = [
   { id: 'date',    label: 'Date',      defaultWidth: 72,  minWidth: 50 },
+  { id: 'ticker',  label: 'Ticker',    defaultWidth: 72,  minWidth: 48 },
   { id: 'time',    label: 'Time',      defaultWidth: 52,  minWidth: 40 },
   { id: 'title',   label: 'Title',     defaultWidth: 300, minWidth: 100, flex: true },
   { id: 'source',  label: 'Sources',   defaultWidth: 90,  minWidth: 50 },
   { id: 'changes', label: 'Changes %', defaultWidth: 280, minWidth: 160 },
 ];
+
+const DEFAULT_VISIBLE: Set<ColumnId> = new Set(DEFAULT_COLUMNS.map(c => c.id));
 
 // ─── Sort ───
 type SortDir = 'asc' | 'desc' | null;
@@ -134,12 +137,35 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
   const [displayMode, setDisplayMode] = useState<DisplayMode>('title-only');
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
 
-  // Column ordering
+  // Column ordering + visibility
   const [columns, setColumns] = useState<ColumnDef[]>(DEFAULT_COLUMNS);
+  const [visibleCols, setVisibleCols] = useState<Set<ColumnId>>(DEFAULT_VISIBLE);
+  const [showColumnMenu, setShowColumnMenu] = useState(false);
   const [dragColIdx, setDragColIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
   const [colWidths, setColWidths] = useState<number[]>(DEFAULT_COLUMNS.map(c => c.defaultWidth));
   const resizingRef = useRef<{ colIdx: number; startX: number; startWidth: number } | null>(null);
+  const columnMenuRef = useRef<HTMLDivElement>(null);
+
+  // Visible columns (filtered + preserving order)
+  const activeColumns = useMemo(() => columns.filter(c => visibleCols.has(c.id)), [columns, visibleCols]);
+  const activeColWidths = useMemo(() => {
+    const widthMap = new Map(columns.map((c, i) => [c.id, colWidths[i]]));
+    return activeColumns.map(c => widthMap.get(c.id) ?? c.defaultWidth);
+  }, [columns, activeColumns, colWidths]);
+
+  const toggleColumnVisibility = useCallback((colId: ColumnId) => {
+    setVisibleCols(prev => {
+      const next = new Set(prev);
+      if (next.has(colId)) {
+        // must keep at least 1 column visible
+        if (next.size > 1) next.delete(colId);
+      } else {
+        next.add(colId);
+      }
+      return next;
+    });
+  }, []);
 
   // Sort
   const [sort, setSort] = useState<SortState>({ column: null, dir: null });
@@ -159,6 +185,7 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
   const watchlistMenuRef = useRef<HTMLDivElement>(null);
   const loadMenuRef = useRef<HTMLDivElement>(null);
   const displayModeMenuRef = useRef<HTMLDivElement>(null);
+  // columnMenuRef declared above with column state
 
   // ─── Saved searches (local state) ───
   interface SavedSearch {
@@ -255,17 +282,19 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
       if (watchlistMenuRef.current && !watchlistMenuRef.current.contains(event.target as Node)) setShowWatchlistMenu(false);
       if (loadMenuRef.current && !loadMenuRef.current.contains(event.target as Node)) setShowLoadMenu(false);
       if (displayModeMenuRef.current && !displayModeMenuRef.current.contains(event.target as Node)) setShowDisplayModeMenu(false);
+      if (columnMenuRef.current && !columnMenuRef.current.contains(event.target as Node)) setShowColumnMenu(false);
     };
-    if (showFilterMenu || showWatchlistMenu || showLoadMenu || showDisplayModeMenu) {
+    if (showFilterMenu || showWatchlistMenu || showLoadMenu || showDisplayModeMenu || showColumnMenu) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
-  }, [showFilterMenu, showWatchlistMenu, showLoadMenu, showDisplayModeMenu]);
+  }, [showFilterMenu, showWatchlistMenu, showLoadMenu, showDisplayModeMenu, showColumnMenu]);
 
   // ─── Sort helper ───
   const getSortValue = useCallback((item: DisplayItem, col: ColumnId): string | number => {
     switch (col) {
       case 'date': return item.publishedAt;
+      case 'ticker': return item.ticker.toLowerCase();
       case 'time': return item.time;
       case 'title': return item.title.toLowerCase();
       case 'source': return item.source.toLowerCase();
@@ -408,6 +437,16 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
     switch (colId) {
       case 'date':
         return <span className="text-gray-600 dark:text-gray-400">{newsItem.date.replace(/, \d{4}$/, '')}</span>;
+      case 'ticker':
+        return newsItem.ticker ? (
+          <span
+            className="inline-block px-1.5 py-0.5 text-[11px] font-medium bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900/60 truncate"
+            onClick={(e) => { e.stopPropagation(); onTickerClick?.(newsItem.ticker); }}
+            title={newsItem.ticker}
+          >
+            {newsItem.ticker}
+          </span>
+        ) : <span className="text-gray-300 dark:text-gray-600">—</span>;
       case 'time':
         return <span className="text-gray-600 dark:text-gray-400">{newsItem.time}</span>;
       case 'title':
@@ -486,8 +525,8 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
     return (
       <div style={style} className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/60 cursor-pointer transition-colors">
         <div className="h-full flex items-stretch text-xs">
-          {columns.map((col, colIdx) => {
-            const isLast = colIdx === columns.length - 1;
+          {activeColumns.map((col, colIdx) => {
+            const isLast = colIdx === activeColumns.length - 1;
             return (
               <div
                 key={col.id}
@@ -497,7 +536,7 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
                   !isLast ? 'border-r border-gray-200 dark:border-gray-700' : '',
                   col.id === 'changes' ? 'py-1' : '',
                 ].join(' ')}
-                style={{ width: colWidths[colIdx], minWidth: col.minWidth }}
+                style={{ width: activeColWidths[colIdx], minWidth: col.minWidth }}
               >
                 {renderCell(col.id, newsItem, isExpanded)}
               </div>
@@ -506,7 +545,7 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
         </div>
       </div>
     );
-  }, [groupedNews, columns, colWidths, displayMode, expandedItems, renderCell]);
+  }, [groupedNews, activeColumns, activeColWidths, displayMode, expandedItems, renderCell]);
 
   const displayModeLabel = displayMode === 'title-only' ? 'Title Only' : 'Title + Abstract';
 
@@ -658,8 +697,42 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
             <span className="text-[10px] text-red-500 truncate max-w-[200px]" title={error}>{error}</span>
           )}
 
+          {/* Column visibility toggle */}
+          <div className="relative ml-auto" ref={columnMenuRef}>
+            <button
+              onClick={() => { setShowColumnMenu(!showColumnMenu); setShowFilterMenu(false); setShowLoadMenu(false); setShowDisplayModeMenu(false); setShowWatchlistMenu(false); }}
+              className="px-2.5 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5"
+              title="Show/hide columns"
+            >
+              <Columns3 className="w-3.5 h-3.5 text-gray-500" />
+              <span className="whitespace-nowrap">Columns</span>
+              <ChevronDown className="w-3 h-3" />
+            </button>
+            {showColumnMenu && (
+              <div className="absolute top-full mt-1 right-0 w-48 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-lg z-30">
+                <div className="p-1.5">
+                  <div className="px-3 py-1 text-[10px] text-gray-400 font-semibold uppercase tracking-wide">Toggle columns</div>
+                  {columns.map(col => (
+                    <label
+                      key={col.id}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={visibleCols.has(col.id)}
+                        onChange={() => toggleColumnVisibility(col.id)}
+                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
+                      />
+                      <span>{col.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Watch Lists */}
-          <div className="relative ml-auto" ref={watchlistMenuRef}>
+          <div className="relative" ref={watchlistMenuRef}>
             <button onClick={() => { setShowWatchlistMenu(!showWatchlistMenu); setShowFilterMenu(false); setShowLoadMenu(false); setShowDisplayModeMenu(false); }}
               className="px-3 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5">
               <span>Watch Lists</span><ChevronDown className="w-3 h-3" />
@@ -682,8 +755,8 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
 
       {/* ─── Table Header ─── */}
       <div className="flex items-center border-b border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-xs font-semibold text-gray-600 dark:text-gray-300 select-none">
-        {columns.map((col, idx) => {
-          const isLast = idx === columns.length - 1;
+        {activeColumns.map((col, idx) => {
+          const isLast = idx === activeColumns.length - 1;
           const isDragTarget = dragOverIdx === idx && dragColIdx !== idx;
           return (
             <div
@@ -699,7 +772,7 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
                 isDragTarget ? 'bg-blue-50 dark:bg-blue-900/30' : '',
                 dragColIdx === idx ? 'opacity-50' : '',
               ].join(' ')}
-              style={{ width: colWidths[idx], minWidth: col.minWidth }}
+              style={{ width: activeColWidths[idx], minWidth: col.minWidth }}
             >
               <GripVertical className="w-3 h-3 text-gray-400 opacity-0 group-hover:opacity-100 shrink-0 cursor-grab" />
               <span className="truncate">{col.label}</span>

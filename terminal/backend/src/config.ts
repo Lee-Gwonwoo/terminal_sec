@@ -47,6 +47,6 @@ function loadFinnhubApiKey(): string {
 export const config = {
   port: Number(process.env.PORT ?? 8080),
   sqlitePath: process.env.SQLITE_PATH ?? "./backend/data/app.db",
-  frontendOrigin: process.env.FRONTEND_ORIGIN ?? "http://localhost:5173",
+  frontendOrigin: process.env.FRONTEND_ORIGIN ?? "http://localhost:5174",
   finnhubApiKey: loadFinnhubApiKey()
 };
