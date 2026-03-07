@@ -258,6 +258,64 @@
 2. 마우스를 3초 이상 올렸을 때만 tooltip이 열리도록 hover timer를 넣었다.
 3. tooltip에 아래 정책 설명을 노출하도록 했다.
    - automatic recent retry confirmed-empty 과거 구간 영구 스킵
+
+### Plan 리비전 — `securities.id` 중심 canonical 종목 모델 추가
+
+**작성 시각:** 2026-03-07 12:19 (local)
+
+**상태:** 확인 대기
+
+#### 수행 내용
+
+1. 사용자가 company description, default ticker, watchlist를 뉴스가 아니라 종목 엔터티에 일관되게 연결해야 한다고 요청했다.
+2. `plan.md` 목표에 `securities.id` 중심 canonical 종목 모델 도입 항목을 추가했다.
+3. `현재 레포 상태`에 아래 현황을 명시했다.
+   - default ticker source는 `watch lists2_2026-02-22.csv` 하드코딩 CSV 기반
+   - `watchlist_items`는 아직 `ticker TEXT` 기반
+   - `securities`, `company_profiles`, universe 테이블은 아직 없음
+4. `제약 / 비범위`와 `결정/선행조건`에 아래 방향을 반영했다.
+   - company description은 `news_id`가 아니라 종목 엔터티 기준으로 저장
+   - 정식 구조는 `company_profiles.security_id`
+   - default ticker는 CSV를 원본으로 남기되 runtime canonical 목록은 `app.db`로 승격
+   - watchlist는 장기적으로 `security_id`로 이전
+5. 후속 구조 정리 phase로 `Step 5 — Canonical ticker master model`을 추가했다.
+   - `securities`, `company_profiles`, `ticker_universes`, `ticker_universe_items` schema
+   - default ticker CSV import
+   - FMP company description upsert
+   - `watchlist_items.security_id` migration/backfill
+   - watchlist API의 ticker 친화적 외부 계약 유지
+
+#### 생성/수정 파일
+
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. `plan.md`에서 목표 20번에 `securities.id` 중심 canonical 종목 모델 항목이 추가됐는지 확인한다.
+2. `결정/선행조건`에 아래 항목이 있는지 확인한다.
+   - `종목 canonical identity 모델`
+   - `Default ticker canonical 저장 방식`
+3. `단계별 계획`에 `Step 5 — Canonical ticker master model`이 추가됐는지 확인한다.
+4. `실행 의존성 그래프`에 `Track E`가 추가됐는지 확인한다.
+
+#### 문제점 / 리스크
+
+1. `ticker` 기반 구조를 한 번에 제거하면 기존 프론트/API 영향이 크다.
+   - 완화 방안 1: 1차는 `securities`/`company_profiles`/universe만 도입
+   - 완화 방안 2: watchlist는 dual-read 또는 backfill 후 단계적으로 전환
+2. ticker 정규화가 불충분하면 `security_id` backfill 누락이 생길 수 있다.
+   - 완화 방안 1: ticker normalize 규칙을 먼저 고정
+   - 완화 방안 2: backfill 후 null row 검사 쿼리를 필수 검증으로 둔다
+3. default CSV와 DB canonical universe가 동시에 존재하면 source of truth 혼선이 생길 수 있다.
+   - 완화 방안 1: CSV는 import source, DB는 runtime canonical이라는 역할을 문서에 분리 명시
+   - 완화 방안 2: import 시각/원본 경로를 universe 메타에 저장한다
+
+#### 비고
+
+- 이번 작업은 plan/log 문서 리비전만 수행했다.
+- 구현 코드(`.ts`, `.tsx`, `.py`)는 수정하지 않았다.
+- 사용자 확인 전까지 이 리비전 상태는 `확인 대기`로 유지한다.
    - HTTP 200 + 빈 배열일 때만 confirmed-empty 기록
    - `company_news`, `press_release` 분리 기록
    - 당일 제외

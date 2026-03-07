@@ -26,6 +26,7 @@
 17. News Feed에 크롬 북마크처럼 폴더형 북마크 구조를 추가하고, 북마크 폴더를 생성/선택할 수 있게 한다.
 18. News row를 우클릭했을 때 `Add bookmark`를 표시하고, 이미 만든 북마크 폴더 중 어디에 저장할지 선택해서 저장할 수 있게 한다.
 19. 검색창 근처에 `Bookmark view`를 두고, 북마크 폴더를 선택하면 그 폴더에 저장된 뉴스 row만 UI에 보이게 한다.
+20. Default ticker / company description / watchlist가 장기적으로 같은 종목 엔터티를 바라보도록 `securities.id` 중심 canonical 종목 모델을 도입한다.
 
 ### 현재 레포 상태(중요, 확인됨)
 - 백엔드 runtime DB는 `terminal/backend/backend/data/app.db` 이다.
@@ -55,6 +56,10 @@
 - 2026-03-07 실제 probe 결과 `news-sentiment?symbol=AAPL` 응답은 `buzz`, `companyNewsScore`, `sectorAverageBullishPercent`, `sectorAverageNewsScore`, `sentiment`, `symbol` top-level object이며, 기사 `id` 배열이나 기사별 sentiment row를 반환하지 않는다.
 - AI 뉴스 분석 skills 지침 명칭은 `ai-news-analysis`로 고정한다.
 - 현재 프론트 문서 기준으로 `Finnhub News`, `Default Ticker`, `Data Control`은 실제 API 연동이 있고, `Watchlist`, `Calendar`는 일부 mock/stub 흔적이 남아 있다.
+- 현재 default ticker source는 `tradigview_screener/original_data/watch lists2_2026-02-22.csv` 파일 경로가 하드코딩된 CSV 기반 입력이다.
+- 현재 `watchlist_items`는 `ticker TEXT`를 직접 저장하며, ticker를 대표 식별자로 사용한다.
+- 현재 runtime DB에는 `securities`, `company_profiles`, `ticker_universes`, `ticker_universe_items` 같은 종목 canonical 테이블이 없다.
+- 현재 company description은 어떤 저장소에도 canonical하게 적재되지 않으며, 뉴스 `id`와 연결된 구조도 없다.
 
 ### 제약 / 비범위
 - 이번 plan은 구현 계획 문서 작성이 목적이다. 아직 코드 변경/테스트 실행을 전제로 하지 않는다.
@@ -73,6 +78,8 @@
 - `news_fulltext.full_text`에는 HTML 태그/스크립트 조각이 섞인 원문을 canonical로 남기지 않는다. 최종 저장값은 plain text 본문만 허용한다.
 - 기존 HTML 기반 `news_fulltext` row는 새 정책 도입 시 그대로 방치하지 않는다. 삭제 후 재추출하거나, 동등한 결과의 재정제 backfill로 plain text 상태로 맞춘다.
 - 북마크 기능은 검색 조건 저장용 `saved view`를 이름만 바꿔 재사용하는 방식으로 땜질하지 않는다. 뉴스 단건 북마크와 폴더 계층은 별도 canonical 구조로 설계한다.
+- company description은 `news_id` 기준으로 저장하지 않는다. 뉴스와 분리된 종목 엔터티 기준(`ticker` 또는 최종적으로 `securities.id`)으로만 저장한다.
+- 정식 구조에서는 종목 canonical key를 `securities.id`로 두고, `company_profiles`, default ticker universe, watchlist를 같은 종목 엔터티에 연결하는 방향을 유지한다.
 - 전체 글자 크기 조절은 우선 `terminal_ui_ver3_final` 앱 범위의 UI scale/font scale을 뜻한다. OS 전체 폰트나 브라우저 줌 제어는 비범위다.
 - 서버 재시작 후 background job 상태 복구까지 이번 범위에 포함할지 여부는 미확정 사항으로 둔다.
 
@@ -211,6 +218,11 @@ Step N — <제목>
   5. `insertFetchedItems`에서 publisher 전달
 - 영향: 새로 pull한 뉴스에 즉시 publisher가 설정되며, SSE로 push된 실시간 뉴스에도 publisher 표시. 기존 NULL row는 서버 시작 시 backfill이 처리.
 
+### PLAN CHANGE (2026-03-07)
+- 왜: 사용자가 company description, default ticker, watchlist를 뉴스와 분리된 종목 엔터티에 일관되게 연결해야 한다고 요청했고, 장기적으로 `ticker` 문자열이 아니라 내부 `id` 기준 구조를 원했다.
+- 무엇이 바뀌었나: 목표/현재 상태/제약에 `securities.id` 중심 canonical 종목 모델을 추가했고, 결정사항에 `company_profiles.security_id`, default ticker universe DB 저장, watchlist의 장기 `security_id` 전환 방향을 반영했다. 또한 후속 Phase로 `Step 5 — Canonical ticker master model`을 추가했다.
+- 영향: FMP company description 적재, default ticker CSV import, watchlist 정규화, 추후 calendar/news/bookmark의 종목 join 방식이 모두 같은 종목 엔터티를 공유하게 된다. 다만 즉시 전면 치환 대신 단계적 migration으로 진행한다.
+
 권장 저장 구조:
 - 뉴스 원본 메타: `[][][]news_items[][][]`
 - 뉴스 full text / keywords: `[][][]news_fulltext[][][]`
@@ -280,6 +292,16 @@ Step N — <제목>
    - 선택지 B: 선택된 폴더 기준 북마크 전용 결과 모드로 전환
    - 현재 권장: B. 사용자가 “그 북마크 폴더 안에 북마크된 뉴스 데이터들이 보이게”를 원하므로 폴더 선택 시 명확한 북마크 전용 view가 맞다.
 
+13. 종목 canonical identity 모델
+   - 선택지 A: `ticker` 문자열을 모든 테이블의 직접 PK/FK처럼 계속 사용
+   - 선택지 B: `securities.id`를 종목 canonical key로 도입하고, `company_profiles.security_id` 및 장기적으로 `watchlist_items.security_id`로 이전
+   - 사용자 요청 반영: B. 정식 구조는 `securities.id` 중심으로 잡되, migration 리스크를 줄이기 위해 1차는 `securities`/`company_profiles`/default ticker universe부터 도입하고, 2차에 watchlist를 `security_id`로 전환한다.
+
+14. Default ticker canonical 저장 방식
+   - 선택지 A: CSV만 source of truth로 유지하고 runtime 조회도 계속 CSV에서 직접 수행
+   - 선택지 B: CSV는 import source로 남기고, runtime canonical 목록은 `app.db`의 universe 테이블로 적재
+   - 현재 권장: B. 원본 CSV는 보존하되, 앱이 실제로 참조하는 기본 종목 집합은 `app.db`에 적재해 company description/FMP enrichment와 같은 종목 엔터티로 연결한다.
+
 ### 계획 중간 필수 확인
 중간 구현 전에 반드시 아래를 확인한다.
 
@@ -339,9 +361,13 @@ Step N — <제목>
    - 이유: 앱 셸과 각 창 상태 저장을 한 번에 묶어야 중복 수정이 줄어든다.
 5. Step 4에서 AI analysis 테스트, 삭제 감지 테스트, 문서 동기화를 한다.
 
+6. Step 5에서 `securities.id` 중심 canonical 종목 모델을 도입한다.
+   - 이유: company description, default ticker, watchlist가 같은 종목 엔터티를 바라보게 만들어 이후 데이터 확장에서 중복 migration을 줄인다.
+
 추가 선행 작업:
 - Step 1 안에서 full text canonical 형식을 먼저 plain text로 고정하고, 기존 HTML 기반 row를 정리한 뒤 keyword/AI analysis 후속 단계를 진행한다.
 - 북마크 기능은 Step 1에서 폴더/아이템 데이터 모델을 먼저 고정한 뒤 Step 2에서 우클릭 메뉴와 Bookmark view를 붙인다.
+- Step 5는 기존 News Feed 기능이 안정화된 뒤, FMP company description 적재를 본격화하기 전에 수행하는 후속 구조 정리 phase로 둔다.
 
 ### 단계별 계획(각 단계: 구현 → 검증)
 
@@ -813,6 +839,71 @@ E2E 수동 검증 체크리스트 (1회 실행 순서):
 사용자 확인 필요: 예
 ```
 
+#### ⬜ Step 5 — Canonical ticker master model (`securities.id`) 도입
+
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 5-1 | `securities`, `company_profiles`, `ticker_universes`, `ticker_universe_items` schema를 `app.db`에 추가 | `terminal/backend/src/db.ts` | 서버 시작 후 테이블 생성 확인 | ⬜ |
+| 5-2 | default ticker CSV를 canonical universe로 import하는 service/repository를 추가 | `terminal/backend/src/services/tickerUniverseRepository.ts`, `terminal/backend/src/services/tickerCsvService.ts`, `terminal/backend/src/server.ts` | import 후 universe/security row count 확인 | ⬜ |
+| 5-3 | FMP company description 저장 경로를 `company_profiles.security_id` 기준 upsert 구조로 설계/구현 | `terminal/backend/src/services/companyProfileRepository.ts`, `terminal/backend/src/services/fmpCompanyProfileProvider.ts` | 특정 ticker profile upsert 확인 | ⬜ |
+| 5-4 | `watchlist_items`에 `security_id`를 추가하고 기존 `ticker` 기반 row를 backfill하는 migration을 넣는다 | `terminal/backend/src/db.ts`, `terminal/backend/src/services/watchlistRepository.ts` | backfill 후 null 없는지 확인 | ⬜ |
+| 5-5 | watchlist API/read path를 `security_id` 기준으로 읽되 외부 API 계약은 ticker 친화적으로 유지 | `terminal/backend/src/services/watchlistRepository.ts`, `terminal/backend/src/server.ts` | watchlist CRUD/E2E 확인 | ⬜ |
+| 5-6 | calendar/news/bookmark 등 ticker join 지점을 점검해 `securities` 연동 확장 포인트를 정리 | `terminal/backend/src/services/*.ts`, 관련 prompt 문서 | join 포인트 점검 체크리스트 확인 | ⬜ |
+
+5-1 목적: 종목을 뉴스나 watchlist와 분리된 독립 엔터티로 올린다.
+5-1 설명: 문자열 ticker 대신 내부 `securities.id`를 canonical key로 도입하고, company description/default ticker universe가 이 key를 공유하게 한다.
+5-1 완료 조건(눈으로 확인): `app.db`에 `securities`, `company_profiles`, `ticker_universes`, `ticker_universe_items` 테이블이 생성된다.
+5-1 사람 검증(비개발자): DB 점검 출력에서 종목 관련 테이블 이름이 새로 보인다.
+5-1 흔한 문제/주의: `ticker`를 완전히 제거하려고 하면 기존 API/프론트 영향이 너무 커지므로, 첫 단계에서는 display/API 입력용 ticker는 유지한다.
+
+5-2 목적: 현재 하드코딩된 default ticker CSV를 runtime canonical 데이터로 승격한다.
+5-2 설명: CSV는 원본 source로 남기고, import 결과는 `ticker_universes`와 `ticker_universe_items`에 저장한다.
+5-2 완료 조건(눈으로 확인): import 후 기본 universe 이름과 구성 종목 수가 DB에서 확인된다.
+5-2 사람 검증(비개발자): 기본 종목 목록을 다시 불러와도 CSV를 매번 직접 읽지 않고 DB 기준으로 조회할 수 있다.
+5-2 흔한 문제/주의: CSV 재import 시 중복 종목 row가 생기지 않도록 upsert/replace 정책을 정해야 한다.
+
+5-3 목적: company description을 뉴스가 아니라 종목 엔터티에 연결한다.
+5-3 설명: FMP profile 응답은 `company_profiles.security_id` 기준으로 저장하고, source별(FMP/Yahoo/Wikipedia)로 다중 row를 허용할 수 있게 한다.
+5-3 완료 조건(눈으로 확인): 특정 ticker를 가져오면 `securities` 한 row와 `company_profiles` 한 row 이상이 연결된다.
+5-3 사람 검증(비개발자): 회사 설명을 다시 가져와도 같은 종목에 덮어쓰기/upsert 되고, 뉴스 row 수와 무관하게 유지된다.
+5-3 흔한 문제/주의: `news_id`에 연결하면 동일 회사 설명이 기사 수만큼 중복 저장돼 구조가 망가진다.
+
+5-4 목적: watchlist도 장기적으로 같은 종목 엔터티를 바라보게 한다.
+5-4 설명: 기존 `watchlist_items.ticker`는 호환용으로 남겨 둘 수 있지만, 내부 join은 `security_id`를 우선 사용하도록 migration/backfill을 진행한다.
+5-4 완료 조건(눈으로 확인): 기존 watchlist row마다 대응하는 `security_id`가 채워진다.
+5-4 사람 검증(비개발자): 기존 watchlist 목록이 깨지지 않고 그대로 열리면서 내부적으로는 종목 id가 생긴다.
+5-4 흔한 문제/주의: ticker 표기 정규화가 안 돼 있으면 backfill에서 매칭 누락이 생길 수 있다.
+
+5-5 목적: 외부 API 사용성은 유지하면서 내부 모델만 정규화한다.
+5-5 설명: 프론트/REST 입력은 여전히 ticker 친화적으로 둘 수 있지만, 저장과 join은 `security_id`를 통해 수행하게 바꾼다.
+5-5 완료 조건(눈으로 확인): watchlist CRUD API 응답 형식은 크게 안 바뀌는데 DB 내부 join은 `security_id` 기준으로 가능하다.
+5-5 사람 검증(비개발자): 기존 watchlist 생성/삭제/조회 화면이 그대로 동작한다.
+5-5 흔한 문제/주의: 외부 계약까지 한 번에 바꾸면 프론트 전체 수정 범위가 커져 리스크가 급증한다.
+
+5-6 목적: 종목 canonical 모델 도입 후 다른 기능들이 어디까지 따라와야 하는지 범위를 고정한다.
+5-6 설명: calendar/news/bookmark가 현재는 ticker 문자열 join을 쓰더라도, 후속 migration 포인트를 문서와 체크리스트에 명시한다.
+5-6 완료 조건(눈으로 확인): 어떤 서비스가 이미 `security_id`를 쓰고 어떤 서비스가 아직 ticker 기반인지 목록이 정리된다.
+5-6 사람 검증(비개발자): 후속 작업 때 “어디를 더 바꿔야 하는지”를 문서만 보고 알 수 있다.
+5-6 흔한 문제/주의: join 포인트 목록 없이 부분 migration만 하면 나중에 ticker/string와 security_id가 섞인 상태가 오래 남을 수 있다.
+
+검증 훅:
+```bash
+cd terminal/backend
+npm run build
+npm run test
+```
+
+```text
+추가 확인:
+- `app.db`에 `securities`, `company_profiles`, `ticker_universes`, `ticker_universe_items` 생성 여부 확인
+- default ticker CSV import 후 universe 이름, 종목 수, 대표 ticker 샘플 5개 확인
+- 특정 ticker(FMP 대상)의 company description이 `company_profiles.security_id` 기준으로 upsert 되는지 확인
+- 기존 watchlist row에 `security_id` backfill 후 null 누락이 없는지 확인
+- watchlist API 응답이 기존 ticker 기반 프론트 계약을 깨지 않는지 확인
+
+사용자 확인 필요: 예
+```
+
 ### 미확정 사항(명시 결정 필요)
 1. 결정 #5 — font size 저장 위치
    - 선택지: global localStorage / tab별 저장 / backend saved settings
@@ -882,9 +973,18 @@ Legend
 ✅ 4-3 삭제 감지 + E2E 체크리스트 정리
 ✅ 4-4 bookmark 문서/체크리스트 정리
 
+[Track E: canonical ticker master model]
+⬜ 5-1 `securities` / `company_profiles` / universe schema
+⬜ 5-2 default ticker CSV import → DB canonical universe
+⬜ 5-3 FMP company description → `company_profiles.security_id`
+⬜ 5-4 `watchlist_items.security_id` migration/backfill
+⬜ 5-5 watchlist API dual-read / ticker-friendly response 유지
+⬜ 5-6 calendar/news/bookmark join 포인트 점검
+
 ================ BLOCKER ================
 Track A의 선행 결정 차단은 해소되었다.
 이제 backend schema/API 설계와 삭제 감지 테스트 구현은 같은 status 기반 규칙으로 진행 가능하다.
+Track E는 구조 정규화 phase이므로, default ticker import 정책과 `security_id` migration 범위를 유지한 채 단계적으로 진행한다.
 남은 미확정 사항은 font size 저장 위치처럼 Track B/C 영역에 가깝다.
 =========================================
 ```
