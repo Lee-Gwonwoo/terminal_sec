@@ -4,6 +4,11 @@ import { TabData, WindowInstance, WindowType } from "./types";
 import { AddTabModal } from "./components/AddTabModal";
 import { DraggableWindow } from "./components/DraggableWindow";
 
+function clampNumber(value: unknown, fallback: number, min: number, max: number) {
+  if (typeof value !== "number" || Number.isNaN(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
+}
+
 export default function App() {
   const [tabs, setTabs] = useState<TabData[]>([
     {
@@ -23,6 +28,10 @@ export default function App() {
     [linkId: number]: string;
   }>({});
   const [fontScale, setFontScale] = useState(1);
+  const [newsTitleFontSize, setNewsTitleFontSize] = useState(12);
+  const [newsSummaryFontSize, setNewsSummaryFontSize] = useState(11);
+  const [dragTabId, setDragTabId] = useState<string | null>(null);
+  const [dragOverTabId, setDragOverTabId] = useState<string | null>(null);
 
   // ─── Restore workspace from localStorage ───
   useEffect(() => {
@@ -35,6 +44,8 @@ export default function App() {
       if (p.activeTabId) setActiveTabId(p.activeTabId);
       if (typeof p.isDarkMode === 'boolean') setIsDarkMode(p.isDarkMode);
       if (typeof p.fontScale === 'number') setFontScale(p.fontScale);
+      setNewsTitleFontSize(clampNumber(p.newsTitleFontSize, 12, 10, 20));
+      setNewsSummaryFontSize(clampNumber(p.newsSummaryFontSize, 11, 9, 18));
       if (p.linkedTicker && typeof p.linkedTicker === 'object') setLinkedTicker(p.linkedTicker);
     } catch { /* corrupted — use defaults */ }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -48,11 +59,17 @@ export default function App() {
   useEffect(() => {
     try {
       localStorage.setItem('terminal-workspace-v1', JSON.stringify({
-        version: 1, activeTabId, isDarkMode, fontScale, linkedTicker,
+        version: 1,
+        activeTabId,
+        isDarkMode,
+        fontScale,
+        newsTitleFontSize,
+        newsSummaryFontSize,
+        linkedTicker,
         tabs: tabs.map(t => ({ id: t.id, name: t.name, windows: t.windows })),
       }));
     } catch { /* quota */ }
-  }, [tabs, activeTabId, isDarkMode, fontScale, linkedTicker]);
+  }, [tabs, activeTabId, isDarkMode, fontScale, newsTitleFontSize, newsSummaryFontSize, linkedTicker]);
 
   useEffect(() => {
     // Apply dark mode class to document
@@ -175,6 +192,33 @@ export default function App() {
     })));
   };
 
+  const handleTabDragStart = (tabId: string) => {
+    setDragTabId(tabId);
+    setDragOverTabId(tabId);
+  };
+
+  const handleTabDrop = (targetTabId: string) => {
+    if (!dragTabId || dragTabId === targetTabId) {
+      setDragTabId(null);
+      setDragOverTabId(null);
+      return;
+    }
+
+    setTabs(prev => {
+      const sourceIndex = prev.findIndex(tab => tab.id === dragTabId);
+      const targetIndex = prev.findIndex(tab => tab.id === targetTabId);
+      if (sourceIndex === -1 || targetIndex === -1) return prev;
+
+      const next = [...prev];
+      const [moved] = next.splice(sourceIndex, 1);
+      next.splice(targetIndex, 0, moved);
+      return next;
+    });
+
+    setDragTabId(null);
+    setDragOverTabId(null);
+  };
+
   const handlePositionChange = (windowId: string, pos: { top: number; left: number; width: number; height: number }) => {
     setTabs(prev => prev.map(tab => ({
       ...tab,
@@ -234,8 +278,22 @@ export default function App() {
               activeTabId === tab.id
                 ? "bg-white dark:bg-gray-800"
                 : "bg-gray-200 dark:bg-gray-800/50 hover:bg-gray-300 dark:hover:bg-gray-800/70"
-            } rounded-t px-3 py-1.5 cursor-pointer transition-colors`}
+            } ${dragOverTabId === tab.id && dragTabId !== tab.id ? "ring-2 ring-blue-400 ring-inset" : ""} rounded-t px-3 py-1.5 cursor-grab active:cursor-grabbing transition-colors`}
+            draggable={editingTabId !== tab.id}
             onClick={() => setActiveTabId(tab.id)}
+            onDragStart={() => handleTabDragStart(tab.id)}
+            onDragOver={(e) => {
+              e.preventDefault();
+              if (dragTabId && dragTabId !== tab.id) setDragOverTabId(tab.id);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              handleTabDrop(tab.id);
+            }}
+            onDragEnd={() => {
+              setDragTabId(null);
+              setDragOverTabId(null);
+            }}
             onContextMenu={(e) =>
               handleTabContextMenu(e, tab.id)
             }
@@ -321,6 +379,10 @@ export default function App() {
               }
               fontScale={fontScale}
               onFontScaleChange={setFontScale}
+              newsTitleFontSize={newsTitleFontSize}
+              onNewsTitleFontSizeChange={setNewsTitleFontSize}
+              newsSummaryFontSize={newsSummaryFontSize}
+              onNewsSummaryFontSizeChange={setNewsSummaryFontSize}
               onPositionChange={handlePositionChange}
             />
           ))

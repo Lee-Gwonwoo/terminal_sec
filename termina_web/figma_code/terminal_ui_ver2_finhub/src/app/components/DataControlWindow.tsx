@@ -27,9 +27,20 @@ type SectionKey = 'price' | 'calendar' | 'recent' | 'custom';
 interface DataControlWindowProps {
   fontScale?: number;
   onFontScaleChange?: (n: number) => void;
+  newsTitleFontSize?: number;
+  onNewsTitleFontSizeChange?: (n: number) => void;
+  newsSummaryFontSize?: number;
+  onNewsSummaryFontSizeChange?: (n: number) => void;
 }
 
-export function DataControlWindow({ fontScale = 1, onFontScaleChange }: DataControlWindowProps) {
+export function DataControlWindow({
+  fontScale = 1,
+  onFontScaleChange,
+  newsTitleFontSize = 12,
+  onNewsTitleFontSizeChange,
+  newsSummaryFontSize = 11,
+  onNewsSummaryFontSizeChange,
+}: DataControlWindowProps) {
   // ─── Status state ───
   const [statuses, setStatuses] = useState<Record<string, UpdateStatusItem | null>>({});
   const [ohlcStatus, setOhlcStatus] = useState<OhlcStatus | null>(null);
@@ -324,6 +335,85 @@ export function DataControlWindow({ fontScale = 1, onFontScaleChange }: DataCont
               />
               <span className="text-[11px] text-gray-500 w-5 text-right">A</span>
               <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300 w-10 text-right">{(fontScale * 100).toFixed(0)}%</span>
+            </div>
+          </div>
+
+          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">
+            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">News Feed Typography</h3>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-4">
+              Adjust News Feed title text and summary text separately from here.
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-medium text-gray-700 dark:text-gray-200">Title Text</span>
+                  <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300">{newsTitleFontSize}px</span>
+                </div>
+                <div className="flex gap-2 mb-2 flex-wrap">
+                  {[11, 12, 14, 16].map(size => (
+                    <button
+                      key={`title-${size}`}
+                      onClick={() => onNewsTitleFontSizeChange?.(size)}
+                      className={`px-3 py-1 rounded border text-xs font-medium transition-colors ${
+                        newsTitleFontSize === size
+                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+                          : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200'
+                      }`}
+                    >
+                      {size}px
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-[11px] text-gray-500 w-5">A</span>
+                  <input
+                    type="range"
+                    min={10}
+                    max={20}
+                    step={1}
+                    value={newsTitleFontSize}
+                    onChange={e => onNewsTitleFontSizeChange?.(parseInt(e.target.value, 10))}
+                    className="flex-1 accent-blue-500"
+                  />
+                  <span className="text-[11px] text-gray-500 w-5 text-right">A</span>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-medium text-gray-700 dark:text-gray-200">Summary Text</span>
+                  <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300">{newsSummaryFontSize}px</span>
+                </div>
+                <div className="flex gap-2 mb-2 flex-wrap">
+                  {[10, 11, 12, 14].map(size => (
+                    <button
+                      key={`summary-${size}`}
+                      onClick={() => onNewsSummaryFontSizeChange?.(size)}
+                      className={`px-3 py-1 rounded border text-xs font-medium transition-colors ${
+                        newsSummaryFontSize === size
+                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+                          : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200'
+                      }`}
+                    >
+                      {size}px
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-[11px] text-gray-500 w-5">A</span>
+                  <input
+                    type="range"
+                    min={9}
+                    max={18}
+                    step={1}
+                    value={newsSummaryFontSize}
+                    onChange={e => onNewsSummaryFontSizeChange?.(parseInt(e.target.value, 10))}
+                    className="flex-1 accent-blue-500"
+                  />
+                  <span className="text-[11px] text-gray-500 w-5 text-right">A</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>

@@ -170,9 +170,16 @@ const changeColor = (val: number | null) => {
 interface FinnhubNewsWindowProps {
   onTickerClick?: (ticker: string) => void;
   initialTicker?: string;
+  titleFontSize?: number;
+  summaryFontSize?: number;
 }
 
-export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsWindowProps) {
+export function FinnhubNewsWindow({
+  onTickerClick,
+  initialTicker,
+  titleFontSize = 12,
+  summaryFontSize = 11,
+}: FinnhubNewsWindowProps) {
   const [searchQuery, setSearchQuery] = useState(() => {
     if (initialTicker) return initialTicker;
     try {
@@ -887,12 +894,15 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
                   {newsItem.ticker}
                 </span>
               )}
-              <span className={`truncate text-gray-900 dark:text-gray-100 ${displayMode === 'title-only' ? 'hover:text-blue-600 dark:hover:text-blue-400' : ''}`}>
+              <span
+                style={{ fontSize: titleFontSize }}
+                className={`truncate text-gray-900 dark:text-gray-100 ${displayMode === 'title-only' ? 'hover:text-blue-600 dark:hover:text-blue-400' : ''}`}
+              >
                 {newsItem.title}
               </span>
             </div>
             {isExpanded && newsItem.body && (
-              <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400 line-clamp-3 whitespace-normal break-words">
+              <p style={{ fontSize: summaryFontSize }} className="mt-1 text-gray-500 dark:text-gray-400 line-clamp-3 whitespace-normal break-words">
                 {newsItem.body}
               </p>
             )}
@@ -979,7 +989,7 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
         return <span className={sc} title={newsItem.sentimentLabel ?? undefined}>{sv.toFixed(2)}</span>;
       }
     }
-  }, [displayMode, toggleExpand, onTickerClick, openExternalUrl, setSearchQuery, fetchFulltext]);
+  }, [displayMode, toggleExpand, onTickerClick, openExternalUrl, setSearchQuery, fetchFulltext, titleFontSize, summaryFontSize]);
 
   // ─── Row renderer ───
   const Row = useCallback(({ index, style }: { index: number; style: React.CSSProperties }) => {

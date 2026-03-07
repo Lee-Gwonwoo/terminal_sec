@@ -19,6 +19,10 @@ interface DraggableWindowProps {
   onDragEnd?: (x: number, y: number) => void;
   fontScale?: number;
   onFontScaleChange?: (n: number) => void;
+  newsTitleFontSize?: number;
+  onNewsTitleFontSizeChange?: (n: number) => void;
+  newsSummaryFontSize?: number;
+  onNewsSummaryFontSizeChange?: (n: number) => void;
   onPositionChange?: (id: string, pos: { top: number; left: number; width: number; height: number }) => void;
 }
 
@@ -32,6 +36,10 @@ export function DraggableWindow({
   onDragEnd,
   fontScale,
   onFontScaleChange,
+  newsTitleFontSize,
+  onNewsTitleFontSizeChange,
+  newsSummaryFontSize,
+  onNewsSummaryFontSizeChange,
   onPositionChange,
 }: DraggableWindowProps) {
   const [isMaximized, setIsMaximized] = useState(false);
@@ -97,11 +105,27 @@ export function DraggableWindow({
       case 'calendar':
         return <CalendarWindow onTickerClick={onTickerClick} />;
       case 'finhub-news':
-        return <FinnhubNewsWindow onTickerClick={onTickerClick} initialTicker={initialTicker} />;
+        return (
+          <FinnhubNewsWindow
+            onTickerClick={onTickerClick}
+            initialTicker={initialTicker}
+            titleFontSize={newsTitleFontSize}
+            summaryFontSize={newsSummaryFontSize}
+          />
+        );
       case 'default-ticker':
         return <DefaultTickerWindow onTickerClick={onTickerClick} />;
       case 'data-control':
-        return <DataControlWindow fontScale={fontScale} onFontScaleChange={onFontScaleChange} />;
+        return (
+          <DataControlWindow
+            fontScale={fontScale}
+            onFontScaleChange={onFontScaleChange}
+            newsTitleFontSize={newsTitleFontSize}
+            onNewsTitleFontSizeChange={onNewsTitleFontSizeChange}
+            newsSummaryFontSize={newsSummaryFontSize}
+            onNewsSummaryFontSizeChange={onNewsSummaryFontSizeChange}
+          />
+        );
       default:
         return <div>Unknown window type</div>;
     }

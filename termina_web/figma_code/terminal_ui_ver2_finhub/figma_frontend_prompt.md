@@ -56,6 +56,7 @@ Vite dev proxy:
 - 기본 탭 1개로 시작
 - `+` 버튼으로 `AddTabModal` 오픈
 - 탭 우클릭 시 inline rename
+- 탭을 drag 해서 순서를 바꿀 수 있다.
 - 탭이 2개 이상일 때만 닫기 버튼 노출
 
 ### 창(window) 공통 동작
@@ -283,7 +284,11 @@ localStorage 사용:
 
 - saved searches는 component state만 사용한다
 - 다크 모드 저장 없음
-- column layout 저장 없음
+
+저장되는 것:
+
+- `finnhub-news-ui-state`: `visibleCols`, `displayMode`, `sourceTypeFilter`, `searchQuery`
+- `terminal-workspace-v1`: 탭 순서, 탭/창 레이아웃, `fontScale`, `newsTitleFontSize`, `newsSummaryFontSize`
 
 ### Finnhub News 창이 기대하는 뉴스 응답 컬럼
 
@@ -320,6 +325,11 @@ localStorage 사용:
 파일: `src/app/components/DataControlWindow.tsx`
 
 현재 이 창은 운영 버튼과 update status 보기용으로 실제 동작한다.
+
+상단 탭:
+
+- `Updates`
+- `Settings`
 
 ### 로드 시 호출
 
@@ -364,6 +374,15 @@ localStorage 사용:
 주의:
 
 - 프론트는 calendar update도 job처럼 polling UI를 기대하지만, 현재 backend `POST /api/ibkr/calendar/update`는 즉시 완료형 response다. 즉 `jobId`를 반환하지 않으므로 이 섹션의 현재 UI 기대와 backend 계약 사이에 불일치가 있다.
+
+### Settings 탭
+
+- 전역 `Font Size` preset + slider를 제공한다.
+- News Feed 전용 typography control을 제공한다.
+  - `Title Text`
+  - `Summary Text`
+- 위 두 값은 Control Window에서만 조정한다. News Feed 창 toolbar에는 별도 font size control이 없다.
+- 저장 위치는 `terminal-workspace-v1`이며 앱 재실행 후에도 유지된다.
 
 ## Default Ticker Window
 

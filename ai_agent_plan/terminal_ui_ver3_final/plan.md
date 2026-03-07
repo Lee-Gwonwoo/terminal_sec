@@ -16,6 +16,8 @@
 7. Terminal UI를 껐다 켜도 마지막 작업 상태(탭, 창, 배치, 선택 상태, 테마, 설정)를 복원한다.
 8. 다른 탭으로 갔다가 다시 돌아와도 탭별 상태가 유지되게 한다.
 9. Data Control Window 안에 `Settings` 탭을 추가하고, 전체 글자 크기를 조절 가능하게 한다.
+10. Data Control Window `Settings`에서 News Feed title/summary 글자 크기를 각각 따로 조절 가능하게 한다.
+11. 탭 바에서 탭 순서를 drag 해서 바꿀 수 있게 한다.
 
 ### 현재 레포 상태(중요, 확인됨)
 - 백엔드 runtime DB는 `terminal/backend/backend/data/app.db` 이다.
@@ -26,9 +28,10 @@
 - 현재 코드에는 `Score`, `Score Evidence`를 canonical하게 저장/조회하는 구조가 없다.
 - `FinnhubNewsWindow.tsx`에는 `keywords` 컬럼 타입/렌더링 코드가 이미 있으나, `DEFAULT_COLUMNS`에 빠져 있어 기본 컬럼 세트/컬럼 선택 메뉴에서 실사용 상태가 아니다.
 - 현재 `FinnhubNewsWindow.tsx`에는 `Score Evidence` 컬럼 정의가 없다.
-- `FinnhubNewsWindow.tsx`는 `localStorage`에 `finnhub-last-update-config`만 저장한다. 즉 뉴스 창 일부 설정만 보존되고, 앱 전체 레이아웃/탭/테마는 보존되지 않는다.
-- `App.tsx`의 `tabs`, `activeTabId`, `isDarkMode`, `linkedTicker`는 모두 메모리 상태만 사용한다. 앱 재실행 시 초기화된다.
-- `DataControlWindow.tsx`는 현재 4개 섹션(`IBKR Price Data`, `IBKR Calendar Data`, `Recent Change% Update`, `Custom Change% Update`)과 job log panel이 있으나, 별도 `Settings` 탭이나 전역 글자 크기 제어는 없다.
+- `FinnhubNewsWindow.tsx`는 `finnhub-last-update-config`와 `finnhub-news-ui-state`를 사용해 update/search/filter/display/column 상태를 localStorage에 저장한다.
+- `App.tsx`는 `terminal-workspace-v1`를 사용해 tabs, activeTabId, theme, linkedTicker, fontScale, News Feed title/summary font size를 저장/복원한다.
+- `DataControlWindow.tsx`는 `Updates` / `Settings` 탭 구조와 전역 font scale, News Feed title/summary 글자 크기 제어 UI를 가진다.
+- 탭 바는 drag/drop으로 순서를 재배치할 수 있다.
 - Finnhub comprehensive probe 기록상 `news-sentiment` 엔드포인트는 접근 가능하다. 다만 현재 backend 수집/저장 흐름에는 아직 연결되어 있지 않다.
 - AI 뉴스 분석 skills 지침 명칭은 `ai-news-analysis`로 고정한다.
 - 현재 프론트 문서 기준으로 `Finnhub News`, `Default Ticker`, `Data Control`은 실제 API 연동이 있고, `Watchlist`, `Calendar`는 일부 mock/stub 흔적이 남아 있다.
@@ -90,25 +93,15 @@ Step N — <제목>
 ```
 
 ### PLAN CHANGE (2026-03-06)
-- 왜: 사용자가 `ai-news-analysis`라는 skills 지침 명칭을 고정하고, `Score`, `Score Evidence`, `Keywords` 정의를 새로 명시했다.
-- 무엇이 바뀌었나: `Score`를 Finnhub sentiment 후보가 아니라 AI 분석 결과로 재정의했고, `Score Evidence` 컬럼/테스트 요구와 `Keywords 30개`, 기본 빈 상태 원칙을 plan에 추가했다.
-- 영향: Step 0~4 전체의 데이터 계약, UI 컬럼, 저장 구조, 테스트 범위가 수정된다.
 
-### 아키텍처(상위)
-이번 작업은 크게 4개 축으로 나뉜다.
+### PLAN CHANGE (2026-03-06)
+- 왜: 사용자가 News Feed title/summary 글자 크기 조절 위치를 Control Window `Settings` 탭으로 고정했고, 탭 순서 drag 이동도 추가로 요구했다.
+- 무엇이 바뀌었나: Step 2의 Settings 범위를 전역 font scale + News Feed title/summary typography control까지 확장했고, Step 3의 persistence 범위에 두 typography 값과 탭 순서 저장을 반영했다.
+- 영향: `App.tsx`, `DataControlWindow.tsx`, `DraggableWindow.tsx`, `FinnhubNewsWindow.tsx` 배선과 workspace payload 검증 항목이 함께 바뀐다.
 
-1. News data enrichment 축
-   - Finnhub 뉴스 pull 시 기존 `news_items` 적재 후, sentiment를 같은 ingestion 흐름 안에서 추가 수집한다.
-   - `Score`, `Score Evidence`, `Keywords`는 provider raw 값이 아니라 `ai-news-analysis` 규칙으로 생성되는 AI enrichment 계층이다.
-   - keywords는 이미 `news_fulltext`에 저장하는 경로가 있으므로, ver3에서는 30개 키워드 기준과 저장/표시 규칙을 정합화한다.
-   - score/evidence는 기본값을 비워 두고, AI 분석 후에만 채운다.
-
-2. API contract 축
-   - `GET /api/news` 응답에 `score`, `scoreEvidence`, `sentiment`, `keywords`를 안정적으로 내려준다.
-   - 프론트는 컬럼 토글만 하는 것이 아니라, 숨김/표시 상태도 탭별 또는 workspace별로 저장 가능해야 한다.
-
-3. Workspace persistence 축
    - 앱 셸의 `tabs`, `activeTabId`, `linkedTicker`, `isDarkMode`, 각 window position/size/title/linkId를 저장한다.
+10. Data Control Window `Settings`에서 News Feed title/summary 글자 크기를 각각 따로 조절 가능하게 한다.
+11. 탭 바에서 탭 순서를 drag 해서 바꿀 수 있게 한다.
    - 창별 로컬 UI 상태(예: Finnhub source filter, columns, display mode, Data Control active tab)는 저장 범위를 정해서 직렬화한다.
 
 4. UI settings 축

@@ -147,3 +147,48 @@
 #### 비고
 
 - 이 변경은 사용자 확인을 plan에 반영한 문서 수정이다.
+
+### Control Window Settings + 탭 drag 재배치 구현
+
+**작성 시각:** 2026-03-06 20:44 (local)
+
+**상태:** 확인 대기
+
+#### 수행 내용
+
+1. News Feed title/summary 글자 크기 제어 위치를 News Feed 창 toolbar가 아니라 `Data Control` 창의 `Settings` 탭으로 옮기도록 구조를 수정했다.
+2. `App.tsx`에 `newsTitleFontSize`, `newsSummaryFontSize` 상태를 추가하고 `terminal-workspace-v1` payload에 저장/복원되게 연결했다.
+3. `DraggableWindow.tsx`를 통해 `DataControlWindow.tsx`와 `FinnhubNewsWindow.tsx`에 새 typography props를 전달하도록 배선했다.
+4. `DataControlWindow.tsx`의 `Settings` 탭에 `Title Text`, `Summary Text` preset/slider UI를 추가했다.
+5. `FinnhubNewsWindow.tsx`에서 잘못 들어가 있던 title/summary font control toolbar를 제거하고, App에서 내려주는 값만 렌더에 적용하게 정리했다.
+6. `App.tsx`의 탭 바에 drag/drop 재정렬을 추가해 탭 순서를 직접 바꿀 수 있게 했다.
+7. `figma_frontend_prompt.md`와 `plan.md`를 이번 구현 기준으로 동기화했다.
+
+#### 생성/수정 파일
+
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/App.tsx`
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DraggableWindow.tsx`
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx`
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+- `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. `termina_web/figma_code/terminal_ui_ver2_finhub`에서 `npm run build`를 실행한다.
+2. `Data Control` 창의 `Settings` 탭에서 `Title Text`, `Summary Text` 값을 바꾸고 News Feed 본문/title 크기가 즉시 달라지는지 확인한다.
+3. 앱을 새로고침한 뒤 마지막 title/summary 값이 유지되는지 확인한다.
+4. 탭 2개 이상을 만든 뒤 탭을 드래그해서 순서를 바꾸고, 새로고침 후 순서가 유지되는지 확인한다.
+
+#### 문제점 / 리스크
+
+1. 기존 `terminal-workspace-v1`에 새 필드가 없는 구버전 payload가 남아 있을 수 있다.
+   - 완화 방안 1: 기본값 `12/11`로 fallback
+   - 완화 방안 2: 필요 시 localStorage reset으로 초기화
+2. 탭 drag와 클릭이 같은 영역에 있어 브라우저/포인터 환경에 따라 오동작 가능성이 있다.
+   - 완화 방안 1: drag 중 highlight 표시로 drop target을 명확히 함
+   - 완화 방안 2: 필요 시 추후 drag handle 분리
+3. News Feed 내부 localStorage와 workspace localStorage를 동시에 쓰면 설정 충돌 위험이 있다.
+   - 완화 방안 1: title/summary 값은 News Feed localStorage 저장 대상에서 제거
+   - 완화 방안 2: Control Window Settings를 단일 source로 유지
