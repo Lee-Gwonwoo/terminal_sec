@@ -6,7 +6,7 @@ import { config } from "./config.js";
 import { initDb } from "./db.js";
 import { getNews, getNewsById } from "./services/newsRepository.js";
 import { createSavedView, deleteSavedView, listSavedViews } from "./services/savedViewRepository.js";
-import { createWatchlist, deleteWatchlist, listWatchlists } from "./services/watchlistRepository.js";
+import { createWatchlist, deleteWatchlist, listWatchlists, backfillWatchlistSecurityIds } from "./services/watchlistRepository.js";
 import {
   exportCalendarEventsCsv,
   getCalendarEventById,
@@ -22,7 +22,7 @@ import { pullIbkrCalendar } from "./services/calendarIngestion.js";
 import { pullEodhdNews, pullEodhdNewsAll } from "./services/eodhdNewsProvider.js";
 import { insertNewsItem } from "./services/newsRepository.js";
 import { listUpdateStatuses, setLastSuccess } from "./services/updateStatusRepository.js";
-import { readTickersFromCsv, appendTickerToCsv, CsvServiceError } from "./services/tickerCsvService.js";
+import { readTickersFromCsv, appendTickerToCsv, readTickerRowsFromCsv, CsvServiceError } from "./services/tickerCsvService.js";
 import {
   fetchCompanyNewsRaw,
   fetchPressReleasesRaw,
@@ -43,6 +43,16 @@ import { getFulltext, getUnextractedNewsIds } from "./services/fulltextRepositor
 import { runFulltextUpdate, runFulltextPlainTextBackfill } from "./services/fulltextUpdateService.js";
 import { backfillPublisher } from "./services/finnhubNewsProvider.js";
 import { validateAnalysisCompleteness } from "./services/aiAnalysisRepository.js";
+import {
+  upsertSecurity,
+  upsertUniverse,
+  addUniverseItem,
+  listUniverses,
+  listUniverseItems,
+  countSecurities,
+  countUniverseItems,
+  getSecurityByTicker,
+} from "./services/tickerUniverseRepository.js";
 import { getDb } from "./db.js";
 import {
   getOhlcDbPath,
@@ -1270,6 +1280,144 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
   res.status(400).json({ error: message });
 });
 
+// ── Step 5-2: default ticker universe import ──
+
+async function importDefaultTickerUniverse(): Promise<void> {
+  const csvPath = DEFAULT_TICKERS_CSV;
+  try {
+    const { rows, resolvedPath } = readTickerRowsFromCsv(csvPath);
+    if (rows.length === 0) {
+      console.log("[startup] default ticker CSV is empty, skipping universe import");
+      return;
+    }
+
+    const universeId = await upsertUniverse("default", "TradingView screener default watchlist", resolvedPath);
+
+    let upserted = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const secId = await upsertSecurity(row.ticker, null, row.name, row.sector, row.industry);
+      await addUniverseItem(universeId, secId, i);
+      upserted++;
+    }
+    console.log(`[startup] upserted ${upserted} tickers into default universe (securities total: ${await countSecurities()})`);
+  } catch (err) {
+    console.warn(`[startup] failed to import default ticker universe: ${err instanceof Error ? err.message : err}`);
+  }
+}
+
+// ── Step 5-2: securities / universe API ──
+
+app.get("/api/securities", async (_req, res) => {
+  try {
+    const rows = await getDb().all(
+      "SELECT id, ticker, exchange, name, sector, industry FROM securities ORDER BY ticker LIMIT 2000"
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Unknown error" });
+  }
+});
+
+app.get("/api/securities/search", async (req, res) => {
+  try {
+    const q = (req.query.q as string || "").toUpperCase().trim();
+    if (!q) { res.json([]); return; }
+    const rows = await getDb().all(
+      "SELECT id, ticker, exchange, name, sector, industry FROM securities WHERE ticker LIKE ? OR name LIKE ? ORDER BY ticker LIMIT 50",
+      [`${q}%`, `%${q}%`],
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Unknown error" });
+  }
+});
+
+app.get("/api/universes", async (_req, res) => {
+  try {
+    const universes = await listUniverses();
+    res.json(universes);
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Unknown error" });
+  }
+});
+
+app.get("/api/universes/:id/items", async (req, res) => {
+  try {
+    const universeId = parseInt(req.params.id, 10);
+    if (isNaN(universeId)) { res.status(400).json({ error: "Invalid universe id" }); return; }
+    const items = await listUniverseItems(universeId);
+    res.json(items);
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Unknown error" });
+  }
+});
+
+// ── Step 5-3: company profile API ──
+
+import { fetchFmpProfile, fetchFmpProfilesBatch } from "./services/fmpCompanyProfileProvider.js";
+import { upsertCompanyProfile, getCompanyProfileByTicker, countCompanyProfiles } from "./services/companyProfileRepository.js";
+
+app.get("/api/company-profiles/:ticker", async (req, res) => {
+  try {
+    const ticker = req.params.ticker.toUpperCase();
+    const profile = await getCompanyProfileByTicker(ticker);
+    if (!profile) { res.status(404).json({ error: "Profile not found" }); return; }
+    res.json(profile);
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Unknown error" });
+  }
+});
+
+app.post("/api/company-profiles/pull-fmp", async (req, res) => {
+  try {
+    const body = req.body as { tickers?: string[]; maxTickers?: number };
+    let tickers = body.tickers;
+
+    if (!tickers || tickers.length === 0) {
+      // default: pull from default universe
+      const { rows } = readTickerRowsFromCsv(DEFAULT_TICKERS_CSV);
+      tickers = rows.map((r) => r.ticker);
+    }
+    const max = body.maxTickers ?? 50;
+    const target = tickers.slice(0, max);
+
+    const profiles = await fetchFmpProfilesBatch(target);
+    let upserted = 0;
+
+    for (const [ticker, fmp] of profiles) {
+      const secId = await upsertSecurity(
+        ticker,
+        fmp.exchangeShortName || null,
+        fmp.companyName || null,
+        fmp.sector || null,
+        fmp.industry || null,
+      );
+      await upsertCompanyProfile(
+        secId,
+        "fmp",
+        fmp.description || null,
+        fmp.ceo || null,
+        fmp.fullTimeEmployees ? parseInt(fmp.fullTimeEmployees, 10) || null : null,
+        fmp.website || null,
+        fmp.ipoDate || null,
+        fmp.mktCap || null,
+        JSON.stringify(fmp.raw),
+      );
+      upserted++;
+    }
+
+    res.json({
+      requested: target.length,
+      fetched: profiles.size,
+      upserted,
+      totalProfiles: await countCompanyProfiles(),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Unknown error" });
+  }
+});
+
 async function start(): Promise<void> {
   await initDb();
   const publisherBackfilled = await backfillPublisher();
@@ -1283,6 +1431,15 @@ async function start(): Promise<void> {
   }
   await ensureSeedData();
   // startCalendarIngestionWorkers() removed — Step 6-2 (mock 생성기 중지)
+
+  // Step 5-2: import default ticker CSV into canonical securities + universe
+  await importDefaultTickerUniverse();
+
+  // Step 5-4: backfill security_id for existing watchlist_items
+  const wlBackfilled = await backfillWatchlistSecurityIds();
+  if (wlBackfilled > 0) {
+    console.log(`[startup] backfilled security_id for ${wlBackfilled} watchlist_items rows`);
+  }
 
   app.listen(config.port, () => {
     console.log(`Backend listening on http://localhost:${config.port}`);

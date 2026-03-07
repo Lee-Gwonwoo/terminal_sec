@@ -44,9 +44,32 @@ function loadFinnhubApiKey(): string {
   );
 }
 
+function loadFmpApiKey(): string {
+  // 1. Environment variable
+  const envKey = process.env.FMP_API_KEY;
+  if (envKey && envKey.trim()) {
+    return envKey.trim();
+  }
+
+  // 2. File fallback
+  const repoRoot = resolveRepoRoot();
+  const keyPath = path.join(repoRoot, "ai_agent_plan", "fmp_api_key", "fmp_api_key");
+  try {
+    const fileKey = fs.readFileSync(keyPath, "utf8").trim();
+    if (fileKey) {
+      return fileKey;
+    }
+  } catch {
+    // File not found or unreadable — fall through
+  }
+
+  return ""; // FMP is optional
+}
+
 export const config = {
   port: Number(process.env.PORT ?? 8080),
   sqlitePath: process.env.SQLITE_PATH ?? "./backend/data/app.db",
   frontendOrigin: process.env.FRONTEND_ORIGIN ?? "http://localhost:5174",
-  finnhubApiKey: loadFinnhubApiKey()
+  finnhubApiKey: loadFinnhubApiKey(),
+  fmpApiKey: loadFmpApiKey(),
 };

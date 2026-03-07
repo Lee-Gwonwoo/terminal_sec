@@ -189,3 +189,80 @@ export async function appendTickerToCsv(
   const result = readTickersFromCsv(csvPath);
   return { tickers: result.tickers, tickerAdded: normalizedTicker, resolvedPath: result.resolvedPath };
 }
+
+// ---------- Rich Read (full row data) ----------
+
+export interface CsvTickerRow {
+  ticker: string;
+  name: string | null;
+  industry: string | null;
+  sector: string | null;
+}
+
+/**
+ * Read tickers with metadata (name, industry, sector) from a TradingView-style CSV.
+ * Columns detected: Symbol/Ticker, Description, Industry, Sector.
+ * Handles quoted fields properly.
+ */
+export function readTickerRowsFromCsv(csvPath: string): { rows: CsvTickerRow[]; resolvedPath: string } {
+  const resolved = validateCsvPath(csvPath);
+
+  if (!fs.existsSync(resolved)) {
+    throw new CsvServiceError(`CSV file not found: ${csvPath}`);
+  }
+
+  const content = fs.readFileSync(resolved, "utf8");
+  const lines = content.split(/\r?\n/).filter((l) => l.trim() !== "");
+
+  if (lines.length === 0) {
+    throw new CsvServiceError("CSV file is empty");
+  }
+
+  const headers = parseCsvRowQuoted(lines[0]);
+  const tickerIdx = headers.findIndex((h) => /^(symbol|ticker)$/i.test(h.trim()));
+  const descIdx = headers.findIndex((h) => /^description$/i.test(h.trim()));
+  const industryIdx = headers.findIndex((h) => /^industry$/i.test(h.trim()));
+  const sectorIdx = headers.findIndex((h) => /^sector$/i.test(h.trim()));
+
+  if (tickerIdx < 0) {
+    throw new CsvServiceError(`No ticker/symbol column found in header: ${headers.join(", ")}`);
+  }
+
+  const rows: CsvTickerRow[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = parseCsvRowQuoted(lines[i]);
+    const raw = cols[tickerIdx]?.trim() ?? "";
+    if (raw === "" || !TICKER_PATTERN.test(raw.toUpperCase())) continue;
+
+    rows.push({
+      ticker: raw.toUpperCase(),
+      name: descIdx >= 0 ? (cols[descIdx]?.trim() || null) : null,
+      industry: industryIdx >= 0 ? (cols[industryIdx]?.trim() || null) : null,
+      sector: sectorIdx >= 0 ? (cols[sectorIdx]?.trim() || null) : null,
+    });
+  }
+
+  return { rows, resolvedPath: resolved };
+}
+
+/** CSV row parser with quoted field support */
+function parseCsvRowQuoted(line: string): string[] {
+  const result: string[] = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (i + 1 < line.length && line[i + 1] === '"') { cur += '"'; i++; }
+        else inQuotes = false;
+      } else { cur += ch; }
+    } else {
+      if (ch === '"') inQuotes = true;
+      else if (ch === ",") { result.push(cur); cur = ""; }
+      else cur += ch;
+    }
+  }
+  result.push(cur);
+  return result;
+}

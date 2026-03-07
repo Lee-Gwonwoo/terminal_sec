@@ -839,16 +839,16 @@ E2E 수동 검증 체크리스트 (1회 실행 순서):
 사용자 확인 필요: 예
 ```
 
-#### ⬜ Step 5 — Canonical ticker master model (`securities.id`) 도입
+#### ⏳ Step 5 — Canonical ticker master model (`securities.id`) 도입
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 5-1 | `securities`, `company_profiles`, `ticker_universes`, `ticker_universe_items` schema를 `app.db`에 추가 | `terminal/backend/src/db.ts` | 서버 시작 후 테이블 생성 확인 | ⬜ |
-| 5-2 | default ticker CSV를 canonical universe로 import하는 service/repository를 추가 | `terminal/backend/src/services/tickerUniverseRepository.ts`, `terminal/backend/src/services/tickerCsvService.ts`, `terminal/backend/src/server.ts` | import 후 universe/security row count 확인 | ⬜ |
-| 5-3 | FMP company description 저장 경로를 `company_profiles.security_id` 기준 upsert 구조로 설계/구현 | `terminal/backend/src/services/companyProfileRepository.ts`, `terminal/backend/src/services/fmpCompanyProfileProvider.ts` | 특정 ticker profile upsert 확인 | ⬜ |
-| 5-4 | `watchlist_items`에 `security_id`를 추가하고 기존 `ticker` 기반 row를 backfill하는 migration을 넣는다 | `terminal/backend/src/db.ts`, `terminal/backend/src/services/watchlistRepository.ts` | backfill 후 null 없는지 확인 | ⬜ |
-| 5-5 | watchlist API/read path를 `security_id` 기준으로 읽되 외부 API 계약은 ticker 친화적으로 유지 | `terminal/backend/src/services/watchlistRepository.ts`, `terminal/backend/src/server.ts` | watchlist CRUD/E2E 확인 | ⬜ |
-| 5-6 | calendar/news/bookmark 등 ticker join 지점을 점검해 `securities` 연동 확장 포인트를 정리 | `terminal/backend/src/services/*.ts`, 관련 prompt 문서 | join 포인트 점검 체크리스트 확인 | ⬜ |
+| 5-1 | `securities`, `company_profiles`, `ticker_universes`, `ticker_universe_items` schema를 `app.db`에 추가 | `terminal/backend/src/db.ts` | 서버 시작 후 테이블 생성 확인 | ✅ |
+| 5-2 | default ticker CSV를 canonical universe로 import하는 service/repository를 추가 | `terminal/backend/src/services/tickerUniverseRepository.ts`, `terminal/backend/src/services/tickerCsvService.ts`, `terminal/backend/src/server.ts` | import 후 universe/security row count 확인 | ✅ |
+| 5-3 | FMP company description 저장 경로를 `company_profiles.security_id` 기준 upsert 구조로 설계/구현 | `terminal/backend/src/services/companyProfileRepository.ts`, `terminal/backend/src/services/fmpCompanyProfileProvider.ts` | 특정 ticker profile upsert 확인 | ✅ |
+| 5-4 | `watchlist_items`에 `security_id`를 추가하고 기존 `ticker` 기반 row를 backfill하는 migration을 넣는다 | `terminal/backend/src/db.ts`, `terminal/backend/src/services/watchlistRepository.ts` | backfill 후 null 없는지 확인 | ✅ |
+| 5-5 | watchlist API/read path를 `security_id` 기준으로 읽되 외부 API 계약은 ticker 친화적으로 유지 | `terminal/backend/src/services/watchlistRepository.ts`, `terminal/backend/src/server.ts` | watchlist CRUD/E2E 확인 | ✅ |
+| 5-6 | calendar/news/bookmark 등 ticker join 지점을 점검해 `securities` 연동 확장 포인트를 정리 | `terminal/backend/src/services/*.ts`, 관련 prompt 문서 | join 포인트 점검 체크리스트 확인 | ✅ |
 
 5-1 목적: 종목을 뉴스나 watchlist와 분리된 독립 엔터티로 올린다.
 5-1 설명: 문자열 ticker 대신 내부 `securities.id`를 canonical key로 도입하고, company description/default ticker universe가 이 key를 공유하게 한다.
@@ -974,12 +974,12 @@ Legend
 ✅ 4-4 bookmark 문서/체크리스트 정리
 
 [Track E: canonical ticker master model]
-⬜ 5-1 `securities` / `company_profiles` / universe schema
-⬜ 5-2 default ticker CSV import → DB canonical universe
-⬜ 5-3 FMP company description → `company_profiles.security_id`
-⬜ 5-4 `watchlist_items.security_id` migration/backfill
-⬜ 5-5 watchlist API dual-read / ticker-friendly response 유지
-⬜ 5-6 calendar/news/bookmark join 포인트 점검
+✅ 5-1 `securities` / `company_profiles` / universe schema
+✅ 5-2 default ticker CSV import → DB canonical universe (1191개 종목)
+✅ 5-3 FMP company description → `company_profiles.security_id` (stable endpoint)
+✅ 5-4 `watchlist_items.security_id` migration/backfill
+✅ 5-5 watchlist API dual-read / ticker-friendly response 유지
+✅ 5-6 calendar/news/bookmark join 포인트 점검 (아래 체크리스트 참고)
 
 ================ BLOCKER ================
 Track A의 선행 결정 차단은 해소되었다.
@@ -1018,6 +1018,45 @@ Track E는 구조 정규화 phase이므로, default ticker import 정책과 `sec
 예시:
 - 예시 1: 대형 수주/가이던스 상향 뉴스면 `Score=+8` 수준, Evidence에는 왜 매출/수요 기대를 높이는지 설명.
 - 예시 2: 중대한 규제 조사/소송 악재면 `Score=-7` 수준, Evidence에는 왜 비용/밸류에이션/신뢰 훼손으로 이어지는지 설명.
+
+---
+
+### PLAN CHANGE (2026-03-07) — Step 5 구현 완료 + join 포인트 점검
+
+**무엇:** Step 5 전체(5-1 ~ 5-6) 구현 완료. Canonical ticker master model 도입.
+
+**변경 파일:**
+- `terminal/backend/src/db.ts` — `securities`, `company_profiles`, `ticker_universes`, `ticker_universe_items` 테이블 추가, `watchlist_items.security_id` 컬럼 추가
+- `terminal/backend/src/config.ts` — FMP API key 로드 추가
+- `terminal/backend/src/services/tickerUniverseRepository.ts` — 신규: securities/universe CRUD
+- `terminal/backend/src/services/companyProfileRepository.ts` — 신규: company profile CRUD
+- `terminal/backend/src/services/fmpCompanyProfileProvider.ts` — 신규: FMP stable API provider
+- `terminal/backend/src/services/tickerCsvService.ts` — `readTickerRowsFromCsv()` 추가 (quoted fields 지원)
+- `terminal/backend/src/services/watchlistRepository.ts` — `security_id` 연동, `backfillWatchlistSecurityIds()` 추가
+- `terminal/backend/src/server.ts` — startup import, backfill, API 라우트 추가
+
+**검증 결과:**
+- `npx tsc --noEmit` → 에러 0
+- `npm run test` → 48 tests passed (6 suites)
+- 서버 시작 → default universe 1191개 종목 import 확인
+- FMP profile pull → AAPL description/CEO/employees/website 저장 확인
+- API: `GET /api/securities`, `GET /api/securities/search?q=`, `GET /api/universes`, `GET /api/universes/:id/items`, `GET /api/company-profiles/:ticker`, `POST /api/company-profiles/pull-fmp`
+
+**FMP API 참고:** legacy v3 endpoint 폐지됨 → `/stable/profile?symbol=...&apikey=...` 사용
+
+**5-6 join 포인트 점검 체크리스트 (후속 migration 대상):**
+
+| 우선순위 | 서비스 | 현재 상태 | 후속 조치 |
+|---------|--------|----------|----------|
+| HIGH | `newsRepository.ts` — `listNews()` ticker LIKE 필터 | CSV 기반 `tickers_csv LIKE ?` | junction table `news_ticker_items(news_id, security_id)` 도입 검토 |
+| HIGH | `newsRepository.ts` — sentiment subquery | `WHERE ticker IN (...)` | `news_sentiment_snapshots`에 `security_id` FK 추가 |
+| MEDIUM | `calendarRepository.ts` — `upsertCalendarEvent()` | ticker 문자열 INSERT | `security_id` FK 추가 |
+| MEDIUM | `calendarRepository.ts` — `listCalendarEvents()` | watchlist ticker IN 필터 | `security_id` join으로 전환 |
+| MEDIUM | `finnhubNewsProvider.ts` — `confirmed_empty_ranges` | ticker 문자열 PK | `security_id` FK 추가 |
+| LOW | `newsChangeMerger.ts` — OHLC Symbol 조회 | 별도 DB의 natural key | 유지 (외부 스키마)  |
+| DONE | `watchlistRepository.ts` | hybrid: ticker + security_id | backfill 완료, ticker는 호환용 유지 |
+| DONE | `tickerUniverseRepository.ts` | security_id FK 기반 | 정규화 완료 |
+| DONE | `companyProfileRepository.ts` | security_id FK 기반 | 정규화 완료 |
 - 예시 3: 아직 AI 분석 미실행이면 `Score=null`, `Score Evidence=null`, `Keywords=[]`로 유지.
 
 ### 결정 #4 — persistence 저장 범위(확정)

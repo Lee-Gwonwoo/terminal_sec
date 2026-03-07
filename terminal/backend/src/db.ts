@@ -227,6 +227,63 @@ export async function initDb(): Promise<void> {
       PRIMARY KEY (ticker, source_type)
     );
   `);
+
+  // Step 5-1: canonical ticker master model
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS securities (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ticker TEXT NOT NULL,
+      exchange TEXT,
+      name TEXT,
+      sector TEXT,
+      industry TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (ticker, exchange)
+    );
+  `);
+  await db.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_securities_ticker_exchange ON securities (ticker, COALESCE(exchange, ''));"
+  );
+
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS company_profiles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      security_id INTEGER NOT NULL REFERENCES securities(id) ON DELETE CASCADE,
+      source TEXT NOT NULL,
+      description TEXT,
+      ceo TEXT,
+      employees INTEGER,
+      website TEXT,
+      ipo_date TEXT,
+      market_cap REAL,
+      raw_json TEXT,
+      fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (security_id, source)
+    );
+  `);
+
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS ticker_universes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      description TEXT,
+      source_path TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS ticker_universe_items (
+      universe_id INTEGER NOT NULL REFERENCES ticker_universes(id) ON DELETE CASCADE,
+      security_id INTEGER NOT NULL REFERENCES securities(id) ON DELETE CASCADE,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (universe_id, security_id)
+    );
+  `);
+
+  // Step 5-4: add security_id column to watchlist_items
+  await ensureColumn("watchlist_items", "security_id", "INTEGER REFERENCES securities(id)");
 }
 
 async function ensureColumn(tableName: string, columnName: string, definition: string): Promise<void> {

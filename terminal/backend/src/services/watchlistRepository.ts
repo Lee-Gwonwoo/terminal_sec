@@ -1,29 +1,35 @@
 import { randomUUID } from "node:crypto";
 import { getDb } from "../db.js";
+import { upsertSecurity } from "./tickerUniverseRepository.js";
 
 export async function listWatchlists(userId: string) {
-  const rows = await getDb().all<any[]>(
-    `SELECT w.id, w.user_id, w.name, w.enable_alerts, w.created_at,
-      COALESCE(GROUP_CONCAT(i.ticker), '') AS tickers_csv
-     FROM watchlists w
-     LEFT JOIN watchlist_items i ON i.watchlist_id = w.id
-     WHERE w.user_id = ?
-     GROUP BY w.id
-     ORDER BY w.created_at DESC`,
+  const db = getDb();
+
+  // Get watchlist headers
+  const headers = await db.all<any[]>(
+    `SELECT id, user_id, name, enable_alerts, created_at
+     FROM watchlists WHERE user_id = ? ORDER BY created_at DESC`,
     [userId]
   );
 
-  return rows.map((row) => ({
-    id: row.id,
-    user_id: row.user_id,
-    name: row.name,
-    enable_alerts: Boolean(row.enable_alerts),
-    created_at: row.created_at,
-    tickers: row.tickers_csv
-      .split(",")
-      .map((ticker: string) => ticker.trim())
-      .filter(Boolean)
-  }));
+  const result = [];
+  for (const h of headers) {
+    const items = await db.all<{ ticker: string; security_id: number | null }[]>(
+      `SELECT ticker, security_id FROM watchlist_items WHERE watchlist_id = ?`,
+      [h.id]
+    );
+    result.push({
+      id: h.id,
+      user_id: h.user_id,
+      name: h.name,
+      enable_alerts: Boolean(h.enable_alerts),
+      created_at: h.created_at,
+      tickers: items.map((i) => i.ticker).filter(Boolean),
+      security_ids: items.map((i) => i.security_id).filter((id): id is number => id != null),
+    });
+  }
+
+  return result;
 }
 
 export async function createWatchlist(userId: string, name: string, tickers: string[], enableAlerts: boolean) {
@@ -38,9 +44,12 @@ export async function createWatchlist(userId: string, name: string, tickers: str
     );
 
     for (const ticker of tickers) {
+      const normalizedTicker = ticker.toUpperCase();
+      // Step 5-4: also resolve security_id for new items
+      const securityId = await upsertSecurity(normalizedTicker, null, null, null, null);
       await db.run(
-        `INSERT INTO watchlist_items (watchlist_id, ticker) VALUES (?, ?)`,
-        [id, ticker.toUpperCase()]
+        `INSERT INTO watchlist_items (watchlist_id, ticker, security_id) VALUES (?, ?, ?)`,
+        [id, normalizedTicker, securityId]
       );
     }
     await db.run("COMMIT");
@@ -65,4 +74,26 @@ export async function deleteWatchlist(userId: string, watchlistId: string) {
     [userId, watchlistId]
   );
   return result.changes ?? 0;
+}
+
+/**
+ * Step 5-4: Backfill security_id for existing watchlist_items that have ticker but no security_id.
+ * Returns number of rows updated.
+ */
+export async function backfillWatchlistSecurityIds(): Promise<number> {
+  const db = getDb();
+  const rows = await db.all<{ watchlist_id: string; ticker: string }[]>(
+    "SELECT watchlist_id, ticker FROM watchlist_items WHERE security_id IS NULL AND ticker != ''"
+  );
+
+  let updated = 0;
+  for (const row of rows) {
+    const securityId = await upsertSecurity(row.ticker, null, null, null, null);
+    await db.run(
+      "UPDATE watchlist_items SET security_id = ? WHERE watchlist_id = ? AND ticker = ?",
+      [securityId, row.watchlist_id, row.ticker]
+    );
+    updated++;
+  }
+  return updated;
 }

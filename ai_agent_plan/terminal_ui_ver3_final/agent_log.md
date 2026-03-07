@@ -579,6 +579,71 @@ Step 1 전체 (1-1 ~ 1-13)를 구현하고 빌드/테스트를 통과시켰다.
 
 market news에서 publisher가 표시되지 않는 버그를 수정했다.
 
+---
+
+### Step 5 — Canonical ticker master model 구현
+
+**작성 시각:** 2026-03-07 13:41 (local)
+
+**상태:** 확인 대기(awaiting user confirmation)
+
+#### 수행 내용
+
+Step 5 전체(5-1 ~ 5-6)를 구현했다. 종목을 뉴스/watchlist와 분리된 독립 엔터티로 도입.
+
+**5-1: DB 스키마 추가**
+- `securities`, `company_profiles`, `ticker_universes`, `ticker_universe_items` 테이블 생성
+- 파일: `terminal/backend/src/db.ts`
+
+**5-2: CSV → canonical universe import**
+- `readTickerRowsFromCsv()` 추가 (quoted fields 지원 CSV 파서)
+- `tickerUniverseRepository.ts` 신규 생성 (securities/universe CRUD)
+- 서버 startup 시 default CSV (watch lists2_2026-02-22.csv) → 1191개 종목 자동 import
+- API: `GET /api/securities`, `GET /api/securities/search`, `GET /api/universes`, `GET /api/universes/:id/items`
+- 파일: `tickerCsvService.ts`, `tickerUniverseRepository.ts`, `server.ts`
+
+**5-3: FMP company profile 저장**
+- `fmpCompanyProfileProvider.ts` 신규: FMP stable endpoint (`/stable/profile?symbol=...`)
+- `companyProfileRepository.ts` 신규: `company_profiles` upsert/조회
+- `config.ts`에 FMP API key 로드 추가
+- API: `GET /api/company-profiles/:ticker`, `POST /api/company-profiles/pull-fmp`
+- 검증: AAPL description/CEO/employees 정상 저장 확인
+
+**5-4: watchlist_items security_id**
+- `watchlist_items`에 `security_id` 컬럼 추가 (ALTER TABLE)
+- `backfillWatchlistSecurityIds()` 추가 — 기존 ticker → security_id 매핑
+- `createWatchlist()` — 새 항목 추가 시 security_id 자동 연결
+- startup 시 자동 backfill 실행
+
+**5-5: watchlist API 내부 전환**
+- `listWatchlists()` — 응답에 `security_ids` 배열 추가
+- 외부 API 계약 (tickers 배열)은 호환 유지
+
+**5-6: join 포인트 점검**
+- 24개 ticker 기반 join/필터 위치 분석 완료
+- HIGH: `newsRepository.ts` (CSV LIKE + sentiment subquery)
+- MEDIUM: `calendarRepository.ts`, `confirmed_empty_ranges`
+- LOW: OHLC Symbol (외부 스키마, 유지)
+- plan.md에 후속 migration 체크리스트 추가
+
+#### 검증
+- `npx tsc --noEmit` → 에러 0
+- `npm run test` → 48 tests, 6 suites 전부 pass
+- 서버 시작 → securities 1191개, default universe 생성 확인
+- `GET /api/securities/search?q=TXN` → sector/industry 정상
+- `POST /api/company-profiles/pull-fmp` (AAPL) → description/CEO/ipo_date 저장 확인
+
+#### 검증 방법 (사용자)
+```bash
+cd terminal/backend
+npm run test
+npx tsc --noEmit
+# 서버 시작 후:
+curl http://localhost:8080/api/universes
+curl http://localhost:8080/api/securities/search?q=AAPL
+curl http://localhost:8080/api/company-profiles/AAPL
+```
+
 **원인 분석:**
 1. `FinnhubMappedItem` type에 `publisher` 필드가 없었다.
 2. Finnhub API의 `item.source`(publisher명: "Yahoo", "CNBC" 등)를 버리고 `source: "FINNHUB"`로 하드코딩했다.
