@@ -186,9 +186,9 @@ Step N — <제목>
 | 세부 단계 | 작업 | 상태 |
 |-----------|------|------|
 | 0-1 | Finnhub `news-sentiment` 응답 구조를 다시 확인하고 기사 단위 매핑 가능 여부를 결정 | 🚫 |
-| 0-2 | `ai-news-analysis` 기준으로 `Score(-10~10)`, `Score Evidence`, `Keywords(30개)` 정의를 문서에 고정 | 🚫 |
+| 0-2 | `ai-news-analysis` 기준으로 `Score(-10~10)`, `Score Evidence`, `Keywords(30개)` 정의를 문서에 고정 | ✅ |
 | 0-3 | sentiment와 AI analysis 저장 위치를 `app.db` 내 별도 테이블 기준으로 확정 | 🚫 |
-| 0-4 | workspace persistence 범위(탭/창/컬럼/필터/테마/폰트 크기)를 freeze | 🚫 |
+| 0-4 | workspace persistence 범위를 권장범위로 확정한다 | ✅ |
 | 0-5 | `Score`/`Score Evidence`/`Keywords` 삭제·유실 감지 테스트 요구를 고정 | 🚫 |
 
 0-1 목적: sentiment가 뉴스 기사와 1:1인지, ticker snapshot인지 확인한다.
@@ -210,10 +210,15 @@ Step N — <제목>
 0-3 흔한 문제/주의: `news_items`에 직접 붙이면 migration 부담이 커질 수 있다.
 
 0-4 목적: “마지막 상태 기억” 범위를 애매하지 않게 만든다.
-0-4 설명: 저장/복원 대상 state를 목록화한다.
+0-4 설명: 저장/복원 대상 state를 권장범위로 목록화하고 고정한다.
 0-4 완료 조건(눈으로 확인): localStorage payload 예시가 문서에 적힌다.
 0-4 사람 검증(비개발자): 앱 종료 후 어떤 것이 복원되는지 목록으로 확인 가능하다.
 0-4 흔한 문제/주의: 너무 많이 저장하면 schema drift가 자주 난다.
+
+0-4 확정 범위(사용자 확인 완료):
+- 저장 대상: 탭 목록, 마지막 활성 탭, 창 위치/크기/제목/linkId, 다크모드, 전체 글자 크기
+- 창 내부 상태: News Feed 컬럼 on/off, source filter, 검색어, display mode, Data Control의 active tab
+- 비저장 대상: 순간적인 modal open 상태, 일회성 loading 상태, 임시 hover/selection UI
 
 0-5 목적: 분석 결과 유실을 놓치지 않게 한다.
 0-5 설명: `Score`, `Score Evidence`, `Keywords`가 저장/조회 중 지워지면 실패하는 테스트 기준을 고정한다.
@@ -294,15 +299,15 @@ node test_check_news_db.mjs
 사용자 확인 필요: 예
 ```
 
-#### ⬜ Step 2 — News Feed / Data Control UI 확장
+#### ✅ Step 2 — News Feed / Data Control UI 확장
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 2-1 | News Feed 컬럼 정의에 `Score`, `Score Evidence`, `Keywords`, `Sentiment`를 반영 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | UI 컬럼 메뉴 확인 | ⬜ |
-| 2-2 | `Keywords`를 30개 기준 default/선택 컬럼 동작으로 정상 연결 | 같은 파일 | 컬럼 토글 및 렌더 확인 | ⬜ |
-| 2-3 | score/score evidence/sentiment 셀 렌더, 정렬, null 표시 규칙 추가 | 같은 파일 | 정렬/표시 확인 | ⬜ |
-| 2-4 | Data Control Window에 `Updates` / `Settings` 탭 구조 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx` | 탭 전환 확인 | ⬜ |
-| 2-5 | Settings 탭에 전체 글자 크기 조절 UI 추가 | 같은 파일 및 app shell styling | 슬라이더/프리셋 반영 확인 | ⬜ |
+| 2-1 | News Feed 컬럼 정의에 `Score`, `Score Evidence`, `Keywords`, `Sentiment`를 반영 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | UI 컬럼 메뉴 확인 | ✅ |
+| 2-2 | `Keywords`를 30개 기준 default/선택 컬럼 동작으로 정상 연결 | 같은 파일 | 컬럼 토글 및 렌더 확인 | ✅ |
+| 2-3 | score/score evidence/sentiment 셀 렌더, 정렬, null 표시 규칙 추가 | 같은 파일 | 정렬/표시 확인 | ✅ |
+| 2-4 | Data Control Window에 `Updates` / `Settings` 탭 구조 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx` | 탭 전환 확인 | ✅ |
+| 2-5 | Settings 탭에 전체 글자 크기 조절 UI 추가 | 같은 파일 및 app shell styling | 슬라이더/프리셋 반영 확인 | ✅ |
 
 2-1 목적: 사용자가 필요한 4개 컬럼을 실제로 보이게 만든다.
 2-1 설명: 단순 타입 선언이 아니라 메뉴/헤더/행 렌더까지 연결한다.
@@ -350,15 +355,15 @@ npm run build
 사용자 확인 필요: 예
 ```
 
-#### ⬜ Step 3 — Workspace state persistence 구현
+#### ✅ Step 3 — Workspace state persistence 구현
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 3-1 | 앱 셸의 tabs/activeTab/theme/linkedTicker 저장 구조 설계 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/App.tsx` | 새 localStorage payload 확인 | ⬜ |
-| 3-2 | 창 배치(position/size/title/type/linkId) 저장/복원 구현 | `App.tsx`, `DraggableWindow.tsx` 관련 파일 | 재실행 후 복원 확인 | ⬜ |
-| 3-3 | 탭 전환 후 탭별 window state 유지 확인 및 보강 | `App.tsx` 및 창 컴포넌트 state wiring | 탭 왕복 테스트 | ⬜ |
-| 3-4 | 창별 중요 UI state(컬럼/필터/검색/active Settings tab) 저장 범위 반영 | `FinnhubNewsWindow.tsx`, `DataControlWindow.tsx` 등 | 창 재오픈 후 상태 복원 확인 | ⬜ |
-| 3-5 | storage versioning / fallback reset 로직 추가 | app shell 공용 유틸 | 깨진 payload 복구 확인 | ⬜ |
+| 3-1 | 앱 셸의 tabs/activeTab/theme/linkedTicker 저장 구조 설계 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/App.tsx` | 새 localStorage payload 확인 | ✅ |
+| 3-2 | 창 배치(position/size/title/type/linkId) 저장/복원 구현 | `App.tsx`, `DraggableWindow.tsx` 관련 파일 | 재실행 후 복원 확인 | ✅ |
+| 3-3 | 탭 전환 후 탭별 window state 유지 확인 및 보강 | `App.tsx` 및 창 컴포넌트 state wiring | 탭 왕복 테스트 | ✅ |
+| 3-4 | 창별 중요 UI state(컬럼/필터/검색/active Settings tab) 저장 범위 반영 | `FinnhubNewsWindow.tsx`, `DataControlWindow.tsx` 등 | 창 재오픈 후 상태 복원 확인 | ✅ |
+| 3-5 | storage versioning / fallback reset 로직 추가 | app shell 공용 유틸 | 깨진 payload 복구 확인 | ✅ |
 
 3-1 목적: 앱 전체 복원의 기준 payload를 만든다.
 3-1 설명: localStorage key, version, schema를 정한다.
@@ -457,11 +462,7 @@ npm run test
    - 선택지: `news_fulltext` 확장 / `news_ai_analysis` 별도 테이블
    - 차단 대상 Step: 1
 
-4. 결정 #4 — 앱 상태 저장 범위
-   - 선택지: layout만 / layout+window filters / 거의 모든 UI state
-   - 차단 대상 Step: 3
-
-5. 결정 #5 — font size 저장 위치
+4. 결정 #5 — font size 저장 위치
    - 선택지: global localStorage / tab별 저장 / backend saved settings
    - 차단 대상 Step: 2, 3
 
@@ -476,7 +477,7 @@ Legend
 ```text
 [Track A: 데이터 계약 / 백엔드]
 🚫 0-1 sentiment 응답 구조 확정
-🚫 0-2 ai-news-analysis 출력 계약 확정
+✅ 0-2 ai-news-analysis 출력 기준 정리
 🚫 0-3 저장 위치 확정
 🚫 0-5 삭제 감지 테스트 규칙 확정
    |
@@ -489,8 +490,8 @@ Legend
 ⬜ 1-6 삭제 감지 backend 테스트
 
 [Track B: 프론트 컬럼 / 운영 UI]
-🚫 0-2 ai-news-analysis 출력 계약 확정
-🚫 0-4 persistence 범위 확정
+✅ 0-2 ai-news-analysis 출력 기준 정리
+✅ 0-4 persistence 범위 확정
    |
    +--> ⬜ 2-1 Score/Score Evidence/Keywords/Sentiment 컬럼 반영
    +--> ⬜ 2-2 Keywords 컬럼 활성화
@@ -499,7 +500,7 @@ Legend
    +--> ⬜ 2-5 전체 글자 크기 조절 UI
 
 [Track C: workspace persistence]
-🚫 0-4 persistence 범위 확정
+✅ 0-4 persistence 범위 확정
    |
    v
 ⬜ 3-1 workspace state schema
@@ -514,7 +515,7 @@ Legend
 ⬜ 4-3 삭제 감지 + E2E 체크리스트 정리
 
 ================ BLOCKER ================
-`ai-news-analysis` 출력 계약과 실행 시점이 확정되지 않으면
+sentiment 매핑 방식, 저장 위치, AI 실행 시점이 정리되지 않으면
 Step 1 backend schema와 Step 2 UI 컬럼 의미가 고정되지 않는다.
 =========================================
 ```
@@ -531,10 +532,9 @@ Step 1 backend schema와 Step 2 UI 컬럼 의미가 고정되지 않는다.
 | AI 분석 실행 시점 | Step 1, Step 4 | pull 직후 / 수동 job / fulltext 이후 |
 | sentiment 저장 단위 | Step 1 | 기사별 / ticker-date / direct column |
 | AI analysis 저장 위치 | Step 1 | `news_fulltext` 확장 / `news_ai_analysis` 별도 |
-| persistence 범위 | Step 3 | layout only / layout+filters / broad workspace |
 | font size 저장 위치 | Step 2, Step 3 | global localStorage / tab scoped / backend |
 
-### 결정 #1 — AI 뉴스 분석 출력 계약(상세)
+### 결정 #1 — AI 뉴스 분석 출력 계약(상세, 사용자 확인 완료)
 권장 기준:
 - `Score`는 AI가 뉴스의 주가 영향 가능성을 판단한 값이어야 한다.
 - 이미 `Sentiment` 컬럼을 별도로 노출할 예정이므로, `Score`는 provider raw sentiment와 완전히 같은 의미가 아니어야 한다.
@@ -551,6 +551,26 @@ Step 1 backend schema와 Step 2 UI 컬럼 의미가 고정되지 않는다.
 - 예시 1: 대형 수주/가이던스 상향 뉴스면 `Score=+8` 수준, Evidence에는 왜 매출/수요 기대를 높이는지 설명.
 - 예시 2: 중대한 규제 조사/소송 악재면 `Score=-7` 수준, Evidence에는 왜 비용/밸류에이션/신뢰 훼손으로 이어지는지 설명.
 - 예시 3: 아직 AI 분석 미실행이면 `Score=null`, `Score Evidence=null`, `Keywords=[]`로 유지.
+
+### 결정 #4 — persistence 저장 범위(확정)
+사용자 확인 결과: **권장범위까지 저장**으로 확정.
+
+확정된 저장 대상:
+- 탭 목록
+- 마지막 활성 탭
+- 각 창의 위치, 크기, 제목, 타입, linkId
+- 다크모드 여부
+- 전체 글자 크기(`fontScale`)
+- News Feed 컬럼 on/off 상태
+- News Feed source filter
+- News Feed 검색어
+- News Feed display mode
+- Data Control active tab
+
+저장하지 않는 대상:
+- modal/dialog open 여부
+- 일회성 loading/spinner 상태
+- hover 상태, 우클릭 메뉴 열림 상태 같은 순간 UI 상태
 
 ### 결정 #2 — persistence 저장 payload(상세)
 권장 payload 초안:

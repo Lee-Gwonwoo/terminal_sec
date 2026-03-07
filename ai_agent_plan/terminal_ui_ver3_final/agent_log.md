@@ -106,3 +106,44 @@
 - 이번 작업도 문서만 수정했다.
 - 구현 코드는 아직 시작하지 않았다.
 - 사용자 확인 전까지 이 리비전 상태는 `확인 대기`로 유지한다.
+
+### Plan 리비전 — persistence 권장범위 확정
+
+**작성 시각:** 2026-03-06 19:48 (local)
+
+**상태:** 사용자 확인 반영
+
+#### 수행 내용
+
+1. 사용자가 `0-4 persistence 범위`에 대해 “권장범위 까지”라고 명시적으로 확인했다.
+2. plan에서 0-4를 더 이상 미확정이 아닌 확정 항목으로 반영했다.
+3. 저장 범위를 아래처럼 고정했다.
+   - 탭 목록, 마지막 활성 탭
+   - 창 위치/크기/제목/linkId
+   - 다크모드, 전체 글자 크기
+   - News Feed 컬럼 on/off, source filter, 검색어, display mode
+   - Data Control active tab
+4. modal open 상태, loading 상태 같은 순간 UI 상태는 저장 범위에서 제외한다고 문서화했다.
+
+#### 생성/수정 파일
+
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. `plan.md`에서 `0-4` 행이 `✅`로 바뀌었는지 확인한다.
+2. `결정 #4 — persistence 저장 범위(확정)` 섹션에서 저장 대상/비저장 대상 목록을 확인한다.
+
+#### 문제점 / 리스크
+
+1. 저장 범위가 넓어져 localStorage schema 관리가 중요해졌다.
+   - 완화 방안 1: version 필드 유지
+   - 완화 방안 2: parse 실패 시 fallback reset
+2. 검색어/컬럼 상태 복원이 과도하게 느껴질 수 있다.
+   - 완화 방안 1: 추후 reset workspace 기능 제공
+   - 완화 방안 2: 창별 초기화 버튼 추가 검토
+
+#### 비고
+
+- 이 변경은 사용자 확인을 plan에 반영한 문서 수정이다.

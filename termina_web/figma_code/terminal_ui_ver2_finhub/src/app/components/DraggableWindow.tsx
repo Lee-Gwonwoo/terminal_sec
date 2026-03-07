@@ -17,6 +17,9 @@ interface DraggableWindowProps {
   style?: React.CSSProperties;
   onDragStart?: () => void;
   onDragEnd?: (x: number, y: number) => void;
+  fontScale?: number;
+  onFontScaleChange?: (n: number) => void;
+  onPositionChange?: (id: string, pos: { top: number; left: number; width: number; height: number }) => void;
 }
 
 export function DraggableWindow({ 
@@ -26,7 +29,10 @@ export function DraggableWindow({
   initialTicker,
   style,
   onDragStart,
-  onDragEnd
+  onDragEnd,
+  fontScale,
+  onFontScaleChange,
+  onPositionChange,
 }: DraggableWindowProps) {
   const [isMaximized, setIsMaximized] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -67,6 +73,7 @@ export function DraggableWindow({
     if (isDragging) {
       setIsDragging(false);
       onDragEnd?.(position.x, position.y);
+      onPositionChange?.(window.id, { top: position.y, left: position.x, width: size.width, height: size.height });
     }
   };
 
@@ -94,7 +101,7 @@ export function DraggableWindow({
       case 'default-ticker':
         return <DefaultTickerWindow onTickerClick={onTickerClick} />;
       case 'data-control':
-        return <DataControlWindow />;
+        return <DataControlWindow fontScale={fontScale} onFontScaleChange={onFontScaleChange} />;
       default:
         return <div>Unknown window type</div>;
     }
@@ -107,7 +114,8 @@ export function DraggableWindow({
         left: 0,
         width: '100%',
         height: '100%',
-        zIndex: 10
+        zIndex: 10,
+        ...style
       }
     : {
         position: 'absolute',
@@ -135,10 +143,9 @@ export function DraggableWindow({
         topLeft: !isMaximized,
       }}
       onResizeStop={(e, direction, ref, d) => {
-        setSize({
-          width: size.width + d.width,
-          height: size.height + d.height,
-        });
+        const newSize = { width: size.width + d.width, height: size.height + d.height };
+        setSize(newSize);
+        onPositionChange?.(window.id, { top: position.y, left: position.x, width: newSize.width, height: newSize.height });
       }}
       style={windowStyle}
       handleStyles={{

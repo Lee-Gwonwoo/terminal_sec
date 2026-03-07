@@ -13,7 +13,7 @@ const ROW_HEIGHT_WITH_ABSTRACT = 140;
 type DisplayMode = 'title-only' | 'title-abstract';
 
 // ─── Column definition ───
-type ColumnId = 'date' | 'ticker' | 'time' | 'title' | 'publisher' | 'industry' | 'source' | 'changes' | 'fulltext' | 'keywords';
+type ColumnId = 'date' | 'ticker' | 'time' | 'title' | 'publisher' | 'industry' | 'source' | 'changes' | 'fulltext' | 'keywords' | 'score' | 'scoreEvidence' | 'sentiment';
 
 interface ColumnDef {
   id: ColumnId;
@@ -24,18 +24,24 @@ interface ColumnDef {
 }
 
 const DEFAULT_COLUMNS: ColumnDef[] = [
-  { id: 'date',    label: 'Date',      defaultWidth: 72,  minWidth: 50 },
-  { id: 'ticker',  label: 'Ticker',    defaultWidth: 72,  minWidth: 48 },
-  { id: 'time',    label: 'Time',      defaultWidth: 52,  minWidth: 40 },
-  { id: 'title',   label: 'Title',     defaultWidth: 300, minWidth: 100, flex: true },
-  { id: 'publisher', label: 'Publisher', defaultWidth: 96, minWidth: 60 },
-  { id: 'industry', label: 'Industry', defaultWidth: 110, minWidth: 60 },
-  { id: 'source',  label: 'Sources',   defaultWidth: 90,  minWidth: 50 },
-  { id: 'fulltext', label: 'Full Text', defaultWidth: 60,  minWidth: 40 },
-  { id: 'changes', label: 'Changes %', defaultWidth: 280, minWidth: 160 },
+  { id: 'date',         label: 'Date',       defaultWidth: 72,  minWidth: 50 },
+  { id: 'ticker',       label: 'Ticker',     defaultWidth: 72,  minWidth: 48 },
+  { id: 'time',         label: 'Time',       defaultWidth: 52,  minWidth: 40 },
+  { id: 'title',        label: 'Title',      defaultWidth: 300, minWidth: 100, flex: true },
+  { id: 'publisher',    label: 'Publisher',  defaultWidth: 96,  minWidth: 60 },
+  { id: 'industry',     label: 'Industry',   defaultWidth: 110, minWidth: 60 },
+  { id: 'source',       label: 'Sources',    defaultWidth: 90,  minWidth: 50 },
+  { id: 'fulltext',     label: 'Full Text',  defaultWidth: 60,  minWidth: 40 },
+  { id: 'changes',      label: 'Changes %',  defaultWidth: 280, minWidth: 160 },
+  { id: 'keywords',     label: 'Keywords',   defaultWidth: 160, minWidth: 80 },
+  { id: 'score',        label: 'Score',      defaultWidth: 58,  minWidth: 40 },
+  { id: 'scoreEvidence', label: 'Evidence',  defaultWidth: 200, minWidth: 80 },
+  { id: 'sentiment',    label: 'Sentiment',  defaultWidth: 80,  minWidth: 50 },
 ];
 
-const DEFAULT_VISIBLE: Set<ColumnId> = new Set(DEFAULT_COLUMNS.filter(c => c.id !== 'source').map(c => c.id));
+// Columns hidden by default — user can enable via Columns menu
+const HIDDEN_BY_DEFAULT: ColumnId[] = ['source', 'keywords', 'score', 'scoreEvidence', 'sentiment'];
+const DEFAULT_VISIBLE: Set<ColumnId> = new Set(DEFAULT_COLUMNS.filter(c => !HIDDEN_BY_DEFAULT.includes(c.id)).map(c => c.id));
 
 // ─── Sort ───
 type SortDir = 'asc' | 'desc' | null;
@@ -83,6 +89,10 @@ interface BackendNewsItem {
   keywords?: string[];
   keywordsStatus?: string | null;
   industry?: string | null;
+  score?: number | null;
+  score_evidence?: string | null;
+  sentiment_score?: number | null;
+  sentiment_label?: string | null;
 }
 
 // ─── Display item ───
@@ -107,6 +117,10 @@ interface DisplayItem {
   keywords: string[];
   keywordsStatus: string | null;
   industry: string | null;
+  score: number | null;
+  scoreEvidence: string | null;
+  sentiment: number | null;
+  sentimentLabel: string | null;
 }
 
 function mapBackendItem(item: BackendNewsItem): DisplayItem {
@@ -132,6 +146,10 @@ function mapBackendItem(item: BackendNewsItem): DisplayItem {
     keywords: item.keywords ?? [],
     keywordsStatus: item.keywordsStatus ?? null,
     industry: item.industry ?? null,
+    score: item.score ?? null,
+    scoreEvidence: item.score_evidence ?? null,
+    sentiment: item.sentiment_score ?? null,
+    sentimentLabel: item.sentiment_label ?? null,
   };
 }
 
@@ -155,7 +173,17 @@ interface FinnhubNewsWindowProps {
 }
 
 export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsWindowProps) {
-  const [searchQuery, setSearchQuery] = useState(initialTicker || '');
+  const [searchQuery, setSearchQuery] = useState(() => {
+    if (initialTicker) return initialTicker;
+    try {
+      const saved = localStorage.getItem('finhub-news-ui-state');
+      if (saved) {
+        const p = JSON.parse(saved);
+        if (typeof p.searchQuery === 'string') return p.searchQuery;
+      }
+    } catch { /* ignore */ }
+    return '';
+  });
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [showWatchlistMenu, setShowWatchlistMenu] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
@@ -178,12 +206,33 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
   const [ftUpdating, setFtUpdating] = useState(false);
 
   // Display mode
-  const [displayMode, setDisplayMode] = useState<DisplayMode>('title-only');
+  const [displayMode, setDisplayMode] = useState<DisplayMode>(() => {
+    try {
+      const saved = localStorage.getItem('finhub-news-ui-state');
+      if (saved) {
+        const p = JSON.parse(saved);
+        if (p.displayMode === 'title-abstract') return 'title-abstract';
+      }
+    } catch { /* ignore */ }
+    return 'title-only';
+  });
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
 
   // Column ordering + visibility
   const [columns, setColumns] = useState<ColumnDef[]>(DEFAULT_COLUMNS);
-  const [visibleCols, setVisibleCols] = useState<Set<ColumnId>>(DEFAULT_VISIBLE);
+  const [visibleCols, setVisibleCols] = useState<Set<ColumnId>>(() => {
+    try {
+      const saved = localStorage.getItem('finhub-news-ui-state');
+      if (saved) {
+        const p = JSON.parse(saved);
+        if (Array.isArray(p.visibleCols)) {
+          const valid = (p.visibleCols as string[]).filter(c => DEFAULT_COLUMNS.some(d => d.id === c)) as ColumnId[];
+          if (valid.length > 0) return new Set(valid);
+        }
+      }
+    } catch { /* ignore */ }
+    return DEFAULT_VISIBLE;
+  });
   const [showColumnMenu, setShowColumnMenu] = useState(false);
   const [dragColIdx, setDragColIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
@@ -215,7 +264,18 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
   const [sort, setSort] = useState<SortState>({ column: null, dir: null });
 
   // Source type filter
-  const [sourceTypeFilter, setSourceTypeFilter] = useState<SourceTypeFilter>('all');
+  const [sourceTypeFilter, setSourceTypeFilter] = useState<SourceTypeFilter>(() => {
+    try {
+      const saved = localStorage.getItem('finhub-news-ui-state');
+      if (saved) {
+        const p = JSON.parse(saved);
+        if (['all', 'company_news', 'press_release', 'market_news'].includes(p.sourceTypeFilter)) {
+          return p.sourceTypeFilter as SourceTypeFilter;
+        }
+      }
+    } catch { /* ignore */ }
+    return 'all';
+  });
 
   // Backend data
   const [newsData, setNewsData] = useState<DisplayItem[]>([]);
@@ -627,6 +687,9 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
       case 'fulltext': return item.hasFullText ? 1 : 0;
       case 'changes': return item.changeFromOpenPct ?? 0;
       case 'keywords': return item.keywords.length;
+      case 'score': return item.score ?? -Infinity;
+      case 'scoreEvidence': return (item.scoreEvidence ?? '').toLowerCase();
+      case 'sentiment': return item.sentiment ?? -Infinity;
     }
   }, []);
 
@@ -690,6 +753,18 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
       return next;
     });
   }, [displayMode]);
+
+  // ─── Persist UI state (visibleCols / displayMode / sourceTypeFilter / searchQuery) ───
+  useEffect(() => {
+    try {
+      localStorage.setItem('finhub-news-ui-state', JSON.stringify({
+        visibleCols: Array.from(visibleCols),
+        displayMode,
+        sourceTypeFilter,
+        searchQuery,
+      }));
+    } catch { /* quota / SSR */ }
+  }, [visibleCols, displayMode, sourceTypeFilter, searchQuery]);
 
   // ─── Save / Load ───
   const handleSaveSearch = () => {
@@ -870,19 +945,39 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
         );
       case 'keywords':
         return newsItem.keywords.length > 0 ? (
-          <div className="flex flex-wrap gap-0.5 overflow-hidden">
-            {newsItem.keywords.slice(0, 3).map((kw, i) => (
-              <span key={i} className="inline-block px-1 py-0 text-[9px] bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded truncate max-w-[80px]" title={kw}>
+          <div className="flex flex-wrap gap-0.5 overflow-hidden" title={newsItem.keywords.join(', ')}>
+            {newsItem.keywords.slice(0, 4).map((kw, i) => (
+              <span key={i} className="inline-block px-1 py-0 text-[9px] bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded truncate max-w-[80px]">
                 {kw}
               </span>
             ))}
-            {newsItem.keywords.length > 3 && (
-              <span className="text-[9px] text-gray-400">+{newsItem.keywords.length - 3}</span>
+            {newsItem.keywords.length > 4 && (
+              <span className="text-[9px] text-gray-400">+{newsItem.keywords.length - 4}</span>
             )}
           </div>
         ) : (
-          <span className="text-gray-300 dark:text-gray-600">-</span>
+          <span className="text-gray-300 dark:text-gray-600">—</span>
         );
+      case 'score': {
+        const s = newsItem.score;
+        if (s === null || s === undefined) return <span className="text-gray-300 dark:text-gray-600">—</span>;
+        const c = s > 0 ? 'text-green-600 dark:text-green-400' : s < 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-500';
+        const label = s > 0 ? `+${s}` : String(s);
+        return <span className={`font-semibold tabular-nums ${c}`} title={`AI Score: ${s}`}>{label}</span>;
+      }
+      case 'scoreEvidence':
+        if (!newsItem.scoreEvidence) return <span className="text-gray-300 dark:text-gray-600">—</span>;
+        return (
+          <span className="truncate text-gray-600 dark:text-gray-400" title={newsItem.scoreEvidence}>
+            {newsItem.scoreEvidence}
+          </span>
+        );
+      case 'sentiment': {
+        const sv = newsItem.sentiment;
+        if (sv === null || sv === undefined) return <span className="text-gray-300 dark:text-gray-600">—</span>;
+        const sc = sv > 0 ? 'text-green-600 dark:text-green-400' : sv < 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-500';
+        return <span className={sc} title={newsItem.sentimentLabel ?? undefined}>{sv.toFixed(2)}</span>;
+      }
     }
   }, [displayMode, toggleExpand, onTickerClick, openExternalUrl, setSearchQuery, fetchFulltext]);
 

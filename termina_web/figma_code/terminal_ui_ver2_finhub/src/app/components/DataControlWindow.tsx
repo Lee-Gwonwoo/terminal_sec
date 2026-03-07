@@ -24,7 +24,12 @@ interface JobStatus {
 
 type SectionKey = 'price' | 'calendar' | 'recent' | 'custom';
 
-export function DataControlWindow() {
+interface DataControlWindowProps {
+  fontScale?: number;
+  onFontScaleChange?: (n: number) => void;
+}
+
+export function DataControlWindow({ fontScale = 1, onFontScaleChange }: DataControlWindowProps) {
   // ─── Status state ───
   const [statuses, setStatuses] = useState<Record<string, UpdateStatusItem | null>>({});
   const [ohlcStatus, setOhlcStatus] = useState<OhlcStatus | null>(null);
@@ -47,6 +52,15 @@ export function DataControlWindow() {
     price: null, calendar: null, 'recent': null, custom: null,
   });
   const logEndRef = useRef<HTMLDivElement>(null);
+
+  // ─── Active tab (Updates / Settings) ───
+  const [activeDataTab, setActiveDataTab] = useState<'updates' | 'settings'>(() => {
+    try {
+      const s = localStorage.getItem('data-control-active-tab');
+      if (s === 'settings') return 'settings';
+    } catch { /* SSR */ }
+    return 'updates';
+  });
 
   // ─── Custom Change date range input ───
   const [customChangeFrom, setCustomChangeFrom] = useState('');
@@ -127,6 +141,11 @@ export function DataControlWindow() {
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, [logSection]);
+
+  // ─── Persist active tab ───
+  useEffect(() => {
+    try { localStorage.setItem('data-control-active-tab', activeDataTab); } catch { /* quota */ }
+  }, [activeDataTab]);
 
   // ─── Start update handlers ───
   const startUpdate = async (key: SectionKey) => {
@@ -255,7 +274,63 @@ export function DataControlWindow() {
         <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-100">Data Control</h2>
       </div>
 
-      {/* Sections */}
+      {/* Tab nav */}
+      <div className="flex border-b border-gray-200 dark:border-gray-700 shrink-0 bg-gray-50 dark:bg-gray-800">
+        {(['updates', 'settings'] as const).map(tab => (
+          <button
+            key={tab}
+            onClick={() => setActiveDataTab(tab)}
+            className={`px-4 py-2 text-xs font-medium transition-colors ${
+              activeDataTab === tab
+                ? 'border-b-2 border-blue-500 text-blue-600 dark:text-blue-400 bg-white dark:bg-gray-900'
+                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+            }`}
+          >
+            {tab === 'updates' ? 'Updates' : 'Settings'}
+          </button>
+        ))}
+      </div>
+
+      {/* Settings tab */}
+      {activeDataTab === 'settings' && (
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">
+            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-3">Font Size</h3>
+            <div className="flex gap-2 mb-3 flex-wrap">
+              {([0.8, 1.0, 1.2, 1.5] as const).map(preset => (
+                <button
+                  key={preset}
+                  onClick={() => onFontScaleChange?.(preset)}
+                  className={`px-3 py-1 rounded border text-xs font-medium transition-colors ${
+                    Math.abs(fontScale - preset) < 0.01
+                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+                      : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200'
+                  }`}
+                >
+                  {preset === 1.0 ? 'Default' : `${preset}×`}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-[11px] text-gray-500 w-5">A</span>
+              <input
+                type="range"
+                min={0.7}
+                max={1.6}
+                step={0.05}
+                value={fontScale}
+                onChange={e => onFontScaleChange?.(parseFloat(e.target.value))}
+                className="flex-1 accent-blue-500"
+              />
+              <span className="text-[11px] text-gray-500 w-5 text-right">A</span>
+              <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300 w-10 text-right">{(fontScale * 100).toFixed(0)}%</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sections (Updates tab) */}
+      {activeDataTab === 'updates' && (
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {sections.map(({ key, label, statusKey, extra }) => {
           const isRunning = updating[key];
@@ -325,6 +400,7 @@ export function DataControlWindow() {
           );
         })}
       </div>
+      )}
 
       {/* ─── Job Log Panel (bottom overlay) ─── */}
       {logSection && activeLog && (

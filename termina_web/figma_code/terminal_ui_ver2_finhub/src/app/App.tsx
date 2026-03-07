@@ -22,6 +22,37 @@ export default function App() {
   const [linkedTicker, setLinkedTicker] = useState<{
     [linkId: number]: string;
   }>({});
+  const [fontScale, setFontScale] = useState(1);
+
+  // ─── Restore workspace from localStorage ───
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('terminal-workspace-v1');
+      if (!saved) return;
+      const p = JSON.parse(saved);
+      if (p?.version !== 1) return;
+      if (Array.isArray(p.tabs) && p.tabs.length > 0) setTabs(p.tabs);
+      if (p.activeTabId) setActiveTabId(p.activeTabId);
+      if (typeof p.isDarkMode === 'boolean') setIsDarkMode(p.isDarkMode);
+      if (typeof p.fontScale === 'number') setFontScale(p.fontScale);
+      if (p.linkedTicker && typeof p.linkedTicker === 'object') setLinkedTicker(p.linkedTicker);
+    } catch { /* corrupted — use defaults */ }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Apply font scale ───
+  useEffect(() => {
+    document.documentElement.style.fontSize = `${fontScale * 100}%`;
+  }, [fontScale]);
+
+  // ─── Persist workspace on change ───
+  useEffect(() => {
+    try {
+      localStorage.setItem('terminal-workspace-v1', JSON.stringify({
+        version: 1, activeTabId, isDarkMode, fontScale, linkedTicker,
+        tabs: tabs.map(t => ({ id: t.id, name: t.name, windows: t.windows })),
+      }));
+    } catch { /* quota */ }
+  }, [tabs, activeTabId, isDarkMode, fontScale, linkedTicker]);
 
   useEffect(() => {
     // Apply dark mode class to document
@@ -138,20 +169,17 @@ export default function App() {
   };
 
   const handleCloseWindow = (windowId: string) => {
-    if (!activeTab) return;
+    setTabs(tabs.map(tab => ({
+      ...tab,
+      windows: tab.windows.filter(w => w.id !== windowId),
+    })));
+  };
 
-    setTabs(
-      tabs.map((tab) =>
-        tab.id === activeTabId
-          ? {
-              ...tab,
-              windows: tab.windows.filter(
-                (w) => w.id !== windowId,
-              ),
-            }
-          : tab,
-      ),
-    );
+  const handlePositionChange = (windowId: string, pos: { top: number; left: number; width: number; height: number }) => {
+    setTabs(prev => prev.map(tab => ({
+      ...tab,
+      windows: tab.windows.map(w => w.id === windowId ? { ...w, position: pos } : w),
+    })));
   };
 
   const handleTickerClick = (
@@ -262,7 +290,8 @@ export default function App() {
 
       {/* Main Content Area */}
       <div className="flex-1 relative overflow-hidden">
-        {activeTab && activeTab.windows.length === 0 ? (
+        {/* Empty-state message if active tab has no windows */}
+        {activeTab?.windows.length === 0 && (
           <div className="h-full flex items-center justify-center">
             <div className="text-center">
               <p className="text-gray-500 dark:text-gray-400 mb-4">
@@ -274,11 +303,13 @@ export default function App() {
               >Add Windows</button>
             </div>
           </div>
-        ) : (
-          activeTab?.windows.map((window) => (
+        )}
+        {tabs.map(tab =>
+          tab.windows.map((window) => (
             <DraggableWindow
               key={window.id}
               window={window}
+              style={tab.id !== activeTabId ? { display: 'none' } : undefined}
               onClose={() => handleCloseWindow(window.id)}
               onTickerClick={(ticker) =>
                 handleTickerClick(ticker, window.linkId)
@@ -288,6 +319,9 @@ export default function App() {
                   ? linkedTicker[window.linkId]
                   : undefined
               }
+              fontScale={fontScale}
+              onFontScaleChange={setFontScale}
+              onPositionChange={handlePositionChange}
             />
           ))
         )}
