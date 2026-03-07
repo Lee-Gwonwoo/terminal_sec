@@ -307,6 +307,23 @@ API:
 - `All news` 선택 시 전체 뉴스로 복귀한다.
 - 선택된 폴더 ID는 `selectedBookmarkFolderId`로 localStorage에 저장되며, 앱 재실행 후에도 복원된다.
 - 복원된 folder ID가 존재하지 않으면 자동으로 초기화(All news)된다.
+- 폴더 목록 아래 separator 후:
+  - **\+ New folder** 버튼: 클릭하면 inline 텍스트 입력이 나타나고, 이름 입력 후 OK 또는 Enter로 `POST /api/bookmarks/folders` 호출하여 폴더를 생성한다. Escape로 취소.
+  - **Bookmark Manager** 버튼: 클릭하면 북마크 관리 모달을 연다.
+
+#### Bookmark Manager 모달
+
+`BookmarkManager.tsx` 컴포넌트로 구현. 모달 형태로 열린다.
+
+- **좌측 Folder sidebar**: 폴더 목록. 각 폴더에 hover 시 rename(Edit2)/delete(Trash2) 버튼 표시. 폴더를 클릭하면 해당 폴더의 아이템이 우측에 표시된다. 폴더 이름 수정은 inline 입력 + Check 아이콘으로 저장.
+- **우측 Items panel**: 선택된 폴더의 북마크 아이템 목록. 각 아이템은 ticker + title + bookmarked_at을 줄임 표시. GripVertical 아이콘으로 드래그 시작.
+- **드래그 이동**: 아이템을 좌측 다른 폴더로 드래그 → drop하면 `PATCH /api/bookmarks/items/move`로 폴더 간 이동.
+- **우클릭 컨텍스트 메뉴**: 아이템 우클릭 시 Copy / Cut / Paste / Delete 메뉴 표시.
+  - Copy: 내부 clipboard에 newsId + folderId + mode='copy' 저장
+  - Cut: 내부 clipboard에 newsId + folderId + mode='cut' 저장
+  - Paste: clipboard 내용을 현재 폴더에 복사(copy) 또는 이동(cut)
+  - Delete: `DELETE /api/bookmarks/items`로 해당 아이템 삭제
+- Paste 가능 시 Items 헤더 영역에 "Paste here (copy/cut)" 버튼도 표시된다.
 
 #### Row 우클릭 북마크
 
@@ -317,8 +334,12 @@ API:
 
 - `GET /api/bookmarks/folders`
 - `POST /api/bookmarks/folders`
+- `PUT /api/bookmarks/folders/:id` (rename)
+- `DELETE /api/bookmarks/folders/:id`
 - `POST /api/bookmarks/items`
 - `DELETE /api/bookmarks/items`
+- `GET /api/bookmarks/folders/:folderId/items` (title/ticker enriched)
+- `PATCH /api/bookmarks/items/move` (폴더 간 이동)
 
 주의: `news_saved_views`는 검색 조건 저장용 평면 리스트이고, bookmark은 개별 뉴스 row를 폴더에 저장하는 구조다. 둘을 혼동하지 않는다.
 
@@ -557,8 +578,12 @@ API:
 - `POST /api/tickers/add`
 - `GET /api/bookmarks/folders`
 - `POST /api/bookmarks/folders`
+- `PUT /api/bookmarks/folders/:id`
+- `DELETE /api/bookmarks/folders/:id`
 - `POST /api/bookmarks/items`
 - `DELETE /api/bookmarks/items`
+- `GET /api/bookmarks/folders/:folderId/items`
+- `PATCH /api/bookmarks/items/move`
 
 ## 현재 구현 기준의 저장/상태 성격
 
@@ -575,6 +600,7 @@ API:
 - `src/app/components/DraggableWindow.tsx`: 공통 창 래퍼
 - `src/app/components/AddTabModal.tsx`: 탭 생성 modal
 - `src/app/components/FinnhubNewsWindow.tsx`: 핵심 뉴스 창
+- `src/app/components/BookmarkManager.tsx`: 북마크 관리 모달 (폴더 rename/delete, 아이템 드래그 이동, 우클릭 복사/잘라내기/붙여넣기/삭제)
 - `src/app/components/DataControlWindow.tsx`: 운영/update 창
 - `src/app/components/DefaultTickerWindow.tsx`: CSV ticker 창
 - `src/app/components/NewsWindow.tsx`: EODHD 기반 부분 구현 창

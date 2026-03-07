@@ -185,6 +185,21 @@ Step N — <제목>
 - 무엇이 바뀌었나: Step 0-5, Step 1-6, Step 4 검증 기준과 차단 상태를 status 기반 규칙으로 갱신했다.
 - 영향: Track A 차단이 해소되고, backend 삭제 감지 테스트와 운영 로그 정책을 같은 기준으로 맞출 수 있다.
 
+### PLAN CHANGE (2026-03-07)
+- 왜: 사용자가 북마크 폴더 이름을 북마크 드롭다운에서 직접 우클릭한 뒤 rename 할 수 있게 해 달라고 요청했다.
+- 무엇이 바뀌었나: Step 2 범위에 `Bookmark view` 폴더 항목 우클릭 context menu와 rename 진입점을 추가했다.
+- 영향: `FinnhubNewsWindow.tsx` 북마크 드롭다운 메뉴 UX와 수동 검증 체크리스트가 함께 바뀐다.
+
+### PLAN CHANGE (2026-03-07)
+- 왜: 사용자가 Bookmark Manager 안에서도 `+` 버튼으로 폴더를 바로 생성할 수 있어야 한다고 요청했다.
+- 무엇이 바뀌었나: Step 2 범위에 Bookmark Manager 사이드바의 `+` 폴더 생성 버튼과 인라인 이름 입력 흐름을 추가했다.
+- 영향: `BookmarkManager.tsx` 폴더 관리 UX와 북마크 수동 검증 체크리스트가 함께 바뀐다.
+
+### PLAN CHANGE (2026-03-07)
+- 왜: 사용자가 copy/cut 이후 빈 폴더 안을 우클릭했을 때도 자연스럽게 `Paste`가 보여야 한다고 요청했다.
+- 무엇이 바뀌었나: Step 2 범위에 Bookmark Manager의 빈 폴더/빈 여백 우클릭 `Paste` context menu를 추가했다.
+- 영향: `BookmarkManager.tsx` 아이템 패널 context menu 동작과 북마크 수동 검증 체크리스트가 함께 바뀐다.
+
 권장 저장 구조:
 - 뉴스 원본 메타: `[][][]news_items[][][]`
 - 뉴스 full text / keywords: `[][][]news_fulltext[][][]`
@@ -519,6 +534,9 @@ node test_check_news_db.mjs
 | 2-9 | 검색창 근처에 `Bookmark view` UI와 북마크 폴더 선택 메뉴 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 폴더 선택 UI 확인 | ✅ |
 | 2-10 | News row 우클릭 메뉴에 `Add bookmark`와 폴더 선택 흐름 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 우클릭 북마크 저장 확인 | ✅ |
 | 2-11 | 선택한 북마크 폴더 안의 뉴스만 리스트에 표시하는 bookmark mode 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 북마크 폴더별 결과 확인 | ✅ |
+| 2-12 | `Bookmark view` 폴더 항목 우클릭 context menu에 `Rename`을 추가하고 인라인 이름 수정으로 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 우클릭 rename 확인 | ⏳ |
+| 2-13 | Bookmark Manager 사이드바에 `+` 버튼을 추가하고 인라인 폴더 생성으로 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/BookmarkManager.tsx` | 매니저 내 폴더 생성 확인 | ⏳ |
+| 2-14 | Bookmark Manager의 빈 폴더 영역 우클릭에서 `Paste`가 뜨도록 context menu를 확장 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/BookmarkManager.tsx` | 빈 폴더 paste 확인 | ⏳ |
 
 2-1 목적: 사용자가 필요한 4개 컬럼을 실제로 보이게 만든다.
 2-1 설명: 단순 타입 선언이 아니라 메뉴/헤더/행 렌더까지 연결한다.
@@ -586,6 +604,24 @@ node test_check_news_db.mjs
 2-11 사람 검증(비개발자): 폴더 A에 넣은 뉴스는 폴더 A에서만 보이고, 폴더 B에 넣은 뉴스는 폴더 B에서만 보인다.
 2-11 흔한 문제/주의: bookmark mode와 일반 search mode의 상태를 분리하지 않으면 사용자가 일반 검색으로 돌아왔을 때 이전 검색 조건이 사라지거나 섞일 수 있다.
 
+2-12 목적: 북마크 폴더 이름을 폴더 관리 모달까지 가지 않고 드롭다운 안에서 빠르게 수정할 수 있게 한다.
+2-12 설명: `Bookmark view` 메뉴에서 폴더 항목을 우클릭하면 작은 context menu가 열리고, 여기서 `Rename`을 누르면 해당 항목이 인라인 입력 상태로 바뀌어 이름을 수정할 수 있게 한다.
+2-12 완료 조건(눈으로 확인): 북마크 폴더 항목 우클릭 시 `Rename` 메뉴가 뜨고, 이름 변경 후 드롭다운 버튼 라벨과 폴더 목록 이름이 함께 바뀐다.
+2-12 사람 검증(비개발자): 북마크 폴더 위에서 마우스 오른쪽 클릭 → `Rename` 클릭 → 새 이름 입력 → Enter 또는 바깥 클릭으로 저장이 된다.
+2-12 흔한 문제/주의: 우클릭 메뉴가 드롭다운 바깥 클릭 처리와 충돌하면 바로 닫힐 수 있으므로 context menu의 outside click 처리가 분리돼 있어야 한다.
+
+2-13 목적: 북마크 매니저를 연 상태에서 폴더 생성까지 한 곳에서 끝낼 수 있게 한다.
+2-13 설명: Bookmark Manager 왼쪽 폴더 사이드바 헤더에 `+` 버튼을 두고, 클릭하면 인라인 입력이 열려 새 폴더명을 입력해 즉시 생성할 수 있게 한다.
+2-13 완료 조건(눈으로 확인): Bookmark Manager 상단 `Folders` 영역의 `+` 버튼을 누르면 입력칸이 열리고, 새 이름 입력 후 생성된 폴더가 목록에 추가되며 선택 상태로 바뀐다.
+2-13 사람 검증(비개발자): Bookmark Manager 열기 → 왼쪽 `+` 버튼 클릭 → 폴더명 입력 → Enter → 새 폴더가 바로 보인다.
+2-13 흔한 문제/주의: Enter와 blur가 함께 발생하면 중복 생성될 수 있으므로 생성 중복 guard가 있어야 한다.
+
+2-14 목적: copy/cut 이후 빈 폴더 안에서도 사용자가 메뉴를 잃지 않고 자연스럽게 붙여넣을 수 있게 한다.
+2-14 설명: Bookmark Manager 오른쪽 아이템 패널에서 아이템이 없거나 빈 여백을 우클릭하면, clipboard가 있을 때 선택된 폴더를 타깃으로 하는 `Paste` context menu가 뜨게 한다.
+2-14 완료 조건(눈으로 확인): 어떤 북마크를 Copy 또는 Cut한 뒤, 비어 있는 폴더를 선택하고 오른쪽 영역을 우클릭하면 `Paste`가 보이고 실행된다.
+2-14 사람 검증(비개발자): 북마크 하나 `Copy` → 비어 있는 폴더 선택 → 빈 공간 우클릭 → `Paste` 클릭 → 해당 폴더에 항목이 나타난다.
+2-14 흔한 문제/주의: 아이템 우클릭과 빈 영역 우클릭이 동시에 처리되면 잘못된 메뉴가 뜰 수 있으므로 이벤트 전파를 분리해야 한다.
+
 검증 훅:
 ```bash
 cd termina_web/figma_code/terminal_ui_ver2_finhub
@@ -603,6 +639,9 @@ npm run build
 - 날짜 From/To가 비어 있을 때 전체 기간 검색이 되는지 확인
 - 날짜 기간 지정 시 해당 기간 안의 결과만 검색되는지 확인
 - 검색창 근처에 `Bookmark view`가 보이고 폴더 선택이 가능한지 확인
+- `Bookmark view` 폴더 항목 우클릭 시 `Rename` 메뉴가 뜨고 이름 변경이 저장되는지 확인
+- Bookmark Manager 안의 `+` 버튼으로 새 폴더를 만들 수 있고 생성 직후 목록에 보이는지 확인
+- Copy 또는 Cut 후 빈 폴더의 빈 영역을 우클릭했을 때 `Paste`가 뜨고 정상 붙여넣기 되는지 확인
 - 뉴스 row 우클릭 시 `Add bookmark`가 보이고, 폴더 선택 후 북마크 저장이 되는지 확인
 - 특정 북마크 폴더 선택 시 그 폴더 안 뉴스만 표시되는지 확인
 - Data Control에서 Settings 탭 표시

@@ -378,6 +378,114 @@ Step 3 항목 (3-1 ~ 3-6) 분석 및 구현을 완료했다.
    - 완화 방안 1: 현재는 `react-window`로 리스트 virtualization 유지
    - 완화 방안 2: 필요 시 검색 조건 변경 시 더 공격적으로 상태 초기화
 
+### Bookmark view 폴더 우클릭 Rename 추가
+
+**작성 시각:** 2026-03-07 (local)
+
+**상태:** 확인 대기(awaiting user confirmation)
+
+#### 수행 내용
+
+1. `FinnhubNewsWindow.tsx`의 `Bookmark view` 드롭다운에 폴더별 우클릭 진입점을 추가했다.
+2. 폴더 항목 우클릭 시 작은 context menu가 열리고 `Rename` 버튼이 보이도록 구현했다.
+3. `Rename` 선택 시 해당 폴더 항목이 인라인 input으로 바뀌고, Enter 또는 blur 시 기존 `PUT /api/bookmarks/folders/:id` API로 이름 수정이 저장되도록 연결했다.
+4. rename 완료 후 북마크 폴더 목록을 다시 fetch 해서 드롭다운 라벨과 목록 이름이 함께 갱신되게 했다.
+5. 현재 작업 중인 `plan.md`에 Step 2-12와 PLAN CHANGE 메모를 추가해 변경 범위를 동기화했다.
+
+#### 생성/수정 파일
+
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. `cd termina_web/figma_code/terminal_ui_ver2_finhub && npm run build`
+2. 앱에서 `Bookmark view` 메뉴를 연다.
+3. 폴더 항목 위에서 마우스 오른쪽 클릭 → `Rename` 클릭 → 새 이름 입력 → Enter
+4. 수정한 이름이 드롭다운 항목과 버튼 라벨에 반영되는지 확인한다.
+
+#### 문제점 / 리스크
+
+1. 드롭다운 내부의 일반 클릭 닫힘과 우클릭 context menu가 충돌할 수 있다.
+   - 완화 방안 1: context menu 전용 outside-click ref로 분리
+   - 완화 방안 2: 필요 시 rename을 Bookmark Manager와 공통 컴포넌트로 통합
+2. 빈 이름으로 저장하려 하면 UX가 모호할 수 있다.
+   - 완화 방안 1: 공백 입력은 저장하지 않고 편집 상태를 종료
+   - 완화 방안 2: 필요 시 후속 작업에서 validation 메시지 추가
+
+### Bookmark Manager `+` 폴더 생성 버튼 추가
+
+**작성 시각:** 2026-03-07 (local)
+
+**상태:** 확인 대기(awaiting user confirmation)
+
+#### 수행 내용
+
+1. `BookmarkManager.tsx`의 왼쪽 `Folders` 헤더에 `+` 버튼을 추가했다.
+2. `+` 버튼을 누르면 인라인 입력칸이 열리고, 새 폴더명을 입력해 기존 `POST /api/bookmarks/folders` API로 생성되도록 연결했다.
+3. 생성 성공 시 새 폴더를 자동 선택하고, 부모의 폴더 목록 refresh 콜백을 호출해 목록을 다시 불러오게 했다.
+4. Enter와 blur가 동시에 발생할 때 중복 생성되지 않도록 `creatingFolder` guard state를 추가했다.
+5. 현재 작업 중인 `plan.md`에 Step 2-13과 PLAN CHANGE 메모를 추가해 변경 범위를 동기화했다.
+
+#### 생성/수정 파일
+
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/BookmarkManager.tsx`
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. `cd termina_web/figma_code/terminal_ui_ver2_finhub && npm run build`
+2. 앱에서 Bookmark Manager를 연다.
+3. 왼쪽 `Folders` 헤더의 `+` 버튼 클릭 → 폴더명 입력 → Enter
+4. 생성된 폴더가 목록에 추가되고 선택 상태가 되는지 확인한다.
+
+#### 문제점 / 리스크
+
+1. 생성 실패 시 현재는 별도 에러 메시지가 없다.
+   - 완화 방안 1: 후속 작업에서 inline validation 또는 toast 추가
+   - 완화 방안 2: 네트워크 실패 시 입력값 유지 정책 검토
+2. 새 폴더 선택은 local state로 즉시 잡히지만 서버 refresh가 늦으면 잠깐 목록 반영이 늦을 수 있다.
+   - 완화 방안 1: 현재는 부모 refresh로 최종 상태를 재동기화
+   - 완화 방안 2: 필요 시 optimistic folder append로 보강
+
+### Bookmark Manager 빈 폴더 우클릭 Paste 추가
+
+**작성 시각:** 2026-03-07 (local)
+
+**상태:** 확인 대기(awaiting user confirmation)
+
+#### 수행 내용
+
+1. `BookmarkManager.tsx`의 item context menu 상태를 일반화해 아이템 row뿐 아니라 빈 폴더 영역도 타깃으로 쓸 수 있게 바꿨다.
+2. 오른쪽 아이템 패널의 빈 영역과 `No bookmarks in this folder` 상태에서 우클릭하면, clipboard가 있을 때 선택된 폴더 기준 `Paste` 메뉴가 뜨도록 구현했다.
+3. 아이템 row 우클릭 시 부모 빈 영역 context menu가 같이 열리지 않도록 `stopPropagation()`을 추가했다.
+4. 빈 영역 우클릭일 때는 `Copy`, `Cut`, `Delete`는 숨기고 `Paste`만 보이게 해서 메뉴를 단순하게 유지했다.
+5. 현재 작업 중인 `plan.md`에 Step 2-14와 PLAN CHANGE 메모를 추가해 변경 범위를 동기화했다.
+
+#### 생성/수정 파일
+
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/BookmarkManager.tsx`
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. `cd termina_web/figma_code/terminal_ui_ver2_finhub && npm run build`
+2. Bookmark Manager에서 항목 하나를 `Copy` 또는 `Cut` 한다.
+3. 비어 있는 폴더를 선택하고 오른쪽 빈 영역을 우클릭한다.
+4. `Paste` 메뉴가 뜨고, 클릭 시 해당 폴더에 항목이 추가되는지 확인한다.
+
+#### 문제점 / 리스크
+
+1. clipboard가 없을 때 빈 영역 우클릭은 아무 반응이 없으므로 사용자가 메뉴를 기대할 수 있다.
+   - 완화 방안 1: 현재는 `Paste` 가능한 경우에만 메뉴를 열어 단순함 유지
+   - 완화 방안 2: 필요 시 후속 작업에서 disabled `Paste` 메뉴 검토
+2. 패널 전체 우클릭 허용으로 아이템 우클릭 이벤트와 중첩될 수 있다.
+   - 완화 방안 1: row `onContextMenu`에서 전파 중단
+   - 완화 방안 2: 필요 시 컨테이너 target 검사 추가
+
 ### Step 1 Backend 구현 완료
 
 **작성 시각:** 2026-03-07 (local)

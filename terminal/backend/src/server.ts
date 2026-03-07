@@ -1166,13 +1166,33 @@ app.delete("/api/bookmarks/items", async (req, res, next) => {
 app.get("/api/bookmarks/folders/:folderId/items", async (req, res, next) => {
   try {
     const rows = await getDb().all(
-      `SELECT bi.news_id, bi.created_at AS bookmarked_at
+      `SELECT bi.news_id, bi.created_at AS bookmarked_at,
+              ni.title, ni.tickers_csv
        FROM bookmark_items bi
+       LEFT JOIN news_items ni ON ni.id = bi.news_id
        WHERE bi.folder_id = ?
        ORDER BY bi.created_at DESC`,
       [req.params.folderId],
     );
-    res.json(rows);
+    res.json(rows.map((r: any) => ({
+      news_id: r.news_id,
+      bookmarked_at: r.bookmarked_at,
+      title: r.title ?? null,
+      ticker: r.tickers_csv ? r.tickers_csv.split(',')[0]?.trim() || null : null,
+    })));
+  } catch (error) { next(error); }
+});
+
+app.patch("/api/bookmarks/items/move", async (req, res, next) => {
+  try {
+    const { newsId, fromFolderId, toFolderId } = z.object({
+      newsId: z.string().min(1),
+      fromFolderId: z.string().min(1),
+      toFolderId: z.string().min(1),
+    }).parse(req.body);
+    await getDb().run(`DELETE FROM bookmark_items WHERE folder_id = ? AND news_id = ?`, [fromFolderId, newsId]);
+    await getDb().run(`INSERT OR IGNORE INTO bookmark_items (folder_id, news_id) VALUES (?, ?)`, [toFolderId, newsId]);
+    res.json({ newsId, fromFolderId, toFolderId });
   } catch (error) { next(error); }
 });
 

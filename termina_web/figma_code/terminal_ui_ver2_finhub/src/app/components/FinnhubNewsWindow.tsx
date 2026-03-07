@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { Search, Save, FolderOpen, Filter, ChevronDown, ArrowUp, ArrowDown, GripVertical, FileText, AlignLeft, RotateCw, Download, Columns3, Eye, X, Calendar, TrendingUp } from 'lucide-react';
+import { Search, Save, FolderOpen, Filter, ChevronDown, ArrowUp, ArrowDown, GripVertical, FileText, AlignLeft, RotateCw, Download, Columns3, Eye, X, Calendar, TrendingUp, Plus, Settings2 } from 'lucide-react';
 import { VariableSizeList as List } from 'react-window';
+import { BookmarkManager } from './BookmarkManager';
 
 const API_BASE = "";
 
@@ -244,6 +245,12 @@ export function FinnhubNewsWindow({
     return '';
   });
   const [showBookmarkMenu, setShowBookmarkMenu] = useState(false);
+  const [showBookmarkManager, setShowBookmarkManager] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [showNewFolderInput, setShowNewFolderInput] = useState(false);
+  const [editingBookmarkFolderId, setEditingBookmarkFolderId] = useState<string | null>(null);
+  const [editingBookmarkFolderName, setEditingBookmarkFolderName] = useState('');
+  const [bookmarkFolderCtxMenu, setBookmarkFolderCtxMenu] = useState<null | { x: number; y: number; folderId: string }>(null);
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [showWatchlistMenu, setShowWatchlistMenu] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
@@ -258,6 +265,7 @@ export function FinnhubNewsWindow({
   const sourceCtxMenuRef = useRef<HTMLDivElement>(null);
   const [rowCtxMenu, setRowCtxMenu] = useState<null | { x: number; y: number; newsId: string }>(null);
   const rowCtxMenuRef = useRef<HTMLDivElement>(null);
+  const bookmarkFolderCtxMenuRef = useRef<HTMLDivElement>(null);
 
   // Full text popup
   const [showFulltextModal, setShowFulltextModal] = useState(false);
@@ -484,6 +492,64 @@ export function FinnhubNewsWindow({
       // keep bookmark UI empty on failure
     }
   }, [selectedBookmarkFolderId]);
+
+  const handleCreateFolder = useCallback(async (name: string) => {
+    if (!name.trim()) return;
+    await fetch(`${API_BASE}/api/bookmarks/folders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name.trim() }),
+    });
+    setNewFolderName('');
+    setShowNewFolderInput(false);
+    fetchBookmarkFolders();
+  }, [fetchBookmarkFolders]);
+
+  const handleRenameBookmarkFolder = useCallback(async (folderId: string, name: string) => {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setEditingBookmarkFolderId(null);
+      setEditingBookmarkFolderName('');
+      return;
+    }
+
+    await fetch(`${API_BASE}/api/bookmarks/folders/${folderId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: trimmedName }),
+    });
+
+    setEditingBookmarkFolderId(null);
+    setEditingBookmarkFolderName('');
+    setBookmarkFolderCtxMenu(null);
+    fetchBookmarkFolders();
+  }, [fetchBookmarkFolders]);
+
+  const startRenameBookmarkFolder = useCallback((folder: BookmarkFolder) => {
+    setEditingBookmarkFolderId(folder.id);
+    setEditingBookmarkFolderName(folder.name);
+    setBookmarkFolderCtxMenu(null);
+    setShowBookmarkMenu(true);
+  }, []);
+
+  useEffect(() => {
+    if (!bookmarkFolderCtxMenu) return;
+
+    const onMouseDown = (e: MouseEvent) => {
+      if (bookmarkFolderCtxMenuRef.current && bookmarkFolderCtxMenuRef.current.contains(e.target as Node)) return;
+      setBookmarkFolderCtxMenu(null);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setBookmarkFolderCtxMenu(null);
+    };
+
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [bookmarkFolderCtxMenu]);
 
   // ─── Fetch news from backend (server-side search via keyword param) ───
   const fetchNews = useCallback(async (keyword?: string) => {
@@ -1303,17 +1369,98 @@ export function FinnhubNewsWindow({
                   All news
                 </button>
                 {bookmarkFolders.map((folder) => (
-                  <button
-                    key={folder.id}
-                    onClick={() => {
-                      setSelectedBookmarkFolderId(folder.id);
-                      setShowBookmarkMenu(false);
-                    }}
-                    className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800 ${selectedBookmarkFolderId === folder.id ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
-                  >
-                    {folder.name}
-                  </button>
+                  <div key={folder.id} className="relative">
+                    {editingBookmarkFolderId === folder.id ? (
+                      <form
+                        className="px-2 py-1.5"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          handleRenameBookmarkFolder(folder.id, editingBookmarkFolderName);
+                        }}
+                      >
+                        <input
+                          autoFocus
+                          value={editingBookmarkFolderName}
+                          onChange={(e) => setEditingBookmarkFolderName(e.target.value)}
+                          onBlur={() => handleRenameBookmarkFolder(folder.id, editingBookmarkFolderName)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Escape') {
+                              setEditingBookmarkFolderId(null);
+                              setEditingBookmarkFolderName('');
+                            }
+                          }}
+                          className="w-full px-2 py-1 text-xs border border-blue-400 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      </form>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setSelectedBookmarkFolderId(folder.id);
+                          setShowBookmarkMenu(false);
+                        }}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setBookmarkFolderCtxMenu({ x: e.clientX, y: e.clientY, folderId: folder.id });
+                        }}
+                        className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800 ${selectedBookmarkFolderId === folder.id ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
+                      >
+                        {folder.name}
+                      </button>
+                    )}
+                  </div>
                 ))}
+                {/* Separator + New folder + Manager */}
+                <div className="border-t border-gray-200 dark:border-gray-700" />
+                {showNewFolderInput ? (
+                  <form
+                    className="flex items-center gap-1 px-2 py-1.5"
+                    onSubmit={(e) => { e.preventDefault(); handleCreateFolder(newFolderName); }}
+                  >
+                    <input
+                      autoFocus
+                      value={newFolderName}
+                      onChange={(e) => setNewFolderName(e.target.value)}
+                      placeholder="Folder name"
+                      className="flex-1 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      onKeyDown={(e) => { if (e.key === 'Escape') { setShowNewFolderInput(false); setNewFolderName(''); } }}
+                    />
+                    <button type="submit" className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600">OK</button>
+                  </form>
+                ) : (
+                  <button
+                    onClick={() => setShowNewFolderInput(true)}
+                    className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-1.5 text-blue-600 dark:text-blue-400"
+                  >
+                    <Plus className="w-3 h-3" /> New folder
+                  </button>
+                )}
+                <button
+                  onClick={() => { setShowBookmarkMenu(false); setShowBookmarkManager(true); }}
+                  className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-1.5 text-gray-600 dark:text-gray-400"
+                >
+                  <Settings2 className="w-3 h-3" /> Bookmark Manager
+                </button>
+              </div>
+            )}
+            {showBookmarkMenu && bookmarkFolderCtxMenu && (
+              <div
+                ref={bookmarkFolderCtxMenuRef}
+                className="fixed z-[60] min-w-[140px] overflow-hidden rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg"
+                style={{
+                  left: Math.min(bookmarkFolderCtxMenu.x, typeof window !== 'undefined' ? window.innerWidth - 160 : bookmarkFolderCtxMenu.x),
+                  top: Math.min(bookmarkFolderCtxMenu.y, typeof window !== 'undefined' ? window.innerHeight - 80 : bookmarkFolderCtxMenu.y),
+                }}
+              >
+                <button
+                  onClick={() => {
+                    const folder = bookmarkFolders.find((item) => item.id === bookmarkFolderCtxMenu.folderId);
+                    if (folder) startRenameBookmarkFolder(folder);
+                  }}
+                  className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800"
+                >
+                  Rename
+                </button>
               </div>
             )}
           </div>
@@ -1868,6 +2015,14 @@ export function FinnhubNewsWindow({
           </div>
         </div>
       )}
+
+      {/* ─── Bookmark Manager Modal ─── */}
+      <BookmarkManager
+        open={showBookmarkManager}
+        onClose={() => setShowBookmarkManager(false)}
+        folders={bookmarkFolders}
+        onFoldersChanged={fetchBookmarkFolders}
+      />
 
       {/* ─── Custom Change Date Range Modal ─── */}
       {showChangeCustomDateModal && (

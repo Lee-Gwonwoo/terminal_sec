@@ -820,6 +820,19 @@ folder와 연관 bookmark_items가 함께 삭제된다.
 
 요청 body: `{"folderId": "...", "newsId": "..."}`
 
+### `GET /api/bookmarks/folders/:folderId/items`
+
+해당 폴더의 북마크 아이템 목록을 조회한다. `news_items`와 LEFT JOIN하여 `title`, `ticker`도 함께 반환한다.
+
+응답: `[{"news_id", "bookmarked_at", "title", "ticker"}]`
+
+### `PATCH /api/bookmarks/items/move`
+
+북마크 아이템을 한 폴더에서 다른 폴더로 이동한다.
+
+요청 body: `{"newsId": "...", "fromFolderId": "...", "toFolderId": "..."}`
+동작: fromFolderId에서 삭제 후 toFolderId에 INSERT OR IGNORE.
+
 ## AI Analysis API
 
 ### `GET /api/news/ai-analysis/validate`
