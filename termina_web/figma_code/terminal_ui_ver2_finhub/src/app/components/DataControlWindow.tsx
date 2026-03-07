@@ -469,7 +469,7 @@ export function DataControlWindow({
             <div className="text-sm text-gray-400 text-center py-12">Refresh를 클릭하여 DB 구조를 조회하세요</div>
           )}
 
-          {dbTables.map(table => (
+          {[...dbTables].sort((a, b) => b.rowCount - a.rowCount).map(table => (
             <div key={table.name} className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 bg-white dark:bg-gray-850">
               {/* Table header */}
               <div className="flex items-center justify-between mb-2">

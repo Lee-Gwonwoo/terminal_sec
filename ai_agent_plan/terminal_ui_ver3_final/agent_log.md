@@ -997,3 +997,261 @@ Step 4 전체 (4-1 ~ 4-4)를 완료했다.
 - 이번 Step은 코드 변경 없이 문서 동기화와 검증 정리만 수행했다.
 - 전체 plan (Step 0 ~ Step 4) 구현이 완료되었다.
 - 사용자 확인 전까지 상태는 `확인 대기`로 유지한다.
+
+### Plan 리비전 — Finnhub peers 컬럼/수집/저장 계획 추가
+
+**작성 시각:** 2026-03-07 17:54 (local)
+
+**상태:** 확인 대기(awaiting user confirmation)
+
+#### 수행 내용
+
+1. 사용자가 다음 요구를 plan에 먼저 반영해 달라고 요청했다.
+   - News Feed에 `Peers` 컬럼 추가
+   - 단, 기본 visible 컬럼에는 포함하지 않음
+   - Data Control에서 `ticker_universes/default` 기준으로 peers batch pull 실행
+   - 저장 위치는 company description과 같은 `company_profiles`
+2. Finnhub peers 가능 여부를 앞선 probe 결과에 맞춰 현재 상태에 명시했다.
+   - `/stock/peers?symbol=...` endpoint 접근 가능
+   - 실제 key 기준 ticker 배열 응답 확인 완료
+3. `plan.md` 목표에 peers 관련 목표 3개(21~23)를 추가했다.
+4. `plan.md` 현재 상태/제약/결정사항에 아래 내용을 추가했다.
+   - peers endpoint는 사용 가능하지만 아직 코드에 연결되지 않음
+   - `company_profiles`에는 peers 저장 구조가 아직 없음
+   - News Feed `Peers` 컬럼은 기본 비노출 규칙 유지
+   - 결정 #15로 `company_profiles` canonical 저장 + 선택 컬럼 노출 방향 확정
+5. `Step 7 — Finnhub peers 수집/저장/UI 노출`을 새로 추가했다.
+   - 7-1 schema/repository 저장 구조
+   - 7-2 Finnhub peers provider + default universe batch pull
+   - 7-3 Data Control peers pull 액션
+   - 7-4 News Feed peers 응답/컬럼 연결
+   - 7-5 기본 비노출 규칙
+   - 7-6 App DB inspection 가시성
+   - 7-7 테스트/문서 동기화
+6. 실행 의존성 그래프에 `Track F: Finnhub peers`를 추가해 후속 구현 순서를 분리했다.
+
+#### 생성/수정 파일
+
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. `plan.md` 목표에 21~23번 peers 요구가 추가됐는지 확인한다.
+2. `plan.md`에 `#### ⬜ Step 7 — Finnhub peers 수집/저장/UI 노출` 섹션이 생겼는지 확인한다.
+3. Step 7 설명 안에 아래 네 가지가 모두 들어있는지 확인한다.
+   - 기본 대상: `ticker_universes/default`
+   - 저장 위치: `company_profiles`
+   - UI 위치: Data Control + News Feed
+   - 기본 비노출: `Peers` 컬럼은 default off
+4. 실행 의존성 그래프에 `Track F: Finnhub peers`가 추가됐는지 확인한다.
+
+#### 문제점 / 리스크
+
+1. `company_profiles`에 peers를 어떤 컬럼 형식으로 저장할지 구현 시점에 다시 확정해야 한다.
+   - 완화 방안 1: inspection/UI 가시성을 위해 명시 컬럼 우선 검토
+   - 완화 방안 2: raw_json 전용 저장은 피하고, 운영자가 확인 가능한 canonical 필드 유지
+2. News Feed row에 ticker가 여러 개인 경우 어떤 ticker의 peers를 보여줄지 규칙이 필요하다.
+   - 완화 방안 1: 대표 ticker 선택 규칙 문서화
+   - 완화 방안 2: 필요 시 후속 단계에서 multi-ticker merge 정책 추가 검토
+3. Finnhub peers batch pull은 rate limit 영향을 받을 수 있다.
+   - 완화 방안 1: 재시도/백오프와 성공/실패 집계 추가
+   - 완화 방안 2: preflight에서 대상 수를 먼저 보여 주기
+
+#### 비고
+
+- 이번 작업은 plan/log 문서 업데이트만 수행했고, 코드 구현은 시작하지 않았다.
+- 사용자 확인 전까지 상태는 `확인 대기`로 유지한다.
+
+### Plan 리비전 — Data Control company description update 버튼 누락 반영
+
+**작성 시각:** 2026-03-07 18:00 (local)
+
+**상태:** 확인 대기(awaiting user confirmation)
+
+#### 수행 내용
+
+1. 사용자가 Data Control에 company description update 버튼이 왜 없는지 질문했고, default ticker 기준 다운로드로 이해하고 있었다.
+2. 실제 코드/plan을 대조해 아래를 확인했다.
+   - backend에는 `POST /api/company-profiles/pull-fmp`가 이미 있음
+   - ticker를 따로 주지 않으면 `ticker_universes/default`를 기본 대상으로 사용함
+   - 하지만 `DataControlWindow.tsx` `Updates` 탭에는 해당 endpoint를 호출하는 버튼이 없음
+3. 기존 plan을 다시 확인한 결과, default universe 기준 backend 전환과 `App DB` 가시성은 반영돼 있었지만, Data Control에서 company description update를 직접 실행하는 UI 항목은 누락돼 있었다.
+4. `plan.md`에 아래 내용을 추가했다.
+   - 목표 24: Data Control `Updates` 탭에서 company description update 직접 실행
+   - 현재 상태: backend route는 있으나 UI 버튼은 없음
+   - Step 2-15: Data Control company description update 버튼 + 기본 대상 설명 + 결과 요약
+   - Track B 및 검증 체크리스트 반영
+   - PLAN CHANGE (2026-03-07 18:00) 추가
+
+#### 생성/수정 파일
+
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. `plan.md` 목표에 24번 company description update 요구가 추가됐는지 확인한다.
+2. `plan.md` 현재 상태에 “backend route는 있으나 UI 버튼은 없음” 문구가 있는지 확인한다.
+3. `plan.md` Step 2 표에 `2-15 Data Control company description update 액션`이 추가됐는지 확인한다.
+4. `plan.md` Track B에 `2-15 company description update 액션`이 반영됐는지 확인한다.
+
+#### 문제점 / 리스크
+
+1. peers pull과 company description pull이 같은 `Updates` 탭에 같이 들어가면 목적이 헷갈릴 수 있다.
+   - 완화 방안 1: 버튼 라벨과 보조 문구에 저장 위치/대상 구분 명시
+   - 완화 방안 2: 실행 결과 요약도 별도 포맷으로 분리
+2. 현재 backend endpoint 기본 `maxTickers`가 50이므로, 사용자가 default universe 전체 pull로 기대하면 차이를 느낄 수 있다.
+   - 완화 방안 1: UI에 기본 limit/대상 수를 명시
+   - 완화 방안 2: 후속 구현 시 preflight 또는 max 조절 옵션 검토
+
+#### 비고
+
+- 이번 수정은 plan 누락 보정이다. 코드 구현은 아직 시작하지 않았다.
+- 사용자 확인 전까지 상태는 `확인 대기`로 유지한다.
+
+### Plan 리비전 — News Feed Company Description 선택 컬럼 + 전체 보기 창 추가
+
+**작성 시각:** 2026-03-07 18:06 (local)
+
+**상태:** 확인 대기(awaiting user confirmation)
+
+#### 수행 내용
+
+1. 사용자가 News Feed에서 `Company Description`을 선택 컬럼으로 보고 싶다고 요청했다.
+2. 추가 요구를 함께 반영했다.
+   - 긴 description 때문에 셀 자체가 커지면 안 됨
+   - 셀에 다 안 보이면 그대로 truncate 유지
+   - description 셀을 클릭하면 전체 텍스트를 읽는 별도 창 또는 팝업이 열려야 함
+3. 기존 plan을 확인한 결과, company description은 canonical 저장과 Data Control update 버튼 계획만 있었고, News Feed 선택 컬럼/전체 보기 창 계획은 없었다.
+4. `plan.md`에 아래 내용을 추가했다.
+   - 목표 25: News Feed `Company Description` 선택 컬럼 + 클릭 시 전체 보기 창
+   - 현재 상태: `GET /api/news` 응답과 News Feed UI에 아직 company description 필드/컬럼/전체 보기 창이 없음
+   - 제약: 기본 visible 컬럼 제외, 셀/행 자동 확장 금지, truncate 유지
+   - 결정 #16: 셀 확장형이 아니라 truncate + 클릭 시 별도 창 방식 권장
+   - `Step 8 — News Feed Company Description 선택 컬럼 + 전체 보기 창`
+   - 실행 의존성 그래프 `Track G`
+   - PLAN CHANGE (2026-03-07 18:06)
+
+#### 생성/수정 파일
+
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. `plan.md` 목표에 25번 `Company Description` 요구가 추가됐는지 확인한다.
+2. `plan.md` 현재 상태에 `GET /api/news`와 News Feed UI에 company description 필드/컬럼/창이 아직 없다는 문구가 있는지 확인한다.
+3. `plan.md`에 `#### ⬜ Step 8 — News Feed Company Description 선택 컬럼 + 전체 보기 창` 섹션이 생겼는지 확인한다.
+4. `plan.md` 실행 의존성 그래프에 `Track G: News Feed company description view`가 추가됐는지 확인한다.
+
+#### 문제점 / 리스크
+
+1. 복수 ticker 뉴스에서 어떤 회사 설명을 보여 줄지 기준이 애매할 수 있다.
+   - 완화 방안 1: 대표 ticker 선택 규칙 명시
+   - 완화 방안 2: description 없음 fallback 규칙을 같이 문서화
+2. 긴 텍스트 컬럼은 리스트 가독성을 쉽게 망친다.
+   - 완화 방안 1: 기본 비노출 유지
+   - 완화 방안 2: 셀은 truncate 고정, 전체 읽기는 별도 창으로 분리
+3. tooltip만으로 전체 텍스트를 읽게 하면 사용성이 떨어질 수 있다.
+   - 완화 방안 1: 스크롤 가능한 별도 창/팝업 사용
+   - 완화 방안 2: 클릭 타깃과 닫기 흐름을 명확히 설계
+
+#### 비고
+
+- 이번 작업은 plan/log 문서 업데이트만 수행했고, 코드 구현은 아직 시작하지 않았다.
+- 사용자 확인 전까지 상태는 `확인 대기`로 유지한다.
+
+### Plan 리비전 — Calendar Update 버튼 이원화 + Initial Calendar Backfill 추가
+
+**작성 시각:** 2026-03-07 18:20 (local)
+
+**상태:** 확인 대기(awaiting user confirmation)
+
+#### 수행 내용
+
+1. 사용자가 Data Control과 News Feed 양쪽에 calendar update 버튼을 두고 싶다고 요청했다.
+2. 추가 요구를 함께 반영했다.
+   - `Change Update`와 섞지 않고 별도 `Calendar Update` 그룹으로 둘 것
+   - `Initial Calendar Backfill` 버튼을 별도로 둘 것
+   - 반복 실행은 과거 전체 재수집이 아니라 upcoming refresh 중심으로 갈 것
+3. 현재 코드를 다시 해석한 결과, backend에는 `POST /api/ibkr/calendar/update`가 있지만 내부 `pullIbkrCalendar()`는 아직 stub이고, 기존 UI도 단일 `IBKR Calendar Data` 액션만 있어 backfill/refresh 구분이 없다.
+4. 기존 WSH probe 맥락상 `conId` 전체 이벤트 요청과 `startDate`/`endDate` 범위 요청이 모두 가능하므로, plan에서는 “초기 backfill”과 “반복 refresh”를 분리하는 정책이 타당하다고 정리했다.
+5. `plan.md`에 아래 내용을 추가했다.
+   - 목표 26, 27: Data Control + News Feed 양쪽 calendar update 버튼, `Initial Calendar Backfill` / `Refresh Upcoming Calendar` 이원화
+   - 현재 상태: calendar backend stub, News Feed calendar 버튼 부재, WSH 요청 방식 특성
+   - 제약: calendar는 `Change Update`와 분리, refresh는 과거 전체 재수집 금지
+   - 결정 #17: 단일 full refresh가 아니라 backfill/refresh 분리 권장
+   - Step 2에 `2-16 Data Control calendar 두 버튼`
+   - `Step 9 — Calendar Update 버튼 이원화 + 초기 backfill / upcoming refresh 정책`
+   - 실행 의존성 그래프 `Track H`
+   - PLAN CHANGE (2026-03-07 18:20)
+
+#### 생성/수정 파일
+
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. `plan.md` 목표에 26, 27번 calendar 관련 요구가 추가됐는지 확인한다.
+2. `plan.md` 현재 상태에 `pullIbkrCalendar()` stub과 News Feed calendar 버튼 부재가 적혀 있는지 확인한다.
+3. `plan.md` Step 2 표에 `2-16 Data Control calendar 두 버튼`이 추가됐는지 확인한다.
+4. `plan.md`에 `#### ⬜ Step 9 — Calendar Update 버튼 이원화 + 초기 backfill / upcoming refresh 정책` 섹션이 생겼는지 확인한다.
+5. `plan.md` 실행 의존성 그래프에 `Track H: calendar backfill / refresh update UX`가 추가됐는지 확인한다.
+
+#### 문제점 / 리스크
+
+1. 현재 backend calendar pull이 stub 상태라 UI 버튼 이름만 먼저 바꾸면 실제 동작과 의미가 어긋날 수 있다.
+   - 완화 방안 1: backend mode/backfill 범위 계약을 먼저 고정
+   - 완화 방안 2: 구현 전까지는 plan 문서에서 의존성을 명시
+2. refresh overlap 범위를 너무 짧게 잡으면 일정 변경을 놓칠 수 있다.
+   - 완화 방안 1: 최근 14~30일 overlap 기본값 검토
+   - 완화 방안 2: 결과 요약에 실제 조회 범위를 노출
+3. Data Control과 News Feed에 같은 액션을 두면 중복 기능처럼 보일 수 있다.
+   - 완화 방안 1: 같은 backend contract를 공유한다는 점을 문구로 통일
+   - 완화 방안 2: 두 위치의 결과 요약/최근 실행 상태를 동일한 의미로 유지
+
+#### 비고
+
+- 이번 작업은 plan/log 문서 업데이트만 수행했고, 코드 구현은 아직 시작하지 않았다.
+- 사용자 확인 전까지 상태는 `확인 대기`로 유지한다.
+
+### App DB 테이블 row count 정렬 + calendar_events mock 데이터 확인
+
+**작성 시각:** 2026-03-07 18:33 (local)
+
+**상태:** 확인 대기
+
+#### 수행 내용
+
+1. 사용자가 App DB 탭에서 0건 테이블이 위에 보이는 문제를 지적하고, row 수 내림차순 정렬을 요청했다.
+2. `calendar_events` 2,943 rows가 무엇인지 DB를 직접 쿼리해 확인했다.
+   - **결과**: 전부 `source='mock_provider'` — 실제 IBKR WSH 데이터 0건, 이전 mock 생성기가 만든 잔여 데이터.
+3. `DataControlWindow.tsx`에서 `dbTables.map(...)` 앞에 `[...dbTables].sort((a, b) => b.rowCount - a.rowCount)` 정렬을 적용했다.
+4. `plan.md`에 목표 28(App DB row count 정렬), 현재 상태(calendar mock data / App DB 미정렬), PLAN CHANGE, 완료 확인 기준을 추가했다.
+
+#### 생성/수정 파일
+
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx`
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. 앱에서 Data Control → `App DB` 탭 → Refresh 후, 테이블이 row count 내림차순으로 보이는지 확인한다.
+2. 0건 테이블이 하단에 몰려 있는지 확인한다.
+3. `npm run build` 통과 여부를 확인한다.
+
+#### 문제점 / 리스크
+
+1. 정렬이 프론트에서만 이루어지므로, 같은 row count인 테이블 간 순서가 불안정할 수 있다.
+   - 완화 방안 1: 같은 count일 때 name alphabetical로 2차 정렬 추가
+   - 완화 방안 2: 현재는 대부분 row count가 다르므로 무시 가능
+2. `calendar_events` 2,943건 mock 데이터가 남아 있어 IBKR calendar 실구현 시 `deleteMockCalendarRows()`가 정상 동작하는지 확인 필요.
+   - 완화 방안: Step 9 구현 시 mock row 삭제 검증을 포함
+
+#### 비고
+
+- `calendar_events` 데이터 정체: 전부 mock_provider. event_type 분포: economics 1,208건, sec_filings 832건, earnings 349건, splits 220건, analyst_ratings 213건, dividends 119건 등.
+- 사용자 확인 전까지 상태는 `확인 대기`로 유지한다.
