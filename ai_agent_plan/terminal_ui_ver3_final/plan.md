@@ -19,6 +19,9 @@
 10. Data Control Window `Settings`에서 News Feed title/summary 글자 크기를 각각 따로 조절 가능하게 한다.
 11. 탭 바에서 탭 순서를 drag 해서 바꿀 수 있게 한다.
 12. Finnhub recent 뉴스 pull에서 당일 제외 confirmed-empty 범위를 `source_type`별로 기록해 자동 재조회 낭비를 줄인다.
+13. News Feed Window 일반 검색창 바로 아래에 ticker 전용 검색창을 추가해 ticker만 정확히 필터링할 수 있게 한다.
+14. News Feed 검색 결과는 DB 전체를 server-side로 검색하되, 최초 500개 로드 후 cursor 기반으로 하단 스크롤 시 자동으로 500개씩 이어서 추가 로드되고, 동시에 리스트 하단에 `Load more` 버튼으로도 같은 추가 로드를 할 수 있게 한다.
+15. News Feed 검색에 날짜 기간(`from`/`to`) 필터를 추가하고, 날짜가 비어 있으면 전체 기간 검색이 되게 한다.
 
 ### 현재 레포 상태(중요, 확인됨)
 - 백엔드 runtime DB는 `terminal/backend/backend/data/app.db` 이다.
@@ -29,6 +32,10 @@
 - 현재 코드에는 `Score`, `Score Evidence`를 canonical하게 저장/조회하는 구조가 없다.
 - `FinnhubNewsWindow.tsx`에는 `keywords` 컬럼 타입/렌더링 코드가 이미 있으나, `DEFAULT_COLUMNS`에 빠져 있어 기본 컬럼 세트/컬럼 선택 메뉴에서 실사용 상태가 아니다.
 - 현재 `FinnhubNewsWindow.tsx`에는 `Score Evidence` 컬럼 정의가 없다.
+- 현재 `FinnhubNewsWindow.tsx` 검색창은 backend `keyword` query만 사용하며, ticker 전용 입력창이나 `tickers` query를 보내는 UI는 없다.
+- 현재 Finnhub News UI에는 검색용 날짜 기간 입력이 없고, `GET /api/news`의 `from`/`to` query를 검색 UX에 연결하지 않는다.
+- 현재 Finnhub News 검색은 DB 전체를 server-side로 조회하지만, 한 번의 응답은 최대 200개로 제한되어 있고 프론트는 그 결과를 append 하지 않고 통째로 교체한다.
+- backend `GET /api/news`는 `cursor`/`nextCursor` pagination 구조를 이미 갖고 있지만, 현재 Finnhub News UI는 이를 사용하지 않는다.
 - `FinnhubNewsWindow.tsx`는 `finnhub-last-update-config`와 `finnhub-news-ui-state`를 사용해 update/search/filter/display/column 상태를 localStorage에 저장한다.
 - `App.tsx`는 `terminal-workspace-v1`를 사용해 tabs, activeTabId, theme, linkedTicker, fontScale, News Feed title/summary font size를 저장/복원한다.
 - `DataControlWindow.tsx`는 `Updates` / `Settings` 탭 구조와 전역 font scale, News Feed title/summary 글자 크기 제어 UI를 가진다.
@@ -68,6 +75,9 @@
 - 앱을 닫았다 다시 열면 직전 탭/창 배치와 활성 탭이 복원된다.
 - 탭 A에서 창을 이동해 두고 탭 B로 갔다가 다시 오면 탭 A 레이아웃이 그대로 남는다.
 - Data Control Window 안에 `Settings` 탭이 생기고, 글자 크기 슬라이더나 preset을 바꾸면 전체 창에 반영된다.
+- News Feed 일반 검색창 아래에 ticker 전용 검색창이 따로 보이고, ticker 입력 시 title/summary가 아니라 ticker 분류 기준으로만 결과가 줄어든다.
+- News Feed는 검색 시 DB 전체를 대상으로 조건에 맞는 최신 결과를 가져오고, 최초 500개 이후에는 하단 스크롤 시 자동으로 500개씩 이어서 더 불러오며, 같은 위치에서 `Load more` 버튼으로도 수동 추가 로드가 가능하다.
+- News Feed 검색에 날짜 From/To가 있고, 둘 다 비어 있으면 전체 기간 검색, 한쪽 또는 양쪽이 채워지면 해당 기간 안의 뉴스만 대상으로 검색된다.
 - 분석 전 뉴스 row는 `Score`, `Score Evidence`, `Keywords`가 비어 있고, 분석 후에만 채워진다.
 - 테스트에서 `Score` 또는 `Score Evidence`가 지워진 경우 실패로 잡힌다.
 
@@ -118,6 +128,26 @@ Step N — <제목>
 - 무엇이 바뀌었나: Recent Update 정책 안내를 info 아이콘 + hover tooltip에서 메뉴 본문 아래의 작은 보조 설명 문구로 변경했다.
 - 영향: `FinnhubNewsWindow.tsx`의 메뉴 UX와 `figma_frontend_prompt.md`, 현재 레포 상태 문구가 함께 바뀐다.
 
+### PLAN CHANGE (2026-03-07)
+- 왜: 사용자가 News Feed에서 일반 텍스트 검색과 ticker 검색을 분리하고, 일반 검색창 바로 아래에 ticker 전용 검색창을 두길 요청했다.
+- 무엇이 바뀌었나: 목표에 ticker 전용 검색창을 추가했고, Step 2에 ticker-only 검색 UI 및 API wiring을 추가했으며, Step 3 persistence 범위에도 ticker 검색 상태 저장을 반영했다.
+- 영향: `FinnhubNewsWindow.tsx` 검색 UX, `GET /api/news` query 조합(`keyword` vs `tickers`), localStorage payload 예시가 함께 바뀐다.
+
+### PLAN CHANGE (2026-03-07)
+- 왜: 사용자가 현재 검색이 DB 전체 대상인지, 200개만 대상인지 구분을 명확히 적고, 검색 결과를 cursor 기반으로 500개씩 이어서 계속 볼 수 있게 하는 방향을 plan에 추가하길 요청했다.
+- 무엇이 바뀌었나: 현재 검색 동작을 “DB 전체 server-side 검색 + 현재는 최대 200개 단건 반환”으로 명시했고, 목표/결정사항/Step 1/Step 2에 `cursor` 기반 500개 배치 append 로딩을 추가했다.
+- 영향: `newsRepository.ts` limit 정책, `/api/news` 응답 계약(`nextCursor`), `FinnhubNewsWindow.tsx` 하단 스크롤 로딩 UX와 loading guard가 함께 바뀐다.
+
+### PLAN CHANGE (2026-03-07)
+- 왜: 사용자가 날짜 기간을 지정해 그 기간 안에서만 검색하고, 날짜가 비어 있으면 전체 검색되도록 기본 동작을 명시하길 요청했다.
+- 무엇이 바뀌었나: 목표에 검색용 날짜 필터를 추가했고, 현재 상태/결정사항/Step 2/Step 3에 `from`/`to` 기반 검색 UX와 빈 기본값 규칙을 반영했다.
+- 영향: `FinnhubNewsWindow.tsx` 검색 바 구성, `/api/news` query 조합(`keyword`/`tickers`/`from`/`to`), localStorage의 검색 상태 payload가 함께 바뀐다.
+
+### PLAN CHANGE (2026-03-07)
+- 왜: 사용자가 500개 cursor paging 방향을 “무한 스크롤만”이 아니라 하단 자동 로드와 `Load more` 버튼을 함께 제공하는 방식으로 확정하길 요청했다.
+- 무엇이 바뀌었나: 검색 paging 방향을 “하단 자동 append + 하단 `Load more` 버튼 병행”으로 구체화했고, Step 2/검증 훅/리스크 문구를 두 동작을 모두 확인하는 기준으로 갱신했다.
+- 영향: `FinnhubNewsWindow.tsx` 하단 sentinel 감지, 중복 로드 guard, `Load more` 버튼 노출/비활성화 규칙이 함께 정의된다.
+
 권장 저장 구조:
 - 뉴스 원본 메타: `[][][]news_items[][][]`
 - 뉴스 full text / keywords: `[][][]news_fulltext[][][]`
@@ -157,6 +187,21 @@ Step N — <제목>
    - 선택지 B: `source_type`별 confirmed-empty range를 저장하고 automatic recent retry에서는 영구 스킵
    - 현재 권장: B. 다만 당일은 제외하고, 수동 `custom range` 재조회는 계속 허용한다.
 
+7. News Feed 검색 입력 분리 방식
+   - 선택지 A: 기존 단일 검색창을 유지하고 검색 문법(`ticker:ASTS`)으로만 분리
+   - 선택지 B: 일반 검색창 + ticker 전용 검색창을 별도 입력으로 분리
+   - 현재 권장: B. 사용자가 원하는 동작이 더 직접적이고, 일반 텍스트 검색과 ticker-only 검색의 의미를 UI에서 명확히 구분할 수 있다.
+
+8. News Feed 검색 결과 paging 방식
+   - 선택지 A: 현재처럼 검색 시 최대 200개만 단건 반환
+   - 선택지 B: 최초 500개 로드 후 `nextCursor` 기반으로 하단 스크롤 시 자동 append + 하단 `Load more` 버튼 병행
+   - 현재 권장: B. 검색 대상은 DB 전체로 유지하되, 자동 로드가 실패하거나 사용자가 더 명시적으로 제어하고 싶을 때를 위해 버튼 fallback도 함께 제공한다.
+
+9. News Feed 날짜 기간 검색 방식
+   - 선택지 A: 날짜 필터 없이 항상 전체 기간 검색
+   - 선택지 B: `from`/`to` 입력을 두되, 기본값은 비워 두고 비어 있으면 전체 검색, 값이 있으면 기간 검색
+   - 현재 권장: B. 기본 사용성은 유지하면서 필요할 때만 기간을 좁힐 수 있어야 한다.
+
 ### 계획 중간 필수 확인
 중간 구현 전에 반드시 아래를 확인한다.
 
@@ -181,12 +226,23 @@ Step N — <제목>
    - `company_news`, `press_release`를 분리 저장하는지
    - 당일 이전 범위만 자동 skip 대상으로 확정하는지
 
+6. News Feed 검색 paging contract 확인
+   - 검색은 이미 로드된 클라이언트 500개가 아니라 DB 전체를 대상으로 유지하는지
+   - 첫 페이지 500개, 다음 페이지도 500개 append로 고정할지
+   - 정렬/필터 변경 시 cursor와 누적 목록을 초기화하는지
+   - 하단 자동 로드와 `Load more` 버튼이 같은 `nextCursor` 계약을 공유하는지
+
+7. News Feed 날짜 검색 contract 확인
+   - `from`/`to`가 모두 비어 있으면 DB 전체 기간 검색으로 남는지
+   - `from` 또는 `to`가 채워지면 해당 경계 조건으로 검색 범위가 줄어드는지
+   - 날짜 조건이 바뀌면 cursor와 누적 결과를 초기화하는지
+
 ### 제안하는 구현 순서(이유)
 1. Step 0에서 `Score`/sentiment 매핑과 저장 모델을 먼저 고정한다.
    - 이유: 이 결정이 DB/API/UI 전체를 바꾼다.
 2. Step 1에서 backend DB/API와 AI analysis 저장 구조를 먼저 맞춘다.
    - 이유: 프론트 컬럼 추가보다 데이터 contract가 선행되어야 한다.
-3. Step 2에서 News Feed 컬럼과 Data Control Settings UI를 붙인다.
+3. Step 2에서 News Feed 컬럼, ticker 전용 검색 UX, 500개 cursor 자동 append + `Load more` 버튼, Data Control Settings UI를 붙인다.
    - 이유: backend 응답이 확정된 뒤 UI wiring이 단순해진다.
 4. Step 3에서 workspace persistence를 구현한다.
    - 이유: 앱 셸과 각 창 상태 저장을 한 번에 묶어야 중복 수정이 줄어든다.
@@ -268,6 +324,8 @@ Step N — <제목>
 | 1-5 | AI analysis 미실행 row는 기본 빈 상태로 내려가도록 null/empty 규칙 고정 | 같은 영역 | API 응답 null/empty 확인 | ⬜ |
 | 1-6 | 분석 결과 유실 감지용 backend 테스트 추가 | `terminal/backend/tests/` 또는 probe 스크립트 | 테스트 실패/성공 확인 | ⬜ |
 | 1-7 | Finnhub recent confirmed-empty range 저장/skip 로직 추가 | `terminal/backend/src/services/finnhubNewsProvider.ts`, `terminal/backend/src/db.ts` 또는 상태 저장소 | repeated recent pull 비교 확인 | ⬜ |
+| 1-8 | `GET /api/news` 검색 paging 정책을 500개 배치 + `nextCursor` append 계약으로 고정 | `terminal/backend/src/services/newsRepository.ts`, `terminal/backend/src/server.ts`, `terminal/backend/src/types.ts` | 첫 페이지/다음 페이지 cursor 응답 확인 | ⬜ |
+| 1-9 | `GET /api/news` 검색 contract에 `from`/`to` 기간 조건과 빈 기본값(전체 검색) 규칙을 명시 | `terminal/backend/src/services/newsRepository.ts`, `terminal/backend/src/server.ts`, `terminal/backend/src/types.ts` | 날짜 조건별 API 응답 확인 | ⬜ |
 
 1-1 목적: runtime DB가 sentiment와 AI analysis 결과를 영속 저장할 수 있게 만든다.
 1-1 설명: 테이블 생성과 기존 DB migration을 안전하게 처리한다.
@@ -311,6 +369,18 @@ Step N — <제목>
 1-7 사람 검증(비개발자): 뉴스가 없던 ticker는 다시 recent를 눌렀을 때 “이미 빈 구간으로 확인됨”에 해당하는 스킵 효과가 보인다.
 1-7 흔한 문제/주의: HTTP 실패를 empty로 잘못 저장하거나 `company_news`와 `press_release`를 합쳐 저장하면 실제 데이터가 있는 소스까지 막을 수 있다.
 
+1-8 목적: 검색 결과를 200개 고정이 아니라 500개 단위 cursor pagination으로 이어서 볼 수 있게 만든다.
+1-8 설명: 첫 요청은 최신 500개를 주고, 이후 요청은 `nextCursor`로 다음 500개를 반환하도록 하며, 하단 자동 로드와 `Load more` 버튼이 같은 cursor 계약을 사용하게 고정한다.
+1-8 완료 조건(눈으로 확인): `/api/news` 첫 응답에 `items<=500`과 `nextCursor`가 보이고, 다음 cursor 요청에서 이어지는 다음 500개가 반환된다.
+1-8 사람 검증(비개발자): 첫 500개 아래의 더 오래된 결과를 같은 검색 상태에서 계속 이어서 볼 수 있다.
+1-8 흔한 문제/주의: 정렬/검색 조건이 바뀌었는데 이전 cursor를 재사용하면 중복/누락이 생길 수 있다.
+
+1-9 목적: 날짜 기간 검색이 전체 검색의 기본 동작을 깨지 않으면서 선택적으로만 범위를 좁히게 만든다.
+1-9 설명: `from`/`to`를 안 보내면 전체 기간 검색, 하나 이상 보내면 해당 경계로 검색 범위를 제한하는 API 계약을 문서와 코드에 고정한다.
+1-9 완료 조건(눈으로 확인): 날짜를 비우면 전체 결과가 나오고, 날짜를 넣으면 그 기간 안의 결과만 나온다.
+1-9 사람 검증(비개발자): 같은 검색어라도 날짜를 좁히면 결과 수가 줄고, 날짜를 지우면 다시 전체 기간 결과로 돌아온다.
+1-9 흔한 문제/주의: UI에서 날짜를 지웠는데 이전 `from`/`to`가 계속 남아 있으면 사용자는 전체 검색이라고 생각해도 실제로는 기간 필터가 남아 버린다.
+
 검증 훅:
 ```bash
 cd terminal/backend
@@ -321,6 +391,11 @@ node test_check_news_db.mjs
 ```text
 추가 확인:
 - GET /api/news?source_names=FINNHUB&limit=5 응답에 score/scoreEvidence/sentiment/keywords 포함 여부 확인
+- GET /api/news 검색 응답이 첫 페이지 최대 500개 + `nextCursor`를 반환하는지 확인
+- 같은 검색 조건으로 cursor 후속 호출 시 다음 500개가 이어지는지 확인
+- 자동 하단 로드와 `Load more` 버튼이 같은 다음 페이지를 중복 없이 가져오는지 확인
+- 날짜 비움 상태에서 전체 기간 검색이 되는지 확인
+- 날짜 지정 상태에서 해당 기간 뉴스만 반환되는지 확인
 - AI analysis 저장 테이블 row count 확인
 - 저장 후 `score_evidence`를 지웠을 때 테스트가 실패하는지 확인
 - 동일 ticker에 대해 recent update를 두 번 실행했을 때 confirmed-empty 과거 구간 재조회가 줄어드는지 확인
@@ -337,6 +412,9 @@ node test_check_news_db.mjs
 | 2-3 | score/score evidence/sentiment 셀 렌더, 정렬, null 표시 규칙 추가 | 같은 파일 | 정렬/표시 확인 | ⏳ |
 | 2-4 | Data Control Window에 `Updates` / `Settings` 탭 구조 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx` | 탭 전환 확인 | ⏳ |
 | 2-5 | Settings 탭에 전체 글자 크기 조절 UI 추가 | 같은 파일 및 app shell styling | 슬라이더/프리셋 반영 확인 | ⏳ |
+| 2-6 | 일반 검색창 바로 아래에 ticker 전용 검색창을 추가하고 `tickers` query로만 동작하도록 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | ticker-only 검색 결과 확인 | ⬜ |
+| 2-7 | 검색 결과를 최초 500개 로드 후 하단 스크롤 시 자동으로 `nextCursor` 500개 append 하고, 동시에 하단 `Load more` 버튼으로도 같은 추가 로드를 가능하게 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 자동 로드/버튼 로드 확인 | ⬜ |
+| 2-8 | 검색창 영역에 날짜 From/To 입력을 추가하고 비어 있으면 전체 검색, 값이 있으면 기간 검색으로 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 날짜 조건 검색 확인 | ⬜ |
 
 2-1 목적: 사용자가 필요한 4개 컬럼을 실제로 보이게 만든다.
 2-1 설명: 단순 타입 선언이 아니라 메뉴/헤더/행 렌더까지 연결한다.
@@ -368,6 +446,24 @@ node test_check_news_db.mjs
 2-5 사람 검증(비개발자): News/Data Control/Tab bar 텍스트가 같이 바뀐다.
 2-5 흔한 문제/주의: 일부 컴포넌트가 px 고정이면 전체 일관성이 깨진다.
 
+2-6 목적: 일반 텍스트 검색과 ticker-only 검색을 UI에서 분리해 오해 없는 검색 동작을 만든다.
+2-6 설명: 첫 번째 입력창은 기존 `keyword` 검색(title/summary 계열), 두 번째 입력창은 `tickers` query만 보내는 전용 검색으로 분리한다.
+2-6 완료 조건(눈으로 확인): 일반 검색창 아래에 ticker 입력창이 보이고, ASTS 입력 시 ticker 분류가 ASTS인 행만 남는다.
+2-6 사람 검증(비개발자): title에 ASTS가 없어도 ticker가 ASTS면 나오고, title에 ASTS가 있어도 ticker가 다르면 ticker 전용 검색에서는 제외된다.
+2-6 흔한 문제/주의: 두 검색창 값을 모두 `keyword`로 보내면 분리 UI를 만들어도 실제 동작은 그대로라 의미가 없다.
+
+2-7 목적: 검색 결과가 500개에서 끊기지 않고 같은 리스트 아래로 자연스럽게 이어지게 만들되, 자동 로드 실패 시에도 사용자가 수동으로 계속 볼 수 있게 한다.
+2-7 설명: 초기 검색 시 첫 500개를 로드하고, 리스트 하단 접근 시 `nextCursor`를 사용해 자동으로 다음 500개를 append 한다. 동시에 리스트 하단에 `Load more` 버튼을 두어 같은 cursor 기반 추가 로드를 수동으로도 실행할 수 있게 한다.
+2-7 완료 조건(눈으로 확인): 검색 후 리스트 하단까지 내리면 자동 로딩 뒤 뉴스가 더 이어 붙고, 같은 위치에 `Load more` 버튼도 보여 수동 로드가 가능하다.
+2-7 사람 검증(비개발자): 자동으로 더 불러오지 못하는 상황이어도 버튼을 눌러 다음 500개를 계속 볼 수 있다.
+2-7 흔한 문제/주의: 하단 도달 이벤트와 버튼 클릭이 동시에 발생하면 같은 페이지를 중복 append 할 수 있으므로 loading guard와 cursor 소비 잠금이 필요하다.
+
+2-8 목적: 사용자가 특정 날짜 기간 안의 뉴스만 좁혀서 검색할 수 있게 만든다.
+2-8 설명: 검색 바에 `From`/`To` 입력을 두고, 기본값은 둘 다 비워 둔다. 둘 다 비어 있으면 전체 검색, 하나 이상 값이 있으면 해당 기간 조건으로 `from`/`to` query를 보낸다.
+2-8 완료 조건(눈으로 확인): 날짜 입력이 비어 있으면 전체 검색 상태이고, 날짜를 지정하면 그 기간 뉴스만 표시된다.
+2-8 사람 검증(비개발자): 검색어는 그대로 둔 채 날짜만 바꿔도 결과 기간이 달라지고, 날짜를 지우면 다시 전체 기간 결과가 나온다.
+2-8 흔한 문제/주의: 날짜만 바뀌어도 기존 cursor 누적 목록을 유지하면 이전 기간 결과와 섞일 수 있으므로 결과를 초기화해야 한다.
+
 검증 훅:
 ```bash
 cd termina_web/figma_code/terminal_ui_ver2_finhub
@@ -377,6 +473,13 @@ npm run build
 ```text
 추가 확인:
 - News Feed 컬럼 메뉴에서 Score/Score Evidence/Keywords/Sentiment 토글 가능
+- 일반 검색창 아래에 ticker 전용 검색창 표시
+- ticker 입력 시 ticker-only 필터가 동작하고 일반 keyword 검색과 결과 차이가 구분되는지 확인
+- 검색 직후 첫 결과가 최대 500개인지 확인
+- 하단 스크롤 시 다음 500개가 자동 append 되고 기존 목록이 유지되는지 확인
+- 리스트 하단의 `Load more` 버튼으로도 다음 500개가 추가 로드되는지 확인
+- 날짜 From/To가 비어 있을 때 전체 기간 검색이 되는지 확인
+- 날짜 기간 지정 시 해당 기간 안의 결과만 검색되는지 확인
 - Data Control에서 Settings 탭 표시
 - 글자 크기 변경 시 앱 전반 반영
 - 미분석 row는 빈 상태로 표시되는지 확인
@@ -413,8 +516,8 @@ npm run build
 3-3 흔한 문제/주의: 렌더 재생성 시 key가 바뀌면 내부 state가 리셋된다.
 
 3-4 목적: 사용자가 말한 “마지막 상태”를 창 내부까지 확장한다.
-3-4 설명: 최소한 컬럼 가시성, source filter, display mode, Settings active tab, font size는 저장한다.
-3-4 완료 조건(눈으로 확인): News Feed 검색/컬럼 상태가 재실행 후 남아 있다.
+3-4 설명: 최소한 컬럼 가시성, source filter, 일반 검색어, ticker 검색어, 날짜 `from`/`to`, display mode, Settings active tab, font size는 저장한다. 다만 `nextCursor`, 현재까지 누적 로드된 페이지, in-flight loading 상태는 저장하지 않는다.
+3-4 완료 조건(눈으로 확인): News Feed 일반 검색/티커 검색/날짜 기간/컬럼 상태가 재실행 후 남아 있다.
 3-4 사람 검증(비개발자): 컬럼을 끄고 앱 재시작 후 그대로 꺼져 있다.
 3-4 흔한 문제/주의: 모든 transient state를 저장하면 오히려 버그가 늘 수 있다.
 
@@ -459,7 +562,7 @@ npm run build
 4-3 설명: update → AI analysis → 조회 → 값 삭제 → 테스트 실패 → 탭 전환 → 재실행 흐름을 검증한다.
 4-3 완료 조건(눈으로 확인): 체크리스트가 1회 실행 가능한 순서로 정리된다.
 4-3 사람 검증(비개발자): 체크리스트 순서대로 따라 하면 핵심 기능을 다 볼 수 있다.
-4-3 흔한 문제/주의: backend/frontend를 따로만 확인하면 persistence 버그를 놓칠 수 있다.
+4-3 흔한 문제/주의: backend/frontend를 따로만 확인하면 persistence 버그나 자동 로드/`Load more` 간 cursor append 중복·누락 버그를 놓칠 수 있다.
 
 검증 훅:
 ```bash
@@ -471,6 +574,9 @@ npm run test
 ```text
 수동 확인:
 - News 업데이트 후 AI analysis 전/후의 Score/Score Evidence/Keywords/Sentiment 컬럼 확인
+- 검색 시 DB 전체 대상 결과가 첫 500개 로드 후 하단 스크롤 자동 로드 또는 `Load more` 버튼으로 다음 500개씩 이어지는지 확인
+- 날짜를 비운 기본 상태에서 전체 검색되는지 확인
+- 날짜를 지정했을 때 기간 안의 결과만 나오는지 확인
 - 저장 후 `Score` 또는 `Score Evidence`를 지웠을 때 테스트 실패 확인
 - 앱 종료/재실행 후 상태 복원 확인
 - Data Control Settings에서 글자 크기 반영 확인
@@ -519,6 +625,8 @@ Legend
 ⬜ 1-5 기본 빈 상태 규칙
 ⬜ 1-6 삭제 감지 backend 테스트
 ⬜ 1-7 confirmed-empty range 저장/skip
+⬜ 1-8 GET /api/news 500개 cursor paging 계약
+⬜ 1-9 GET /api/news 날짜 기간 검색 계약
 
 [Track B: 프론트 컬럼 / 운영 UI]
 ✅ 0-2 ai-news-analysis 출력 기준 정리
@@ -527,6 +635,9 @@ Legend
    +--> ⏳ 2-1 Score/Score Evidence/Keywords/Sentiment 컬럼 반영
    +--> ⏳ 2-2 Keywords 컬럼 활성화
    +--> ⏳ 2-3 score/evidence/sentiment 정렬/렌더
+   +--> ⬜ 2-6 ticker 전용 검색창 + tickers query 연결
+   +--> ⬜ 2-7 500개 cursor 자동 append + Load more 버튼
+   +--> ⬜ 2-8 날짜 기간 검색 UI + from/to query 연결
    +--> ⏳ 2-4 Data Control Settings 탭 추가
    +--> ⏳ 2-5 전체 글자 크기 조절 UI
 
@@ -563,6 +674,8 @@ Step 1 backend schema와 Step 2 UI 컬럼 의미가 고정되지 않는다.
 | AI 분석 실행 시점 | Step 1, Step 4 | pull 직후 / 수동 job / fulltext 이후 |
 | sentiment 저장 단위 | Step 1 | 기사별 / ticker-date / direct column |
 | AI analysis 저장 위치 | Step 1 | `news_fulltext` 확장 / `news_ai_analysis` 별도 |
+| 검색 paging 방식 | Step 1, Step 2 | 200 고정 / 500 cursor 자동 append + Load more 버튼 |
+| 검색 날짜 기간 방식 | Step 1, Step 2 | 날짜 없음 / 비워두면 전체 + 값 있으면 기간 검색 |
 | font size 저장 위치 | Step 2, Step 3 | global localStorage / tab scoped / backend |
 
 ### 결정 #1 — AI 뉴스 분석 출력 계약(상세, 사용자 확인 완료)
@@ -594,13 +707,16 @@ Step 1 backend schema와 Step 2 UI 컬럼 의미가 고정되지 않는다.
 - 전체 글자 크기(`fontScale`)
 - News Feed 컬럼 on/off 상태
 - News Feed source filter
-- News Feed 검색어
+- News Feed 일반 검색어
+- News Feed ticker 검색어
+- News Feed 날짜 `from`/`to`
 - News Feed display mode
 - Data Control active tab
 
 저장하지 않는 대상:
 - modal/dialog open 여부
 - 일회성 loading/spinner 상태
+- News Feed `nextCursor`, 누적 페이지 수, append 중 loading 상태
 - hover 상태, 우클릭 메뉴 열림 상태 같은 순간 UI 상태
 
 ### 결정 #2 — persistence 저장 payload(상세)
@@ -625,6 +741,10 @@ Step 1 backend schema와 Step 2 UI 컬럼 의미가 고정되지 않는다.
           "linkId": 1,
           "position": { "top": 20, "left": 20, "width": 800, "height": 600 },
           "uiState": {
+                  "searchQuery": "earnings",
+                  "tickerQuery": "ASTS",
+                  "dateFrom": null,
+                  "dateTo": null,
             "sourceTypeFilter": "all",
                   "visibleColumns": ["date", "ticker", "title", "score", "scoreEvidence", "sentiment"],
             "displayMode": "title-only"
