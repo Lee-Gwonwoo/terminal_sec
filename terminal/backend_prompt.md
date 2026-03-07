@@ -203,6 +203,74 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 - `news_change_recent`, `news_change_custom` 같은 값은 DB에 row가 생기면 응답에 함께 포함된다.
 
+#### `news_sentiment_snapshots`
+컬럼:
+
+- `[][][]ticker[][][]`
+- `[][][]fetched_at[][][]`
+- `[][][]bullish_pct[][][]`
+- `[][][]bearish_pct[][][]`
+- `[][][]company_news_score[][][]`
+- `[][][]sector_avg_bullish[][][]`
+- `[][][]sector_avg_news_score[][][]`
+- `[][][]raw_json[][][]`
+
+기본키: `(ticker, fetched_at)`
+
+의미: Finnhub `/news-sentiment` endpoint 결과를 ticker·시간대별로 캐시한다.
+
+#### `news_ai_analysis`
+컬럼:
+
+- `[][][]news_id[][][]`
+- `[][][]analysis_status[][][]`
+- `[][][]score[][][]`
+- `[][][]score_evidence[][][]`
+- `[][][]keywords_json[][][]`
+- `[][][]model_id[][][]`
+- `[][][]created_at[][][]`
+- `[][][]updated_at[][][]`
+
+기본키: `news_id`
+
+의미: 외부 AI가 생성한 score/evidence/keywords를 저장한다. `analysis_status`가 `completed`인데 `score`나 `score_evidence`가 NULL이면 유실로 간주한다.
+
+#### `bookmark_folders`
+컬럼:
+
+- `[][][]id[][][]`
+- `[][][]user_id[][][]`
+- `[][][]name[][][]`
+- `[][][]parent_id[][][]`
+- `[][][]sort_order[][][]`
+- `[][][]created_at[][][]`
+
+의미: 크롬 북마크처럼 폴더 트리 구조를 제공한다.
+
+#### `bookmark_items`
+컬럼:
+
+- `[][][]folder_id[][][]`
+- `[][][]news_id[][][]`
+- `[][][]created_at[][][]`
+
+기본키: `(folder_id, news_id)`
+
+의미: 뉴스 row를 폴더에 저장한다.
+
+#### `confirmed_empty_ranges`
+컬럼:
+
+- `[][][]ticker[][][]`
+- `[][][]source_type[][][]`
+- `[][][]range_from[][][]`
+- `[][][]range_to[][][]`
+- `[][][]confirmed_at[][][]`
+
+기본키: `(ticker, source_type)`
+
+의미: Finnhub recent pull에서 HTTP 200 + 빈 배열이 확인된 과거 범위를 기록하여 자동 재조회 낭비를 줄인다. 당일 범위는 제외한다.
+
 #### 기타 테이블
 
 - `news_saved_views`
@@ -249,12 +317,9 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 limit 정책:
 
-- 기본 요청값: `200`
-- hard clamp: `1..200`
-- `from/to` 범위가 있을 때 추가 cap 적용
-  - 7일 이하: 최대 200
-  - 31일 이하: 최대 100
-  - 32일 이상: 최대 50
+- 기본값: `500`
+- hard clamp: `1..500`
+- `from/to` 범위 유무와 관계없이 항상 최대 500
 
 응답 형식:
 
@@ -284,7 +349,13 @@ limit 정책:
       "hasFullText": true,
       "keywords": ["earnings", "guidance"],
       "keywordsStatus": "ready",
-      "industry": "Technology"
+      "industry": "Technology",
+      "score": 8,
+      "scoreEvidence": "Strong earnings beat with raised guidance",
+      "analysisStatus": "completed",
+      "sentimentBullishPct": 0.72,
+      "sentimentBearishPct": 0.15,
+      "companyNewsScore": 0.85
     }
   ],
   "nextCursor": "..."
@@ -316,6 +387,26 @@ limit 정책:
 - `[][][]keywords[][][]`
 - `[][][]keywordsStatus[][][]`
 - `[][][]industry[][][]`
+- `[][][]score[][][]`
+- `[][][]scoreEvidence[][][]`
+- `[][][]analysisStatus[][][]`
+- `[][][]sentimentBullishPct[][][]`
+- `[][][]sentimentBearishPct[][][]`
+- `[][][]companyNewsScore[][][]`
+
+score/scoreEvidence/analysisStatus 규칙:
+
+- `analysis_status`가 `null` 또는 `not_started`이면 score/scoreEvidence도 `null`이 정상이다 (아직 분석 안 됨).
+- `analysis_status=completed`인데 score나 scoreEvidence가 `null`이면 유실(lost)로 간주한다.
+
+sentiment 규칙:
+
+- `sentimentBullishPct`, `sentimentBearishPct`, `companyNewsScore`는 `news_sentiment_snapshots`에서 가장 최근 ticker snapshot을 가져온다.
+- 해당 ticker에 snapshot이 없으면 모두 `null`이다.
+
+bookmarkFolderId query:
+
+- `bookmarkFolderId=<uuid>`가 주어지면 `bookmark_items` INNER JOIN으로 해당 폴더에 저장된 뉴스만 반환한다.
 
 ### `GET /api/news/:id`
 
@@ -701,6 +792,52 @@ methods enum:
 - `sound`
 - `email`
 
+## Bookmark API
+
+### `GET /api/bookmarks/folders`
+
+응답: 폴더 배열 (`[{id, user_id, name, parent_id, sort_order, created_at}]`)
+
+### `POST /api/bookmarks/folders`
+
+요청 body: `{"name": "...", "parentId": "..."}`
+
+응답: 생성된 폴더 object.
+
+### `PUT /api/bookmarks/folders/:id`
+
+요청 body: `{"name": "...", "parentId": "..."}`
+
+### `DELETE /api/bookmarks/folders/:id`
+
+folder와 연관 bookmark_items가 함께 삭제된다.
+
+### `POST /api/bookmarks/items`
+
+요청 body: `{"folderId": "...", "newsId": "..."}`
+
+### `DELETE /api/bookmarks/items`
+
+요청 body: `{"folderId": "...", "newsId": "..."}`
+
+## AI Analysis API
+
+### `GET /api/news/ai-analysis/validate`
+
+전체 `news_ai_analysis` row에 대해 무결성 검증을 수행한다.
+
+규칙:
+
+- `analysis_status=completed`인데 `score IS NULL` → FAIL
+- `analysis_status=completed`인데 `score_evidence IS NULL` → FAIL
+- `analysis_status=completed`인데 `keywords_json='[]'` → WARN
+
+응답: `{"total", "failCount", "warnCount", "failures": [{newsId, reason}]}`
+
+### `POST /api/news/fulltext/backfill-plaintext`
+
+기존 HTML fragment 기반 full_text row를 plain text로 변환하는 일괄 처리를 실행한다.
+
 ## 기타 API
 
 - `GET /healthz`
@@ -725,6 +862,7 @@ methods enum:
 - `src/services/ohlcWatchlistRepository.ts`: OHLC DB read/write
 - `src/services/ibkrOhlc1dProvider.ts`: IBKR OHLC provider
 - `src/services/updateStatusRepository.ts`: update_status read/write
+- `src/services/aiAnalysisRepository.ts`: AI analysis CRUD, batch, 무결성 검증
 - `src/services/jobManager.ts`: in-memory jobs
 - `src/realtime/streamHub.ts`: SSE client registry
 

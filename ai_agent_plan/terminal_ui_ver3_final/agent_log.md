@@ -290,6 +290,45 @@
 3. 현재 tooltip은 메뉴 열림 상태에서만 접근 가능하다.
    - 완화 방안 1: main Update 버튼 주변 도움말 재노출 검토
 
+### Step 3 Workspace Persistence 구현 완료
+
+**작성 시각:** 2026-03-07 (local)
+
+**상태:** 확인 대기(awaiting user confirmation)
+
+#### 수행 내용
+
+Step 3 항목 (3-1 ~ 3-6) 분석 및 구현을 완료했다.
+
+1. **3-1 ~ 3-3 (기존 구현 확인):** 탐색 결과, `terminal-workspace-v1` localStorage key에 tabs/activeTabId/isDarkMode/fontScale/newsTitleFontSize/newsSummaryFontSize/linkedTicker/window positions가 이미 저장/복원되고 있었다. `App.tsx`에서 모든 탭의 windows를 렌더하되 비활성 탭은 `display:'none'`으로 숨겨 React state를 보존하는 방식이라 탭 왕복 시 상태가 유지된다.
+2. **3-4 (기존 구현 확인):** `finhub-news-ui-state`에 visibleCols/displayMode/sourceTypeFilter/searchQuery/tickerQuery/fromDate/toDate가 이미 저장/복원되고 있었다. `data-control-active-tab`에 Settings 탭 상태 저장도 구현돼 있었다.
+3. **3-5 versioning/fallback 보강:** `DraggableWindow.tsx`에 off-screen 클램핑 로직을 추가했다. 화면 크기가 달라질 때 창이 뷰포트 범위를 벗어나지 않도록 `Math.min(x, innerWidth-100)`, `Math.min(y, innerHeight-50)` 적용. 기존 `App.tsx`의 version 체크와 try/catch fallback은 이미 충분히 견고했다.
+4. **3-6 북마크 view 상태 복원:** `selectedBookmarkFolderId`를 `finhub-news-ui-state` localStorage에 추가했다. 초기화 시 복원하고, persist effect에도 포함했다. 삭제된 폴더 ID fallback 로직도 `fetchBookmarkFolders` 콜백에 추가했다.
+5. **버그 수정:** `fetchBookmarkFolders`에서 backend 응답이 배열인 경우(`data`)와 `.folders` wrapper인 경우(`data.folders`) 모두 처리하도록 수정했다 (기존 코드는 `data.folders`만 처리해서 실제로는 항상 빈 배열이었음).
+
+#### 생성/수정 파일
+
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` — selectedBookmarkFolderId 저장/복원, fetchBookmarkFolders 응답 파싱 수정
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DraggableWindow.tsx` — off-screen 클램핑
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md` — Step 3 전체 ✅
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md` — 본 항목 추가
+
+#### 검증 방법
+
+1. `cd termina_web/figma_code/terminal_ui_ver2_finhub && npm run build` → 성공 ✅
+2. `cd terminal/backend && npm run test` → 48/48 pass ✅
+3. TypeScript 에러 0개 확인 (`get_errors`) ✅
+4. 수동 검증: 브라우저에서 앱 열기 → 탭/창 배치 변경 → 새로고침 → 복원 확인
+5. 수동 검증: 북마크 폴더 선택 → 새로고침 → 같은 폴더 view 복원 확인
+6. 수동 검증: 창을 화면 우하단으로 이동 → 화면 크기 줄이기 → 새로고침 → 뷰포트 내 복원 확인
+
+#### 문제점 / 리스크
+
+1. `selectedBookmarkFolderId`가 복원됐는데 폴더 목록 fetch가 느리면 일시적으로 빈 화면이 보일 수 있다
+   - 완화 방안: 현재 로직은 fetchNews가 먼저 bookmarkFolderId로 조회하므로 fetch 후 결과가 보임
+2. 여러 FinnhubNewsWindow가 동시에 열리면 같은 localStorage key를 공유한다
+   - 완화 방안: 현재 탭당 1개 News 창 구조에서는 문제 없음. 추후 window ID별 key 분리 검토 가능
+
 ### Step 2 Frontend 구현 완료
 
 **작성 시각:** 2026-03-07 (local)
@@ -506,4 +545,57 @@ Step 1 전체 (1-1 ~ 1-13)를 구현하고 빌드/테스트를 통과시켰다.
 #### 비고
 
 - 이번 수정은 구현 상태 표현을 실제 진행 상태에 맞게 정정한 문서 동기화 작업이다.
+- 사용자 확인 전까지 상태는 `확인 대기`로 유지한다.
+
+### Step 4 통합 검증 / 문서 동기화 / 운영 가드레일 완료
+
+**작성 시각:** 2026-03-07 (local)
+
+**상태:** 확인 대기(awaiting user confirmation)
+
+#### 수행 내용
+
+Step 4 전체 (4-1 ~ 4-4)를 완료했다.
+
+1. **4-1 prompt 문서 동기화**
+   - `backend_prompt.md`: 5개 새 테이블 스키마(news_sentiment_snapshots, news_ai_analysis, bookmark_folders, bookmark_items, confirmed_empty_ranges), 새 응답 필드(score, scoreEvidence, analysisStatus, sentimentBullishPct, sentimentBearishPct, companyNewsScore), 500 고정 limit 정책, bookmarkFolderId query, Bookmark API 6개 라우트, AI Analysis validate/backfill 엔드포인트, aiAnalysisRepository.ts 파일 추가를 반영했다.
+   - `figma_frontend_prompt.md`: 13개 컬럼(+keywords, score, scoreEvidence, sentiment), 3-row 검색 UI(keyword, ticker, date range), 500건 cursor pagination + Load more, Bookmark UI 섹션(폴더 view, row 우클릭), localStorage 필드 확장(tickerQuery, fromDate, toDate, selectedBookmarkFolderId), backend API 계약 18개 엔드포인트, 다크모드 localStorage 저장을 반영했다.
+
+2. **4-2 empty/lost/null 정책 정리**
+   - `analysis_status` 기반 구분 규칙을 backend_prompt에 문서화: `not_started`/`in_progress` = 정상 empty, `completed` 후 score=null = 유실(FAIL), `completed` 후 keywords=[] = WARN.
+
+3. **4-3 E2E 체크리스트 정리**
+   - plan.md 검증 훅에 26개 항목 수동 검증 체크리스트 추가: 뉴스 기본 조회(3), 검색(4), 컬럼(3), 북마크(6), Workspace persistence(6), 삭제 감지(2), 북마크 vs saved view 구분(2).
+
+4. **4-4 의존성 그래프 최종화**
+   - Track A/B/C/D 전체 ✅로 갱신, plan Step 4 테이블 전체 ✅ 마킹.
+
+#### 생성/수정 파일
+
+- `terminal/backend_prompt.md` — 5개 테이블, limit정책, 응답 필드, Bookmark/AI API, 파일맵
+- `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md` — 13 컬럼, 검색 UI, bookmark UI, state, API 계약
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md` — E2E 체크리스트, 의존성 그래프 전체 ✅, Step 4 테이블 ✅
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md` — 본 항목 추가
+
+#### 검증 방법
+
+1. `cd terminal/backend && npm run build && npm run test` → 48/48 pass ✅
+2. `cd termina_web/figma_code/terminal_ui_ver2_finhub && npm run build` → 성공 ✅
+3. TypeScript 에러 0개 (`get_errors`) ✅
+4. Backend API alive 확인: `GET /api/news?limit=2` → items:2, hasCursor:True ✅
+5. `backend_prompt.md` diff 확인: 새 테이블/필드/API가 코드와 일치
+6. `figma_frontend_prompt.md` diff 확인: 컬럼/검색/북마크/state가 코드와 일치
+7. plan.md E2E 체크리스트 26개 항목을 1회 실행 순서로 수동 검증 (사용자 수행)
+
+#### 문제점 / 리스크
+
+1. prompt 문서가 코드 변경 없이 업데이트됐으므로 향후 코드 변경 시 다시 drift될 수 있다.
+   - 완화 방안: copilot-instructions.md의 필수 워크플로우 가드레일(*.py 수정 시 *.md 동기화)이 이미 적용 중
+2. E2E 체크리스트 26개 항목은 수동 검증이므로 시간이 걸린다.
+   - 완화 방안: 가장 핵심적인 항목(1, 4-7, 11-16, 17-22)부터 우선 실행
+
+#### 비고
+
+- 이번 Step은 코드 변경 없이 문서 동기화와 검증 정리만 수행했다.
+- 전체 plan (Step 0 ~ Step 4) 구현이 완료되었다.
 - 사용자 확인 전까지 상태는 `확인 대기`로 유지한다.

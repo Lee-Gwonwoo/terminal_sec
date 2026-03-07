@@ -49,7 +49,7 @@ Vite dev proxy:
 
 - 앱 제목: `Stock News Platform`
 - 다크 모드 토글 제공
-- 다크 모드는 `document.documentElement.classList`만 바꾸며 localStorage 저장은 없다.
+- 다크 모드는 `document.documentElement.classList`을 바꾸고 `terminal-workspace-v1`에 저장된다.
 
 ### 탭 구조
 
@@ -124,19 +124,35 @@ Vite dev proxy:
 백엔드 호출:
 
 ```text
-GET /api/news?source_names=FINNHUB&limit=200
+GET /api/news?source_names=FINNHUB&limit=500
 ```
 
 추가 query:
 
 - `keyword`
 - `source_type` (`company_news | press_release | market_news`)
+- `tickers` (ticker 전용 검색, 예: `AAPL,TSLA`)
+- `from`, `to` (YYYY-MM-DD 날짜 범위 필터)
+- `bookmarkFolderId` (북마크 폴더 필터)
+- `cursor` (cursor 기반 페이지네이션)
 
 검색은 서버사이드다.
 
 - 입력창 300ms debounce
 - `keyword`를 그대로 backend로 보냄
-- 결과 최대 200건 렌더
+- 최초 결과 500건, cursor 기반으로 하단 스크롤 시 자동 append
+- 리스트 하단에 `Load more` 버튼 제공
+- `react-window`의 `onItemsRendered`로 sentinel row 감지 시 자동 추가 로드
+
+### 검색 UI
+
+검색 영역은 3줄 구조다:
+
+1. 일반 keyword 검색창 (돋보기 아이콘)
+2. Ticker 전용 검색창 (TrendingUp 아이콘)
+3. From / To 날짜 입력 (Calendar 아이콘)
+
+각 검색 필드 변경 시 300ms debounce 후 자동 재조회한다.
 
 ### 테이블 컬럼
 
@@ -151,13 +167,21 @@ GET /api/news?source_names=FINNHUB&limit=200
 - `[][][]source[][][]`
 - `[][][]fulltext[][][]`
 - `[][][]changes[][][]`
+- `[][][]keywords[][][]`
+- `[][][]score[][][]`
+- `[][][]scoreEvidence[][][]`
+- `[][][]sentiment[][][]`
 
 기본 visible 상태:
 
-- `source`만 기본 숨김
+- 기본 숨김: `source`, `keywords`, `score`, `scoreEvidence`, `sentiment`
 - 나머지는 기본 표시
 
-현재 코드에는 `keywords` 컬럼 id/type 정의가 남아 있지만 `DEFAULT_COLUMNS`에는 포함되지 않는다. 즉 데이터는 받아도 컬럼 메뉴나 헤더에서 실제 활성 컬럼으로 렌더되지 않는다.
+score/scoreEvidence/sentiment 컬럼 규칙:
+
+- `score`: `news_ai_analysis.score` 값. `null`이면 빈 셀.
+- `scoreEvidence`: `news_ai_analysis.score_evidence` 값.
+- `sentiment`: `sentimentBullishPct` 기반 파생. >0.6 → "Bullish", <0.4 → "Bearish", else "Neutral". sentiment snapshot이 없으면 빈 셀.
 
 ### 정렬/가시화/레이아웃
 
@@ -272,6 +296,32 @@ API:
 - `Esc`로 닫기 가능
 - 진행률 bar, 상태 badge, 로그 줄, 완료 result 표시
 
+### 북마크 기능
+
+#### Bookmark view
+
+검색창 근처에 `FolderOpen` 아이콘 버튼으로 bookmark view 선택 메뉴를 연다.
+
+- 메뉴에는 `All news` 옵션과 backend에서 받아온 북마크 폴더 목록이 표시된다.
+- 폴더를 선택하면 `bookmarkFolderId` query로 해당 폴더 뉴스만 조회한다.
+- `All news` 선택 시 전체 뉴스로 복귀한다.
+- 선택된 폴더 ID는 `selectedBookmarkFolderId`로 localStorage에 저장되며, 앱 재실행 후에도 복원된다.
+- 복원된 folder ID가 존재하지 않으면 자동으로 초기화(All news)된다.
+
+#### Row 우클릭 북마크
+
+- 뉴스 row를 우클릭하면 컨텍스트 메뉴가 뜨고 `Add bookmark` 선택지가 보인다.
+- 폴더를 선택하면 `POST /api/bookmarks/items`로 해당 뉴스를 폴더에 저장한다.
+
+관련 API:
+
+- `GET /api/bookmarks/folders`
+- `POST /api/bookmarks/folders`
+- `POST /api/bookmarks/items`
+- `DELETE /api/bookmarks/items`
+
+주의: `news_saved_views`는 검색 조건 저장용 평면 리스트이고, bookmark은 개별 뉴스 row를 폴더에 저장하는 구조다. 둘을 혼동하지 않는다.
+
 ### Source / Publisher 클릭 동작
 
 - Publisher 셀은 링크 열기 용도
@@ -290,15 +340,16 @@ localStorage 사용:
 - key: `finnhub-last-update-config`
 - 저장 값: 마지막 update의 `mode`, `sourceType`
 
+저장되는 것:
+
+- `finhub-news-ui-state`: `visibleCols`, `displayMode`, `sourceTypeFilter`, `searchQuery`, `tickerQuery`, `fromDate`, `toDate`, `selectedBookmarkFolderId`
+- `terminal-workspace-v1`: 탭 순서, 탭/창 레이아웃, `isDarkMode`, `fontScale`, `newsTitleFontSize`, `newsSummaryFontSize`, `linkedTicker`
+- `data-control-active-tab`: DataControl Settings 탭 상태
+
 저장되지 않는 것:
 
 - saved searches는 component state만 사용한다
-- 다크 모드 저장 없음
-
-저장되는 것:
-
-- `finnhub-news-ui-state`: `visibleCols`, `displayMode`, `sourceTypeFilter`, `searchQuery`
-- `terminal-workspace-v1`: 탭 순서, 탭/창 레이아웃, `fontScale`, `newsTitleFontSize`, `newsSummaryFontSize`
+- `nextCursor`, 누적 로드 페이지, in-flight loading 상태는 저장하지 않는다
 
 ### Finnhub News 창이 기대하는 뉴스 응답 컬럼
 
@@ -322,6 +373,12 @@ localStorage 사용:
 - `[][][]keywords[][][]`
 - `[][][]keywordsStatus[][][]`
 - `[][][]industry[][][]`
+- `[][][]score[][][]`
+- `[][][]scoreEvidence[][][]`
+- `[][][]analysisStatus[][][]`
+- `[][][]sentimentBullishPct[][][]`
+- `[][][]sentimentBearishPct[][][]`
+- `[][][]companyNewsScore[][][]`
 
 렌더 규칙:
 
@@ -329,6 +386,8 @@ localStorage 사용:
 - publisher가 없으면 빈 값
 - change 값이 `null`이면 `-`
 - industry가 없으면 비어 보일 수 있음
+- score가 `null`이면 빈 셀
+- sentiment 파생: `sentimentBullishPct > 0.6` → Bullish, `< 0.4` → Bearish, else Neutral
 
 ## Data Control Window
 
@@ -496,6 +555,10 @@ API:
 - `GET /api/jobs/:jobId`
 - `GET /api/tickers`
 - `POST /api/tickers/add`
+- `GET /api/bookmarks/folders`
+- `POST /api/bookmarks/folders`
+- `POST /api/bookmarks/items`
+- `DELETE /api/bookmarks/items`
 
 ## 현재 구현 기준의 저장/상태 성격
 
@@ -524,6 +587,6 @@ API:
 
 - active window 중 backend와 완전히 맞물려 있는 것은 `Finnhub News`, `Default Ticker`, `Data Control` 중심이다.
 - `CalendarWindow`와 `WatchlistWindow`는 UI만 있고 운영 데이터와 연결되어 있지 않다.
-- `keywords`는 backend 응답으로 내려올 수 있지만 현재 `FinnhubNewsWindow`의 기본 컬럼 배열에는 포함되지 않는다.
+- `keywords`는 backend 응답으로 내려오고 `DEFAULT_COLUMNS`에 포함되어 있으며 컬럼 매뉴에서 표시/숨김 가능하다. 단 기본 숨김 상태다.
 - `DataControlWindow`의 calendar 섹션은 backend가 `jobId`를 돌려준다고 가정하는 UI지만, 실제 backend는 현재 즉시 결과 응답형이다.
 - `BraveNewsWindow`는 사실상 보관 파일에 가깝다. 새 작업은 여기에 붙이지 않는 편이 안전하다.

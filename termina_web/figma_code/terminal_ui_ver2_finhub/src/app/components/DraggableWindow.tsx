@@ -45,9 +45,13 @@ export function DraggableWindow({
   const [isMaximized, setIsMaximized] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-  const [position, setPosition] = useState({ 
-    x: window.position?.left || 20, 
-    y: window.position?.top || 20 
+  const [position, setPosition] = useState(() => {
+    const x = window.position?.left || 20;
+    const y = window.position?.top || 20;
+    // Clamp to viewport so windows aren't restored off-screen
+    const maxX = Math.max(0, globalThis.innerWidth - 100);
+    const maxY = Math.max(0, globalThis.innerHeight - 50);
+    return { x: Math.min(x, maxX), y: Math.min(y, maxY) };
   });
   const [size, setSize] = useState({
     width: window.position?.width || 600,

@@ -612,16 +612,16 @@ npm run build
 사용자 확인 필요: 예
 ```
 
-#### ⏳ Step 3 — Workspace state persistence 구현
+#### ✅ Step 3 — Workspace state persistence 구현
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 3-1 | 앱 셸의 tabs/activeTab/theme/linkedTicker 저장 구조 설계 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/App.tsx` | 새 localStorage payload 확인 | ⏳ |
-| 3-2 | 창 배치(position/size/title/type/linkId) 저장/복원 구현 | `App.tsx`, `DraggableWindow.tsx` 관련 파일 | 재실행 후 복원 확인 | ⏳ |
-| 3-3 | 탭 전환 후 탭별 window state 유지 확인 및 보강 | `App.tsx` 및 창 컴포넌트 state wiring | 탭 왕복 테스트 | ⏳ |
-| 3-4 | 창별 중요 UI state(컬럼/필터/검색/active Settings tab) 저장 범위 반영 | `FinnhubNewsWindow.tsx`, `DataControlWindow.tsx` 등 | 창 재오픈 후 상태 복원 확인 | ⏳ |
-| 3-5 | storage versioning / fallback reset 로직 추가 | app shell 공용 유틸 | 깨진 payload 복구 확인 | ⏳ |
-| 3-6 | 북마크 view 상태와 마지막 선택 북마크 폴더 복원 범위 반영 | `App.tsx`, `FinnhubNewsWindow.tsx` | 재실행 후 북마크 뷰 상태 확인 | ⬜ |
+| 3-1 | 앱 셸의 tabs/activeTab/theme/linkedTicker 저장 구조 설계 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/App.tsx` | 새 localStorage payload 확인 | ✅ |
+| 3-2 | 창 배치(position/size/title/type/linkId) 저장/복원 구현 | `App.tsx`, `DraggableWindow.tsx` 관련 파일 | 재실행 후 복원 확인 | ✅ |
+| 3-3 | 탭 전환 후 탭별 window state 유지 확인 및 보강 | `App.tsx` 및 창 컴포넌트 state wiring | 탭 왕복 테스트 | ✅ |
+| 3-4 | 창별 중요 UI state(컬럼/필터/검색/active Settings tab) 저장 범위 반영 | `FinnhubNewsWindow.tsx`, `DataControlWindow.tsx` 등 | 창 재오픈 후 상태 복원 확인 | ✅ |
+| 3-5 | storage versioning / fallback reset 로직 추가 | app shell 공용 유틸 | 깨진 payload 복구 확인 | ✅ |
+| 3-6 | 북마크 view 상태와 마지막 선택 북마크 폴더 복원 범위 반영 | `App.tsx`, `FinnhubNewsWindow.tsx` | 재실행 후 북마크 뷰 상태 확인 | ✅ |
 
 3-1 목적: 앱 전체 복원의 기준 payload를 만든다.
 3-1 설명: localStorage key, version, schema를 정한다.
@@ -670,14 +670,14 @@ npm run build
 사용자 확인 필요: 예
 ```
 
-#### ⬜ Step 4 — 통합 검증 / 문서 동기화 / 운영 가드레일
+#### ✅ Step 4 — 통합 검증 / 문서 동기화 / 운영 가드레일
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 4-1 | backend/frontend prompt 문서를 실제 구현과 동기화 | `terminal/backend_prompt.md`, `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md` | 문서 diff 확인 | ⬜ |
-| 4-2 | score/score evidence/keywords 기본 빈 상태와 실패 로그 정책 정리 | 관련 prompt 및 plan 리비전 | 실패 케이스 확인 | ⬜ |
-| 4-3 | AI analysis 삭제 감지 테스트와 end-to-end 수동 검증 체크리스트 정리 | plan 또는 test 문서 | 체크리스트 실행 | ⬜ |
-| 4-4 | 북마크 폴더/우클릭 저장/Bookmark view 흐름 문서화와 E2E 체크리스트 추가 | 관련 prompt 및 plan 리비전 | 북마크 시나리오 점검 | ⬜ |
+| 4-1 | backend/frontend prompt 문서를 실제 구현과 동기화 | `terminal/backend_prompt.md`, `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md` | 문서 diff 확인 | ✅ |
+| 4-2 | score/score evidence/keywords 기본 빈 상태와 실패 로그 정책 정리 | 관련 prompt 및 plan 리비전 | 실패 케이스 확인 | ✅ |
+| 4-3 | AI analysis 삭제 감지 테스트와 end-to-end 수동 검증 체크리스트 정리 | plan 또는 test 문서 | 체크리스트 실행 | ✅ |
+| 4-4 | 북마크 폴더/우클릭 저장/Bookmark view 흐름 문서화와 E2E 체크리스트 추가 | 관련 prompt 및 plan 리비전 | 북마크 시나리오 점검 | ✅ |
 
 4-1 목적: 코드와 문서가 다시 벌어지지 않게 한다.
 4-1 설명: 구현 후 prompt/spec 문서를 최신화한다.
@@ -705,21 +705,60 @@ npm run build
 
 검증 훅:
 ```bash
-cd terminal
+cd terminal/backend
 npm run build
 npm run test
+cd ../../termina_web/figma_code/terminal_ui_ver2_finhub
+npm run build
 ```
 
 ```text
-수동 확인:
-- News 업데이트 후 AI analysis 전/후의 Score/Score Evidence/Keywords/Sentiment 컬럼 확인
-- 검색 시 DB 전체 대상 결과가 첫 500개 로드 후 하단 스크롤 자동 로드 또는 `Load more` 버튼으로 다음 500개씩 이어지는지 확인
-- 날짜를 비운 기본 상태에서 전체 검색되는지 확인
-- 날짜를 지정했을 때 기간 안의 결과만 나오는지 확인
-- 저장 후 `Score` 또는 `Score Evidence`를 지웠을 때 테스트 실패 확인
-- 앱 종료/재실행 후 상태 복원 확인
-- Data Control Settings에서 글자 크기 반영 확인
-- 북마크 폴더 생성 → 뉴스 우클릭 `Add bookmark` → `Bookmark view`에서 폴더 선택 → 해당 뉴스 표시 흐름 확인
+E2E 수동 검증 체크리스트 (1회 실행 순서):
+
+[뉴스 기본 조회]
+□ 1. 앱 시작 → News Feed 창에 최근 뉴스 500건 로드 확인
+□ 2. 하단 스크롤 → 자동으로 다음 500건 append 확인
+□ 3. "Load more" 버튼 클릭 → 같은 append 동작 확인
+
+[검색 기능]
+□ 4. 일반 keyword 검색 → 결과 재조회 확인
+□ 5. Ticker 전용 검색 → AAPL 입력 → AAPL 관련 뉴스만 표시 확인
+□ 6. 날짜 From/To 입력 → 해당 기간 뉴스만 표시 확인
+□ 7. 날짜 비움 → 전체 기간 검색 복원 확인
+
+[컬럼]
+□ 8. 컬럼 메뉴에서 Score, Score Evidence, Keywords, Sentiment를 켬 → 헤더에 표시
+□ 9. AI analysis 전이면 Score/ScoreEvidence 빈 셀 확인
+□ 10. Sentiment 셀에 Bullish/Bearish/Neutral 표시 확인 (sentiment snapshot 있을 때)
+
+[북마크]
+□ 11. Bookmark view 메뉴 열기 → "All news" 표시 확인
+□ 12. 뉴스 row 우클릭 → "Add bookmark" → 폴더가 없으면 빈 목록
+□ 13. (API direct) POST /api/bookmarks/folders {"name":"Test"} → 폴더 생성
+□ 14. 뉴스 row 우클릭 → "Add bookmark" → 생성한 폴더 선택 → 저장
+□ 15. Bookmark view → 해당 폴더 선택 → 북마크된 뉴스만 표시
+□ 16. "All news" 선택 → 전체 뉴스 복귀
+
+[Workspace persistence]
+□ 17. 탭 2개 생성, 각 탭 창 위치/크기 다르게 배치
+□ 18. 다크 모드 전환, 검색어 입력
+□ 19. 브라우저 새로고침 → 마지막 탭/창 배치/다크모드/검색어 복원 확인
+□ 20. 탭 A → 탭 B → 탭 A 왕복 → 이전 상태 유지 확인
+□ 21. Settings에서 title/summary 글자 크기 변경 → 적용 확인 → 새로고침 후 유지 확인
+□ 22. Bookmark view에서 폴더 선택 → 새로고침 → 같은 폴더 view 복원 확인
+
+[삭제 감지 (backend)]
+□ 23. npm run test → aiAnalysisRepository.test.ts 8개 pass 확인
+     - score null FAIL
+     - score_evidence null FAIL
+     - empty keywords WARN
+     - not_started 미오탐
+□ 24. GET /api/news/ai-analysis/validate → 무결성 리포트 확인
+
+[북마크 vs saved view 구분]
+□ 25. 북마크: 개별 뉴스 row를 폴더에 저장 (POST /api/bookmarks/items)
+□ 26. Saved view: 검색 조건 세트 저장 (POST /api/news/saved-views)
+     → 두 기능이 UI에서 혼동되지 않는지 확인
 
 사용자 확인 필요: 예
 ```
@@ -780,18 +819,18 @@ Legend
 ✅ 0-4 persistence 범위 확정
    |
    v
-⏳ 3-1 workspace state schema
-⏳ 3-2 창 배치 저장/복원
-⏳ 3-3 탭 왕복 상태 유지
-⏳ 3-4 창 내부 UI state 저장
-⏳ 3-5 storage version/fallback
-⬜ 3-6 bookmark view 상태 복원
+✅ 3-1 workspace state schema
+✅ 3-2 창 배치 저장/복원
+✅ 3-3 탭 왕복 상태 유지
+✅ 3-4 창 내부 UI state 저장
+✅ 3-5 storage version/fallback
+✅ 3-6 bookmark view 상태 복원
 
 [Track D: 마감]
-⬜ 4-1 prompt 문서 동기화
-⬜ 4-2 empty/lost/null 정책 정리
-⬜ 4-3 삭제 감지 + E2E 체크리스트 정리
-⬜ 4-4 bookmark 문서/체크리스트 정리
+✅ 4-1 prompt 문서 동기화
+✅ 4-2 empty/lost/null 정책 정리
+✅ 4-3 삭제 감지 + E2E 체크리스트 정리
+✅ 4-4 bookmark 문서/체크리스트 정리
 
 ================ BLOCKER ================
 Track A의 선행 결정 차단은 해소되었다.
