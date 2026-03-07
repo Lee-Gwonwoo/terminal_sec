@@ -1,643 +1,738 @@
-# Backend Prompt (terminal/backend)
+# Backend Prompt
 
-## EN
+## 목적
+이 문서는 `terminal/backend/`의 현재 구현을 기준으로 한 작업용 프롬프트/스펙이다. plan 문서나 별도 설명 없이 이 문서만 읽어도, 백엔드가 지금 무엇을 저장하고 어떤 API를 노출하며 어떤 제약을 가지는지 바로 파악할 수 있어야 한다.
 
-### Purpose
-This document is a working prompt/spec for the Node/Express/TypeScript backend located under `terminal/backend/`.
+현재 백엔드의 중심 역할은 아래 5가지다.
 
-Primary focus in this repo iteration:
-- Persist news items in SQLite.
-- Provide a filterable, cursor-paginated `GET /api/news` feed.
-- Support importing historical news from EODHD into SQLite via `POST /api/news/pull-eodhd`.
-- Stream newly inserted items via SSE (`GET /api/news/stream`).
+1. Finnhub, EODHD, IBKR에서 가져온 데이터를 SQLite와 OHLC DB에 저장한다.
+2. 저장된 뉴스를 `GET /api/news`로 조회 가능하게 만든다.
+3. 장시간 작업은 background job으로 실행하고 `GET /api/jobs/:jobId`로 진행 상황과 로그를 반환한다.
+4. 뉴스 full text와 뉴스 이후 가격 변화율(change metrics)을 후처리로 계산해 다시 저장한다.
+5. CSV 티커 목록, watchlist, saved view, alerts, calendar 데이터를 API로 관리한다.
 
-Constraints and expectations:
-- Do not add mock news generation.
-- Do not log secrets (especially the EODHD token).
-- Keep API responses stable unless explicitly requested.
-- Prefer correctness and debuggability over cleverness.
+## 현재 구현 상태 요약
 
-### How to run (dev)
-From `terminal/backend/`:
+- 뉴스 주 저장소는 `terminal/backend/backend/data/app.db` 이다.
+- Finnhub API 키는 서버 시작 시 필수다. 키가 없으면 서버가 기동되지 않는다.
+- EODHD 토큰은 `POST /api/news/pull-eodhd` 호출 시에만 필요하다.
+- Finnhub 뉴스 pull, full text 추출, OHLC 업데이트, 뉴스 change 재계산은 모두 background job으로 실행된다.
+- `GET /api/news`는 `news_items` 본문만 읽는 것이 아니라 `news_change_metrics`, `news_fulltext`, industry lookup 결과를 join/병합해서 내려준다.
+- industry 값은 DB 컬럼이 아니라, 가장 최근 `tradigview_screener/original_data/watch lists2*.csv`에서 읽어온 ticker → industry 매핑을 응답 시점에 붙인다.
+- full text 추출기는 현재 `NASDAQ`, `TMX`, `FINNHUB` 3가지 publisher 흐름만 구체 처리한다.
+- mock calendar 생성기는 이미 제거되어 startup 시 자동 mock insert는 더 이상 하지 않는다.
+- `news_change_metrics` 테이블은 현재 코드상 서버 시작 때마다 `DROP TABLE IF EXISTS` 후 재생성된다. 즉, change metric 데이터는 서버 재시작 시 초기화된다.
+- job manager는 메모리 기반이다. 서버 재시작 시 job 상태와 로그는 유지되지 않는다.
 
-1) Install deps
+## 실행과 환경
+
+`terminal/backend/`에서 실행한다.
+
 ```bash
 npm install
-```
-
-2) Start in watch mode
-```bash
 npm run dev
 ```
 
-Backend defaults:
-- Port: `8080` (env `PORT`)
-- SQLite: `./backend/data/app.db` (env `SQLITE_PATH`)
-- CORS origin: `http://localhost:5173` (env `FRONTEND_ORIGIN`)
+배포/검증용 스크립트:
 
-Environment loading:
-- `src/config.ts` calls `dotenv.config({ path: "../.env" })` then `dotenv.config()`.
-  - That means a `terminal/.env` (one folder above `terminal/backend`) is loaded first if present.
-
-### Where the EODHD token lives
-The EODHD token is read from the repo root file:
-
-- `EODHD/API TOKEN`
-
-The backend resolves repo root by walking up from `src/services/eodhdNewsProvider.ts` until it finds `EODHD/API TOKEN`.
-
-Failure modes:
-- Missing token file → request fails with a 400 `{error: "EODHD token file not found at ..."}`.
-- Empty token file → request fails with a 400 `{error: "EODHD token file is empty"}`.
-
-### Where the Finnhub API key lives
-The Finnhub API key is required for the backend to start.
-
-Lookup order (see `terminal/backend/src/config.ts`):
-1. Environment variable `FINNHUB_API_KEY`
-2. File fallback at repo root: `finhub/finhub_api_key/finhub_api_key`
-
-Failure modes:
-- Missing key → backend throws on startup with an error like:
-  - `FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/finhub_api_key/finhub_api_key`
-
-Security note:
-- Do not log or commit the API key.
-
-### Data model (SQLite)
-DB init and schema live in `src/db.ts`.
-
-Key tables for news:
-- `news_items`
-  - Base columns: `id`, `published_at`, `source`, `publisher`, `source_type`, `title`, `body`, `url`, `tickers_csv`, `tags_csv`, `created_at`
-  - Change% columns (optional, computed post-ingest):
-    - `ohlc_ticker`, `ohlc_date`, `change_1d_pct`, `change_from_open_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct`, `change_computed_at`
-  - Uniqueness: `UNIQUE (source, url)`
-  - Index: `idx_news_items_published` on `(published_at DESC, id DESC)`
-
-Key table for update tracking:
-- `update_status`
-  - Tracks: last successful time and details for ingestion/update actions.
-  - Known keys (always returned by `GET /api/updates/status`): `tickers_csv`, `finhub_news`, `ibkr_calendar`, `ibkr_ohlc_1d`.
-
-Deduplication strategy:
-- Inserts use `INSERT OR IGNORE`.
-- A duplicate is defined as same `(source, url)`.
-
-### News API (read)
-
-#### GET /api/news
-Cursor pagination and filtering are implemented in `src/services/newsRepository.ts`.
-
-Supported query params (see `NewsQuery` in `src/types.ts`):
-- `keyword`: case-insensitive substring match over `LOWER(title || ' ' || body)`
-- `tickers`: CSV string, ex `tickers=TSLA,NVDA`
-  - Stored in DB as an envelope like `,TSLA,NVDA,` and filtered via `tickers_csv LIKE '%,TSLA,%'`.
-- `sources`: filters `source_type IN (...)`
-  - Alias: `source_type` is also accepted as a query param (same meaning).
-- `source_names`: filters `source IN (...)`
-- `tags`: similar envelope strategy (`tags_csv LIKE '%,earnings,%'`)
-- `from`: published_at >= from
-- `to`: published_at <= to
-- `limit`: requested page size
-- `cursor`: base64 of `published_at|id` from the last item of the previous page
-
-Cursor semantics:
-- Sort order is `published_at DESC, id DESC`.
-- When a cursor is provided, the query adds:
-  - `(published_at < cursor.publishedAt OR (published_at = cursor.publishedAt AND id < cursor.id))`
-
-Server-side limit policy (important):
-- If `limit` is missing/invalid → default requested limit is 200.
-- The backend caps the effective limit based on date-range width:
-  - range <= 7 days → max 200
-  - range <= 31 days → max 100
-  - range > 31 days → max 50
-- Absolute hard clamp is always 1..200.
-
-Response shape:
-```json
-{ "items": [/* NewsItem[] */], "nextCursor": "..." }
+```bash
+npm run build
+npm run test
 ```
 
-Important field semantics:
-- `source`: provider label, e.g. `FINNHUB`
-- `publisher`: original article site derived from URL when available, e.g. `NASDAQ`, `TMX`, `FINNHUB`
+기본 환경값:
 
-`nextCursor` is only present when there are more rows.
+- 포트: `8080` (`PORT`)
+- 앱 DB 경로: `./backend/data/app.db` (`SQLITE_PATH`)
+- 허용 프론트 origin: `http://localhost:5174` (`FRONTEND_ORIGIN`)
 
-#### GET /api/news/:id
-Loads a single row by ID.
+환경 변수 로딩 순서:
 
-### News API (import from EODHD)
+1. `dotenv.config({ path: "../.env" })`
+2. `dotenv.config()`
 
-#### POST /api/news/pull-eodhd
-Route lives in `src/server.ts` and validates input with Zod.
+즉 `terminal/.env`가 있으면 먼저 읽고, 그 다음 현재 작업 디렉터리 기준 `.env`를 추가로 읽는다.
 
-Two mutually exclusive modes (exactly one):
-- `{ "date": "YYYY-MM-DD" }`
-- `{ "from": "YYYY-MM-DD", "to": "YYYY-MM-DD" }`
+### Finnhub API 키
 
-Other fields:
-- `symbol` (string, default `"QQQ.US"`)
-  - If empty string, upstream query omits `s=` and pulls a “global feed” for the date range.
-- `limit` (int 1..200, default 200)
-- `offset` (int >= 0, default 0) — only meaningful when `fetch_all=false`
-- `fetch_all` (boolean, default false)
+조회 순서:
 
-Behavior:
-- Calls EODHD upstream via `src/services/eodhdNewsProvider.ts`.
-- Maps upstream records into a normalized shape (`publishedAt`, `source`, `sourceType`, `title`, `body`, `url`, `providerTickers`, `tags`).
-- Inserts into SQLite with DB-level dedupe (`UNIQUE(source,url)` + `INSERT OR IGNORE`).
-- For each newly inserted item:
-  - publishes to SSE stream via `StreamHub.publishNews(inserted)`.
+1. 환경 변수 `FINNHUB_API_KEY`
+2. 레포 루트의 `finhub/finhub_api_key/finhub_api_key`
 
-Response:
+없으면 서버가 아래 형태의 오류로 시작 실패한다.
+
+```text
+FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/finhub_api_key/finhub_api_key
+```
+
+### EODHD 토큰
+
+`POST /api/news/pull-eodhd`는 레포 루트의 `EODHD/API TOKEN` 파일을 읽는다.
+
+## 저장 구조
+
+### 앱 DB
+
+경로: `terminal/backend/backend/data/app.db`
+
+주요 테이블:
+
+#### `news_items`
+컬럼:
+
+- `[][][]id[][][]`
+- `[][][]published_at[][][]`
+- `[][][]source[][][]`
+- `[][][]publisher[][][]`
+- `[][][]source_type[][][]`
+- `[][][]title[][][]`
+- `[][][]body[][][]`
+- `[][][]url[][][]`
+- `[][][]tickers_csv[][][]`
+- `[][][]tags_csv[][][]`
+- `[][][]created_at[][][]`
+- `[][][]ohlc_ticker[][][]`
+- `[][][]ohlc_date[][][]`
+- `[][][]change_1d_pct[][][]`
+- `[][][]change_from_open_pct[][][]`
+- `[][][]change_7d_pct[][][]`
+- `[][][]change_14d_pct[][][]`
+- `[][][]change_30d_pct[][][]`
+- `[][][]change_computed_at[][][]`
+
+제약:
+
+- `UNIQUE (source, url)`
+- 인덱스: `(published_at DESC, id DESC)`
+
+주의:
+
+- change 관련 컬럼은 여전히 테이블에 남아 있지만, 현재 `GET /api/news`는 실질적으로 `news_change_metrics`에서 값을 읽어 join한다.
+
+#### `news_change_metrics`
+컬럼:
+
+- `[][][]news_id[][][]`
+- `[][][]metric_key[][][]`
+- `[][][]value_pct[][][]`
+- `[][][]ohlc_ticker[][][]`
+- `[][][]reference_date[][][]`
+- `[][][]target_date[][][]`
+- `[][][]forward_trading_days[][][]`
+- `[][][]calc_version[][][]`
+- `[][][]computed_at[][][]`
+
+기본키:
+
+- `(news_id, metric_key)`
+
+표준 metric key:
+
+- `[][][]change_from_open_pct[][][]`
+- `[][][]change_1d_pct[][][]`
+- `[][][]change_7d_pct[][][]`
+- `[][][]change_14d_pct[][][]`
+- `[][][]change_30d_pct[][][]`
+
+운영적 정의:
+
+- `change_from_open_pct`: 뉴스 기준일 시가 → 뉴스 기준일 종가
+- `change_1d_pct`: 뉴스 기준일 종가 → 1거래일 후 종가
+- `change_7d_pct`: 뉴스 기준일 종가 → 5거래일 후 종가
+- `change_14d_pct`: 뉴스 기준일 종가 → 10거래일 후 종가
+- `change_30d_pct`: 뉴스 기준일 종가 → 22거래일 후 종가
+
+주의:
+
+- 코드 주석에는 “30d = 22 trading days”라고 되어 있다.
+- 테이블은 startup 때 항상 재생성된다.
+
+#### `news_fulltext`
+컬럼:
+
+- `[][][]news_id[][][]`
+- `[][][]full_text[][][]`
+- `[][][]extraction_status[][][]`
+- `[][][]extraction_note[][][]`
+- `[][][]word_count[][][]`
+- `[][][]extracted_at[][][]`
+- `[][][]keywords_json[][][]`
+- `[][][]keywords_status[][][]`
+- `[][][]keywords_updated_at[][][]`
+
+의미:
+
+- `keywords_json`은 후속 AI keyword 분석 결과 저장용이다.
+- 현재 backend는 keyword를 직접 생성하지 않는다.
+- `getUnextractedNewsIds()`는 `news_fulltext` row 자체가 없는 뉴스만 대상으로 삼는다. 즉 한 번 `failed`/`skipped` row가 생기면, 현재 구현상 같은 row를 자동 재시도하지 않는다.
+
+#### `calendar_events`
+컬럼:
+
+- `[][][]id[][][]`
+- `[][][]event_type[][][]`
+- `[][][]ticker[][][]`
+- `[][][]title[][][]`
+- `[][][]event_at[][][]`
+- `[][][]meta_json[][][]`
+- `[][][]source[][][]`
+- `[][][]unique_key[][][]`
+- `[][][]created_at[][][]`
+
+제약:
+
+- `UNIQUE (event_type, unique_key)` 인덱스 존재
+
+#### `update_status`
+컬럼:
+
+- `[][][]source_key[][][]`
+- `[][][]last_success_at[][][]`
+- `[][][]details_json[][][]`
+- `[][][]updated_at[][][]`
+
+항상 응답에 보장되는 기본 key:
+
+- `[][][]tickers_csv[][][]`
+- `[][][]finhub_news[][][]`
+- `[][][]ibkr_calendar[][][]`
+- `[][][]ibkr_ohlc_1d[][][]`
+
+추가 key:
+
+- `news_change_recent`, `news_change_custom` 같은 값은 DB에 row가 생기면 응답에 함께 포함된다.
+
+#### 기타 테이블
+
+- `news_saved_views`
+- `watchlists`
+- `watchlist_items`
+- `alert_rules`
+- `users`
+
+### OHLC DB
+
+경로: `OHLC_data/ohlc_1d_watchlist.sqlite`
+
+주 테이블:
+
+- `[][][]ohlc_1d[][][]`
+  - 기본 컬럼: `Symbol`, `Datetime`, `Open`, `High`, `Low`, `Close`, `Volume`
+  - symbol/date 기준 unique upsert
+
+## 뉴스 조회 API
+
+### `GET /api/news`
+
+지원 query:
+
+- `keyword`
+- `tickers=TSLA,NVDA`
+- `sources=company_news,press_release`
+- `source_type=company_news,press_release` (`sources`의 alias)
+- `source_names=FINNHUB,EODHD`
+- `tags=earnings,macro`
+- `from`
+- `to`
+- `limit`
+- `cursor`
+
+필터 동작:
+
+- `keyword`: `LOWER(title || ' ' || body)` substring match
+- `tickers`: `tickers_csv LIKE '%,TICKER,%'`
+- `sources`: `news_items.source_type IN (...)`
+- `source_names`: `news_items.source IN (...)`
+- `tags`: `tags_csv LIKE '%,tag,%'`
+- `cursor`: 정렬 `(published_at DESC, id DESC)` 기준 base64 커서
+
+limit 정책:
+
+- 기본 요청값: `200`
+- hard clamp: `1..200`
+- `from/to` 범위가 있을 때 추가 cap 적용
+  - 7일 이하: 최대 200
+  - 31일 이하: 최대 100
+  - 32일 이상: 최대 50
+
+응답 형식:
+
 ```json
 {
-  "symbol": "",
-  "from": "2026-02-15",
-  "to": "2026-02-19",
-  "offset": 0,
-  "nextOffset": 200,
-  "done": false,
-  "fetched": 200,
-  "inserted": 180,
-  "truncated": false
+  "items": [
+    {
+      "id": "...",
+      "published_at": "2026-03-06T12:34:56.000Z",
+      "source": "FINNHUB",
+      "publisher": "NASDAQ",
+      "source_type": "press_release",
+      "title": "...",
+      "body": "...",
+      "url": "...",
+      "tickers": ["AAPL"],
+      "tags": [],
+      "created_at": "...",
+      "ohlc_ticker": "AAPL",
+      "ohlc_date": "2026-03-07",
+      "change_1d_pct": 1.23,
+      "change_from_open_pct": -0.42,
+      "change_7d_pct": 3.11,
+      "change_14d_pct": null,
+      "change_30d_pct": null,
+      "change_computed_at": "...",
+      "hasFullText": true,
+      "keywords": ["earnings", "guidance"],
+      "keywordsStatus": "ready",
+      "industry": "Technology"
+    }
+  ],
+  "nextCursor": "..."
 }
 ```
 
-Notes:
-- When `fetch_all=true`, the backend loops pages internally (`pullEodhdNewsAll`) and does not return `offset/nextOffset/done`.
-- When `fetch_all=false`, `done` is inferred as `providerItems.length < limit`.
+뉴스 item 출력 컬럼:
 
-### Realtime (SSE)
+- `[][][]id[][][]`
+- `[][][]published_at[][][]`
+- `[][][]source[][][]`
+- `[][][]publisher[][][]`
+- `[][][]source_type[][][]`
+- `[][][]title[][][]`
+- `[][][]body[][][]`
+- `[][][]url[][][]`
+- `[][][]tickers[][][]`
+- `[][][]tags[][][]`
+- `[][][]created_at[][][]`
+- `[][][]ohlc_ticker[][][]`
+- `[][][]ohlc_date[][][]`
+- `[][][]change_1d_pct[][][]`
+- `[][][]change_from_open_pct[][][]`
+- `[][][]change_7d_pct[][][]`
+- `[][][]change_14d_pct[][][]`
+- `[][][]change_30d_pct[][][]`
+- `[][][]change_computed_at[][][]`
+- `[][][]hasFullText[][][]`
+- `[][][]keywords[][][]`
+- `[][][]keywordsStatus[][][]`
+- `[][][]industry[][][]`
 
-#### GET /api/news/stream
-Server-sent events endpoint.
-- Each connected client registers filters (same query params as `GET /api/news`).
-- When a new item is inserted (e.g., by EODHD pull or other ingestion paths), `StreamHub` checks `matchesNewsFilters(item, client.filters)` and only emits matching items.
-- Heartbeat is emitted every 20 seconds.
+### `GET /api/news/:id`
 
-Event payload format:
-```json
-{ "type": "news_item", "payload": { /* NewsItem */ } }
-```
+`GET /api/news`의 단일 row 버전이며, 같은 매핑 규칙을 사용한다.
 
-### Error handling
-The server has a single error handler that returns:
-```json
-{ "error": "<message>" }
-```
-with HTTP 400.
+### `GET /api/news/stream`
 
-### File map (news-related)
-- `src/server.ts` — routes, query parsing, SSE wiring, EODHD pull endpoint
-- `src/services/newsRepository.ts` — SQLite query builder, cursor encoding, limit policy, inserts
-- `src/services/eodhdNewsProvider.ts` — EODHD HTTP fetch + mapping + token resolution
-- `src/realtime/streamHub.ts` — SSE client registry, filter-aware publish, heartbeats
-- `src/types.ts` — `NewsItem`, `NewsQuery`
-- `src/db.ts` — schema and migrations
+SSE endpoint.
 
-### Change requests (how to ask for edits)
-When requesting changes to backend news ingestion/query behavior, specify:
-- Endpoint(s) and exact request/response changes.
-- Whether this is a breaking change for existing frontends.
-- Expected dedupe semantics (`(source,url)` today).
-- Range performance expectations (limits/caps) and the reason.
-- Whether SSE should emit new items for the change.
+- query filter는 `GET /api/news`와 동일 파서 사용
+- `StreamHub`가 client별 filter를 저장
+- heartbeat는 20초마다 발생
+- 새 뉴스가 insert될 때 filter를 만족하는 client에만 push
 
-If the request is about EODHD import, specify:
-- symbol mode: symbol-specific vs global feed (`symbol: ""`)
-- desired chunk size and expected total volume
-- whether to rely on `offset` (progressive pulling) or `fetch_all` (server loops)
+## 뉴스 적재 API
 
----
+### `POST /api/news/pull-finhub`
 
-### News API (import from Finnhub)
+요청 body:
 
-#### POST /api/news/pull-finhub
-Purpose:
-- Pull **company news** and **press releases** from Finnhub per ticker, dedupe into SQLite, and (optionally) merge Change% from the OHLC DB.
-
-Request body (Zod in `src/server.ts`):
 ```json
 {
   "csvPath": "tradigview_screener/original_data/watch lists2_2026-02-22.csv",
   "maxTickers": 0,
-  "mode": "recent",
+  "mode": "7d",
   "sourceType": "all",
-  "from": "YYYY-MM-DD",
-  "to": "YYYY-MM-DD"
+  "from": "2026-03-01",
+  "to": "2026-03-06"
 }
 ```
 
-Notes:
-- `csvPath` is optional (defaults to the watchlist CSV above).
-- `maxTickers` is optional. `0` or omission means **use all tickers in the CSV**. A positive value limits the ticker count.
-- `mode` is optional: `recent | entire`.
-  - `recent` = incremental pull. If data exists, resume from the last stored date for that `sourceType`; otherwise use the last 7 days.
-  - `entire` = adaptive backfill from 5 years ago by default (unless explicit `from` is provided).
-- `sourceType` is optional: `all | company_news | press_release | market_news`.
-- `market_news` uses Finnhub `/news?category=general` and is not ticker-scoped.
-- If reading the CSV fails, the server uses a small hard-coded ticker list fallback (AAPL/MSFT/TSLA/NVDA/AMD).
-- Entire mode uses adaptive date-range splitting to bypass Finnhub's per-request cap (~200 items).
-- Dedupe is DB-level: `UNIQUE(source,url)` + `INSERT OR IGNORE`.
-- The server logs the resolved scope at startup of a pull: `maxTickers=... → tickerList.length=...`.
-- Inserted items are published to SSE (`GET /api/news/stream`).
-- `market_news` pages older headlines through Finnhub `minId`, so reachable history is limited by the upstream `/news` endpoint rather than ticker date parameters.
+필드 의미:
 
-Response:
-```json
-{
-  "source": "FINNHUB",
-  "mode": "recent",
-  "sourceType": "all",
-  "tickerCount": 3,
-  "inserted": 42,
-  "skipped": 0,
-  "changeMerged": 0,
-  "details": {
-    "company_news": { "fetched": 41, "inserted": 41 },
-    "press_release": { "fetched": 1, "inserted": 1 },
-    "market_news": { "fetched": 100, "inserted": 100 }
-  }
-}
-```
-
-Filtering after ingest:
-- Use `GET /api/news?source_names=FINNHUB`.
-- Use `GET /api/news?source_names=FINNHUB&source_type=press_release` (or `sources=press_release`).
-
----
-
-### Ticker CSV API
-
-#### GET /api/tickers
-Reads tickers from a CSV file under the allowlisted root:
-- Allowed root: `tradigview_screener/original_data/`
-
-Query params:
-- `csvPath` (required) — repo-relative path under the allowlist.
-
-Response:
-```json
-{ "csvPath": "...", "tickers": ["AAPL", "MSFT"] }
-```
-
-#### POST /api/tickers/add
-Appends a new ticker into the CSV (atomic write + Windows lock retries).
-
-Request:
-```json
-{ "csvPath": "...", "ticker": "TSLA" }
-```
-
-Response:
-```json
-{ "csvPath": "...", "tickerAdded": "TSLA", "tickers": ["..."] }
-```
-
-This endpoint also updates `update_status` under key `tickers_csv`.
-
----
-
-### Update status API
-
-#### GET /api/updates/status
-Returns the last successful timestamp + details per source.
-
-Response shape:
-```json
-{
-  "sources": {
-    "tickers_csv": null,
-    "finhub_news": null,
-    "ibkr_calendar": null,
-    "ibkr_ohlc_1d": null
-  }
-}
-```
-
-The backend updates:
-- `tickers_csv` on `POST /api/tickers/add`
-- `finhub_news` on `POST /api/news/pull-finhub`
-
----
-
-## KO
-
-### 목적
-이 문서는 `terminal/backend/` 아래의 Node/Express/TypeScript 백엔드에 대한 “작업용 프롬프트/스펙”입니다.
-
-이 레포의 현재 단계에서 뉴스 관련 핵심 목표는 아래와 같습니다.
-- 뉴스 아이템을 SQLite에 저장
-- `GET /api/news`에서 필터 + 커서 페이지네이션으로 조회
-- `POST /api/news/pull-eodhd`로 EODHD 히스토리 뉴스를 SQLite로 적재
-- 새로 insert된 아이템을 SSE(`GET /api/news/stream`)로 스트리밍
-
-제약/원칙:
-- mock 뉴스 생성 기능을 추가하지 않기
-- 시크릿(특히 EODHD 토큰)을 로그로 남기지 않기
-- 명시 요청 없이는 API 응답을 깨는 변경을 하지 않기
-- “똑똑함”보다 정확성과 디버깅 용이성을 우선
-
-### 실행 방법 (dev)
-`terminal/backend/`에서:
-
-1) 의존성 설치
-```bash
-npm install
-```
-
-2) watch 모드 실행
-```bash
-npm run dev
-```
-
-기본 설정값:
-- Port: `8080` (환경변수 `PORT`)
-- SQLite 경로: `./backend/data/app.db` (환경변수 `SQLITE_PATH`)
-- CORS origin: `http://localhost:5173` (환경변수 `FRONTEND_ORIGIN`)
-
-환경변수 로딩:
-- `src/config.ts`는 `dotenv.config({ path: "../.env" })` 후 `dotenv.config()`를 수행합니다.
-  - 즉, `terminal/.env`(백엔드 폴더의 상위 폴더) 파일이 먼저 로딩됩니다.
-
-### EODHD 토큰 파일 위치
-EODHD 토큰은 레포 루트의 아래 파일에서 읽습니다.
-
-- `EODHD/API TOKEN`
-
-`src/services/eodhdNewsProvider.ts`가 자신의 위치에서 상위로 올라가며 `EODHD/API TOKEN`이 있는 폴더를 repo root로 판단합니다.
-
-자주 나는 오류:
-- 파일 없음 → 400 `{error: "EODHD token file not found at ..."}`
-- 파일은 있으나 빈 값 → 400 `{error: "EODHD token file is empty"}`
-
-### Finnhub API 키 위치
-Finnhub API 키는 **백엔드 기동에 필수**입니다.
-
-조회 순서(`terminal/backend/src/config.ts` 참고):
-1. 환경변수 `FINNHUB_API_KEY`
-2. 레포 루트 파일 fallback: `finhub/finhub_api_key/finhub_api_key`
-
-자주 나는 오류:
-- 키가 없으면 백엔드가 시작 시점에 에러를 던지며 종료합니다:
-  - `FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/finhub_api_key/finhub_api_key`
-
-보안 노트:
-- API 키는 로그로 남기지 말고 커밋하지 마세요.
-
-### 데이터 모델 (SQLite)
-스키마는 `src/db.ts`에 있습니다.
-
-뉴스 핵심 테이블:
-- `news_items`
-  - 기본 컬럼: `id`, `published_at`, `source`, `source_type`, `title`, `body`, `url`, `tickers_csv`, `tags_csv`, `created_at`
-  - Change% 컬럼(옵션, 적재 후 계산/병합):
-    - `ohlc_ticker`, `ohlc_date`, `change_1d_pct`, `change_from_open_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct`, `change_computed_at`
-  - 유니크: `UNIQUE (source, url)`
-  - 인덱스: `idx_news_items_published` on `(published_at DESC, id DESC)`
-
-업데이트 추적 테이블:
-- `update_status`
-  - 적재/업데이트 액션의 마지막 성공 시각과 details를 기록합니다.
-  - 알려진 키(`GET /api/updates/status`에서 항상 반환): `tickers_csv`, `finhub_news`, `ibkr_calendar`, `ibkr_ohlc_1d`
-
-중복 제거(dedupe) 방식:
-- insert는 `INSERT OR IGNORE`로 수행
-- 중복의 정의는 `(source, url)` 동일
-
-### 뉴스 API (조회)
-
-#### GET /api/news
-커서 페이지네이션과 필터는 `src/services/newsRepository.ts`에서 구현됩니다.
-
-지원 쿼리 파라미터(`src/types.ts`의 `NewsQuery` 참고):
-- `keyword`: `LOWER(title || ' ' || body)`에 대한 substring 검색
-- `tickers`: CSV 문자열, 예: `tickers=TSLA,NVDA`
-  - DB에는 `,TSLA,NVDA,` 같은 envelope 형태로 저장되고, `tickers_csv LIKE '%,TSLA,%'`로 필터링
-- `sources`: `source_type IN (...)`
-  - 별칭(alias): `source_type`도 동일한 의미로 지원합니다.
-- `source_names`: `source IN (...)`
-- `tags`: `tags_csv LIKE '%,earnings,%'` 방식
-- `from`: published_at >= from
-- `to`: published_at <= to
-- `limit`: 요청 페이지 크기
-- `cursor`: 이전 페이지 마지막 아이템의 `published_at|id`를 base64 인코딩한 값
-
-커서 동작:
-- 정렬은 `published_at DESC, id DESC`
-- cursor가 있을 때 아래 조건을 추가합니다.
-  - `(published_at < cursor.publishedAt OR (published_at = cursor.publishedAt AND id < cursor.id))`
-
-서버 측 limit 정책(중요):
-- `limit`이 없거나 비정상 → 기본 요청값 200
-- 날짜 범위 폭에 따라 최대치를 추가로 캡합니다.
-  - range <= 7일 → 최대 200
-  - range <= 31일 → 최대 100
-  - range > 31일 → 최대 50
-- 최종 하드 클램프는 항상 1..200
-
-응답 형태:
-```json
-{ "items": [/* NewsItem[] */], "nextCursor": "..." }
-```
-
-`nextCursor`는 다음 페이지가 있을 때만 내려갑니다.
-
-#### GET /api/news/:id
-ID로 단건 조회합니다.
-
-### 뉴스 API (EODHD 적재)
-
-#### POST /api/news/pull-eodhd
-라우트는 `src/server.ts`에 있고, Zod로 입력을 검증합니다.
-
-두 모드 중 하나만 허용(정확히 하나):
-- `{ "date": "YYYY-MM-DD" }`
-- `{ "from": "YYYY-MM-DD", "to": "YYYY-MM-DD" }`
-
-추가 필드:
-- `symbol` (기본값 `"QQQ.US"`)
-  - 빈 문자열이면 upstream 요청에서 `s=`를 생략해서 날짜 범위에 대한 “global feed”를 받습니다.
-- `limit` (1..200, 기본 200)
-- `offset` (0 이상, 기본 0) — `fetch_all=false`에서만 의미 있음
-- `fetch_all` (기본 false)
+- `csvPath`: 기본값은 `watch lists2_2026-02-22.csv`
+- `maxTickers=0`: CSV 전체 ticker 사용
+- `mode`: `7d | recent | custom`
+- `sourceType`: `all | company_news | press_release | market_news`
+- `custom`일 때만 `from/to` 사용
 
 동작:
-- `src/services/eodhdNewsProvider.ts`로 EODHD HTTP 요청
-- upstream 레코드를 내부 표준 형태로 매핑(`publishedAt`, `source`, `sourceType`, `title`, `body`, `url`, `providerTickers`, `tags`)
-- SQLite에 insert(`UNIQUE(source,url)` + `INSERT OR IGNORE`)로 DB 레벨 dedupe
-- 새로 insert된 아이템은 SSE로 publish
 
-응답 예시:
-```json
-{
-  "symbol": "",
-  "from": "2026-02-15",
-  "to": "2026-02-19",
-  "offset": 0,
-  "nextOffset": 200,
-  "done": false,
-  "fetched": 200,
-  "inserted": 180,
-  "truncated": false
-}
-```
-
-참고:
-- `fetch_all=true`이면 서버가 내부에서 페이지를 돌며 전부 가져오고(`pullEodhdNewsAll`), `offset/nextOffset/done`은 반환하지 않습니다.
-- `fetch_all=false`이면 `done = (providerItems.length < limit)`로 판단합니다.
-
-### 실시간(SSE)
-
-#### GET /api/news/stream
-서버 센트 이벤트 엔드포인트입니다.
-- 연결 시 클라이언트별 필터를 등록(쿼리 파라미터는 `GET /api/news`와 동일)
-- 새 뉴스가 insert될 때 `matchesNewsFilters(item, client.filters)`를 통과한 클라이언트에게만 푸시
-- 20초마다 heartbeat 전송
-
-이벤트 payload 형식:
-```json
-{ "type": "news_item", "payload": { /* NewsItem */ } }
-```
-
-### 에러 처리
-단일 에러 핸들러가 400으로 아래 형태를 반환합니다.
-```json
-{ "error": "<message>" }
-```
-
-### 파일 맵(뉴스 관련)
-- `src/server.ts` — 라우팅, 쿼리 파싱, SSE, EODHD pull 엔드포인트
-- `src/services/newsRepository.ts` — SQLite 조회/커서/limit 정책/insert
-- `src/services/eodhdNewsProvider.ts` — EODHD fetch + 매핑 + 토큰 찾기
-- `src/realtime/streamHub.ts` — SSE 클라이언트 관리, 필터 적용 publish, heartbeat
-- `src/types.ts` — `NewsItem`, `NewsQuery`
-- `src/db.ts` — 스키마/마이그레이션
-
-### 변경 요청 가이드(어떻게 요청하면 좋은지)
-백엔드 뉴스/적재 로직 변경을 요청할 때는 아래를 함께 적어주세요.
-- 어떤 엔드포인트를 어떻게 바꿀지(요청/응답까지)
-- 기존 프런트와의 호환성이 깨지는 변경인지
-- dedupe 기준(현재 `(source,url)`)을 바꿀지
-- 범위가 넓은 조회에서의 성능 기대치(limit/cap)와 그 이유
-- SSE가 새 아이템을 내보내야 하는지
-
-EODHD 적재 요청이면 아래도 명시해 주세요.
-- symbol 모드: 특정 심볼 vs global feed(`symbol: ""`)
-- chunk size/총량 기대
-- `offset` 기반 progressive pull을 쓸지, `fetch_all`로 서버가 내부 루프를 돌지
-
----
-
-### 뉴스 API (Finnhub 적재)
-
-#### POST /api/news/pull-finhub
-목적:
-- 티커별로 Finnhub에서 **company news**와 **press releases**를 수집하고, SQLite에 dedupe insert한 뒤, (가능하면) OHLC DB를 이용해 Change%를 병합합니다.
-
-요청 바디(`src/server.ts`의 Zod):
-```json
-{
-  "csvPath": "tradigview_screener/original_data/watch lists2_2026-02-22.csv",
-  "maxTickers": 0,
-  "mode": "recent",
-  "sourceType": "all",
-  "from": "YYYY-MM-DD",
-  "to": "YYYY-MM-DD"
-}
-```
-
-참고:
-- `csvPath`는 옵션이며 위 CSV가 기본값입니다.
-- `maxTickers`는 옵션입니다. `0` 또는 미전송이면 **CSV 전체 티커**를 사용합니다. 양수를 보내면 그 개수만큼 제한합니다.
-- `mode`는 옵션: `recent | entire`.
-  - `recent` = 증분 수집. 해당 `sourceType` 데이터가 이미 있으면 마지막 저장 날짜부터 재개하고, 없으면 최근 7일을 사용합니다.
-  - `entire` = 기본적으로 5년 전부터 adaptive backfill을 수행합니다(`from` 명시 시 그 값을 우선).
-- `sourceType`는 옵션: `all | company_news | press_release | market_news`.
-- `market_news`는 Finnhub `/news?category=general`을 사용하며 ticker 범위와 무관한 일반 시장 헤드라인입니다.
-- CSV 읽기에 실패하면 서버는 작은 하드코딩 티커 목록(AAPL/MSFT/TSLA/NVDA/AMD)을 fallback으로 사용합니다.
-- entire 모드는 Finnhub의 요청당 cap(~200건)를 우회하기 위해 adaptive date-range splitting을 사용합니다.
-- dedupe는 DB 레벨: `UNIQUE(source,url)` + `INSERT OR IGNORE`.
-- pull 시작 시 서버 로그에 실제 범위가 출력됩니다: `maxTickers=... → tickerList.length=...`.
-- 새로 insert된 아이템은 SSE(`GET /api/news/stream`)로 publish됩니다.
-- `market_news`는 Finnhub `minId` 페이지네이션으로 더 오래된 헤드라인을 따라가므로, 실제 도달 가능한 히스토리는 upstream `/news` 엔드포인트 보유 범위에 제한됩니다.
+1. CSV에서 ticker 목록을 읽는다.
+2. `recent`일 경우 ticker별 마지막 뉴스 시각(anchor map)을 읽는다.
+3. 즉시 `jobId`를 반환한다.
+4. background job에서 source type별 fetch를 수행한다.
+5. 새 row는 `INSERT OR IGNORE`로 저장한다.
+6. 신규 row만 SSE로 publish 한다.
+7. 마지막에 신규 뉴스에 대해 `mergeChangeForNewItems()`를 돌린다.
+8. `update_status.finhub_news`를 갱신한다.
 
 응답:
+
+```json
+{ "jobId": "..." }
+```
+
+background job 완료 시 `result` 예시:
+
 ```json
 {
   "source": "FINNHUB",
   "mode": "recent",
   "sourceType": "all",
-  "tickerCount": 3,
+  "tickerCount": 120,
   "inserted": 42,
-  "skipped": 0,
-  "changeMerged": 0,
+  "skipped": 10,
+  "changeMerged": 37,
   "details": {
-    "company_news": { "fetched": 41, "inserted": 41 },
-    "press_release": { "fetched": 1, "inserted": 1 },
-    "market_news": { "fetched": 100, "inserted": 100 }
+    "company_news": { "fetched": 30, "inserted": 22 },
+    "press_release": { "fetched": 15, "inserted": 10 },
+    "market_news": { "fetched": 20, "inserted": 10 }
   }
 }
 ```
 
-적재 후 조회/필터:
-- `GET /api/news?source_names=FINNHUB`
-- `GET /api/news?source_names=FINNHUB&source_type=press_release` (또는 `sources=press_release`)
+### `GET /api/news/pull-finhub/preflight`
 
----
+query:
 
-### Ticker CSV API
+- `sourceType`
+- `csvPath`
 
-#### GET /api/tickers
-allowlist 루트 아래의 CSV에서 티커를 읽습니다:
-- 허용 루트: `tradigview_screener/original_data/`
+용도:
 
-쿼리:
-- `csvPath` (필수) — allowlist 아래의 repo-relative 경로
+- `recent` 실행 전, 기존 뉴스가 전혀 없는 fallback ticker 수를 미리 보여준다.
 
 응답:
+
+```json
+{
+  "totalTickers": 200,
+  "fallbackCount": 15,
+  "fallbackTickers": ["AAPL", "TSLA"]
+}
+```
+
+### `POST /api/news/pull-eodhd`
+
+입력 모드 둘 중 하나만 허용:
+
+1. `{ "date": "YYYY-MM-DD" }`
+2. `{ "from": "YYYY-MM-DD", "to": "YYYY-MM-DD" }`
+
+추가 필드:
+
+- `symbol` 기본값: `QQQ.US`
+- `limit` 기본값: `200`
+- `offset` 기본값: `0`
+- `fetch_all` 기본값: `false`
+
+동작:
+
+- `fetch_all=false`면 offset 기반 한 번 호출
+- `fetch_all=true`면 서버 내부에서 반복 fetch
+- 저장은 `INSERT OR IGNORE`
+- 신규 row는 SSE publish
+
+응답 출력 컬럼:
+
+- `[][][]symbol[][][]`
+- `[][][]from[][][]`
+- `[][][]to[][][]`
+- `[][][]offset[][][]`
+- `[][][]nextOffset[][][]`
+- `[][][]done[][][]`
+- `[][][]fetched[][][]`
+- `[][][]inserted[][][]`
+- `[][][]truncated[][][]`
+
+## Full Text API
+
+### `POST /api/news/fulltext/update`
+
+요청 body:
+
+```json
+{ "sourceType": "all" }
+```
+
+현재 구현상 `sourceType`은 엄격 zod 검증이 없고 문자열 그대로 내려간다. 실제 조회 함수는 아래처럼 동작한다.
+
+- 생략 또는 `all`: 전체 미추출 뉴스
+- `company_news`, `press_release`, `market_news`: 해당 `news_items.source_type`만 대상
+
+사전 동작:
+
+- `backfillPublisher()`를 먼저 실행해 publisher 없는 기존 row를 보정한다.
+
+응답:
+
+```json
+{ "jobId": "...", "total": 123 }
+```
+
+### `GET /api/news/fulltext/:newsId`
+
+응답 출력 컬럼:
+
+- `[][][]newsId[][][]`
+- `[][][]fullText[][][]`
+- `[][][]extractionStatus[][][]`
+- `[][][]extractionNote[][][]`
+- `[][][]wordCount[][][]`
+- `[][][]extractedAt[][][]`
+- `[][][]keywords[][][]`
+- `[][][]keywordsStatus[][][]`
+
+### 추출기 규칙
+
+- `NASDAQ`: HTML fetch + cheerio 파싱
+- `TMX`: URL의 `newsid`를 추출해 `https://app-money.tmx.com/graphql` 호출
+- `FINNHUB`: 외부 기사 페이지가 아니라서 `skipped`
+- unknown publisher: `unavailable`
+
+재시도 정책:
+
+- 최대 10회
+- 기본 지연 500ms
+- 429/5xx/backoff 처리
+- fulltext batch는 non-FINNHUB publisher 사이에 400ms delay 추가
+
+## Change Metric API
+
+### `POST /api/news/change/update-recent`
+
+- body 없음
+- 최근 7일 뉴스 전체에 대해 표준 metric 재계산
+- 즉시 `jobId` 반환
+- 완료 시 `update_status.news_change_recent` 갱신
+
+### `POST /api/news/change/update-custom`
+
+요청 body:
+
+```json
+{ "from": "2026-03-01", "to": "2026-03-06" }
+```
+
+- 지정 기간 뉴스 전체에 대해 표준 metric 재계산
+- 즉시 `jobId` 반환
+- 완료 시 `update_status.news_change_custom` 갱신
+
+## Job API
+
+### `GET /api/jobs/:jobId`
+
+응답 출력 컬럼:
+
+- `[][][]id[][][]`
+- `[][][]status[][][]` (`running | done | failed`)
+- `[][][]progress[][][]`
+  - `[][][]completed[][][]`
+  - `[][][]total[][][]`
+  - `[][][]pct[][][]`
+- `[][][]logs[][][]`
+- `[][][]error[][][]`
+- `[][][]result[][][]`
+- `[][][]createdAt[][][]`
+- `[][][]updatedAt[][][]`
+
+주의:
+
+- 메모리 기반이므로 서버 재시작 시 사라진다.
+- 30분 cleanup 정책이 적용된다.
+
+## Ticker CSV API
+
+### `GET /api/tickers`
+
+query:
+
+- `csvPath` 필수
+
+응답:
+
 ```json
 { "csvPath": "...", "tickers": ["AAPL", "MSFT"] }
 ```
 
-#### POST /api/tickers/add
-CSV에 티커 1개를 추가합니다(원자적 write + Windows 락 재시도).
+### `POST /api/tickers/add`
 
-요청:
+요청 body:
+
 ```json
 { "csvPath": "...", "ticker": "TSLA" }
 ```
 
 응답:
+
 ```json
 { "csvPath": "...", "tickerAdded": "TSLA", "tickers": ["..."] }
 ```
 
-이 엔드포인트는 `update_status`의 `tickers_csv` 키를 업데이트합니다.
+보안/쓰기 정책:
 
----
+- `tradigview_screener/original_data/` 하위 `.csv`만 허용
+- path traversal 금지
+- ticker 정규식: `^[A-Z0-9.\-]{1,20}$`
+- atomic temp write + rename
+- Windows lock 대응 재시도 최대 10회
+- 성공 시 `update_status.tickers_csv` 갱신
 
-### 업데이트 상태 API
+## Calendar API
 
-#### GET /api/updates/status
-소스별 마지막 성공 시각과 details를 반환합니다.
+### `GET /api/calendar/types`
 
-응답 형태:
+캘린더 타입 설정을 반환한다.
+
+### `GET /api/calendar/events`
+
+지원 query:
+
+- `type`
+- `tickers`
+- `watchlist_id`
+- `from`
+- `to`
+- `time_of_day` (`BMO | AMC | Unknown`)
+- `region`
+- `sort` (`field:asc|desc`)
+- `cursor`
+- `limit`
+
+### `GET /api/calendar/events/export.csv`
+
+위와 같은 필터로 CSV export를 만든다.
+
+### `GET /api/calendar/events/:id`
+
+단일 event 조회.
+
+### `POST /api/ibkr/calendar/update`
+
+현재 구현은 synchronous response다. background job이 아니다.
+
+동작:
+
+1. `pullIbkrCalendar([])` 실행
+2. event upsert
+3. `mock_provider` row 삭제
+4. `update_status.ibkr_calendar` 갱신
+
+응답:
+
+```json
+{ "upserted": 10, "deletedMockRows": 5, "source": "IBKR" }
+```
+
+## OHLC API
+
+### `GET /api/ibkr/ohlc1d/status`
+
+응답 출력 컬럼:
+
+- `[][][]dbPath[][][]`
+- `[][][]overallMaxDate[][][]`
+- `[][][]lastSuccessAt[][][]`
+
+### `POST /api/ibkr/ohlc1d/update`
+
+요청 body:
+
+```json
+{ "csvPath": "tradigview_screener/original_data/watch lists2_2026-02-22.csv" }
+```
+
+동작:
+
+1. CSV에서 ticker 읽기
+2. 종목별 마지막 저장 일자 다음 날부터 오늘까지 OHLC fetch
+3. `ohlc_1d` upsert
+4. 파생 컬럼 계산
+5. 영향받은 ticker 관련 뉴스에 대해 change metric backfill
+6. `update_status.ibkr_ohlc_1d` 갱신
+
+응답:
+
+```json
+{ "jobId": "..." }
+```
+
+job 완료 result 예시:
+
 ```json
 {
-  "sources": {
-    "tickers_csv": null,
-    "finhub_news": null,
-    "ibkr_calendar": null,
-    "ibkr_ohlc_1d": null
-  }
+  "tickersRequested": 120,
+  "tickersUpdated": 118,
+  "tickersFailed": 2,
+  "totalRowsUpserted": 3400,
+  "overallMaxDateBefore": "2026-02-20",
+  "overallMaxDateAfter": "2026-03-06"
 }
 ```
 
-백엔드에서 업데이트하는 키:
-- `tickers_csv` — `POST /api/tickers/add`
-- `finhub_news` — `POST /api/news/pull-finhub`
+## Saved Views / Watchlists / Alerts API
+
+### Saved Views
+
+- `POST /api/news/saved-views`
+- `GET /api/news/saved-views`
+- `DELETE /api/news/saved-views/:id`
+
+### Watchlists
+
+- `GET /api/watchlists`
+- `POST /api/watchlists`
+- `DELETE /api/watchlists/:id`
+
+### Alerts
+
+- `GET /api/settings/alerts`
+- `POST /api/settings/alerts`
+
+alert tool enum:
+
+- `news`
+- `watchlists`
+- `calendar`
+
+methods enum:
+
+- `browser`
+- `sound`
+- `email`
+
+## 기타 API
+
+- `GET /healthz`
+- `GET /api/config`
+  - 출력: `[][][]realtime[][][]`, `[][][]pollingFallbackSeconds[][][]`, `[][][]demoUserId[][][]`
+
+## 파일 맵
+
+- `src/server.ts`: Express 엔트리, route 등록, background job 시작점
+- `src/db.ts`: app DB schema 생성과 migration
+- `src/config.ts`: env 로딩, Finnhub 키 확인
+- `src/services/newsRepository.ts`: 뉴스 조회, filter, cursor, insert, industry 병합
+- `src/services/finnhubNewsProvider.ts`: Finnhub fetch, recent/backfill 로직, publisher 보정
+- `src/services/eodhdNewsProvider.ts`: EODHD fetch
+- `src/services/newsChangeMerger.ts`: forward-looking change 계산
+- `src/services/fulltextRepository.ts`: fulltext persistence
+- `src/services/fulltextUpdateService.ts`: fulltext background orchestration
+- `src/services/fulltextExtractors.ts`: Nasdaq/TMX/Finnhub domain extractor
+- `src/services/tickerCsvService.ts`: allowlist CSV read/append
+- `src/services/calendarRepository.ts`: calendar query/export/upsert
+- `src/services/calendarIngestion.ts`: IBKR calendar fetch
+- `src/services/ohlcWatchlistRepository.ts`: OHLC DB read/write
+- `src/services/ibkrOhlc1dProvider.ts`: IBKR OHLC provider
+- `src/services/updateStatusRepository.ts`: update_status read/write
+- `src/services/jobManager.ts`: in-memory jobs
+- `src/realtime/streamHub.ts`: SSE client registry
+
+## 현재 한계와 주의점
+
+- `news_change_metrics`는 startup 시 매번 초기화된다.
+- full text는 row가 이미 생성된 뉴스에 대해 자동 재시도하지 않는다.
+- `POST /api/ibkr/calendar/update`는 background job이 아니라 즉시 처리형이다.
+- `GET /api/updates/status`의 기본 key 목록에는 `news_change_recent`, `news_change_custom`가 하드코딩되어 있지 않다. 다만 DB row가 생기면 extra key로 응답에 포함된다.
+- industry는 DB source of truth가 아니라 최신 `watch lists2*.csv` 파일 기반 lazy cache다.
+- job 상태는 영속 저장이 아니므로 운영 audit 용 로그 저장소로 간주하면 안 된다.

@@ -1,336 +1,500 @@
-# Figma Frontend Prompt (terminal_ui_ver2_finhub)
+# Figma Frontend Prompt
 
-## EN
+## 목적
+이 문서는 `termina_web/figma_code/terminal_ui_ver2_finhub/`의 현재 구현을 기준으로 한 프론트엔드 작업용 프롬프트/스펙이다. 별도 plan 문서 없이도 이 문서만 읽으면, 어떤 창이 실제 동작하고 어떤 창이 아직 목업/스텁인지, 어떤 백엔드 API를 어떤 방식으로 호출하는지 바로 알 수 있어야 한다.
 
-### Purpose
-This document is the working prompt/spec for the Figma-derived frontend under:
-- `termina_web/figma_code/terminal_ui_ver2_finhub/`
+## 현재 구현 상태 요약
 
-Primary goals (current repo iteration):
-- Provide a draggable, resizable, multi-tab “terminal” UI.
-- Render news from the backend SQLite feed (`GET /api/news`).
-- Provide a Finnhub-backed news feed window that can pull and persist news via the backend (`POST /api/news/pull-finhub`).
-- Provide a “Default Ticker” window that reads/appends tickers in a CSV via the backend (`GET /api/tickers`, `POST /api/tickers/add`).
+- 앱은 React + TypeScript + Vite 기반이다.
+- 창(window) 기반 데스크톱 스타일 UI이며, 각 창은 드래그/리사이즈/최대화/닫기를 지원한다.
+- 실제 API 연동이 살아 있는 주요 창은 `Finnhub News`, `Default Ticker`, `Data Control` 이다.
+- `News` 창은 EODHD 적재/조회 로직이 일부 연결되어 있지만 완성형은 아니다.
+- `Watchlist`, `Calendar` 창은 현재 mock data 기반이다.
+- `BraveNewsWindow.tsx` 파일은 남아 있지만 현재 `WindowType`에 연결되어 있지 않아 UI에서 열 수 없다.
+- API 호출 base는 빈 문자열 `""` 이고, dev 환경에서는 Vite proxy가 `/api`, `/healthz`를 `http://localhost:8080`으로 보낸다.
 
-Constraints:
-- Do not add mock/synthetic data generation unless explicitly requested.
-- Do not introduce new pages or flows beyond what is requested.
-- Keep Tailwind usage consistent (no new theme primitives).
+## 실행
 
-### Tech stack
-- React 18 + TypeScript (Vite)
-- Tailwind CSS
-- `re-resizable` (window resizing)
-- `react-window` (virtualized lists)
-- `lucide-react` (icons)
+프론트 디렉터리에서 실행한다.
 
-### How to run (dev)
-Prereqs:
-- Backend running at `http://localhost:8080`.
-
-From `termina_web/figma_code/terminal_ui_ver2_finhub/`:
-
-1) Install deps
 ```bash
 npm install
-```
-
-2) Start dev server
-```bash
 npm run dev
 ```
 
-### Important runtime note (API base URL)
-Some windows currently call the backend with a hard-coded base URL:
-- `http://localhost:8080`
+빌드:
 
-Files:
-- `src/app/components/FinnhubNewsWindow.tsx`
-- `src/app/components/DefaultTickerWindow.tsx`
+```bash
+npm run build
+```
 
-If you add a Vite proxy later, prefer switching these to `fetch('/api/...')` to avoid hard-coded ports.
-
-## App structure
-
-### Tabs + windows
-File: `src/app/App.tsx`
-
-- Maintains `tabs: TabData[]` and `activeTabId`.
-- New tabs are created via `AddTabModal` (checkbox selection of window types).
-- Windows are placed with a simple initial layout rule:
-  - 1 window: 800×600
-  - 2 windows: side-by-side
-  - 3+ windows: staggered
-
-Window titles:
-- `finhub-news` -> `News Feed: Finnhub API`
-- `default-ticker` -> `Default Ticker`
-
-### DraggableWindow wrapper
-File: `src/app/components/DraggableWindow.tsx`
-
-- Wraps content in a draggable + resizable container.
-- Renders the appropriate window content by `window.type`:
-  - `news` -> `NewsWindow`
-  - `finhub-news` -> `FinnhubNewsWindow`
-  - `default-ticker` -> `DefaultTickerWindow`
-  - `watchlist` -> `WatchlistWindow`
-  - `calendar` -> `CalendarWindow`
-
-### Window type definitions
-File: `src/app/types.ts`
-
-- `WindowType` includes: `news | watchlist | calendar | finhub-news | default-ticker`.
-
-## Windows
-
-### News (EODHD-backed feed via SQLite)
-File: `src/app/components/NewsWindow.tsx`
-
-- Reads from SQLite via backend `GET /api/news`.
-- Can trigger historical ingestion via backend `POST /api/news/pull-eodhd`.
-
-This window is expected to render **only persisted data** (not direct provider responses).
-
-### News Feed: Finnhub API
-File: `src/app/components/FinnhubNewsWindow.tsx`
-
-Responsibilities:
-- Fetch persisted Finnhub items from SQLite:
-  - `GET /api/news?source_names=FINNHUB&limit=200`
-- Filter by source type (company news vs press release vs market news):
-  - Uses `source_type=company_news|press_release|market_news`.
-- Trigger backend ingestion:
-  - Main Update button sends `POST /api/news/pull-finhub` with `{ mode: 'recent', sourceType: 'all' }`, then refreshes.
-  - Split-dropdown offers source-type specific actions for `all`, `company_news`, `press_release`, and `market_news` across `7d`, `recent`, and `custom` modes.
-
-Current window behavior:
-- Dedicated `Ticker` column between Date and Time.
-- Clicking a ticker badge sets the search box to that ticker (and also calls `onTickerClick` if provided).
-- `Columns` dropdown can show/hide columns without changing persisted data.
-- `Publisher` cell supports left-click open + right-click `Copy URL` context menu.
-- `Source` cell supports the same interactions but is hidden by default in the `Columns` dropdown state.
-- Update requests do **not** send `maxTickers`; backend default `0` means full CSV ticker scope.
-
-Change% display:
-- Reads optional fields returned by `GET /api/news`:
-  - `change_1d_pct`, `change_from_open_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct`
-- If the backend has no OHLC coverage for the news date, these fields are null and the UI shows `-`.
-
-UX/features intentionally kept from the previous virtualized feed:
-- Date grouping headers
-- `react-window` virtualization
-- Column drag-reorder, column resize, column sort
-- Display mode: Title Only vs Title + Body excerpt
-- Save/Load search settings (local UI state)
-
-Search behavior:
-- Search is **server-side**: typing in the search box sends `keyword=...` to `GET /api/news`, which runs `WHERE LOWER(title || ' ' || body) LIKE '%keyword%'` against the **entire DB**.
-- A 300ms debounce prevents excessive API calls while typing.
-- The backend returns up to 200 matching results; `react-window` virtualizes the render.
-
-### Default Ticker
-File: `src/app/components/DefaultTickerWindow.tsx`
-
-Responsibilities:
-- Read tickers from a CSV (repo-relative path) via backend:
-  - `GET /api/tickers?csvPath=...`
-- Append a ticker via backend:
-  - `POST /api/tickers/add` with `{ csvPath, ticker }`
-
-Backend security constraints (important):
-- The backend only allows CSV paths under `tradigview_screener/original_data/`.
-- Path traversal (`..`) is rejected.
-
-## Backend API contracts used by this frontend
-
-### Read news
-- `GET /api/news?source_names=FINNHUB&source_type=press_release&limit=200`
-- `GET /api/news?source_names=FINNHUB&source_type=market_news&limit=200`
-
-### Ingest Finnhub news
-- `POST /api/news/pull-finhub`
-  - Body: `{ csvPath?, maxTickers?, mode?, sourceType?, from?, to? }`
-  - Frontend currently sends only `{ mode, sourceType }`
-  - If `maxTickers` is omitted, backend default `0` = all tickers in the CSV
-
-### Read tickers from CSV
-- `GET /api/tickers?csvPath=tradigview_screener/original_data/...csv`
-
-### Append a ticker to CSV
-- `POST /api/tickers/add`
-  - Body: `{ csvPath, ticker }`
-
-## Change requests (how to ask for edits)
-When requesting frontend changes, specify:
-- The exact window type(s) affected.
-- Any backend endpoint changes required (avoid implicit contracts).
-- Whether filters/sorting should be backend-driven or UI-only.
-- Whether change% columns must be displayed even when null.
-
----
-
-## KO
-
-### 목적
-이 문서는 아래 경로의 Figma 기반 프론트엔드에 대한 작업용 프롬프트/스펙입니다.
-- `termina_web/figma_code/terminal_ui_ver2_finhub/`
-
-현재 단계 핵심 목표:
-- 드래그/리사이즈 가능한 멀티 탭 “터미널” UI 제공
-- 백엔드 SQLite 피드(`GET /api/news`)를 렌더링
-- Finnhub 뉴스 피드 윈도우에서 백엔드 호출로 적재 + 저장 (`POST /api/news/pull-finhub`)
-- Default Ticker 윈도우에서 CSV 티커를 읽고/추가 (`GET /api/tickers`, `POST /api/tickers/add`)
-
-제약:
-- 사용자가 요청하지 않는 한 mock/가짜 데이터 생성을 추가하지 않기
-- 요청되지 않은 새 페이지/플로우를 만들지 않기
-- Tailwind 스타일 토큰/패턴을 기존과 일관되게 유지하기
-
-### 기술 스택
-- React 18 + TypeScript (Vite)
-- Tailwind CSS
-- `re-resizable` (윈도우 리사이즈)
-- `react-window` (가상화 리스트)
-- `lucide-react` (아이콘)
-
-### 실행 방법 (dev)
 전제:
-- 백엔드가 `http://localhost:8080`에서 실행 중
 
-`termina_web/figma_code/terminal_ui_ver2_finhub/`에서:
+- 백엔드 `terminal/backend` 가 `http://localhost:8080`에서 실행 중이어야 한다.
 
-1) 의존성 설치
-```bash
-npm install
-```
+Vite dev proxy:
 
-2) dev 서버 실행
-```bash
-npm run dev
-```
+- `/api/*` → `http://localhost:8080`
+- `/healthz` → `http://localhost:8080`
 
-### 런타임 중요 노트(API Base URL)
-일부 윈도우는 백엔드를 하드코딩 URL로 호출합니다:
-- `http://localhost:8080`
+즉 현재 프론트 컴포넌트들은 `fetch('/api/...')` 형태로 동작한다.
 
-해당 파일:
-- `src/app/components/FinnhubNewsWindow.tsx`
-- `src/app/components/DefaultTickerWindow.tsx`
+## 앱 셸 구조
 
-향후 Vite proxy를 추가할 경우 `fetch('/api/...')` 형태로 전환하는 것을 권장합니다.
+### 진입점
 
-## 앱 구조
+- `src/main.tsx` → `src/app/App.tsx`
 
-### Tabs + windows
-파일: `src/app/App.tsx`
+### 상단 바
 
-- `tabs: TabData[]`와 `activeTabId`를 관리합니다.
-- `AddTabModal`에서 체크박스로 window type을 선택해 탭을 생성합니다.
-- 초기 배치는 단순 규칙으로 결정합니다:
-  - 윈도우 1개: 800×600
-  - 윈도우 2개: 좌우 분할
-  - 3개 이상: 계단식(staggered)
+- 앱 제목: `Stock News Platform`
+- 다크 모드 토글 제공
+- 다크 모드는 `document.documentElement.classList`만 바꾸며 localStorage 저장은 없다.
 
-윈도우 타이틀:
-- `finhub-news` -> `News Feed: Finnhub API`
-- `default-ticker` -> `Default Ticker`
+### 탭 구조
 
-### DraggableWindow 래퍼
-파일: `src/app/components/DraggableWindow.tsx`
+- 기본 탭 1개로 시작
+- `+` 버튼으로 `AddTabModal` 오픈
+- 탭 우클릭 시 inline rename
+- 탭이 2개 이상일 때만 닫기 버튼 노출
 
-- 각 윈도우를 드래그/리사이즈 가능한 컨테이너로 감쌉니다.
-- `window.type`에 따라 실제 컨텐츠를 렌더링합니다:
-  - `news` -> `NewsWindow`
-  - `finhub-news` -> `FinnhubNewsWindow`
-  - `default-ticker` -> `DefaultTickerWindow`
-  - `watchlist` -> `WatchlistWindow`
-  - `calendar` -> `CalendarWindow`
+### 창(window) 공통 동작
 
-### WindowType 정의
-파일: `src/app/types.ts`
+각 창은 `DraggableWindow.tsx`에서 공통 처리한다.
 
-- `WindowType`: `news | watchlist | calendar | finhub-news | default-ticker`
+- 드래그 이동
+- 가장자리/모서리 리사이즈
+- 최대화/복원
+- 닫기
+- `linkId` badge 표시
 
-## 윈도우
+## WindowType
 
-### News (EODHD 적재 + SQLite 조회)
-파일: `src/app/components/NewsWindow.tsx`
+현재 `src/app/types.ts`의 실제 window type:
 
-- 백엔드 `GET /api/news`로 SQLite에서 조회합니다.
-- 백엔드 `POST /api/news/pull-eodhd`로 히스토리 적재를 트리거할 수 있습니다.
+- `news`
+- `watchlist`
+- `calendar`
+- `finhub-news`
+- `default-ticker`
+- `data-control`
 
-이 윈도우는 **provider 응답을 직접 렌더링하지 않고**, 반드시 DB(SQLite)에 저장된 데이터를 렌더링하는 것을 원칙으로 합니다.
+`brave-news`는 타입 정의에 없다. 즉 파일은 있지만 앱에서 선택/렌더링되지 않는다.
 
-### News Feed: Finnhub API
+## Add Tab Modal
+
+`AddTabModal.tsx`에서 선택 가능한 창:
+
+- Calendar
+- News
+- News Feed: Finnhub API
+- Watch List
+- Default Ticker
+- Data Control
+
+초기 창 배치 규칙:
+
+- 1개 창: `800x600`
+- 2개 창: 좌우 분할 `600x600`
+- 3개 이상: 계단식 배치
+
+기본 창 제목:
+
+- `finhub-news` → `News Feed: Finnhub API`
+- `default-ticker` → `Default Ticker`
+- `data-control` → `Data Control`
+- 나머지 → `<Type> Window`
+
+## 창 연결(linked ticker)
+
+`App.tsx`는 `linkedTicker` 상태를 유지한다.
+
+- 어떤 창에서 ticker를 클릭하면 같은 `linkId`를 가진 다른 창으로 ticker 문자열을 전달할 수 있다.
+- 현재 `FinnhubNewsWindow`, `NewsWindow`, `WatchlistWindow`, `DefaultTickerWindow` 쪽에서 이 패턴을 일부 사용한다.
+
+## Finnhub News Window
+
 파일: `src/app/components/FinnhubNewsWindow.tsx`
 
-책임:
-- SQLite에 저장된 Finnhub 아이템을 백엔드에서 조회:
-  - `GET /api/news?source_names=FINNHUB&limit=200`
-- source_type별 필터(company news / press release / market news):
-  - `source_type=company_news|press_release|market_news`
-- 백엔드 적재 트리거:
-  - 메인 Update 버튼은 `{ mode: 'recent', sourceType: 'all' }`로 `POST /api/news/pull-finhub` 호출 후 refresh
-  - split-dropdown에서 `all`, `company_news`, `press_release`, `market_news` 각각에 대해 `7d`, `recent`, `custom` 옵션 제공
+이 창이 현재 프론트에서 가장 구현이 많이 진행된 핵심 창이다.
 
-현재 윈도우 동작:
-- Date와 Time 사이에 전용 `Ticker` 컬럼이 있습니다.
-- ticker 배지 클릭 시 검색창이 해당 ticker로 설정됩니다(`onTickerClick`도 함께 호출).
-- `Columns` 드롭다운으로 컬럼 표시/숨김을 전환할 수 있습니다.
-- `Source` 셀은 좌클릭으로 링크 열기, 우클릭으로 `Copy URL` 컨텍스트 메뉴를 지원합니다.
-- Update 요청은 `maxTickers`를 보내지 않으며, 백엔드 기본값 `0`이 적용되어 CSV 전체 티커를 대상으로 합니다.
+### 데이터 로드
 
-Change% 표시:
-- `GET /api/news`가 내려주는 optional 필드 사용:
-  - `change_1d_pct`, `change_from_open_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct`
-- 뉴스 날짜에 해당하는 OHLC 데이터가 없으면 null이고 UI는 `-`로 표시합니다.
+백엔드 호출:
 
-기존 가상화 피드에서 유지한 UX/기능:
-- 날짜 헤더 그룹핑
-- `react-window` 가상화
-- 컬럼 드래그 재정렬/리사이즈/정렬
-- 표시 모드: Title Only vs Title + Body 일부 표시
-- Save/Load 검색 설정(로컬 UI state)
-검색 동작:
-- 검색은 **서버사이드**: 검색창에 입력하면 `keyword=...`를 `GET /api/news`에 전달하고, 백엔드가 `WHERE LOWER(title || ' ' || body) LIKE '%keyword%'`로 **전체 DB**를 검색합니다.
-- 300ms 디바운스를 적용하여 타이핑 중 과도한 API 호출을 방지합니다.
-- 백엔드는 매칭된 결과 중 최대 200건을 반환하고, `react-window`가 렌더를 가상화합니다.
-### Default Ticker
+```text
+GET /api/news?source_names=FINNHUB&limit=200
+```
+
+추가 query:
+
+- `keyword`
+- `source_type` (`company_news | press_release | market_news`)
+
+검색은 서버사이드다.
+
+- 입력창 300ms debounce
+- `keyword`를 그대로 backend로 보냄
+- 결과 최대 200건 렌더
+
+### 테이블 컬럼
+
+정의된 컬럼:
+
+- `[][][]date[][][]`
+- `[][][]ticker[][][]`
+- `[][][]time[][][]`
+- `[][][]title[][][]`
+- `[][][]publisher[][][]`
+- `[][][]industry[][][]`
+- `[][][]source[][][]`
+- `[][][]fulltext[][][]`
+- `[][][]changes[][][]`
+
+기본 visible 상태:
+
+- `source`만 기본 숨김
+- 나머지는 기본 표시
+
+현재 코드에는 `keywords` 컬럼 id/type 정의가 남아 있지만 `DEFAULT_COLUMNS`에는 포함되지 않는다. 즉 데이터는 받아도 컬럼 메뉴나 헤더에서 실제 활성 컬럼으로 렌더되지 않는다.
+
+### 정렬/가시화/레이아웃
+
+- 컬럼 헤더 클릭 정렬 `asc → desc → null`
+- 컬럼 드래그 재정렬
+- 컬럼 리사이즈
+- 컬럼 표시/숨김 메뉴
+- `react-window` 기반 가상 스크롤
+- 날짜 그룹 sticky header
+- display mode
+  - `title-only`
+  - `title-abstract`
+
+행 높이:
+
+- title only: 88px
+- title + abstract: 140px
+
+### 소스 필터
+
+상단 버튼:
+
+- `All`
+- `Company News`
+- `Press Release`
+- `Market News`
+
+상태값:
+
+- `all`
+- `company_news`
+- `press_release`
+- `market_news`
+
+### Update 메뉴
+
+Finnhub 뉴스 적재는 직접 API response를 표에 그리지 않고, backend DB 적재 job을 시작한 뒤 job 완료 후 다시 `GET /api/news`를 호출하는 구조다.
+
+메뉴 항목:
+
+- 7d Update
+  - All
+  - Company News
+  - Press Release
+  - Market News
+- Recent Update
+  - All
+  - Company News
+  - Press Release
+  - Market News
+- Custom Update
+  - All
+  - Company News
+  - Press Release
+  - Market News
+
+관련 API:
+
+- `GET /api/news/pull-finhub/preflight?sourceType=...`
+- `POST /api/news/pull-finhub`
+- `GET /api/jobs/:jobId`
+
+`recent`를 시작하면 preflight modal이 먼저 열리고, 기존 데이터가 없는 fallback ticker 수를 보여준다.
+
+custom update는 별도 날짜 선택 modal에서 `from/to`를 입력한 뒤 시작한다.
+
+### Change Update 버튼
+
+Finnhub News 창 안에도 change 계산 버튼이 있다.
+
+- `7D Change Update` → `POST /api/news/change/update-recent`
+- `Custom Change% Update` → 날짜 modal 후 `POST /api/news/change/update-custom`
+
+이 버튼들은 Data Control 창의 change update와 같은 backend job을 재사용한다.
+
+### Full Text 기능
+
+표의 Full Text 셀:
+
+- 값 `O`: `hasFullText=true`
+- 값 `X`: full text 없음
+- `O` 클릭 시 `GET /api/news/fulltext/:newsId`로 본문 modal 오픈
+
+상단에는 별도 Full Text Update 메뉴가 있다.
+
+메뉴 항목:
+
+- All
+- Company News
+- Press Release
+- Market News
+
+API:
+
+- `POST /api/news/fulltext/update`
+
+### Log 패널
+
+- `View Log` 버튼은 항상 보이지만 job이 없으면 disabled
+- update 시작 시 로그 패널이 자동 오픈되지는 않는다
+- 사용자가 직접 `View Log`를 눌러야 하단 패널이 열린다
+- `Esc`로 닫기 가능
+- 진행률 bar, 상태 badge, 로그 줄, 완료 result 표시
+
+### Source / Publisher 클릭 동작
+
+- Publisher 셀은 링크 열기 용도
+- Source 셀도 링크 열기와 우클릭 `Copy URL` 컨텍스트 메뉴 지원
+- Source 컬럼은 기본 hidden 상태
+
+### Ticker 클릭 동작
+
+- ticker badge 클릭 시 현재 검색어를 그 ticker로 바꾼다
+- 동시에 `onTickerClick`이 있으면 상위로 전달한다
+
+### 저장 상태
+
+localStorage 사용:
+
+- key: `finnhub-last-update-config`
+- 저장 값: 마지막 update의 `mode`, `sourceType`
+
+저장되지 않는 것:
+
+- saved searches는 component state만 사용한다
+- 다크 모드 저장 없음
+- column layout 저장 없음
+
+### Finnhub News 창이 기대하는 뉴스 응답 컬럼
+
+현재 렌더에서 실제 사용하는 필드:
+
+- `[][][]id[][][]`
+- `[][][]published_at[][][]`
+- `[][][]source[][][]`
+- `[][][]publisher[][][]`
+- `[][][]source_type[][][]`
+- `[][][]title[][][]`
+- `[][][]body[][][]`
+- `[][][]url[][][]`
+- `[][][]tickers[][][]`
+- `[][][]change_1d_pct[][][]`
+- `[][][]change_from_open_pct[][][]`
+- `[][][]change_7d_pct[][][]`
+- `[][][]change_14d_pct[][][]`
+- `[][][]change_30d_pct[][][]`
+- `[][][]hasFullText[][][]`
+- `[][][]keywords[][][]`
+- `[][][]keywordsStatus[][][]`
+- `[][][]industry[][][]`
+
+렌더 규칙:
+
+- ticker는 `tickers[0]`만 사용
+- publisher가 없으면 빈 값
+- change 값이 `null`이면 `-`
+- industry가 없으면 비어 보일 수 있음
+
+## Data Control Window
+
+파일: `src/app/components/DataControlWindow.tsx`
+
+현재 이 창은 운영 버튼과 update status 보기용으로 실제 동작한다.
+
+### 로드 시 호출
+
+- `GET /api/updates/status`
+- `GET /api/ibkr/ohlc1d/status`
+
+### 섹션
+
+- `IBKR Price Data`
+- `IBKR Calendar Data`
+- `Recent Change% Update`
+- `Custom Change% Update`
+
+각 섹션은 아래를 가진다.
+
+- Update 버튼
+- Log 버튼
+- Last Success 시각 표시
+- 에러 표시
+
+추가 정보:
+
+- Price 섹션은 `DB Max Date` 표시
+- Custom Change 섹션은 `from/to` date input 포함
+
+### 호출 API
+
+- `POST /api/ibkr/ohlc1d/update`
+- `POST /api/ibkr/calendar/update`
+- `POST /api/news/change/update-recent`
+- `POST /api/news/change/update-custom`
+- `GET /api/jobs/:jobId`
+
+### 로그 패널
+
+- 한 번에 한 섹션 로그만 표시
+- `View Log`를 눌렀을 때만 열림
+- 자동 스크롤
+- `Esc`로 닫기 가능
+- 완료 result는 ticker/row 수 또는 merged/skipped 수를 summary로 표시
+
+주의:
+
+- 프론트는 calendar update도 job처럼 polling UI를 기대하지만, 현재 backend `POST /api/ibkr/calendar/update`는 즉시 완료형 response다. 즉 `jobId`를 반환하지 않으므로 이 섹션의 현재 UI 기대와 backend 계약 사이에 불일치가 있다.
+
+## Default Ticker Window
+
 파일: `src/app/components/DefaultTickerWindow.tsx`
 
-책임:
-- CSV(repo-relative path)에서 티커 읽기:
-  - `GET /api/tickers?csvPath=...`
-- CSV에 티커 추가:
-  - `POST /api/tickers/add` 바디 `{ csvPath, ticker }`
+현재 이 창은 실제 CSV read/append가 연결되어 있다.
 
-백엔드 보안 제약(중요):
-- 백엔드는 `tradigview_screener/original_data/` 아래의 CSV만 허용합니다.
-- path traversal(`..`)은 거부됩니다.
+기본 CSV path:
 
-## 프론트엔드가 사용하는 백엔드 API 계약
+- `tradigview_screener/original_data/watch lists2_2026-02-22.csv`
 
-### 뉴스 조회
-- `GET /api/news?source_names=FINNHUB&source_type=press_release&limit=200`
-- `GET /api/news?source_names=FINNHUB&source_type=market_news&limit=200`
+기능:
 
-### Finnhub 뉴스 적재
-- `POST /api/news/pull-finhub`
-  - 바디: `{ csvPath?, maxTickers?, mode?, sourceType?, from?, to? }`
-  - 프론트엔드는 현재 `{ mode, sourceType }`만 전송
-  - `maxTickers`를 생략하면 백엔드 기본값 `0` = CSV 전체 티커
+- CSV path 직접 수정
+- Reload
+- ticker 추가
+- filter 입력
+- ticker grid 표시
+- ticker 클릭 시 상위 `onTickerClick` 전달
 
-### CSV 티커 조회
-- `GET /api/tickers?csvPath=tradigview_screener/original_data/...csv`
+API:
 
-### CSV 티커 추가
+- `GET /api/tickers?csvPath=...`
 - `POST /api/tickers/add`
-  - 바디: `{ csvPath, ticker }`
 
-## 변경 요청 가이드(어떻게 요청하면 좋은지)
-프론트엔드 변경 요청 시 아래를 함께 적어주세요.
-- 어떤 window type(윈도우)이 대상인지
-- 백엔드 엔드포인트 변경이 필요한지(암묵적 계약 금지)
-- 필터/정렬이 백엔드 기반인지(UI-only인지)
-- change% 컬럼이 null일 때도 표시해야 하는지
+현재 제약:
+
+- 허용 경로는 backend allowlist에 의해 제한된다
+- UI는 어떤 CSV든 입력 가능해 보이지만, backend가 허용하지 않으면 error banner를 보여준다
+
+## News Window
+
+파일: `src/app/components/NewsWindow.tsx`
+
+현재 상태는 부분 구현이다.
+
+남아 있는 연결:
+
+- `GET /api/news`
+- `POST /api/news/pull-eodhd`
+
+특징:
+
+- EODHD pull offset 상태 관리가 있다
+- refresh/pull 관련 state가 있으나 전체 UX가 현재 주력 창만큼 정리되어 있지 않다
+
+이 창을 현재 운영 기준의 메인 뉴스 창으로 보지 않는다. 실제 주력은 `FinnhubNewsWindow` 이다.
+
+## Watchlist Window
+
+파일: `src/app/components/WatchlistWindow.tsx`
+
+현재 상태:
+
+- mock data only
+- local state 위주
+- API 연동 없음
+
+컬럼 UI는 있지만 source of truth가 backend가 아니다.
+
+## Calendar Window
+
+파일: `src/app/components/CalendarWindow.tsx`
+
+현재 상태:
+
+- mock data only
+- API 연동 없음
+- earnings / conference / dividend / analyst_rating 탭 UI는 존재
+
+즉 backend의 `calendar_events` API와 아직 연결된 화면이 아니다.
+
+## Brave News Window
+
+파일: `src/app/components/BraveNewsWindow.tsx`
+
+현재 상태:
+
+- 파일은 남아 있음
+- mock data 생성 코드 존재
+- refresh/update는 실 API 호출이 아니라 `console.log` 수준
+- `WindowType`에 연결되어 있지 않아 실제 앱에서 열 수 없음
+
+따라서 현재 프론트의 공식 동작 문서에서는 active window로 보지 않는다.
+
+## 백엔드 계약 요약
+
+프론트가 현재 직접 호출하는 핵심 API:
+
+- `GET /api/news`
+- `POST /api/news/pull-finhub`
+- `GET /api/news/pull-finhub/preflight`
+- `POST /api/news/change/update-recent`
+- `POST /api/news/change/update-custom`
+- `GET /api/news/fulltext/:newsId`
+- `POST /api/news/fulltext/update`
+- `GET /api/updates/status`
+- `GET /api/ibkr/ohlc1d/status`
+- `POST /api/ibkr/ohlc1d/update`
+- `POST /api/ibkr/calendar/update`
+- `GET /api/jobs/:jobId`
+- `GET /api/tickers`
+- `POST /api/tickers/add`
+
+## 현재 구현 기준의 저장/상태 성격
+
+- Finnhub 뉴스 검색 결과는 모두 backend DB 기반이다. provider raw response를 직접 렌더하지 않는다.
+- update, fulltext, change 계산은 모두 “job 시작 → polling → 완료 후 재조회” 패턴이다.
+- 단, calendar update는 프론트는 job처럼 다루지만 backend는 아직 동기 응답형이다.
+- saved search, watchlist menu 선택값 등 일부 UI 상태는 메모리 state만 사용하고 영속 저장되지 않는다.
+
+## 파일 맵
+
+- `src/main.tsx`: 앱 진입
+- `src/app/App.tsx`: 탭/창 상태, 다크 모드, linked ticker
+- `src/app/types.ts`: WindowType 정의
+- `src/app/components/DraggableWindow.tsx`: 공통 창 래퍼
+- `src/app/components/AddTabModal.tsx`: 탭 생성 modal
+- `src/app/components/FinnhubNewsWindow.tsx`: 핵심 뉴스 창
+- `src/app/components/DataControlWindow.tsx`: 운영/update 창
+- `src/app/components/DefaultTickerWindow.tsx`: CSV ticker 창
+- `src/app/components/NewsWindow.tsx`: EODHD 기반 부분 구현 창
+- `src/app/components/WatchlistWindow.tsx`: mock watchlist 창
+- `src/app/components/CalendarWindow.tsx`: mock calendar 창
+- `src/app/components/BraveNewsWindow.tsx`: 미연결 잔존 파일
+- `vite.config.ts`: `/api`, `/healthz` proxy 설정
+
+## 현재 한계와 주의점
+
+- active window 중 backend와 완전히 맞물려 있는 것은 `Finnhub News`, `Default Ticker`, `Data Control` 중심이다.
+- `CalendarWindow`와 `WatchlistWindow`는 UI만 있고 운영 데이터와 연결되어 있지 않다.
+- `keywords`는 backend 응답으로 내려올 수 있지만 현재 `FinnhubNewsWindow`의 기본 컬럼 배열에는 포함되지 않는다.
+- `DataControlWindow`의 calendar 섹션은 backend가 `jobId`를 돌려준다고 가정하는 UI지만, 실제 backend는 현재 즉시 결과 응답형이다.
+- `BraveNewsWindow`는 사실상 보관 파일에 가깝다. 새 작업은 여기에 붙이지 않는 편이 안전하다.
