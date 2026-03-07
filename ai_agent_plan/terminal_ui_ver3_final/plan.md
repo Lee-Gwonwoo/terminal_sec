@@ -8,12 +8,14 @@
 `terminal_ui_ver3_final`에서 아래 요구를 구현하기 위한 계획을 정의한다.
 
 1. News Feed Window에 `Score` 컬럼을 추가한다.
-2. News Feed Window에 `Keywords` 컬럼을 실제 표시 가능한 컬럼으로 추가한다.
-3. News feed 데이터를 runtime DB에 canonical 형태로 저장한다.
-4. News feed 다운로드 시 Finnhub `news-sentiment`도 함께 수집하고, sentiment 결과를 컬럼 선택 목록에 추가한다.
-5. Terminal UI를 껐다 켜도 마지막 작업 상태(탭, 창, 배치, 선택 상태, 테마, 설정)를 복원한다.
-6. 다른 탭으로 갔다가 다시 돌아와도 탭별 상태가 유지되게 한다.
-7. Data Control Window 안에 `Settings` 탭을 추가하고, 전체 글자 크기를 조절 가능하게 한다.
+2. News Feed Window에 `Score Evidence` 컬럼을 추가한다.
+3. News Feed Window에 `Keywords` 컬럼을 실제 표시 가능한 컬럼으로 추가한다.
+4. News feed 데이터를 runtime DB에 canonical 형태로 저장한다.
+5. News feed 다운로드 시 Finnhub `news-sentiment`도 함께 수집하고, sentiment 결과를 컬럼 선택 목록에 추가한다.
+6. `ai-news-analysis` 기준으로 `Score`, `Score Evidence`, `Keywords`를 생성/저장한다.
+7. Terminal UI를 껐다 켜도 마지막 작업 상태(탭, 창, 배치, 선택 상태, 테마, 설정)를 복원한다.
+8. 다른 탭으로 갔다가 다시 돌아와도 탭별 상태가 유지되게 한다.
+9. Data Control Window 안에 `Settings` 탭을 추가하고, 전체 글자 크기를 조절 가능하게 한다.
 
 ### 현재 레포 상태(중요, 확인됨)
 - 백엔드 runtime DB는 `terminal/backend/backend/data/app.db` 이다.
@@ -21,18 +23,23 @@
 - `GET /api/news`는 현재 `news_items`만 읽지 않고, `news_fulltext.keywords_json`과 `news_change_metrics`를 join해서 응답한다.
 - `news_fulltext`에는 이미 `[][][]keywords_json[][][]`, `[][][]keywords_status[][][]`, `[][][]keywords_updated_at[][][]` 컬럼이 있다.
 - `fulltextRepository.updateKeywords()`가 이미 존재하므로 keywords 저장 파이프라인의 일부는 구현되어 있다.
+- 현재 코드에는 `Score`, `Score Evidence`를 canonical하게 저장/조회하는 구조가 없다.
 - `FinnhubNewsWindow.tsx`에는 `keywords` 컬럼 타입/렌더링 코드가 이미 있으나, `DEFAULT_COLUMNS`에 빠져 있어 기본 컬럼 세트/컬럼 선택 메뉴에서 실사용 상태가 아니다.
+- 현재 `FinnhubNewsWindow.tsx`에는 `Score Evidence` 컬럼 정의가 없다.
 - `FinnhubNewsWindow.tsx`는 `localStorage`에 `finnhub-last-update-config`만 저장한다. 즉 뉴스 창 일부 설정만 보존되고, 앱 전체 레이아웃/탭/테마는 보존되지 않는다.
 - `App.tsx`의 `tabs`, `activeTabId`, `isDarkMode`, `linkedTicker`는 모두 메모리 상태만 사용한다. 앱 재실행 시 초기화된다.
 - `DataControlWindow.tsx`는 현재 4개 섹션(`IBKR Price Data`, `IBKR Calendar Data`, `Recent Change% Update`, `Custom Change% Update`)과 job log panel이 있으나, 별도 `Settings` 탭이나 전역 글자 크기 제어는 없다.
 - Finnhub comprehensive probe 기록상 `news-sentiment` 엔드포인트는 접근 가능하다. 다만 현재 backend 수집/저장 흐름에는 아직 연결되어 있지 않다.
+- AI 뉴스 분석 skills 지침 명칭은 `ai-news-analysis`로 고정한다.
 - 현재 프론트 문서 기준으로 `Finnhub News`, `Default Ticker`, `Data Control`은 실제 API 연동이 있고, `Watchlist`, `Calendar`는 일부 mock/stub 흔적이 남아 있다.
 
 ### 제약 / 비범위
 - 이번 plan은 구현 계획 문서 작성이 목적이다. 아직 코드 변경/테스트 실행을 전제로 하지 않는다.
 - mock sentiment, mock score, 임의 점수 생성 로직은 추가하지 않는다.
 - Finnhub가 주지 않는 값을 UI 편의를 위해 추정 숫자로 채우지 않는다.
-- `Score`의 정확한 계산식이 확정되기 전에는 DB 스키마와 UI 라벨만 먼저 굳히지 않는다.
+- `Score`, `Score Evidence`, `Keywords`는 기본적으로 비워 둔다. AI 분석이 아직 실행되지 않은 row에 placeholder 값을 넣지 않는다.
+- `Score`는 Finnhub raw sentiment가 아니라, `ai-news-analysis` 규칙으로 계산하는 AI 결과다.
+- `Score Evidence` 또는 `Score`가 저장 후 직접 지워져도 통과해 버리는 구조를 허용하지 않는다. 삭제/유실 감지 테스트를 포함해야 한다.
 - 전체 글자 크기 조절은 우선 `terminal_ui_ver3_final` 앱 범위의 UI scale/font scale을 뜻한다. OS 전체 폰트나 브라우저 줌 제어는 비범위다.
 - 서버 재시작 후 background job 상태 복구까지 이번 범위에 포함할지 여부는 미확정 사항으로 둔다.
 
@@ -46,17 +53,20 @@
 4. `단계별 계획`에서 각 Step의 작업, 파일, 검증 방법을 본다.
 
 완료를 눈으로 확인하는 기준:
-- News Feed 컬럼 메뉴에서 `Score`, `Keywords`, `Sentiment`를 직접 on/off 할 수 있다.
+- News Feed 컬럼 메뉴에서 `Score`, `Score Evidence`, `Keywords`, `Sentiment`를 직접 on/off 할 수 있다.
 - 앱을 닫았다 다시 열면 직전 탭/창 배치와 활성 탭이 복원된다.
 - 탭 A에서 창을 이동해 두고 탭 B로 갔다가 다시 오면 탭 A 레이아웃이 그대로 남는다.
 - Data Control Window 안에 `Settings` 탭이 생기고, 글자 크기 슬라이더나 preset을 바꾸면 전체 창에 반영된다.
-- 뉴스 업데이트 후 DB에 sentiment 관련 row/컬럼이 채워지고, `GET /api/news` 응답에도 들어온다.
+- 분석 전 뉴스 row는 `Score`, `Score Evidence`, `Keywords`가 비어 있고, 분석 후에만 채워진다.
+- 테스트에서 `Score` 또는 `Score Evidence`가 지워진 경우 실패로 잡힌다.
 
 용어(Glossary):
 - `workspace state`: 앱 전체의 탭/창/활성 탭/테마/폰트 크기 같은 복원 대상 상태
 - `tab state`: 특정 탭 안의 창 목록, 창 위치/크기, 탭 이름, 탭별 선택 상태
 - `news sentiment`: Finnhub `news-sentiment` 응답에서 얻는 종목 단위 sentiment 데이터
-- `score`: 사용자가 News Feed에서 보게 될 단일 숫자/등급 컬럼. 산식은 미확정
+- `score`: AI가 뉴스의 주가 영향 가능성을 평가해 매긴 `-10 ~ 10` 범위 점수
+- `score evidence`: 왜 그 점수를 줬는지 설명하는 근거 텍스트
+- `keywords`: AI가 뉴스에서 중요하다고 본 키워드 30개
 - `canonical DB`: 앱이 실제로 조회하는 단일 source of truth 저장소. 현재 기본 후보는 `terminal/backend/backend/data/app.db`
 
 ### 프로세스 템플릿(plan 변경 + 단계 완료 확인)
@@ -79,16 +89,22 @@ Step N — <제목>
 - 사용자 확인 필요?: Yes
 ```
 
+### PLAN CHANGE (2026-03-06)
+- 왜: 사용자가 `ai-news-analysis`라는 skills 지침 명칭을 고정하고, `Score`, `Score Evidence`, `Keywords` 정의를 새로 명시했다.
+- 무엇이 바뀌었나: `Score`를 Finnhub sentiment 후보가 아니라 AI 분석 결과로 재정의했고, `Score Evidence` 컬럼/테스트 요구와 `Keywords 30개`, 기본 빈 상태 원칙을 plan에 추가했다.
+- 영향: Step 0~4 전체의 데이터 계약, UI 컬럼, 저장 구조, 테스트 범위가 수정된다.
+
 ### 아키텍처(상위)
 이번 작업은 크게 4개 축으로 나뉜다.
 
 1. News data enrichment 축
    - Finnhub 뉴스 pull 시 기존 `news_items` 적재 후, sentiment를 같은 ingestion 흐름 안에서 추가 수집한다.
-   - keywords는 이미 `news_fulltext`에 저장하는 경로가 있으므로, ver3에서는 UI 노출과 저장 기준을 정합화한다.
-   - score는 sentiment/keywords/change metrics 중 어떤 값을 사용해 계산할지 먼저 확정해야 한다.
+   - `Score`, `Score Evidence`, `Keywords`는 provider raw 값이 아니라 `ai-news-analysis` 규칙으로 생성되는 AI enrichment 계층이다.
+   - keywords는 이미 `news_fulltext`에 저장하는 경로가 있으므로, ver3에서는 30개 키워드 기준과 저장/표시 규칙을 정합화한다.
+   - score/evidence는 기본값을 비워 두고, AI 분석 후에만 채운다.
 
 2. API contract 축
-   - `GET /api/news` 응답에 `score`, `sentiment`, `keywords`를 안정적으로 내려준다.
+   - `GET /api/news` 응답에 `score`, `scoreEvidence`, `sentiment`, `keywords`를 안정적으로 내려준다.
    - 프론트는 컬럼 토글만 하는 것이 아니라, 숨김/표시 상태도 탭별 또는 workspace별로 저장 가능해야 한다.
 
 3. Workspace persistence 축
@@ -103,27 +119,32 @@ Step N — <제목>
 - 뉴스 원본 메타: `[][][]news_items[][][]`
 - 뉴스 full text / keywords: `[][][]news_fulltext[][][]`
 - 뉴스 sentiment: 별도 `[][][]news_sentiment_snapshots[][][]` 테이블 권장
-- score: `score` 산식이 snapshot 성격이면 별도 `[][][]news_scores[][][]` 또는 `news_sentiment_snapshots.score` 컬럼 고려
+- AI analysis result: `[][][]news_ai_analysis[][][]` 같은 별도 테이블 권장 (`score`, `score_evidence`, `keywords_json`, `analysis_status`, `analyzed_at`)
 - 앱 상태: 1차는 프론트 `localStorage`, 2차 확장 시 backend saved view/API로 승격 가능
 
 ### 결정/선행조건(초기에 확정 필요)
-1. `Score`의 운영적 정의
-   - 선택지 A: Finnhub sentiment 응답의 score를 그대로 표시
-   - 선택지 B: sentiment + keyword hit + change metric을 조합한 내부 score
-   - 선택지 C: 정수 grade(예: 0~100)로 정규화한 별도 계산값
-   - 현재 권장: A 또는 B 중 하나를 먼저 확정. C는 추가 설계 비용이 큼.
+1. AI 분석 실행 시점
+   - 선택지 A: 뉴스 pull 직후 자동 enqueue
+   - 선택지 B: 별도 `AI Analysis Update` job으로 수동 실행
+   - 선택지 C: full text 추출 성공한 row만 후속 배치 실행
+   - 현재 권장: B 또는 C. 기본값이 빈 상태여야 하므로, 분석 시점을 명시적으로 관리하는 편이 안전하다.
 
 2. sentiment 저장 위치
    - 선택지 A: `news_items` 직접 컬럼 추가
    - 선택지 B: `news_id` 또는 `(ticker, asof_date)` 기준 별도 테이블
    - 현재 권장: B. 뉴스 원문과 enrichment를 분리하면 재수집/재계산이 안전하다.
 
-3. workspace persistence 저장소
+3. AI analysis 저장 위치
+   - 선택지 A: `news_fulltext` 확장
+   - 선택지 B: `news_ai_analysis` 별도 테이블
+   - 현재 권장: B. `Score`/`Score Evidence`/`Keywords`는 full text 추출과 다른 lifecycle을 가진다.
+
+4. workspace persistence 저장소
    - 선택지 A: 프론트 `localStorage`만 사용
    - 선택지 B: backend DB에도 저장해 브라우저/기기 간 동기화까지 고려
    - 현재 권장: A. 이번 범위에서 가장 빠르고 리스크가 낮다.
 
-4. 탭 상태 기억 범위
+5. 탭 상태 기억 범위
    - 선택지 A: 창 배치와 활성 탭만 저장
    - 선택지 B: 창 내부 필터/컬럼/검색어까지 저장
    - 현재 권장: B. 사용자가 말한 “마지막 상태”에 더 가깝다.
@@ -136,23 +157,27 @@ Step N — <제목>
    - 날짜 범위와 timestamp 단위
    - 동일 뉴스 row에 매핑할 때 어떤 key를 사용할지
 
-2. `Score`가 기사 단위인지 ticker/day snapshot 단위인지 확인
-   - 기사 단위가 아니면 `news_id`에 직접 고정 저장할 수 없다.
+2. `ai-news-analysis` 결과 저장 형태 확인
+   - `Score`, `Score Evidence`, `Keywords`를 `news_id` 기준으로 저장할지 확정
+   - 기본 빈 상태와 분석 완료 상태를 구분할 status 필드 필요 여부 확인
 
 3. workspace state 직렬화 범위 확인
    - 창 내부 상태를 어디까지 저장할지 명시
    - localStorage key versioning 필요 여부 확인
 
+4. 삭제/유실 테스트 범위 확인
+   - `Score`, `Score Evidence`, `Keywords` 중 무엇이 비면 실패로 간주할지 테스트 규칙을 문서화
+
 ### 제안하는 구현 순서(이유)
 1. Step 0에서 `Score`/sentiment 매핑과 저장 모델을 먼저 고정한다.
    - 이유: 이 결정이 DB/API/UI 전체를 바꾼다.
-2. Step 1에서 backend DB/API를 먼저 맞춘다.
+2. Step 1에서 backend DB/API와 AI analysis 저장 구조를 먼저 맞춘다.
    - 이유: 프론트 컬럼 추가보다 데이터 contract가 선행되어야 한다.
 3. Step 2에서 News Feed 컬럼과 Data Control Settings UI를 붙인다.
    - 이유: backend 응답이 확정된 뒤 UI wiring이 단순해진다.
 4. Step 3에서 workspace persistence를 구현한다.
    - 이유: 앱 셸과 각 창 상태 저장을 한 번에 묶어야 중복 수정이 줄어든다.
-5. Step 4에서 통합 검증과 문서 동기화를 한다.
+5. Step 4에서 AI analysis 테스트, 삭제 감지 테스트, 문서 동기화를 한다.
 
 ### 단계별 계획(각 단계: 구현 → 검증)
 
@@ -161,9 +186,10 @@ Step N — <제목>
 | 세부 단계 | 작업 | 상태 |
 |-----------|------|------|
 | 0-1 | Finnhub `news-sentiment` 응답 구조를 다시 확인하고 기사 단위 매핑 가능 여부를 결정 | 🚫 |
-| 0-2 | `Score` 컬럼의 정의와 표시 포맷(숫자/등급/소수점)을 확정 | 🚫 |
-| 0-3 | sentiment/score 저장 위치를 `app.db` 내 별도 테이블 기준으로 확정 | 🚫 |
+| 0-2 | `ai-news-analysis` 기준으로 `Score(-10~10)`, `Score Evidence`, `Keywords(30개)` 정의를 문서에 고정 | 🚫 |
+| 0-3 | sentiment와 AI analysis 저장 위치를 `app.db` 내 별도 테이블 기준으로 확정 | 🚫 |
 | 0-4 | workspace persistence 범위(탭/창/컬럼/필터/테마/폰트 크기)를 freeze | 🚫 |
+| 0-5 | `Score`/`Score Evidence`/`Keywords` 삭제·유실 감지 테스트 요구를 고정 | 🚫 |
 
 0-1 목적: sentiment가 뉴스 기사와 1:1인지, ticker snapshot인지 확인한다.
 0-1 설명: 어떤 key로 `news_items`와 연결할지 정해져야 DB 설계가 가능하다.
@@ -171,13 +197,13 @@ Step N — <제목>
 0-1 사람 검증(비개발자): 문서에 “뉴스 한 건에 어떤 sentiment가 붙는지” 예시 2개가 보인다.
 0-1 흔한 문제/주의: ticker-day aggregate를 기사 score처럼 오해하면 잘못 저장된다.
 
-0-2 목적: `Score`가 무엇을 의미하는지 UI/DB 모두에서 한 가지로 통일한다.
-0-2 설명: 정렬, 색상, null 처리, 컬럼명 tooltip까지 같은 의미를 사용해야 한다.
-0-2 완료 조건(눈으로 확인): 문서에 formula 또는 source field가 1문장으로 명확히 적힌다.
-0-2 사람 검증(비개발자): “이 숫자가 무엇을 뜻하는지”를 한 문장으로 말할 수 있다.
-0-2 흔한 문제/주의: score가 sentiment와 중복이면 불필요한 컬럼이 된다.
+0-2 목적: AI 뉴스 분석 출력 계약을 UI/DB 모두에서 한 가지로 통일한다.
+0-2 설명: `Score`, `Score Evidence`, `Keywords`가 각각 무엇을 뜻하는지 고정한다.
+0-2 완료 조건(눈으로 확인): 문서에 `Score=-10~10`, `Score Evidence=근거 텍스트`, `Keywords=중요 단어 30개`가 명시된다.
+0-2 사람 검증(비개발자): “왜 이 점수인지”, “키워드는 몇 개인지”를 문서만 보고 바로 알 수 있다.
+0-2 흔한 문제/주의: sentiment와 AI score를 같은 값으로 오해하면 컬럼 의미가 붕괴한다.
 
-0-3 목적: enrichment 데이터의 canonical 저장소를 고정한다.
+0-3 목적: sentiment와 AI analysis의 canonical 저장소를 고정한다.
 0-3 설명: runtime 조회 대상이 `app.db` 하나로 수렴되게 한다.
 0-3 완료 조건(눈으로 확인): 테이블 이름/주요 컬럼/PK가 plan에 나온다.
 0-3 사람 검증(비개발자): 어느 DB 파일을 보면 되는지 하나만 확인하면 된다.
@@ -189,11 +215,18 @@ Step N — <제목>
 0-4 사람 검증(비개발자): 앱 종료 후 어떤 것이 복원되는지 목록으로 확인 가능하다.
 0-4 흔한 문제/주의: 너무 많이 저장하면 schema drift가 자주 난다.
 
+0-5 목적: 분석 결과 유실을 놓치지 않게 한다.
+0-5 설명: `Score`, `Score Evidence`, `Keywords`가 저장/조회 중 지워지면 실패하는 테스트 기준을 고정한다.
+0-5 완료 조건(눈으로 확인): 삭제 감지 테스트 시나리오가 문서에 나온다.
+0-5 사람 검증(비개발자): 값을 지우면 테스트가 실패해야 한다는 규칙을 이해할 수 있다.
+0-5 흔한 문제/주의: null 기본값과 저장 후 유실 상태를 같은 것으로 취급하면 안 된다.
+
 검증 훅:
 ```text
 - Finnhub sentiment sample 응답을 문서에 정리
-- Score 정의를 예시 2개와 함께 문서에 기재
+- `ai-news-analysis` 출력 계약을 예시 2개와 함께 문서에 기재
 - persistence 저장 범위를 체크리스트로 확정
+- 삭제 감지 테스트 시나리오를 문서에 기재
 
 사용자 확인 필요: 예
 ```
@@ -202,13 +235,14 @@ Step N — <제목>
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 1-1 | sentiment/score 저장용 테이블 또는 컬럼 migration 추가 | `terminal/backend/src/db.ts` | 서버 시작 후 테이블 생성 확인 | ⬜ |
+| 1-1 | sentiment 저장 구조와 AI analysis 저장 구조 migration 추가 | `terminal/backend/src/db.ts` | 서버 시작 후 테이블 생성 확인 | ⬜ |
 | 1-2 | Finnhub sentiment fetch + retry + mapping 로직 추가 | `terminal/backend/src/services/finnhubNewsProvider.ts` | sentiment fetch probe 통과 | ⬜ |
-| 1-3 | sentiment snapshot repository 추가 | `terminal/backend/src/services/` | TypeScript build 통과 | ⬜ |
-| 1-4 | `GET /api/news` 응답에 score/sentiment/keywords 계약 반영 | `terminal/backend/src/services/newsRepository.ts`, `terminal/backend/src/server.ts`, `terminal/backend/src/types.ts` | `/api/news` JSON 필드 확인 | ⬜ |
-| 1-5 | news pull job 완료 시 sentiment도 함께 저장되도록 orchestration 연결 | `terminal/backend/src/server.ts` 또는 관련 job service | update job 후 DB row 확인 | ⬜ |
+| 1-3 | `ai-news-analysis` 결과 저장/retrieve repository 추가 | `terminal/backend/src/services/` | TypeScript build 통과 | ⬜ |
+| 1-4 | `GET /api/news` 응답에 score/scoreEvidence/sentiment/keywords 계약 반영 | `terminal/backend/src/services/newsRepository.ts`, `terminal/backend/src/server.ts`, `terminal/backend/src/types.ts` | `/api/news` JSON 필드 확인 | ⬜ |
+| 1-5 | AI analysis 미실행 row는 기본 빈 상태로 내려가도록 null/empty 규칙 고정 | 같은 영역 | API 응답 null/empty 확인 | ⬜ |
+| 1-6 | 분석 결과 유실 감지용 backend 테스트 추가 | `terminal/backend/tests/` 또는 probe 스크립트 | 테스트 실패/성공 확인 | ⬜ |
 
-1-1 목적: runtime DB가 score/sentiment를 영속 저장할 수 있게 만든다.
+1-1 목적: runtime DB가 sentiment와 AI analysis 결과를 영속 저장할 수 있게 만든다.
 1-1 설명: 테이블 생성과 기존 DB migration을 안전하게 처리한다.
 1-1 완료 조건(눈으로 확인): `app.db`에 새 테이블/컬럼이 보인다.
 1-1 사람 검증(비개발자): DB 점검 스크립트 출력에서 새 이름이 보인다.
@@ -220,23 +254,29 @@ Step N — <제목>
 1-2 사람 검증(비개발자): 같은 티커 뉴스를 업데이트한 뒤 sentiment 값이 비어 있지 않다.
 1-2 흔한 문제/주의: 기사 단위 매핑이 불가능하면 ticker/date snapshot 방식으로 우회해야 한다.
 
-1-3 목적: news metadata와 sentiment enrichment를 분리 저장한다.
-1-3 설명: 재수집 시 upsert 기준을 분명히 한다.
+1-3 목적: `Score`, `Score Evidence`, `Keywords`를 AI enrichment 계층으로 분리 저장한다.
+1-3 설명: `news_id` 기준 upsert와 분석 상태를 분명히 한다.
 1-3 완료 조건(눈으로 확인): repository 함수 이름과 PK 기준이 문서/코드에 있다.
-1-3 사람 검증(비개발자): 같은 업데이트를 두 번 돌려도 중복 row가 폭증하지 않는다.
-1-3 흔한 문제/주의: PK 정의가 약하면 duplicate snapshot이 쌓인다.
+1-3 사람 검증(비개발자): 같은 분석을 두 번 돌려도 row가 무한히 늘지 않는다.
+1-3 흔한 문제/주의: `Keywords`를 30개 배열 대신 자유문으로 저장하면 UI 계약이 흔들린다.
 
 1-4 목적: 프론트가 필요한 필드를 한 번에 받을 수 있게 한다.
 1-4 설명: null 허용 규칙과 컬럼명을 고정한다.
-1-4 완료 조건(눈으로 확인): API 응답 예시에 `score`, `sentiment`, `keywords`가 보인다.
+1-4 완료 조건(눈으로 확인): API 응답 예시에 `score`, `scoreEvidence`, `sentiment`, `keywords`가 보인다.
 1-4 사람 검증(비개발자): 브라우저 network 응답에서 새 필드가 보인다.
 1-4 흔한 문제/주의: 이름을 바꾸면 프론트 매핑이 바로 깨진다.
 
-1-5 목적: 업데이트 버튼 한 번으로 뉴스 + sentiment가 함께 최신화되게 한다.
-1-5 설명: 별도 수동 step 없이 ingestion pipeline에 묶는다.
-1-5 완료 조건(눈으로 확인): job 완료 후 score/sentiment가 바로 조회된다.
-1-5 사람 검증(비개발자): 업데이트 후 새 뉴스에 sentiment 컬럼 값이 표시된다.
-1-5 흔한 문제/주의: 실패 시 뉴스는 들어오고 sentiment만 비는 partial success를 로그로 구분해야 한다.
+1-5 목적: 분석 전 상태와 분석 후 상태를 명확히 분리한다.
+1-5 설명: 기본값은 빈 상태이고, 분석 완료 후에만 값이 채워진다.
+1-5 완료 조건(눈으로 확인): 미분석 row는 비어 있고, 분석 row만 값이 있다.
+1-5 사람 검증(비개발자): 같은 목록에서 어떤 row는 비어 있고 어떤 row는 채워져도 이상하지 않다.
+1-5 흔한 문제/주의: 빈 기본값과 데이터 유실을 동일하게 취급하면 안 된다.
+
+1-6 목적: 값이 직접 지워지는 문제를 테스트에서 잡는다.
+1-6 설명: 저장 후 `score`/`score_evidence` 삭제 시 실패하는 테스트를 넣는다.
+1-6 완료 조건(눈으로 확인): 관련 테스트가 red/green으로 동작한다.
+1-6 사람 검증(비개발자): 값을 지우면 테스트 실패 메시지가 나온다.
+1-6 흔한 문제/주의: 정상적인 미분석 row까지 실패시키면 운영이 불편해진다.
 
 검증 훅:
 ```bash
@@ -247,8 +287,9 @@ node test_check_news_db.mjs
 
 ```text
 추가 확인:
-- GET /api/news?source_names=FINNHUB&limit=5 응답에 score/sentiment/keywords 포함 여부 확인
-- sentiment 저장 테이블 row count 확인
+- GET /api/news?source_names=FINNHUB&limit=5 응답에 score/scoreEvidence/sentiment/keywords 포함 여부 확인
+- AI analysis 저장 테이블 row count 확인
+- 저장 후 `score_evidence`를 지웠을 때 테스트가 실패하는지 확인
 
 사용자 확인 필요: 예
 ```
@@ -257,28 +298,28 @@ node test_check_news_db.mjs
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 2-1 | News Feed 컬럼 정의에 `Score`, `Keywords`, `Sentiment`를 반영 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | UI 컬럼 메뉴 확인 | ⬜ |
-| 2-2 | `Keywords`를 default/선택 컬럼 동작으로 정상 연결 | 같은 파일 | 컬럼 토글 및 렌더 확인 | ⬜ |
-| 2-3 | score/sentiment 셀 렌더, 정렬, null 표시 규칙 추가 | 같은 파일 | 정렬/표시 확인 | ⬜ |
+| 2-1 | News Feed 컬럼 정의에 `Score`, `Score Evidence`, `Keywords`, `Sentiment`를 반영 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | UI 컬럼 메뉴 확인 | ⬜ |
+| 2-2 | `Keywords`를 30개 기준 default/선택 컬럼 동작으로 정상 연결 | 같은 파일 | 컬럼 토글 및 렌더 확인 | ⬜ |
+| 2-3 | score/score evidence/sentiment 셀 렌더, 정렬, null 표시 규칙 추가 | 같은 파일 | 정렬/표시 확인 | ⬜ |
 | 2-4 | Data Control Window에 `Updates` / `Settings` 탭 구조 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx` | 탭 전환 확인 | ⬜ |
 | 2-5 | Settings 탭에 전체 글자 크기 조절 UI 추가 | 같은 파일 및 app shell styling | 슬라이더/프리셋 반영 확인 | ⬜ |
 
-2-1 목적: 사용자가 필요한 3개 컬럼을 실제로 보이게 만든다.
+2-1 목적: 사용자가 필요한 4개 컬럼을 실제로 보이게 만든다.
 2-1 설명: 단순 타입 선언이 아니라 메뉴/헤더/행 렌더까지 연결한다.
-2-1 완료 조건(눈으로 확인): Columns 메뉴에 3개 항목이 모두 나온다.
+2-1 완료 조건(눈으로 확인): Columns 메뉴에 새 4개 항목이 모두 나온다.
 2-1 사람 검증(비개발자): 체크박스로 끄고 켤 수 있다.
 2-1 흔한 문제/주의: 타입만 있고 `DEFAULT_COLUMNS`에 빠지면 다시 반쪽 구현이 된다.
 
 2-2 목적: 기존 keywords 파이프라인을 UI에 완성한다.
-2-2 설명: 이미 응답이 내려오는 값을 실제 컬럼으로 사용한다.
+2-2 설명: AI 분석 결과로 내려오는 30개 키워드를 실제 컬럼으로 사용한다.
 2-2 완료 조건(눈으로 확인): keyword chip 또는 placeholder가 행마다 보인다.
 2-2 사람 검증(비개발자): keywords가 있는 뉴스와 없는 뉴스의 차이가 보인다.
-2-2 흔한 문제/주의: `keywordsStatus`가 pending인데 빈 배열처럼 보이면 혼동된다.
+2-2 흔한 문제/주의: 30개 목표인데 잘린 수와 전체 수를 UI에서 구분 못 하면 혼동된다.
 
-2-3 목적: score/sentiment를 읽기 쉬운 형태로 표시한다.
-2-3 설명: 숫자 포맷, 색상, tooltip, 정렬키를 정한다.
+2-3 목적: score/score evidence/sentiment를 읽기 쉬운 형태로 표시한다.
+2-3 설명: 숫자 포맷, 색상, tooltip, 정렬키, evidence 말줄임 규칙을 정한다.
 2-3 완료 조건(눈으로 확인): score 열 정렬이 기대대로 동작한다.
-2-3 사람 검증(비개발자): 높은 score가 위로, null은 아래로 정렬된다.
+2-3 사람 검증(비개발자): 높은 score가 위로, null은 아래로 정렬되고 evidence가 보인다.
 2-3 흔한 문제/주의: 문자열 정렬로 처리하면 숫자 순서가 깨진다.
 
 2-4 목적: Data Control을 운영용 탭과 환경설정 탭으로 분리한다.
@@ -301,9 +342,10 @@ npm run build
 
 ```text
 추가 확인:
-- News Feed 컬럼 메뉴에서 Score/Keywords/Sentiment 토글 가능
+- News Feed 컬럼 메뉴에서 Score/Score Evidence/Keywords/Sentiment 토글 가능
 - Data Control에서 Settings 탭 표시
 - 글자 크기 변경 시 앱 전반 반영
+- 미분석 row는 빈 상태로 표시되는지 확인
 
 사용자 확인 필요: 예
 ```
@@ -364,8 +406,8 @@ npm run build
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
 | 4-1 | backend/frontend prompt 문서를 실제 구현과 동기화 | `terminal/backend_prompt.md`, `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md` | 문서 diff 확인 | ⬜ |
-| 4-2 | score/sentiment null 처리와 실패 로그 정책 정리 | 관련 prompt 및 plan 리비전 | 실패 케이스 확인 | ⬜ |
-| 4-3 | end-to-end 수동 검증 체크리스트 정리 | plan 또는 test 문서 | 체크리스트 실행 | ⬜ |
+| 4-2 | score/score evidence/keywords 기본 빈 상태와 실패 로그 정책 정리 | 관련 prompt 및 plan 리비전 | 실패 케이스 확인 | ⬜ |
+| 4-3 | AI analysis 삭제 감지 테스트와 end-to-end 수동 검증 체크리스트 정리 | plan 또는 test 문서 | 체크리스트 실행 | ⬜ |
 
 4-1 목적: 코드와 문서가 다시 벌어지지 않게 한다.
 4-1 설명: 구현 후 prompt/spec 문서를 최신화한다.
@@ -373,14 +415,14 @@ npm run build
 4-1 사람 검증(비개발자): 문서를 읽고 UI 동작을 그대로 재현할 수 있다.
 4-1 흔한 문제/주의: plan만 바뀌고 prompt가 안 바뀌면 다음 작업에서 혼선이 생긴다.
 
-4-2 목적: 부분 실패를 운영자가 이해할 수 있게 만든다.
-4-2 설명: 뉴스는 들어왔지만 sentiment가 실패한 경우를 명시한다.
-4-2 완료 조건(눈으로 확인): 로그/문서에 partial success 기준이 적힌다.
-4-2 사람 검증(비개발자): 에러 메시지가 “무엇이 비었는지” 설명한다.
+4-2 목적: 기본 빈 상태와 유실 상태를 운영자가 구분할 수 있게 만든다.
+4-2 설명: 분석 미실행 null과 저장 후 유실 null을 문서/로그에서 구분한다.
+4-2 완료 조건(눈으로 확인): 로그/문서에 empty vs lost 기준이 적힌다.
+4-2 사람 검증(비개발자): 에러 메시지가 “아직 분석 안 됨”과 “지워짐”을 구분한다.
 4-2 흔한 문제/주의: null과 0을 혼동하면 잘못된 score로 보인다.
 
-4-3 목적: 실제 사용 시나리오 기준 최종 확인을 준비한다.
-4-3 설명: update → 조회 → 탭 전환 → 재실행 흐름을 한 번에 검증한다.
+4-3 목적: 실제 사용 시나리오와 유실 감지까지 최종 확인을 준비한다.
+4-3 설명: update → AI analysis → 조회 → 값 삭제 → 테스트 실패 → 탭 전환 → 재실행 흐름을 검증한다.
 4-3 완료 조건(눈으로 확인): 체크리스트가 1회 실행 가능한 순서로 정리된다.
 4-3 사람 검증(비개발자): 체크리스트 순서대로 따라 하면 핵심 기능을 다 볼 수 있다.
 4-3 흔한 문제/주의: backend/frontend를 따로만 확인하면 persistence 버그를 놓칠 수 있다.
@@ -394,7 +436,8 @@ npm run test
 
 ```text
 수동 확인:
-- News 업데이트 후 Score/Keywords/Sentiment 컬럼 확인
+- News 업데이트 후 AI analysis 전/후의 Score/Score Evidence/Keywords/Sentiment 컬럼 확인
+- 저장 후 `Score` 또는 `Score Evidence`를 지웠을 때 테스트 실패 확인
 - 앱 종료/재실행 후 상태 복원 확인
 - Data Control Settings에서 글자 크기 반영 확인
 
@@ -402,19 +445,23 @@ npm run test
 ```
 
 ### 미확정 사항(명시 결정 필요)
-1. 결정 #1 — `Score` 정의
-   - 선택지: Finnhub raw score 사용 / 내부 composite score / 정규화 등급
-   - 차단 대상 Step: 0, 1, 2
+1. 결정 #1 — AI 분석 실행 시점
+   - 선택지: news pull 직후 / 별도 수동 job / full text 이후 batch
+   - 차단 대상 Step: 1, 4
 
 2. 결정 #2 — sentiment 저장 단위
    - 선택지: 기사별 snapshot / ticker-date snapshot / 직접 컬럼
    - 차단 대상 Step: 1
 
-3. 결정 #3 — 앱 상태 저장 범위
+3. 결정 #3 — AI analysis 저장 위치
+   - 선택지: `news_fulltext` 확장 / `news_ai_analysis` 별도 테이블
+   - 차단 대상 Step: 1
+
+4. 결정 #4 — 앱 상태 저장 범위
    - 선택지: layout만 / layout+window filters / 거의 모든 UI state
    - 차단 대상 Step: 3
 
-4. 결정 #4 — font size 저장 위치
+5. 결정 #5 — font size 저장 위치
    - 선택지: global localStorage / tab별 저장 / backend saved settings
    - 차단 대상 Step: 2, 3
 
@@ -429,23 +476,25 @@ Legend
 ```text
 [Track A: 데이터 계약 / 백엔드]
 🚫 0-1 sentiment 응답 구조 확정
-🚫 0-2 Score 정의 확정
+🚫 0-2 ai-news-analysis 출력 계약 확정
 🚫 0-3 저장 위치 확정
+🚫 0-5 삭제 감지 테스트 규칙 확정
    |
    v
 ⬜ 1-1 DB migration
 ⬜ 1-2 Finnhub sentiment fetch
-⬜ 1-3 sentiment repository
+⬜ 1-3 AI analysis repository
 ⬜ 1-4 GET /api/news contract 확장
-⬜ 1-5 pull job orchestration 연결
+⬜ 1-5 기본 빈 상태 규칙
+⬜ 1-6 삭제 감지 backend 테스트
 
 [Track B: 프론트 컬럼 / 운영 UI]
-🚫 0-2 Score 정의 확정
+🚫 0-2 ai-news-analysis 출력 계약 확정
 🚫 0-4 persistence 범위 확정
    |
-   +--> ⬜ 2-1 Score/Keywords/Sentiment 컬럼 반영
+   +--> ⬜ 2-1 Score/Score Evidence/Keywords/Sentiment 컬럼 반영
    +--> ⬜ 2-2 Keywords 컬럼 활성화
-   +--> ⬜ 2-3 score/sentiment 정렬/렌더
+   +--> ⬜ 2-3 score/evidence/sentiment 정렬/렌더
    +--> ⬜ 2-4 Data Control Settings 탭 추가
    +--> ⬜ 2-5 전체 글자 크기 조절 UI
 
@@ -461,11 +510,11 @@ Legend
 
 [Track D: 마감]
 ⬜ 4-1 prompt 문서 동기화
-⬜ 4-2 partial success/null 정책 정리
-⬜ 4-3 E2E 체크리스트 정리
+⬜ 4-2 empty/lost/null 정책 정리
+⬜ 4-3 삭제 감지 + E2E 체크리스트 정리
 
 ================ BLOCKER ================
-결정 #1 Score 정의가 확정되지 않으면
+`ai-news-analysis` 출력 계약과 실행 시점이 확정되지 않으면
 Step 1 backend schema와 Step 2 UI 컬럼 의미가 고정되지 않는다.
 =========================================
 ```
@@ -479,23 +528,29 @@ Step 1 backend schema와 Step 2 UI 컬럼 의미가 고정되지 않는다.
 
 | 결정 | 차단 대상 | 선택지 |
 |------|-----------|--------|
-| Score 정의 | Step 1, Step 2 | Finnhub raw / composite / normalized grade |
+| AI 분석 실행 시점 | Step 1, Step 4 | pull 직후 / 수동 job / fulltext 이후 |
 | sentiment 저장 단위 | Step 1 | 기사별 / ticker-date / direct column |
+| AI analysis 저장 위치 | Step 1 | `news_fulltext` 확장 / `news_ai_analysis` 별도 |
 | persistence 범위 | Step 3 | layout only / layout+filters / broad workspace |
 | font size 저장 위치 | Step 2, Step 3 | global localStorage / tab scoped / backend |
 
-### 결정 #1 — Score 정의(상세)
+### 결정 #1 — AI 뉴스 분석 출력 계약(상세)
 권장 기준:
-- `Score`는 사용자가 한눈에 비교하는 컬럼이므로 null/정렬/범례가 단순해야 한다.
-- 이미 `Sentiment` 컬럼을 별도로 노출할 예정이면, `Score`는 `Sentiment` raw 값과 완전히 같은 의미가 되지 않도록 주의해야 한다.
+- `Score`는 AI가 뉴스의 주가 영향 가능성을 판단한 값이어야 한다.
+- 이미 `Sentiment` 컬럼을 별도로 노출할 예정이므로, `Score`는 provider raw sentiment와 완전히 같은 의미가 아니어야 한다.
+- `Score Evidence`는 왜 이 점수를 줬는지 설명해야 하며, 분석 전에는 비워 둔다.
+- `Keywords`는 중요한 단어 30개를 목표로 배열 형태로 관리한다.
 
 권장안:
-- 1차 구현은 Finnhub에서 제공하는 sentiment score 또는 bull/bear 비율 기반의 단일 숫자를 그대로 쓰고, 컬럼 라벨 tooltip으로 의미를 설명한다.
-- 후속 단계에서 필요하면 composite score로 확장한다.
+- `Score`: `-10 ~ 10`
+- `Score Evidence`: 2~5문장 근거 요약
+- `Keywords`: 중요한 키워드 30개
+- 기본값: 분석 전에는 모두 비움
 
 예시:
-- 예시 1: `AAPL` 뉴스 row가 해당 시점 sentiment snapshot `0.72`를 가지면 `Score=0.72`, `Sentiment=Positive`처럼 분리 표시 가능.
-- 예시 2: sentiment 응답이 없으면 `Score=null`, `Sentiment=Unavailable`로 표시하고 0으로 대체하지 않는다.
+- 예시 1: 대형 수주/가이던스 상향 뉴스면 `Score=+8` 수준, Evidence에는 왜 매출/수요 기대를 높이는지 설명.
+- 예시 2: 중대한 규제 조사/소송 악재면 `Score=-7` 수준, Evidence에는 왜 비용/밸류에이션/신뢰 훼손으로 이어지는지 설명.
+- 예시 3: 아직 AI 분석 미실행이면 `Score=null`, `Score Evidence=null`, `Keywords=[]`로 유지.
 
 ### 결정 #2 — persistence 저장 payload(상세)
 권장 payload 초안:
@@ -520,7 +575,7 @@ Step 1 backend schema와 Step 2 UI 컬럼 의미가 고정되지 않는다.
           "position": { "top": 20, "left": 20, "width": 800, "height": 600 },
           "uiState": {
             "sourceTypeFilter": "all",
-            "visibleColumns": ["date", "ticker", "title", "score", "sentiment"],
+                  "visibleColumns": ["date", "ticker", "title", "score", "scoreEvidence", "sentiment"],
             "displayMode": "title-only"
           }
         }

@@ -54,3 +54,55 @@
 - 이번 작업은 문서 생성만 수행했다.
 - 코드 파일(`.ts`, `.tsx`, `.js`, `.py`)은 수정하지 않았다.
 - 사용자 확인 전까지 이 plan의 상태는 `확인 대기`로 유지한다.
+
+### Plan 리비전 — ai-news-analysis 정의 반영
+
+**작성 시각:** 2026-03-06 19:40 (local)
+
+**상태:** 확인 대기
+
+#### 수행 내용
+
+1. AI 뉴스 분석 skills 지침의 정식 명칭을 `ai-news-analysis`로 고정했다.
+2. 새 skills 문서 `.github/copilot-skills/ai-news-analysis.md`를 생성했다.
+3. skills 문서에 아래 계약을 문서화했다.
+   - `Score`: `-10 ~ 10`
+   - `Score Evidence`: 점수 근거 텍스트
+   - `Keywords`: 중요한 키워드 30개
+   - 기본값: 분석 전에는 비워 둠
+   - 저장/재조회/삭제 감지 테스트 필요
+4. `terminal_ui_ver3_final/plan.md`를 리비전해서 기존의 “Score=sentiment 후보” 해석을 제거하고, AI analysis 결과 중심으로 다시 정의했다.
+
+#### 생성/수정 파일
+
+- `.github/copilot-skills/ai-news-analysis.md`
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. `.github/copilot-skills/ai-news-analysis.md`를 열어 `Score`, `Score Evidence`, `Keywords`, 기본 빈 상태, 테스트 요구가 있는지 확인한다.
+2. `ai_agent_plan/terminal_ui_ver3_final/plan.md`를 열어 아래 반영 여부를 확인한다.
+   - `Score Evidence` 컬럼 추가
+   - `Score=-10~10` 정의
+   - `Keywords=30개` 정의
+   - 분석 전 기본 빈 상태 규칙
+   - 값 삭제/유실 감지 테스트 요구
+
+#### 문제점 / 리스크
+
+1. AI 분석 실행 시점은 아직 미확정이다.
+   - 완화 방안 1: 별도 수동 batch job으로 시작
+   - 완화 방안 2: full text 추출 후 후속 batch로 제한
+2. AI analysis 저장 위치는 아직 미확정이다.
+   - 완화 방안 1: `news_ai_analysis` 별도 테이블 채택
+   - 완화 방안 2: 필요 시 `news_fulltext` 확장과 비교 검토
+3. 정상적인 미분석 row와 저장 후 유실 row를 테스트에서 구분해야 한다.
+   - 완화 방안 1: `analysis_status` 같은 상태값 도입
+   - 완화 방안 2: 테스트 fixture를 미분석/분석완료/유실 3종으로 분리
+
+#### 비고
+
+- 이번 작업도 문서만 수정했다.
+- 구현 코드는 아직 시작하지 않았다.
+- 사용자 확인 전까지 이 리비전 상태는 `확인 대기`로 유지한다.
