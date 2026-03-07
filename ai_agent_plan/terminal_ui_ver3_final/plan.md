@@ -22,6 +22,10 @@
 13. News Feed Window 일반 검색창 바로 아래에 ticker 전용 검색창을 추가해 ticker만 정확히 필터링할 수 있게 한다.
 14. News Feed 검색 결과는 DB 전체를 server-side로 검색하되, 최초 500개 로드 후 cursor 기반으로 하단 스크롤 시 자동으로 500개씩 이어서 추가 로드되고, 동시에 리스트 하단에 `Load more` 버튼으로도 같은 추가 로드를 할 수 있게 한다.
 15. News Feed 검색에 날짜 기간(`from`/`to`) 필터를 추가하고, 날짜가 비어 있으면 전체 기간 검색이 되게 한다.
+16. `news_fulltext.full_text`는 HTML fragment가 아니라 plain text 본문만 canonical하게 저장하고, 기존 HTML 기반 row는 삭제 또는 재생성으로 정리한다.
+17. News Feed에 크롬 북마크처럼 폴더형 북마크 구조를 추가하고, 북마크 폴더를 생성/선택할 수 있게 한다.
+18. News row를 우클릭했을 때 `Add bookmark`를 표시하고, 이미 만든 북마크 폴더 중 어디에 저장할지 선택해서 저장할 수 있게 한다.
+19. 검색창 근처에 `Bookmark view`를 두고, 북마크 폴더를 선택하면 그 폴더에 저장된 뉴스 row만 UI에 보이게 한다.
 
 ### 현재 레포 상태(중요, 확인됨)
 - 백엔드 runtime DB는 `terminal/backend/backend/data/app.db` 이다.
@@ -29,6 +33,8 @@
 - `GET /api/news`는 현재 `news_items`만 읽지 않고, `news_fulltext.keywords_json`과 `news_change_metrics`를 join해서 응답한다.
 - `news_fulltext`에는 이미 `[][][]keywords_json[][][]`, `[][][]keywords_status[][][]`, `[][][]keywords_updated_at[][][]` 컬럼이 있다.
 - `fulltextRepository.updateKeywords()`가 이미 존재하므로 keywords 저장 파이프라인의 일부는 구현되어 있다.
+- 현재 full text extractor는 일부 도메인에서 기사 body HTML 조각을 `news_fulltext.full_text`에 그대로 저장하므로, plain text canonical 상태가 아니다.
+- backend에는 `news_saved_views` 테이블과 `/api/news/saved-views` API가 이미 있으나, 이는 검색 조건 저장용 평면 리스트이고 뉴스 단건 북마크/폴더 트리 구조는 아니다.
 - 현재 코드에는 `Score`, `Score Evidence`를 canonical하게 저장/조회하는 구조가 없다.
 - `FinnhubNewsWindow.tsx`에는 `keywords` 컬럼 타입/렌더링 코드가 이미 있으나, `DEFAULT_COLUMNS`에 빠져 있어 기본 컬럼 세트/컬럼 선택 메뉴에서 실사용 상태가 아니다.
 - 현재 `FinnhubNewsWindow.tsx`에는 `Score Evidence` 컬럼 정의가 없다.
@@ -37,6 +43,8 @@
 - 현재 Finnhub News 검색은 DB 전체를 server-side로 조회하지만, 한 번의 응답은 최대 200개로 제한되어 있고 프론트는 그 결과를 append 하지 않고 통째로 교체한다.
 - backend `GET /api/news`는 `cursor`/`nextCursor` pagination 구조를 이미 갖고 있지만, 현재 Finnhub News UI는 이를 사용하지 않는다.
 - `FinnhubNewsWindow.tsx`는 `finnhub-last-update-config`와 `finnhub-news-ui-state`를 사용해 update/search/filter/display/column 상태를 localStorage에 저장한다.
+- 현재 `FinnhubNewsWindow.tsx`에는 source/url cell 우클릭 메뉴가 있으나 기능은 URL 복사 중심이며, 뉴스 row를 북마크 폴더에 넣는 메뉴는 없다.
+- 현재 Finnhub News UI에는 검색창 근처의 `Bookmark view` 또는 북마크 폴더 선택 UI가 없다.
 - `App.tsx`는 `terminal-workspace-v1`를 사용해 tabs, activeTabId, theme, linkedTicker, fontScale, News Feed title/summary font size를 저장/복원한다.
 - `DataControlWindow.tsx`는 `Updates` / `Settings` 탭 구조와 전역 font scale, News Feed title/summary 글자 크기 제어 UI를 가진다.
 - 탭 바는 drag/drop으로 순서를 재배치할 수 있다.
@@ -58,6 +66,9 @@
 - Finnhub recent no-news 기록은 `source_type`별로 분리한다. `company_news`와 `press_release`를 한 덩어리로 기록하지 않는다.
 - 당일 범위는 보수적으로 취급한다. 자동 recent skip 대상은 당일 이전 confirmed-empty 범위까지만 허용한다.
 - 자동 recent retry는 confirmed-empty 범위에 대해 영구 스킵하되, 수동 `custom range` 재조회 경로는 유지한다.
+- `news_fulltext.full_text`에는 HTML 태그/스크립트 조각이 섞인 원문을 canonical로 남기지 않는다. 최종 저장값은 plain text 본문만 허용한다.
+- 기존 HTML 기반 `news_fulltext` row는 새 정책 도입 시 그대로 방치하지 않는다. 삭제 후 재추출하거나, 동등한 결과의 재정제 backfill로 plain text 상태로 맞춘다.
+- 북마크 기능은 검색 조건 저장용 `saved view`를 이름만 바꿔 재사용하는 방식으로 땜질하지 않는다. 뉴스 단건 북마크와 폴더 계층은 별도 canonical 구조로 설계한다.
 - 전체 글자 크기 조절은 우선 `terminal_ui_ver3_final` 앱 범위의 UI scale/font scale을 뜻한다. OS 전체 폰트나 브라우저 줌 제어는 비범위다.
 - 서버 재시작 후 background job 상태 복구까지 이번 범위에 포함할지 여부는 미확정 사항으로 둔다.
 
@@ -78,6 +89,8 @@
 - News Feed 일반 검색창 아래에 ticker 전용 검색창이 따로 보이고, ticker 입력 시 title/summary가 아니라 ticker 분류 기준으로만 결과가 줄어든다.
 - News Feed는 검색 시 DB 전체를 대상으로 조건에 맞는 최신 결과를 가져오고, 최초 500개 이후에는 하단 스크롤 시 자동으로 500개씩 이어서 더 불러오며, 같은 위치에서 `Load more` 버튼으로도 수동 추가 로드가 가능하다.
 - News Feed 검색에 날짜 From/To가 있고, 둘 다 비어 있으면 전체 기간 검색, 한쪽 또는 양쪽이 채워지면 해당 기간 안의 뉴스만 대상으로 검색된다.
+- News row를 우클릭하면 `Add bookmark`가 뜨고, 원하는 북마크 폴더를 골라 저장할 수 있다.
+- 검색창 근처의 `Bookmark view`를 누르면 폴더 목록이 보이고, 특정 폴더를 선택하면 그 폴더 안의 북마크 뉴스만 리스트에 보인다.
 - 분석 전 뉴스 row는 `Score`, `Score Evidence`, `Keywords`가 비어 있고, 분석 후에만 채워진다.
 - 테스트에서 `Score` 또는 `Score Evidence`가 지워진 경우 실패로 잡힌다.
 
@@ -148,6 +161,16 @@ Step N — <제목>
 - 무엇이 바뀌었나: 검색 paging 방향을 “하단 자동 append + 하단 `Load more` 버튼 병행”으로 구체화했고, Step 2/검증 훅/리스크 문구를 두 동작을 모두 확인하는 기준으로 갱신했다.
 - 영향: `FinnhubNewsWindow.tsx` 하단 sentinel 감지, 중복 로드 guard, `Load more` 버튼 노출/비활성화 규칙이 함께 정의된다.
 
+### PLAN CHANGE (2026-03-07)
+- 왜: 사용자가 현재 full text가 HTML 조각까지 섞여 저장되는 상태를 문제로 보고, 기존 값을 지운 뒤 plain text 본문만 canonical하게 저장하는 방향을 plan에 반영하길 요청했다.
+- 무엇이 바뀌었나: 목표에 plain text canonical 저장을 추가했고, 현재 상태/제약/Step 1/결정 상세에 “extractor plain text 정규화 + 기존 `news_fulltext` row 삭제 또는 재생성” 계획을 반영했다.
+- 영향: `fulltextExtractors.ts`, `fulltextUpdateService.ts`, `news_fulltext` 재처리 절차, keyword/AI analysis 입력 품질, 운영 검증 체크리스트가 함께 바뀐다.
+
+### PLAN CHANGE (2026-03-07)
+- 왜: 사용자가 크롬 북마크처럼 폴더형 북마크를 만들고, 뉴스 row 우클릭 `Add bookmark`, 검색창 근처 `Bookmark view`, 폴더별 북마크 뉴스 조회 기능을 요구했다.
+- 무엇이 바뀌었나: 목표에 북마크 폴더/단건 북마크/Bookmark view를 추가했고, 현재 상태/제약/결정사항/Step 1~3/결정 상세에 북마크 전용 데이터 모델과 UI 흐름을 반영했다.
+- 영향: bookmark schema/API, `FinnhubNewsWindow.tsx` 우클릭 메뉴/Bookmark view UX, workspace persistence payload, backend/frontend prompt 문서가 함께 바뀐다.
+
 권장 저장 구조:
 - 뉴스 원본 메타: `[][][]news_items[][][]`
 - 뉴스 full text / keywords: `[][][]news_fulltext[][][]`
@@ -202,6 +225,21 @@ Step N — <제목>
    - 선택지 B: `from`/`to` 입력을 두되, 기본값은 비워 두고 비어 있으면 전체 검색, 값이 있으면 기간 검색
    - 현재 권장: B. 기본 사용성은 유지하면서 필요할 때만 기간을 좁힐 수 있어야 한다.
 
+10. 북마크 데이터 모델
+   - 선택지 A: 기존 `news_saved_views`를 북마크 용도로 확장
+   - 선택지 B: 북마크 폴더/북마크 아이템을 별도 테이블로 분리
+   - 현재 권장: B. saved view는 검색 조건 저장이고, 북마크는 뉴스 row 저장 + 폴더 트리라는 다른 lifecycle을 가진다.
+
+11. 북마크 폴더 계층 방식
+   - 선택지 A: 1단계 폴더만 허용
+   - 선택지 B: `parent_id` 기반 트리로 크롬 북마크처럼 중첩 허용
+   - 현재 권장: B. 사용자가 “북마크 폴더 같은 것”을 원하므로 트리 구조를 먼저 열어 두는 편이 안전하다.
+
+12. Bookmark view 동작 방식
+   - 선택지 A: 기존 검색 결과 위에 북마크 필터만 얹기
+   - 선택지 B: 선택된 폴더 기준 북마크 전용 결과 모드로 전환
+   - 현재 권장: B. 사용자가 “그 북마크 폴더 안에 북마크된 뉴스 데이터들이 보이게”를 원하므로 폴더 선택 시 명확한 북마크 전용 view가 맞다.
+
 ### 계획 중간 필수 확인
 중간 구현 전에 반드시 아래를 확인한다.
 
@@ -237,6 +275,17 @@ Step N — <제목>
    - `from` 또는 `to`가 채워지면 해당 경계 조건으로 검색 범위가 줄어드는지
    - 날짜 조건이 바뀌면 cursor와 누적 결과를 초기화하는지
 
+8. Full text plain text contract 확인
+   - `news_fulltext.full_text`에 HTML tag/script/style 조각이 남지 않도록 저장 규칙을 고정하는지
+   - 기존 HTML 기반 row를 삭제 후 재추출할지, 동일 결과 보장의 backfill로 교체할지 실행 절차를 문서화하는지
+   - keyword/AI analysis는 plain text로 정리된 row만 입력으로 쓰는지 확인하는지
+
+9. 북마크 contract 확인
+   - 북마크 폴더와 북마크 아이템의 canonical 저장소를 별도 테이블로 둘지 확정하는지
+   - 뉴스 row 우클릭 시 `Add bookmark` 메뉴가 뜨고, 폴더 선택 다이얼로그 또는 서브메뉴 흐름을 어떤 방식으로 둘지 고정하는지
+   - `Bookmark view`에서 폴더 선택 시 해당 폴더에 속한 뉴스 row 집합만 보여주는지 확인하는지
+   - 같은 news_id를 같은 폴더에 중복 저장할 때의 정책을 정하는지
+
 ### 제안하는 구현 순서(이유)
 1. Step 0에서 `Score`/sentiment 매핑과 저장 모델을 먼저 고정한다.
    - 이유: 이 결정이 DB/API/UI 전체를 바꾼다.
@@ -247,6 +296,10 @@ Step N — <제목>
 4. Step 3에서 workspace persistence를 구현한다.
    - 이유: 앱 셸과 각 창 상태 저장을 한 번에 묶어야 중복 수정이 줄어든다.
 5. Step 4에서 AI analysis 테스트, 삭제 감지 테스트, 문서 동기화를 한다.
+
+추가 선행 작업:
+- Step 1 안에서 full text canonical 형식을 먼저 plain text로 고정하고, 기존 HTML 기반 row를 정리한 뒤 keyword/AI analysis 후속 단계를 진행한다.
+- 북마크 기능은 Step 1에서 폴더/아이템 데이터 모델을 먼저 고정한 뒤 Step 2에서 우클릭 메뉴와 Bookmark view를 붙인다.
 
 ### 단계별 계획(각 단계: 구현 → 검증)
 
@@ -326,6 +379,10 @@ Step N — <제목>
 | 1-7 | Finnhub recent confirmed-empty range 저장/skip 로직 추가 | `terminal/backend/src/services/finnhubNewsProvider.ts`, `terminal/backend/src/db.ts` 또는 상태 저장소 | repeated recent pull 비교 확인 | ⬜ |
 | 1-8 | `GET /api/news` 검색 paging 정책을 500개 배치 + `nextCursor` append 계약으로 고정 | `terminal/backend/src/services/newsRepository.ts`, `terminal/backend/src/server.ts`, `terminal/backend/src/types.ts` | 첫 페이지/다음 페이지 cursor 응답 확인 | ⬜ |
 | 1-9 | `GET /api/news` 검색 contract에 `from`/`to` 기간 조건과 빈 기본값(전체 검색) 규칙을 명시 | `terminal/backend/src/services/newsRepository.ts`, `terminal/backend/src/server.ts`, `terminal/backend/src/types.ts` | 날짜 조건별 API 응답 확인 | ⬜ |
+| 1-10 | full text extractor를 HTML fragment 저장에서 plain text canonical 저장으로 변경 | `terminal/backend/src/services/fulltextExtractors.ts`, 필요 시 `terminal/backend/src/services/fulltextUpdateService.ts` | extractor 결과 샘플 확인 | ⬜ |
+| 1-11 | 기존 HTML 기반 `news_fulltext` row를 삭제 또는 재생성해 plain text로 backfill | `terminal/backend/backend/data/app.db`, 필요 시 보조 스크립트/운영 절차 문서 | 재추출 후 DB 샘플 확인 | ⬜ |
+| 1-12 | 북마크 폴더/북마크 아이템 schema 및 repository/API 추가 | `terminal/backend/src/db.ts`, `terminal/backend/src/services/`, `terminal/backend/src/server.ts`, `terminal/backend/src/types.ts` | 폴더 생성/북마크 추가 API 확인 | ⬜ |
+| 1-13 | 북마크 폴더 선택 기준 북마크 뉴스 조회 API 추가 | `terminal/backend/src/services/newsRepository.ts`, `terminal/backend/src/server.ts`, `terminal/backend/src/types.ts` | 폴더별 뉴스 응답 확인 | ⬜ |
 
 1-1 목적: runtime DB가 sentiment와 AI analysis 결과를 영속 저장할 수 있게 만든다.
 1-1 설명: 테이블 생성과 기존 DB migration을 안전하게 처리한다.
@@ -381,6 +438,30 @@ Step N — <제목>
 1-9 사람 검증(비개발자): 같은 검색어라도 날짜를 좁히면 결과 수가 줄고, 날짜를 지우면 다시 전체 기간 결과로 돌아온다.
 1-9 흔한 문제/주의: UI에서 날짜를 지웠는데 이전 `from`/`to`가 계속 남아 있으면 사용자는 전체 검색이라고 생각해도 실제로는 기간 필터가 남아 버린다.
 
+1-10 목적: `news_fulltext.full_text`를 HTML 조각이 아닌 plain text canonical 본문으로 고정한다.
+1-10 설명: extractor에서 article body를 찾은 뒤 태그 제거, 불필요한 노드 제거, 줄바꿈/공백 정규화를 거쳐 텍스트만 저장하도록 바꾼다.
+1-10 완료 조건(눈으로 확인): 새로 추출된 `full_text` 샘플에 `<div>`, `<p>`, `<script>` 같은 태그가 남아 있지 않다.
+1-10 사람 검증(비개발자): DB나 API에서 본문을 봤을 때 웹페이지 코드가 아니라 읽을 수 있는 문장만 보인다.
+1-10 흔한 문제/주의: 태그만 지우고 문단 경계를 잃으면 문장이 한 줄로 뭉개질 수 있고, 반대로 script/style 제거가 빠지면 코드 조각이 다시 섞일 수 있다.
+
+1-11 목적: 이미 저장된 HTML 기반 `news_fulltext`를 plain text 상태로 정리해 old/new 데이터가 섞이지 않게 한다.
+1-11 설명: 기존 row를 삭제 후 재추출하거나, 동등한 plain text 결과를 보장하는 재정제 backfill을 수행한다. 최종 목표는 canonical DB에 HTML 기반 row가 남지 않는 것이다.
+1-11 완료 조건(눈으로 확인): 기존 문제 row를 다시 조회했을 때 plain text만 남고 HTML 태그가 사라진다.
+1-11 사람 검증(비개발자): 예전에는 코드처럼 보이던 뉴스 본문이 재처리 후 일반 문장으로만 보인다.
+1-11 흔한 문제/주의: 기존 row를 그대로 둔 채 새 정책만 적용하면 old row와 new row 포맷이 섞여 keyword/AI analysis 품질이 불안정해질 수 있다.
+
+1-12 목적: 북마크 기능의 canonical 저장 구조를 고정한다.
+1-12 설명: `bookmark_folders`, `bookmark_items` 같은 별도 테이블과 CRUD API를 추가해 폴더 생성, 폴더 트리 조회, 뉴스 북마크 추가/삭제를 지원한다.
+1-12 완료 조건(눈으로 확인): 북마크 폴더 생성 API와 `Add bookmark` API가 존재하고 DB에 row가 생긴다.
+1-12 사람 검증(비개발자): 폴더를 하나 만들고 뉴스 하나를 넣었을 때 DB 점검이나 API 응답에서 둘 다 보인다.
+1-12 흔한 문제/주의: saved view 테이블에 억지로 합치면 검색 조건 저장과 뉴스 단건 저장이 섞여 나중에 UI 의미가 붕괴할 수 있다.
+
+1-13 목적: 선택한 북마크 폴더 안의 뉴스만 다시 보여줄 수 있게 한다.
+1-13 설명: 폴더 id를 받아 그 폴더에 속한 news_id 집합을 최신 정렬로 조회하는 API를 만들고, 필요하면 하위 폴더 포함 여부도 옵션으로 둔다.
+1-13 완료 조건(눈으로 확인): 특정 폴더 id로 요청했을 때 그 폴더에 북마크된 뉴스 row만 반환된다.
+1-13 사람 검증(비개발자): 폴더 A와 폴더 B에 다른 뉴스를 넣어 두고 조회하면 서로 다른 목록이 나온다.
+1-13 흔한 문제/주의: 폴더 선택 이후에도 기존 검색 cursor를 재사용하면 북마크 모드와 일반 검색 결과가 섞일 수 있다.
+
 검증 훅:
 ```bash
 cd terminal/backend
@@ -399,6 +480,10 @@ node test_check_news_db.mjs
 - AI analysis 저장 테이블 row count 확인
 - 저장 후 `score_evidence`를 지웠을 때 테스트가 실패하는지 확인
 - 동일 ticker에 대해 recent update를 두 번 실행했을 때 confirmed-empty 과거 구간 재조회가 줄어드는지 확인
+- 새로 추출한 `news_fulltext.full_text` 샘플에 HTML tag/script/style 조각이 남지 않는지 확인
+- 기존 HTML 기반 row를 삭제 또는 재생성한 뒤 같은 news_id 샘플이 plain text로 바뀌었는지 확인
+- 북마크 폴더 생성 API로 폴더를 만든 뒤 뉴스 row를 해당 폴더에 추가할 수 있는지 확인
+- 폴더별 북마크 뉴스 조회 API가 같은 폴더 내 뉴스만 반환하는지 확인
 
 사용자 확인 필요: 예
 ```
@@ -415,6 +500,9 @@ node test_check_news_db.mjs
 | 2-6 | 일반 검색창 바로 아래에 ticker 전용 검색창을 추가하고 `tickers` query로만 동작하도록 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | ticker-only 검색 결과 확인 | ⬜ |
 | 2-7 | 검색 결과를 최초 500개 로드 후 하단 스크롤 시 자동으로 `nextCursor` 500개 append 하고, 동시에 하단 `Load more` 버튼으로도 같은 추가 로드를 가능하게 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 자동 로드/버튼 로드 확인 | ⬜ |
 | 2-8 | 검색창 영역에 날짜 From/To 입력을 추가하고 비어 있으면 전체 검색, 값이 있으면 기간 검색으로 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 날짜 조건 검색 확인 | ⬜ |
+| 2-9 | 검색창 근처에 `Bookmark view` UI와 북마크 폴더 선택 메뉴 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 폴더 선택 UI 확인 | ⬜ |
+| 2-10 | News row 우클릭 메뉴에 `Add bookmark`와 폴더 선택 흐름 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 우클릭 북마크 저장 확인 | ⬜ |
+| 2-11 | 선택한 북마크 폴더 안의 뉴스만 리스트에 표시하는 bookmark mode 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 북마크 폴더별 결과 확인 | ⬜ |
 
 2-1 목적: 사용자가 필요한 4개 컬럼을 실제로 보이게 만든다.
 2-1 설명: 단순 타입 선언이 아니라 메뉴/헤더/행 렌더까지 연결한다.
@@ -464,6 +552,24 @@ node test_check_news_db.mjs
 2-8 사람 검증(비개발자): 검색어는 그대로 둔 채 날짜만 바꿔도 결과 기간이 달라지고, 날짜를 지우면 다시 전체 기간 결과가 나온다.
 2-8 흔한 문제/주의: 날짜만 바뀌어도 기존 cursor 누적 목록을 유지하면 이전 기간 결과와 섞일 수 있으므로 결과를 초기화해야 한다.
 
+2-9 목적: 검색/필터 근처에서 북마크 폴더를 빠르게 고를 수 있게 한다.
+2-9 설명: 검색창 근처에 `Bookmark view` 버튼 또는 드롭다운을 두고, 북마크 폴더 트리를 선택할 수 있게 한다.
+2-9 완료 조건(눈으로 확인): 검색창 근처에 `Bookmark view`가 보이고, 누르면 북마크 폴더 목록이 열린다.
+2-9 사람 검증(비개발자): 폴더를 몇 개 만들어 두면 메뉴에서 각 폴더 이름을 직접 고를 수 있다.
+2-9 흔한 문제/주의: 폴더가 많아질 때 단순 평면 리스트만 보여주면 크롬 북마크 같은 구조라는 요구와 어긋날 수 있다.
+
+2-10 목적: 뉴스 리스트에서 곧바로 북마크할 수 있게 한다.
+2-10 설명: row 우클릭 시 `Add bookmark`를 띄우고, 클릭하면 기존 북마크 폴더 목록 중 어디에 저장할지 선택하게 한다.
+2-10 완료 조건(눈으로 확인): 뉴스 row 우클릭 메뉴에 `Add bookmark`가 보이고, 폴더 선택 뒤 저장된다.
+2-10 사람 검증(비개발자): 뉴스 하나를 우클릭해 폴더를 고르면 그 뉴스가 북마크 폴더에 들어간다.
+2-10 흔한 문제/주의: 현재 URL 복사 메뉴와 북마크 메뉴가 충돌하지 않도록 row 기준 메뉴와 source/url cell 기준 메뉴를 분리할 필요가 있다.
+
+2-11 목적: 선택한 북마크 폴더를 뉴스 뷰 자체로 볼 수 있게 한다.
+2-11 설명: `Bookmark view`에서 폴더를 선택하면 일반 검색 결과 대신 해당 폴더에 저장된 뉴스 데이터 집합을 같은 리스트 UI에 렌더한다.
+2-11 완료 조건(눈으로 확인): 폴더를 바꾸면 리스트가 그 폴더 뉴스로 교체되고, 폴더마다 다른 결과가 나온다.
+2-11 사람 검증(비개발자): 폴더 A에 넣은 뉴스는 폴더 A에서만 보이고, 폴더 B에 넣은 뉴스는 폴더 B에서만 보인다.
+2-11 흔한 문제/주의: bookmark mode와 일반 search mode의 상태를 분리하지 않으면 사용자가 일반 검색으로 돌아왔을 때 이전 검색 조건이 사라지거나 섞일 수 있다.
+
 검증 훅:
 ```bash
 cd termina_web/figma_code/terminal_ui_ver2_finhub
@@ -480,6 +586,9 @@ npm run build
 - 리스트 하단의 `Load more` 버튼으로도 다음 500개가 추가 로드되는지 확인
 - 날짜 From/To가 비어 있을 때 전체 기간 검색이 되는지 확인
 - 날짜 기간 지정 시 해당 기간 안의 결과만 검색되는지 확인
+- 검색창 근처에 `Bookmark view`가 보이고 폴더 선택이 가능한지 확인
+- 뉴스 row 우클릭 시 `Add bookmark`가 보이고, 폴더 선택 후 북마크 저장이 되는지 확인
+- 특정 북마크 폴더 선택 시 그 폴더 안 뉴스만 표시되는지 확인
 - Data Control에서 Settings 탭 표시
 - 글자 크기 변경 시 앱 전반 반영
 - 미분석 row는 빈 상태로 표시되는지 확인
@@ -496,6 +605,7 @@ npm run build
 | 3-3 | 탭 전환 후 탭별 window state 유지 확인 및 보강 | `App.tsx` 및 창 컴포넌트 state wiring | 탭 왕복 테스트 | ⏳ |
 | 3-4 | 창별 중요 UI state(컬럼/필터/검색/active Settings tab) 저장 범위 반영 | `FinnhubNewsWindow.tsx`, `DataControlWindow.tsx` 등 | 창 재오픈 후 상태 복원 확인 | ⏳ |
 | 3-5 | storage versioning / fallback reset 로직 추가 | app shell 공용 유틸 | 깨진 payload 복구 확인 | ⏳ |
+| 3-6 | 북마크 view 상태와 마지막 선택 북마크 폴더 복원 범위 반영 | `App.tsx`, `FinnhubNewsWindow.tsx` | 재실행 후 북마크 뷰 상태 확인 | ⬜ |
 
 3-1 목적: 앱 전체 복원의 기준 payload를 만든다.
 3-1 설명: localStorage key, version, schema를 정한다.
@@ -527,6 +637,12 @@ npm run build
 3-5 사람 검증(비개발자): localStorage를 지워도 앱이 정상 시작한다.
 3-5 흔한 문제/주의: versioning이 없으면 나중 schema 변경 때 복원이 깨진다.
 
+3-6 목적: 사용자가 보던 북마크 폴더 view를 다시 열었을 때 그대로 이어 보게 한다.
+3-6 설명: News Feed uiState에 bookmark mode on/off와 마지막 선택 folder id를 저장하되, 임시 북마크 메뉴 open 상태는 저장하지 않는다.
+3-6 완료 조건(눈으로 확인): 앱 재실행 후에도 직전에 보던 북마크 폴더 view가 다시 열린다.
+3-6 사람 검증(비개발자): 특정 북마크 폴더를 보고 앱을 껐다 켜면 같은 폴더 뉴스가 다시 보인다.
+3-6 흔한 문제/주의: 존재하지 않는 folder id를 복원하면 빈 화면처럼 보일 수 있으므로 삭제된 폴더에 대한 fallback이 필요하다.
+
 검증 훅:
 ```text
 수동 검증:
@@ -545,6 +661,7 @@ npm run build
 | 4-1 | backend/frontend prompt 문서를 실제 구현과 동기화 | `terminal/backend_prompt.md`, `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md` | 문서 diff 확인 | ⬜ |
 | 4-2 | score/score evidence/keywords 기본 빈 상태와 실패 로그 정책 정리 | 관련 prompt 및 plan 리비전 | 실패 케이스 확인 | ⬜ |
 | 4-3 | AI analysis 삭제 감지 테스트와 end-to-end 수동 검증 체크리스트 정리 | plan 또는 test 문서 | 체크리스트 실행 | ⬜ |
+| 4-4 | 북마크 폴더/우클릭 저장/Bookmark view 흐름 문서화와 E2E 체크리스트 추가 | 관련 prompt 및 plan 리비전 | 북마크 시나리오 점검 | ⬜ |
 
 4-1 목적: 코드와 문서가 다시 벌어지지 않게 한다.
 4-1 설명: 구현 후 prompt/spec 문서를 최신화한다.
@@ -564,6 +681,12 @@ npm run build
 4-3 사람 검증(비개발자): 체크리스트 순서대로 따라 하면 핵심 기능을 다 볼 수 있다.
 4-3 흔한 문제/주의: backend/frontend를 따로만 확인하면 persistence 버그나 자동 로드/`Load more` 간 cursor append 중복·누락 버그를 놓칠 수 있다.
 
+4-4 목적: 북마크 기능이 나중 작업에서 saved view와 혼동되지 않게 문서 기준을 고정한다.
+4-4 설명: 폴더 생성, 뉴스 북마크 추가, Bookmark view 조회, 일반 검색 복귀 흐름을 prompt/spec와 체크리스트에 반영한다.
+4-4 완료 조건(눈으로 확인): 문서에 북마크 폴더와 saved view의 차이가 분명히 적혀 있다.
+4-4 사람 검증(비개발자): 문서만 보고도 폴더 생성 → 우클릭 북마크 → Bookmark view 조회 흐름을 따라 할 수 있다.
+4-4 흔한 문제/주의: saved view와 bookmark 용어를 섞어 쓰면 UI 요구가 다시 흐려질 수 있다.
+
 검증 훅:
 ```bash
 cd terminal
@@ -580,6 +703,7 @@ npm run test
 - 저장 후 `Score` 또는 `Score Evidence`를 지웠을 때 테스트 실패 확인
 - 앱 종료/재실행 후 상태 복원 확인
 - Data Control Settings에서 글자 크기 반영 확인
+- 북마크 폴더 생성 → 뉴스 우클릭 `Add bookmark` → `Bookmark view`에서 폴더 선택 → 해당 뉴스 표시 흐름 확인
 
 사용자 확인 필요: 예
 ```
@@ -600,6 +724,10 @@ npm run test
 4. 결정 #5 — font size 저장 위치
    - 선택지: global localStorage / tab별 저장 / backend saved settings
    - 차단 대상 Step: 2, 3
+
+5. 결정 #8 — 북마크 데이터 모델
+   - 선택지: `news_saved_views` 확장 / `bookmark_folders` + `bookmark_items` 별도
+   - 차단 대상 Step: 1, 2, 3
 
 ### 실행 의존성 그래프
 
@@ -627,6 +755,10 @@ Legend
 ⬜ 1-7 confirmed-empty range 저장/skip
 ⬜ 1-8 GET /api/news 500개 cursor paging 계약
 ⬜ 1-9 GET /api/news 날짜 기간 검색 계약
+⬜ 1-10 full text plain text extractor
+⬜ 1-11 기존 HTML full_text 정리/backfill
+⬜ 1-12 북마크 schema/repository/API
+⬜ 1-13 북마크 폴더별 뉴스 조회 API
 
 [Track B: 프론트 컬럼 / 운영 UI]
 ✅ 0-2 ai-news-analysis 출력 기준 정리
@@ -638,6 +770,9 @@ Legend
    +--> ⬜ 2-6 ticker 전용 검색창 + tickers query 연결
    +--> ⬜ 2-7 500개 cursor 자동 append + Load more 버튼
    +--> ⬜ 2-8 날짜 기간 검색 UI + from/to query 연결
+   +--> ⬜ 2-9 Bookmark view 폴더 선택 UI
+   +--> ⬜ 2-10 row 우클릭 Add bookmark
+   +--> ⬜ 2-11 폴더별 bookmark mode 결과 표시
    +--> ⏳ 2-4 Data Control Settings 탭 추가
    +--> ⏳ 2-5 전체 글자 크기 조절 UI
 
@@ -650,11 +785,13 @@ Legend
 ⏳ 3-3 탭 왕복 상태 유지
 ⏳ 3-4 창 내부 UI state 저장
 ⏳ 3-5 storage version/fallback
+⬜ 3-6 bookmark view 상태 복원
 
 [Track D: 마감]
 ⬜ 4-1 prompt 문서 동기화
 ⬜ 4-2 empty/lost/null 정책 정리
 ⬜ 4-3 삭제 감지 + E2E 체크리스트 정리
+⬜ 4-4 bookmark 문서/체크리스트 정리
 
 ================ BLOCKER ================
 sentiment 매핑 방식, 저장 위치, AI 실행 시점이 정리되지 않으면
@@ -677,6 +814,7 @@ Step 1 backend schema와 Step 2 UI 컬럼 의미가 고정되지 않는다.
 | 검색 paging 방식 | Step 1, Step 2 | 200 고정 / 500 cursor 자동 append + Load more 버튼 |
 | 검색 날짜 기간 방식 | Step 1, Step 2 | 날짜 없음 / 비워두면 전체 + 값 있으면 기간 검색 |
 | font size 저장 위치 | Step 2, Step 3 | global localStorage / tab scoped / backend |
+| 북마크 데이터 모델 | Step 1, Step 2, Step 3 | saved view 확장 / 별도 folder+item 테이블 |
 
 ### 결정 #1 — AI 뉴스 분석 출력 계약(상세, 사용자 확인 완료)
 권장 기준:
@@ -711,6 +849,8 @@ Step 1 backend schema와 Step 2 UI 컬럼 의미가 고정되지 않는다.
 - News Feed ticker 검색어
 - News Feed 날짜 `from`/`to`
 - News Feed display mode
+- News Feed bookmark mode on/off
+- News Feed 마지막 선택 bookmark folder
 - Data Control active tab
 
 저장하지 않는 대상:
@@ -745,6 +885,8 @@ Step 1 backend schema와 Step 2 UI 컬럼 의미가 고정되지 않는다.
                   "tickerQuery": "ASTS",
                   "dateFrom": null,
                   "dateTo": null,
+               "bookmarkViewMode": false,
+               "selectedBookmarkFolderId": null,
             "sourceTypeFilter": "all",
                   "visibleColumns": ["date", "ticker", "title", "score", "scoreEvidence", "sentiment"],
             "displayMode": "title-only"
@@ -765,6 +907,7 @@ Step 1 backend schema와 Step 2 UI 컬럼 의미가 고정되지 않는다.
 사람 확인 체크 항목:
 - 앱을 다시 열었을 때 마지막 탭이 자동으로 열린다.
 - News Feed의 컬럼 on/off 상태가 이전과 같다.
+- 북마크 폴더 view를 보고 있었다면 같은 폴더가 다시 열린다.
 - 글자 크기가 마지막 설정값으로 유지된다.
 
 ### 결정 #6 — Finnhub recent confirmed-empty skip 정책(상세)
@@ -787,3 +930,49 @@ Step 1 backend schema와 Step 2 UI 컬럼 의미가 고정되지 않는다.
 - 뉴스가 없던 ticker는 같은 과거 범위를 recent update에서 반복 조회하지 않는다.
 - `company_news`와 `press_release`의 스킵 판단이 서로 섞이지 않는다.
 - 당일 범위는 여전히 조회될 수 있고, 필요하면 `custom range`로 과거를 강제 재조회할 수 있다.
+
+### 결정 #7 — Full Text plain text canonical 저장 정책(상세)
+사용자 요구 기준:
+- 기존 HTML 기반 `news_fulltext.full_text`는 지우거나 다시 만들어서 plain text 상태로 맞춘다.
+- 이후 canonical 저장값은 HTML fragment가 아니라 본문 plain text만 허용한다.
+
+권장 기준:
+- extractor 단계에서 article body HTML을 찾되, 저장 직전에는 plain text 정규화를 거친다.
+- `script`, `style`, `noscript`, embed/iframe 계열 노드는 제거한다.
+- 문단/리스트/줄바꿈 경계는 유지하되, 최종 저장값에는 HTML tag가 남지 않게 한다.
+- 기존 `news_fulltext` row는 정책 도입 시 한 번 정리한다. 권장 순서는 “기존 row 삭제 → fulltext update 재실행 → plain text 샘플 확인”이다.
+- keyword와 후속 `ai-news-analysis`는 plain text로 정리된 `full_text`를 기준으로만 돌린다.
+
+운영적 정의:
+- 예시 1: Nasdaq 기사 body에서 `<p>Revenue rose 20%</p><p>Guidance was raised</p>`를 얻었다면, 저장값은 태그 없는 두 문단 텍스트여야 한다.
+- 예시 2: article body 안에 `<script>...</script>` 또는 embed HTML이 섞여 있어도 저장된 `full_text`에는 포함되지 않아야 한다.
+- 예시 3: 기존 DB row가 `<div class="body__content">...</div>` 형태라면, 새 정책 적용 후에는 해당 row를 삭제 후 재추출하거나 재정제 backfill로 plain text만 남겨야 한다.
+
+사람 확인 체크 항목:
+- News full text를 열었을 때 웹페이지 코드처럼 보이지 않고 읽을 수 있는 문장만 남아 있다.
+- 예전 HTML 기반 row와 새 row가 포맷이 섞여 있지 않다.
+- 이후 keywords/AI analysis 품질 점검 시 HTML tag 잔여물이 입력으로 보이지 않는다.
+
+### 결정 #8 — News Bookmark Folder/View 정책(상세)
+사용자 요구 기준:
+- 크롬 북마크처럼 북마크와 북마크 폴더를 만들 수 있어야 한다.
+- 뉴스 data를 우클릭하면 `Add bookmark`가 떠야 하고, 이미 만든 폴더 중 어디에 저장할지 선택할 수 있어야 한다.
+- 검색창 근처의 `Bookmark view`에서 폴더를 선택하면 그 폴더에 북마크된 뉴스만 UI에 보여야 한다.
+
+권장 기준:
+- saved view와 bookmark는 분리한다. saved view는 검색 조건 저장, bookmark는 뉴스 row 저장이다.
+- backend는 `bookmark_folders(id, user_id, name, parent_id, sort_order, created_at)`와 `bookmark_items(folder_id, news_id, created_at)` 같은 별도 구조를 권장한다.
+- 같은 news_id를 같은 folder_id에 다시 넣으면 중복 row를 만들지 않고 no-op 또는 upsert로 처리한다.
+- `Bookmark view`는 일반 검색과 별도 모드로 취급하되, 같은 리스트 컴포넌트를 재사용한다.
+- 북마크 폴더 선택 UI는 검색창 근처에서 바로 접근 가능해야 하고, row 우클릭 메뉴와 충돌하지 않아야 한다.
+
+운영적 정의:
+- 예시 1: 사용자가 `Earnings` 폴더를 만들고 뉴스 A를 우클릭해 `Add bookmark` → `Earnings`를 고르면, 이후 `Bookmark view`에서 `Earnings` 선택 시 뉴스 A가 리스트에 보여야 한다.
+- 예시 2: `Macro` 폴더와 `Semis` 폴더에 서로 다른 뉴스를 넣어 두면, 각 폴더 선택 시 자기 폴더 뉴스만 보여야 한다.
+- 예시 3: 같은 뉴스를 같은 폴더에 두 번 `Add bookmark`해도 중복 행이 두 번 보이면 안 된다.
+
+사람 확인 체크 항목:
+- 북마크 폴더를 직접 만들 수 있다.
+- 뉴스 row 우클릭 시 `Add bookmark`가 보인다.
+- 폴더 선택 후 해당 뉴스가 그 폴더의 `Bookmark view`에서만 보인다.
+- saved view와 bookmark가 UI에서 서로 다른 개념으로 보인다.
