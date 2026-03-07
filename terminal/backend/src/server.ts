@@ -174,6 +174,26 @@ app.post("/api/tickers/add", async (req, res, next) => {
 // ── Finnhub News Pull ───────────────────────────────────
 const DEFAULT_TICKERS_CSV = "tradigview_screener/original_data/watch lists2_2026-02-22.csv";
 
+/** canonical default universe에서 ticker 목록 조회. DB 미준비 시 CSV fallback. */
+async function getDefaultUniverseTickers(): Promise<string[]> {
+  try {
+    const universes = await listUniverses();
+    const def = universes.find((u) => u.name === "default");
+    if (def) {
+      const items = await listUniverseItems(def.id);
+      if (items.length > 0) return items.map((s) => s.ticker);
+    }
+  } catch {
+    // DB not ready yet
+  }
+  try {
+    const { rows } = readTickerRowsFromCsv(DEFAULT_TICKERS_CSV);
+    return rows.map((r) => r.ticker);
+  } catch {
+    return ["AAPL", "MSFT", "TSLA", "NVDA", "AMD"];
+  }
+}
+
 const pullFinnhubSchema = z.object({
   csvPath: z.string().optional().default(DEFAULT_TICKERS_CSV),
   /** 0 or omitted = all tickers in CSV (no cap) */
@@ -228,14 +248,19 @@ app.get("/api/news/pull-finhub/preflight", async (req, res, next) => {
       res.json({ totalTickers: 0, fallbackCount: 0, fallbackTickers: [] });
       return;
     }
-    const csvPath = (req.query.csvPath as string) || DEFAULT_TICKERS_CSV;
+    const csvPath = req.query.csvPath as string | undefined;
 
     let tickerList: string[];
-    try {
-      const csvResult = readTickersFromCsv(csvPath);
-      tickerList = csvResult.tickers;
-    } catch {
-      tickerList = ["AAPL", "MSFT", "TSLA", "NVDA", "AMD"];
+    if (!csvPath || csvPath === DEFAULT_TICKERS_CSV) {
+      // Default: canonical DB universe first; CSV fallback handled inside helper
+      tickerList = await getDefaultUniverseTickers();
+    } else {
+      try {
+        const csvResult = readTickersFromCsv(csvPath);
+        tickerList = csvResult.tickers;
+      } catch {
+        tickerList = await getDefaultUniverseTickers();
+      }
     }
 
     const tickersWithNews = await getTickersWithNews(
@@ -282,16 +307,19 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
       return;
     }
 
-    // Load tickers from CSV
+    // Load tickers — DB universe first when using default path; CSV for explicit overrides
     let tickerList: string[];
-    try {
-      const csvResult = readTickersFromCsv(input.csvPath);
-      tickerList = input.maxTickers > 0
-        ? csvResult.tickers.slice(0, input.maxTickers)
-        : csvResult.tickers;
-    } catch {
-      tickerList = ["AAPL", "MSFT", "TSLA", "NVDA", "AMD"];
+    if (input.csvPath === DEFAULT_TICKERS_CSV) {
+      tickerList = await getDefaultUniverseTickers();
+    } else {
+      try {
+        const csvResult = readTickersFromCsv(input.csvPath);
+        tickerList = csvResult.tickers;
+      } catch {
+        tickerList = await getDefaultUniverseTickers();
+      }
     }
+    if (input.maxTickers > 0) tickerList = tickerList.slice(0, input.maxTickers);
     if (!pullCompany && !pullPress) {
       tickerList = [];
     }
@@ -1375,9 +1403,7 @@ app.post("/api/company-profiles/pull-fmp", async (req, res) => {
     let tickers = body.tickers;
 
     if (!tickers || tickers.length === 0) {
-      // default: pull from default universe
-      const { rows } = readTickerRowsFromCsv(DEFAULT_TICKERS_CSV);
-      tickers = rows.map((r) => r.ticker);
+      tickers = await getDefaultUniverseTickers();
     }
     const max = body.maxTickers ?? 50;
     const target = tickers.slice(0, max);
@@ -1415,6 +1441,117 @@ app.post("/api/company-profiles/pull-fmp", async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : "Unknown error" });
+  }
+});
+
+// ── App DB Inspection ────────────────────────────────────────────────────────
+const TABLE_UI_USAGE: Record<string, string[]> = {
+  securities: [
+    "Default Ticker Window — 종목 식별자 기준",
+    "Watchlist join point (security_id)",
+    "company_profiles · ticker_universe_items 연결 키",
+  ],
+  company_profiles: [
+    "POST /api/company-profiles/pull-fmp (FMP 회사 설명 저장)",
+    "GET /api/company-profiles/:ticker",
+  ],
+  ticker_universes: [
+    "Default Ticker Window — default universe 조회",
+    "POST /api/news/pull-finhub — default 대상 선택",
+    "POST /api/company-profiles/pull-fmp — 기본 종목 목록",
+  ],
+  ticker_universe_items: [
+    "ticker_universes ↔ securities 조인 테이블",
+    "Default Ticker Window 종목 목록 소스",
+  ],
+  watchlists: ["Watchlist 창 — 사용자 관심 종목 그룹"],
+  watchlist_items: [
+    "Watchlist 창 종목 항목",
+    "security_id 기준 securities 조인",
+  ],
+  news_items: [
+    "News Feed — Finnhub 뉴스 표시",
+    "GET /api/news (검색/필터/커서 페이징)",
+    "SSE 스트림 — 실시간 push",
+  ],
+  news_fulltext: ["News Feed 본문 보기 — full text 추출 결과"],
+  bookmarks: ["News Feed 북마크 폴더"],
+  bookmark_items: ["News Feed 북마크 항목"],
+  calendar_events: ["Calendar 창 — IBKR 이벤트"],
+  ohlc_1d: ["Price 변화율 계산 (IBKR OHLC 1일봉)"],
+  saved_views: ["News Feed 저장 필터 뷰"],
+  alert_rules: ["Alert 규칙 관리"],
+  update_status: ["Data Control Updates 탭 — 마지막 성공 시각 표시"],
+  jobs: ["Data Control Update 진행 상황 (background job)"],
+};
+
+app.get("/api/db/inspect", async (_req, res, next) => {
+  try {
+    const db = getDb();
+    const tables = await db.all<Array<{ name: string }>>(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`,
+    );
+
+    const result = await Promise.all(
+      tables.map(async ({ name }) => {
+        const columns = await db.all(`PRAGMA table_info("${name}")`);
+        const fks = await db.all(`PRAGMA foreign_key_list("${name}")`);
+        const countRow = await db.get<{ cnt: number }>(`SELECT COUNT(*) as cnt FROM "${name}"`);
+        const sampleRows = await db.all(`SELECT * FROM "${name}" ORDER BY rowid DESC LIMIT 5`);
+
+        const tableObj: Record<string, unknown> = {
+          name,
+          columns,
+          foreignKeys: fks,
+          rowCount: countRow?.cnt ?? 0,
+          sampleRows,
+          uiUsage: TABLE_UI_USAGE[name] ?? [],
+        };
+
+        // Resource expansion for ticker_universes — each row = one resource identifier
+        if (name === "ticker_universes") {
+          const universesData = await db.all<Array<{
+            id: number; name: string; source_path: string | null; created_at: string; itemCount: number;
+          }>>(
+            `SELECT u.id, u.name, u.source_path, u.created_at,
+                    COUNT(ui.security_id) as itemCount
+             FROM ticker_universes u
+             LEFT JOIN ticker_universe_items ui ON ui.universe_id = u.id
+             GROUP BY u.id`,
+          );
+          const resources = await Promise.all(
+            universesData.map(async (u) => {
+              const sampleSecs = await db.all<Array<{ ticker: string }>>(
+                `SELECT s.ticker FROM ticker_universe_items ui
+                 JOIN securities s ON s.id = ui.security_id
+                 WHERE ui.universe_id = ?
+                 ORDER BY ui.sort_order LIMIT 10`,
+                [u.id],
+              );
+              return {
+                identifier: `ticker_universes/${u.name}`,
+                label: u.name,
+                sourcePath: u.source_path,
+                itemCount: u.itemCount,
+                sampleTickers: sampleSecs.map((s) => s.ticker),
+                uiUsage: [
+                  "Default Ticker Window — 종목 목록 표시",
+                  "POST /api/company-profiles/pull-fmp — 기본 종목 대상",
+                  "POST /api/news/pull-finhub — 기본 ticker 대상",
+                ],
+              };
+            }),
+          );
+          tableObj.resources = resources;
+        }
+
+        return tableObj;
+      }),
+    );
+
+    res.json({ tables: result });
+  } catch (err) {
+    next(err);
   }
 });
 

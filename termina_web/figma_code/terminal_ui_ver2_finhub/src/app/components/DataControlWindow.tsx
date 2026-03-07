@@ -33,6 +33,11 @@ interface DataControlWindowProps {
   onNewsSummaryFontSizeChange?: (n: number) => void;
 }
 
+interface DbColumn { cid: number; name: string; type: string; notnull: number; dflt_value: string | null; pk: number; }
+interface DbForeignKey { id: number; seq: number; table: string; from: string; to: string; }
+interface DbResource { identifier: string; label: string; sourcePath: string | null; itemCount: number; sampleTickers: string[]; uiUsage: string[]; }
+interface DbTableInfo { name: string; columns: DbColumn[]; foreignKeys: DbForeignKey[]; rowCount: number; sampleRows: Record<string, unknown>[]; uiUsage: string[]; resources?: DbResource[]; }
+
 export function DataControlWindow({
   fontScale = 1,
   onFontScaleChange,
@@ -64,11 +69,17 @@ export function DataControlWindow({
   });
   const logEndRef = useRef<HTMLDivElement>(null);
 
-  // ─── Active tab (Updates / Settings) ───
-  const [activeDataTab, setActiveDataTab] = useState<'updates' | 'settings'>(() => {
+  // ─── App DB inspection state ───
+  const [dbTables, setDbTables] = useState<DbTableInfo[]>([]);
+  const [dbLoading, setDbLoading] = useState(false);
+  const [dbError, setDbError] = useState<string | null>(null);
+
+  // ─── Active tab (Updates / Settings / App DB) ───
+  const [activeDataTab, setActiveDataTab] = useState<'updates' | 'settings' | 'appdb'>(() => {
     try {
       const s = localStorage.getItem('data-control-active-tab');
       if (s === 'settings') return 'settings';
+      if (s === 'appdb') return 'appdb';
     } catch { /* SSR */ }
     return 'updates';
   });
@@ -102,6 +113,21 @@ export function DataControlWindow({
   useEffect(() => {
     fetchStatuses();
   }, []);
+
+  const fetchDbInspect = async () => {
+    setDbLoading(true);
+    setDbError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/db/inspect`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: { tables: DbTableInfo[] } = await res.json();
+      setDbTables(data.tables);
+    } catch (err) {
+      setDbError(err instanceof Error ? err.message : 'Failed to load DB info');
+    } finally {
+      setDbLoading(false);
+    }
+  };
 
   // ─── Poll job statuses ───
   useEffect(() => {
@@ -287,7 +313,7 @@ export function DataControlWindow({
 
       {/* Tab nav */}
       <div className="flex border-b border-gray-200 dark:border-gray-700 shrink-0 bg-gray-50 dark:bg-gray-800">
-        {(['updates', 'settings'] as const).map(tab => (
+        {(['updates', 'settings', 'appdb'] as const).map(tab => (
           <button
             key={tab}
             onClick={() => setActiveDataTab(tab)}
@@ -297,7 +323,7 @@ export function DataControlWindow({
                 : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
             }`}
           >
-            {tab === 'updates' ? 'Updates' : 'Settings'}
+            {tab === 'updates' ? 'Updates' : tab === 'settings' ? 'Settings' : 'App DB'}
           </button>
         ))}
       </div>
@@ -416,6 +442,92 @@ export function DataControlWindow({
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* App DB tab */}
+      {activeDataTab === 'appdb' && (
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {/* Header + Refresh */}
+          <div className="flex items-center justify-between pb-1">
+            <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">앱 데이터베이스 구조</span>
+            <button
+              onClick={fetchDbInspect}
+              disabled={dbLoading}
+              className="flex items-center gap-1.5 px-3 py-1 border border-gray-300 dark:border-gray-600 rounded text-xs hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3 h-3 ${dbLoading ? 'animate-spin' : ''}`} />
+              {dbLoading ? '조회 중...' : 'Refresh'}
+            </button>
+          </div>
+
+          {dbError && (
+            <div className="text-red-500 text-xs px-2 py-1 bg-red-50 dark:bg-red-900/20 rounded border border-red-200 dark:border-red-800">{dbError}</div>
+          )}
+
+          {dbTables.length === 0 && !dbLoading && !dbError && (
+            <div className="text-sm text-gray-400 text-center py-12">Refresh를 클릭하여 DB 구조를 조회하세요</div>
+          )}
+
+          {dbTables.map(table => (
+            <div key={table.name} className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 bg-white dark:bg-gray-850">
+              {/* Table header */}
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-semibold font-mono text-gray-800 dark:text-gray-100">{table.name}</span>
+                <span className="text-xs text-gray-500 tabular-nums">{table.rowCount.toLocaleString()} rows</span>
+              </div>
+
+              {/* Columns */}
+              <div className="flex flex-wrap gap-1 mb-2">
+                {table.columns.map(col => (
+                  <span key={col.name} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-xs font-mono">
+                    {col.pk > 0 && <span className="text-amber-500 mr-0.5" title="Primary Key">PK</span>}
+                    <span className="text-gray-800 dark:text-gray-200">{col.name}</span>
+                    <span className="text-gray-400 dark:text-gray-500 ml-0.5">{col.type || 'TEXT'}</span>
+                  </span>
+                ))}
+              </div>
+
+              {/* Foreign keys */}
+              {table.foreignKeys.length > 0 && (
+                <div className="text-xs text-gray-500 dark:text-gray-400 mb-1.5 font-mono">
+                  FK: {table.foreignKeys.map(fk => `${fk.from} → ${fk.table}.${fk.to}`).join(' · ')}
+                </div>
+              )}
+
+              {/* UI usage badges */}
+              {table.uiUsage.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {table.uiUsage.map((u, i) => (
+                    <span key={i} className="px-1.5 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded text-xs">{u}</span>
+                  ))}
+                </div>
+              )}
+
+              {/* Resource cards (e.g. ticker_universes/default) */}
+              {table.resources && table.resources.map(resource => (
+                <div key={resource.identifier} className="mt-2 border border-blue-200 dark:border-blue-800 rounded p-2.5 bg-blue-50/40 dark:bg-blue-900/20">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-sm font-mono font-semibold text-blue-800 dark:text-blue-300">{resource.identifier}</span>
+                    <span className="text-xs text-gray-500 tabular-nums">{resource.itemCount.toLocaleString()} items</span>
+                  </div>
+                  {resource.sourcePath && (
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">source: {resource.sourcePath}</div>
+                  )}
+                  {resource.sampleTickers.length > 0 && (
+                    <div className="text-xs text-gray-600 dark:text-gray-400 mb-1.5 font-mono">
+                      {resource.sampleTickers.slice(0, 8).join(', ')}{resource.itemCount > 8 ? ` …(+${resource.itemCount - 8})` : ''}
+                    </div>
+                  )}
+                  <div className="flex flex-wrap gap-1">
+                    {resource.uiUsage.map((u, i) => (
+                      <span key={i} className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded text-xs">{u}</span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
         </div>
       )}
 

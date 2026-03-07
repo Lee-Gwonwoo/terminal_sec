@@ -259,7 +259,135 @@
 3. tooltip에 아래 정책 설명을 노출하도록 했다.
    - automatic recent retry confirmed-empty 과거 구간 영구 스킵
 
-### Plan 리비전 — `securities.id` 중심 canonical 종목 모델 추가
+### Plan 리비전 — `ticker_universes/default` 기준 전환 + Data Control app DB 구조 탭
+
+**작성 시각:** 2026-03-07 17:21 (local)
+
+**상태:** 확인 대기
+
+#### 수행 내용
+
+1. 사용자가 “default ticker는 `ticker_universes/default`를 쓰고, Data Control에 app DB 구조를 보여주는 새 탭을 넣는 방향을 먼저 plan에 반영하라”고 요청했다.
+2. `plan.md` 상단의 현재 레포 상태를 실제 구현 기준으로 정정했다.
+   - runtime `app.db`에 `securities`, `company_profiles`, `ticker_universes`, `ticker_universe_items`가 이미 존재함
+   - default ticker는 아직 CSV 원본 + DB canonical import가 함께 있는 hybrid 상태임
+   - company description은 `company_profiles.security_id` 기준 canonical 저장 구조가 이미 있음
+3. `plan.md`에 새 후속 단계 `Step 6 — ticker_universes/default 기준 조회 전환 + Data Control app DB 구조 탭`을 추가했다.
+4. Step 6에는 아래 요구를 세부 단계로 분해해 반영했다.
+   - CSV 직접 read보다 `ticker_universes/default` 조회 우선
+   - app DB inspection API
+   - `ticker_universes/default` 같은 식별자 기반 설명/lookup
+   - Data Control의 `App DB`/`Database` 탭 + Refresh
+   - 각 데이터 리소스의 UI/API 사용처 표시
+5. `plan.md` 말미에 이번 리비전의 이유와 사용자 관점 영향을 `PLAN CHANGE (2026-03-07)`로 추가했다.
+
+#### 생성/수정 파일
+
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. `plan.md`에서 현재 상태 섹션에 아래 3개가 반영됐는지 확인한다.
+   - default ticker hybrid 상태 설명
+   - runtime `app.db` canonical 테이블 존재 설명
+   - `company_profiles.security_id` canonical 저장 설명
+2. `plan.md`에 `#### ⬜ Step 6 — ticker_universes/default 기준 조회 전환 + Data Control app DB 구조 탭`이 추가됐는지 확인한다.
+3. `plan.md` 말미에 `PLAN CHANGE (2026-03-07) — ticker_universes/default 기준 전환 + Data Control app DB 가시성 추가`가 있는지 확인한다.
+
+#### 문제점 / 리스크
+
+1. 현재 코드상 기본 대상 선정은 여전히 CSV 직접 read 경로가 남아 있다.
+   - 완화 방안 1: Step 6-1에서 기본 대상 선정 API를 `ticker_universes/default` 조회 우선으로 정리
+   - 완화 방안 2: CSV는 import source/fallback 용도로만 남긴다고 문서/코드에서 명시
+2. app DB 구조를 그대로 노출하면 테이블이 많아져 UI가 복잡해질 수 있다.
+   - 완화 방안 1: table count + sample row + 관계 요약 중심으로 제한
+   - 완화 방안 2: 리소스 식별자 단위 lookup 화면을 함께 제공
+3. 테이블 구조만 보여주고 사용처를 안 붙이면 운영자가 다시 코드를 찾아야 한다.
+   - 완화 방안 1: 각 리소스에 UI/API 사용처 필드를 같이 표시
+   - 완화 방안 2: `ticker_universes/default` 같은 named resource를 직접 선택해 설명하게 설계
+
+#### 비고
+
+- 이번 작업은 plan/log 문서 리비전만 수행했다.
+- 코드 파일(`.ts`, `.tsx`, `.js`, `.py`)은 수정하지 않았다.
+- 사용자 확인 전까지 이 리비전 상태는 `확인 대기`로 유지한다.
+
+---
+
+### Step 6 구현 — `ticker_universes/default` 기준 전환 + Data Control App DB 탭
+
+**작성 시각:** 2026-03-07 17:34 (local)
+
+**상태:** 사용자 확인 대기 (awaiting user confirmation)
+
+#### 수행 내용
+
+1. **6-1 기본 ticker 소스 전환** (`server.ts`)
+   - `getDefaultUniverseTickers()` 비동기 helper 추가: `listUniverses()` → `name==="default"` 행 → `listUniverseItems()` 순서로 조회; DB 미준비 시 CSV 자동 fallback.
+   - 적용 위치 6곳: `POST /api/company-profiles/pull-fmp`, `GET /api/news/pull-finhub/preflight`(직접 csvPath 미지정 시), `POST /api/news/pull-finhub`(입력 csvPath === DEFAULT_TICKERS_CSV 시). 그 외 경로에서는 CSV 계속 사용.
+
+2. **6-2/6-3 inspection API** (`server.ts`)
+   - `GET /api/db/inspect` 신규 추가.
+   - `sqlite_master`에서 테이블 목록 조회, 각 테이블마다 `PRAGMA table_info` / `PRAGMA foreign_key_list` / `COUNT(*)` / `SELECT … LIMIT 5` 실행.
+   - `TABLE_UI_USAGE` 상수에 테이블별 UI 사용처 한글 설명 12개 테이블 정의.
+   - `ticker_universes` 테이블은 `resources[]` 확장: 각 universe row를 `ticker_universes/<name>` 식별자로 표현, `itemCount` / `sampleTickers` (10개) / UI 사용처 3개 포함.
+
+3. **6-4/6-5 Data Control App DB 탭** (`DataControlWindow.tsx`)
+   - `DbColumn`, `DbForeignKey`, `DbResource`, `DbTableInfo` 인터페이스 추가.
+   - `activeDataTab` 타입 `'updates' | 'settings' | 'appdb'`로 확장, localStorage restore/persist 모두 처리.
+   - `dbTables / dbLoading / dbError` 상태 추가, `fetchDbInspect()` 함수 추가.
+   - `App DB` 탭 추가: Refresh 버튼 → `GET /api/db/inspect`, 테이블 카드(이름/rowCount/컬럼 chip/FK/uiUsage badge), `ticker_universes` 하위에 resource 카드(identifier/source/sampleTickers/uiUsage).
+
+#### 생성/수정 파일
+
+- `terminal/backend/src/server.ts` — helper + inspection API + 기본 ticker 소스 전환
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx` — App DB 탭
+
+#### 검증 결과
+
+- `tsc --noEmit` (백엔드): **clean (0 errors)**
+- `vite build` (프론트엔드): **✓ 성공**
+- `vitest run` (백엔드): **48/48 pass**
+
+#### 사용자 확인 방법
+
+1. Dev 서버 기동 후 Data Control 창 열기 → `App DB` 탭 확인.
+2. Refresh 클릭 → 테이블 목록(securities, news_items, ticker_universes 등) 카드 표시 확인.
+3. `ticker_universes` 카드 하단에 `ticker_universes/default` resource 카드(itemCount ~1191, sampleTickers 10개, uiUsage badges) 표시 확인.
+4. `POST /api/company-profiles/pull-fmp` 호출 시 body에 tickers 미지정이면 DB에서 default universe 종목을 기본 대상으로 쓰는지 확인.
+
+---
+
+### Plan 문구 동기화 — stale 상태 정정
+
+**작성 시각:** 2026-03-07 17:38 (local)
+
+**상태:** 반영 완료
+
+#### 수행 내용
+
+1. `plan.md` 상단 현재 레포 상태 섹션의 stale 문구를 실제 구현 기준으로 정정했다.
+   - `DataControlWindow.tsx` 설명: `Updates` / `Settings`만 있던 문구 → `App DB` 포함으로 갱신
+   - company description 기본 pull 대상 설명: CSV 직접 read 잔존 문구 → `ticker_universes/default` 우선 조회 + CSV fallback 문구로 교체
+2. 실제 완료된 단계 헤더 상태를 정정했다.
+   - `Step 1` header: `⬜` → `✅`
+   - `Step 5` header: `⏳` → `✅`
+3. `plan.md` 말미에 이번 문서 동기화 이유와 범위를 `PLAN CHANGE (2026-03-07 17:38)`로 남겼다.
+
+#### 생성/수정 파일
+
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. `plan.md` 상단 현재 상태에서 `DataControlWindow.tsx` 설명에 `App DB`가 포함되는지 확인.
+2. 같은 섹션에서 company profile 기본 pull 대상 설명이 `ticker_universes/default` 우선 조회로 적혀 있는지 확인.
+3. `plan.md`의 `Step 1`, `Step 5` 헤더가 각각 `✅`로 표시되는지 확인.
+4. `plan.md` 말미에 `PLAN CHANGE (2026-03-07 17:38) — plan 상태 문구 동기화`가 추가됐는지 확인.
+
+
 
 **작성 시각:** 2026-03-07 12:19 (local)
 

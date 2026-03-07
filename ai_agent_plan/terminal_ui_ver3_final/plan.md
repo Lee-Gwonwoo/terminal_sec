@@ -47,7 +47,7 @@
 - 현재 `FinnhubNewsWindow.tsx`에는 source/url cell 우클릭 메뉴가 있으나 기능은 URL 복사 중심이며, 뉴스 row를 북마크 폴더에 넣는 메뉴는 없다.
 - 현재 Finnhub News UI에는 검색창 근처의 `Bookmark view` 또는 북마크 폴더 선택 UI가 없다.
 - `App.tsx`는 `terminal-workspace-v1`를 사용해 tabs, activeTabId, theme, linkedTicker, fontScale, News Feed title/summary font size를 저장/복원한다.
-- `DataControlWindow.tsx`는 `Updates` / `Settings` 탭 구조와 전역 font scale, News Feed title/summary 글자 크기 제어 UI를 가진다.
+- `DataControlWindow.tsx`는 `Updates` / `Settings` / `App DB` 탭 구조와 전역 font scale, News Feed title/summary 글자 크기 제어 UI, app DB inspection UI를 가진다.
 - 탭 바는 drag/drop으로 순서를 재배치할 수 있다.
 - 현재 Finnhub recent pull은 ticker별 기존 뉴스 anchor가 없으면 7일 fallback으로 다시 조회한다.
 - 현재는 “이미 조회했지만 뉴스가 없었다”는 confirmed-empty 기록 저장소가 없어서, 뉴스가 한 번도 없던 ticker는 recent update 때 같은 구간을 반복 조회할 수 있다.
@@ -56,10 +56,10 @@
 - 2026-03-07 실제 probe 결과 `news-sentiment?symbol=AAPL` 응답은 `buzz`, `companyNewsScore`, `sectorAverageBullishPercent`, `sectorAverageNewsScore`, `sentiment`, `symbol` top-level object이며, 기사 `id` 배열이나 기사별 sentiment row를 반환하지 않는다.
 - AI 뉴스 분석 skills 지침 명칭은 `ai-news-analysis`로 고정한다.
 - 현재 프론트 문서 기준으로 `Finnhub News`, `Default Ticker`, `Data Control`은 실제 API 연동이 있고, `Watchlist`, `Calendar`는 일부 mock/stub 흔적이 남아 있다.
-- 현재 default ticker source는 `tradigview_screener/original_data/watch lists2_2026-02-22.csv` 파일 경로가 하드코딩된 CSV 기반 입력이다.
+- 현재 default ticker의 원본 source는 여전히 `tradigview_screener/original_data/watch lists2_2026-02-22.csv` 이지만, 서버 startup 시 이 CSV를 `ticker_universes/default`와 `securities`로 import 하는 hybrid 상태다.
 - 현재 `watchlist_items`는 `ticker TEXT`를 직접 저장하며, ticker를 대표 식별자로 사용한다.
-- 현재 runtime DB에는 `securities`, `company_profiles`, `ticker_universes`, `ticker_universe_items` 같은 종목 canonical 테이블이 없다.
-- 현재 company description은 어떤 저장소에도 canonical하게 적재되지 않으며, 뉴스 `id`와 연결된 구조도 없다.
+- 현재 runtime `app.db`에는 `securities`, `company_profiles`, `ticker_universes`, `ticker_universe_items`가 이미 존재한다.
+- 현재 company description은 `company_profiles.security_id` 기준으로 canonical 적재하며, 기본 pull 대상 선정은 `ticker_universes/default` DB 조회를 우선 사용하고 CSV는 fallback/import source로만 남아 있다.
 
 ### 제약 / 비범위
 - 이번 plan은 구현 계획 문서 작성이 목적이다. 아직 코드 변경/테스트 실행을 전제로 하지 않는다.
@@ -434,7 +434,7 @@ Step N — <제목>
 사용자 확인 필요: 예
 ```
 
-#### ⬜ Step 1 — Backend schema / repository / API 확장
+#### ✅ Step 1 — Backend schema / repository / API 확장
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
@@ -839,7 +839,7 @@ E2E 수동 검증 체크리스트 (1회 실행 순서):
 사용자 확인 필요: 예
 ```
 
-#### ⏳ Step 5 — Canonical ticker master model (`securities.id`) 도입
+#### ✅ Step 5 — Canonical ticker master model (`securities.id`) 도입
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
@@ -900,6 +900,71 @@ npm run test
 - 특정 ticker(FMP 대상)의 company description이 `company_profiles.security_id` 기준으로 upsert 되는지 확인
 - 기존 watchlist row에 `security_id` backfill 후 null 누락이 없는지 확인
 - watchlist API 응답이 기존 ticker 기반 프론트 계약을 깨지 않는지 확인
+
+사용자 확인 필요: 예
+```
+
+#### ✅ Step 6 — `ticker_universes/default` 기준 조회 전환 + Data Control app DB 구조 탭
+
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 6-1 | default ticker/회사 profile pull/관련 운영 기능의 기본 대상 선택을 CSV 직접 읽기보다 `ticker_universes/default` 조회 우선으로 정리 | `terminal/backend/src/server.ts` | `getDefaultUniverseTickers()` helper 6곳 적용, build+test 통과 | ✅ |
+| 6-2 | app DB의 테이블/컬럼/행 수/최신 row 샘플/관계 요약을 반환하는 inspection API를 설계한다 | `terminal/backend/src/server.ts` (`GET /api/db/inspect`) | 빌드 통과, tsc --noEmit clean | ✅ |
+| 6-3 | `ticker_universes/default` 같은 식별자를 입력하면 해당 리소스의 컬럼, 대표 row, source path, UI 사용처를 풀어서 보여주는 lookup 규칙을 정의한다 | `server.ts` — `TABLE_UI_USAGE` 상수 + `ticker_universes` resource 확장 | inspection API 응답에 `resources[]` 포함 | ✅ |
+| 6-4 | Data Control에 `App DB` 탭을 추가하고, 새로고침 시 현재 app DB 구조/상태를 다시 읽어오게 한다 | `DataControlWindow.tsx` | 탭 추가, Refresh → `GET /api/db/inspect` 호출, build 통과 | ✅ |
+| 6-5 | Data Control 새 탭에서 각 리소스가 UI 어디에 쓰이는지(`Default Ticker`, `Finnhub News`, `Watchlist`, `Calendar`)까지 함께 표시한다 | `DataControlWindow.tsx` | 사용처 badge(`uiUsage[]`), resource card(identifier/items/sampleTickers) 표시 | ✅ |
+
+6-1 목적: canonical default universe가 이미 DB에 있는데도 계속 CSV 경로를 직접 참조하는 혼합 상태를 줄인다.
+6-1 설명: 기본 ticker 대상이 필요한 기능은 우선 `ticker_universes/default`를 조회하고, CSV는 import source 또는 fallback 용도로만 남긴다.
+6-1 완료 조건(눈으로 확인): “기본 universe”를 쓰는 기능 설명에 CSV 경로 대신 `ticker_universes/default`가 기준이라고 적힌다.
+6-1 사람 검증(비개발자): 운영자가 “지금 기본 종목셋이 뭐냐”를 물으면 파일 경로가 아니라 `ticker_universes/default`라고 답할 수 있다.
+6-1 흔한 문제/주의: CSV import와 DB 조회를 동시에 유지하면서 둘의 count가 어긋나면 어느 쪽이 진실인지 다시 헷갈릴 수 있으므로 source/fallback 구분을 명확히 해야 한다.
+
+6-2 목적: app DB에 어떤 데이터가 실제로 들어 있는지 운영자가 UI에서 바로 볼 수 있게 한다.
+6-2 설명: 각 테이블의 컬럼 목록, row count, 최신 갱신 시각 후보, 샘플 row 3~5개, 관계 요약을 한 번에 보여주는 inspection API를 만든다.
+6-2 완료 조건(눈으로 확인): Data Control에서 app DB 테이블 목록과 각 테이블의 구조가 보인다.
+6-2 사람 검증(비개발자): `company_profiles`를 눌렀을 때 description/ceo/website 같은 컬럼이 실제로 보인다.
+6-2 흔한 문제/주의: 테이블 전체를 그대로 내려주면 너무 무거워질 수 있으므로 sample row와 count 위주로 제한해야 한다.
+
+6-3 목적: `ticker_universes/default` 같은 식별자만으로도 “이게 뭔지”를 이해할 수 있게 한다.
+6-3 설명: 식별자를 받으면 해당 리소스의 테이블명, 주요 컬럼, source path, 대표 데이터, 연결된 API, 사용 중인 UI 창을 묶어 반환한다.
+6-3 완료 조건(눈으로 확인): `ticker_universes/default`를 선택하면 universe 메타데이터와 아이템 count, 대표 ticker, 사용처가 함께 보인다.
+6-3 사람 검증(비개발자): 식별자 한 줄만 보고도 “어디에 쓰이는 데이터인지”를 화면에서 이해할 수 있다.
+6-3 흔한 문제/주의: 테이블명과 리소스명을 1:1로 착각하면 `ticker_universes/default`처럼 테이블 row를 가리키는 식별자를 제대로 설명하지 못한다.
+
+6-4 목적: Data Control을 단순 update 버튼 모음이 아니라 운영 가시성 창으로 확장한다.
+6-4 설명: 기존 `Updates` / `Settings` 옆에 `App DB` 또는 `Database` 탭을 추가하고, Refresh 버튼으로 현재 구조/상태를 다시 읽는다.
+6-4 완료 조건(눈으로 확인): Data Control에 새 탭이 보이고, 새로고침 시 최신 row count/샘플이 갱신된다.
+6-4 사람 검증(비개발자): 회사 설명을 pull한 뒤 Refresh를 누르면 `company_profiles` count가 증가한 것을 볼 수 있다.
+6-4 흔한 문제/주의: 단순히 initial mount 때만 읽으면 운영 상태 확인 창으로서 가치가 떨어지므로 명시적 Refresh가 필요하다.
+
+6-5 목적: DB 구조와 실제 UI 사용처 사이의 단절을 없앤다.
+6-5 설명: 각 리소스 카드에 “이 데이터는 어느 창/어느 API/어느 기능에서 사용되는가”를 함께 적어, DB 이름만 봐도 제품 맥락을 이해하게 한다.
+6-5 완료 조건(눈으로 확인): 예를 들어 `ticker_universes/default`에 `Default Ticker`, `company-profiles/pull-fmp`, `Finnhub pull default 대상` 같은 사용처가 같이 보인다.
+6-5 사람 검증(비개발자): Data Control만 보고도 “이 테이블은 UI에서 어디에 쓰이는가”를 추적할 수 있다.
+6-5 흔한 문제/주의: 테이블 설명만 있고 사용처가 없으면 운영자가 다시 코드/문서를 뒤져야 하므로 요구를 충족하지 못한다.
+
+검증 훅:
+```bash
+cd terminal/backend
+npm run build
+npm run test
+cd ../../termina_web/figma_code/terminal_ui_ver2_finhub
+npm run build
+```
+
+```text
+추가 확인:
+- Data Control에 `App DB` 또는 `Database` 탭이 보이는지 확인
+- Refresh 클릭 시 table count / sample row / 최신 상태가 다시 로드되는지 확인
+- `ticker_universes/default`를 선택했을 때 아래가 함께 보이는지 확인
+   - universe 메타데이터
+   - 포함 security 수
+   - 대표 ticker 샘플
+   - source path
+   - UI/API 사용처
+- company profile pull 이후 Refresh 시 `company_profiles` count 증가가 보이는지 확인
+- 기본 ticker 대상 조회가 CSV 직접 read가 아니라 `ticker_universes/default` 기준으로 설명/호출되는지 확인
 
 사용자 확인 필요: 예
 ```
@@ -1057,7 +1122,28 @@ Track E는 구조 정규화 phase이므로, default ticker import 정책과 `sec
 | DONE | `watchlistRepository.ts` | hybrid: ticker + security_id | backfill 완료, ticker는 호환용 유지 |
 | DONE | `tickerUniverseRepository.ts` | security_id FK 기반 | 정규화 완료 |
 | DONE | `companyProfileRepository.ts` | security_id FK 기반 | 정규화 완료 |
+
+### PLAN CHANGE (2026-03-07) — `ticker_universes/default` 기준 전환 + Data Control app DB 가시성 추가
+
+- 무엇이 바뀌었나: 현재 상태 문구를 실제 구현 기준으로 정정했다. 이제 문서상으로도 `securities`, `company_profiles`, `ticker_universes`, `ticker_universe_items`가 이미 runtime `app.db`에 존재한다고 명시한다.
+- 무엇을 새로 계획에 넣었나: 후속 `Step 6`을 추가해, 기본 대상 종목셋은 CSV 직접 읽기보다 `ticker_universes/default`를 우선 쓰도록 전환하고, Data Control에 `App DB`/`Database` 탭을 추가해 구조/현재 상태/사용처를 Refresh로 볼 수 있게 한다.
+- 왜 바꿨나: `ticker_universes/default` 같은 이름만으로는 운영자가 컬럼, row, 관계, UI 사용처를 알 수 없고, 현재도 CSV 원본과 DB canonical layer가 섞여 있어 source of truth가 불명확하게 보이기 때문이다.
+- 사용자 관점 영향: 앞으로는 “기본 ticker universe가 무엇인가?”라는 질문에 파일 경로가 아니라 DB 리소스 식별자와 현재 상태 화면으로 답할 수 있어야 한다.
 - 예시 3: 아직 AI 분석 미실행이면 `Score=null`, `Score Evidence=null`, `Keywords=[]`로 유지.
+
+### PLAN CHANGE (2026-03-07 17:34) — Step 6 구현 완료
+
+- **변경 파일**: `server.ts`, `DataControlWindow.tsx`
+- **6-1**: `getDefaultUniverseTickers()` helper 추가. `POST /api/company-profiles/pull-fmp`, `GET /api/news/pull-finhub/preflight`, `POST /api/news/pull-finhub` 3곳의 기본 ticker 소스를 `ticker_universes/default` DB 조회로 교체 (CSV는 DB 미준비 시 fallback만).
+- **6-2/6-3**: `GET /api/db/inspect` 신규 추가. 테이블별 PRAGMA 컬럼/FK/rowCount/sampleRows + `TABLE_UI_USAGE` UI 사용처 주입. `ticker_universes` 는 `resources[]`로 identifier · source_path · itemCount · sampleTickers 확장.
+- **6-4/6-5**: `DataControlWindow.tsx`에 `App DB` 탭 추가. Refresh → `GET /api/db/inspect`, 테이블 카드(컬럼/FK/사용처 badge) + resource 카드(`ticker_universes/default` 식별자/아이템 수/샘플 ticker/사용처).
+- **검증**: `tsc --noEmit` clean, `vite build` ✓, `vitest run` 48/48 pass.
+
+### PLAN CHANGE (2026-03-07 17:38) — plan 상태 문구 동기화
+
+- **왜**: Step 6 구현 후에도 plan 상단의 현재 상태와 일부 Step 헤더 상태에 pre-implementation 문구가 남아 있었다.
+- **무엇이 바뀌었나**: `DataControlWindow.tsx` 현재 상태를 `App DB` 탭 포함 기준으로 갱신했고, company profile 기본 pull 대상 설명을 `ticker_universes/default` 우선 조회 기준으로 고쳤다. 또한 실제 완료된 `Step 1`, `Step 5` 헤더 상태를 `✅`로 정정했다.
+- **영향**: plan 문서만 읽어도 현재 코드 상태와 단계 완료 상태가 어긋나지 않게 된다.
 
 ### 결정 #4 — persistence 저장 범위(확정)
 사용자 확인 결과: **권장범위까지 저장**으로 확정.
