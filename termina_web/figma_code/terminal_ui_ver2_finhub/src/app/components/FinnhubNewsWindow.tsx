@@ -236,8 +236,9 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
   const [showCustomDateModal, setShowCustomDateModal] = useState(false);
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState(() => new Date().toISOString().slice(0, 10));
-  const [showChangeDaysModal, setShowChangeDaysModal] = useState(false);
-  const [changeLookbackDays, setChangeLookbackDays] = useState(30);
+  const [showChangeCustomDateModal, setShowChangeCustomDateModal] = useState(false);
+  const [changeCustomFrom, setChangeCustomFrom] = useState('');
+  const [changeCustomTo, setChangeCustomTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [showPreflightModal, setShowPreflightModal] = useState(false);
   const [preflightData, setPreflightData] = useState<{ totalTickers: number; fallbackCount: number; fallbackTickers: string[] } | null>(null);
   const [pendingUpdateSourceType, setPendingUpdateSourceType] = useState<UpdateSourceType>('all');
@@ -422,13 +423,13 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
     setShowCustomDateModal(true);
   };
 
-  // ─── Change Update: 7D change recalculation ───
-  const handleChange7dUpdate = async () => {
+  // ─── Change Update: Recent (last 7 days, all metrics) ───
+  const handleRecentChangeUpdate = async () => {
     setUpdating(true);
     setError(null);
     setJobStatus(null);
     try {
-      const res = await fetch(`${API_BASE}/api/news/change/update-7d`, {
+      const res = await fetch(`${API_BASE}/api/news/change/update-recent`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -440,13 +441,13 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
       }
       setCurrentJobId(data.jobId);
     } catch (err: any) {
-      setError(err.message || 'Failed to start 7D change update');
+      setError(err.message || 'Failed to start recent change update');
       setUpdating(false);
     }
   };
 
-  // ─── Change Update: Custom N-day change recalculation ───
-  const handleCustomChangeUpdate = async (days: number) => {
+  // ─── Change Update: Custom date range (all metrics) ───
+  const handleCustomChangeUpdate = async (from: string, to: string) => {
     setUpdating(true);
     setError(null);
     setJobStatus(null);
@@ -454,7 +455,7 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
       const res = await fetch(`${API_BASE}/api/news/change/update-custom`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lookbackDays: days }),
+        body: JSON.stringify({ from, to }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -1055,13 +1056,13 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
                       {/* ── Change Update ── */}
                       <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
                       <div className="px-2 py-1 text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Change Update</div>
-                      <button onClick={() => { setShowUpdateMenu(false); handleChange7dUpdate(); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                      <button onClick={() => { setShowUpdateMenu(false); handleRecentChangeUpdate(); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <TrendingUp className="w-3.5 h-3.5 shrink-0 text-teal-500" />
-                        <div><div className="font-medium">7D Change Update</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Recalculate 7-day change % for all news (uses OHLC DB)</div></div>
+                        <div><div className="font-medium">Recent Change% Update</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Recalculate all change % for news from last 7 days</div></div>
                       </button>
-                      <button onClick={() => { setShowUpdateMenu(false); setShowChangeDaysModal(true); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                      <button onClick={() => { setShowUpdateMenu(false); setChangeCustomFrom(''); setChangeCustomTo(new Date().toISOString().slice(0, 10)); setShowChangeCustomDateModal(true); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <TrendingUp className="w-3.5 h-3.5 shrink-0 text-indigo-500" />
-                        <div><div className="font-medium">Custom Change Update</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick lookback trading days · recalculate custom change %</div></div>
+                        <div><div className="font-medium">Custom Change% Update</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick date range · recalculate all change % for news in range</div></div>
                       </button>
                     </div>
                   </div>
@@ -1486,30 +1487,35 @@ export function FinnhubNewsWindow({ onTickerClick, initialTicker }: FinnhubNewsW
         </div>
       )}
 
-      {/* ─── Custom Change Days Modal ─── */}
-      {showChangeDaysModal && (
+      {/* ─── Custom Change Date Range Modal ─── */}
+      {showChangeCustomDateModal && (
         <div className="absolute inset-0 bg-black/30 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-4 w-72 border border-gray-200 dark:border-gray-700">
-            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-indigo-500" />Custom Change Update</h3>
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-4 w-80 border border-gray-200 dark:border-gray-700">
+            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-indigo-500" />Custom Change% Update</h3>
             <div className="space-y-2">
-              <label className="block text-xs text-gray-500">Lookback Trading Days</label>
+              <label className="block text-xs text-gray-500">From</label>
               <input
-                type="number"
-                min={1}
-                max={365}
-                value={changeLookbackDays}
-                onChange={(e) => setChangeLookbackDays(Math.max(1, Math.min(365, Number(e.target.value) || 1)))}
+                type="date"
+                value={changeCustomFrom}
+                onChange={(e) => setChangeCustomFrom(e.target.value)}
                 className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 autoFocus
-                onKeyDown={(e) => { if (e.key === 'Enter') { setShowChangeDaysModal(false); handleCustomChangeUpdate(changeLookbackDays); } if (e.key === 'Escape') setShowChangeDaysModal(false); }}
               />
-              <p className="text-[10px] text-gray-400">Recalculate custom_{'{N}'}d_pct for all news items using OHLC DB.</p>
+              <label className="block text-xs text-gray-500">To</label>
+              <input
+                type="date"
+                value={changeCustomTo}
+                onChange={(e) => setChangeCustomTo(e.target.value)}
+                className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              <p className="text-[10px] text-gray-400">Recalculate all change % for news published within selected date range.</p>
             </div>
             <div className="flex justify-end gap-2 mt-4">
-              <button onClick={() => setShowChangeDaysModal(false)} className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
+              <button onClick={() => setShowChangeCustomDateModal(false)} className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
               <button
-                onClick={() => { setShowChangeDaysModal(false); handleCustomChangeUpdate(changeLookbackDays); }}
-                className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+                onClick={() => { if (changeCustomFrom && changeCustomTo) { setShowChangeCustomDateModal(false); handleCustomChangeUpdate(changeCustomFrom, changeCustomTo); } }}
+                disabled={!changeCustomFrom || !changeCustomTo}
+                className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
               >Start</button>
             </div>
           </div>

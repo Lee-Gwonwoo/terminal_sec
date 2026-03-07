@@ -40,15 +40,6 @@ type OhlcRow = {
   Close: number;
 };
 
-async function getOhlcClose(symbol: string, date: string): Promise<OhlcRow | null> {
-  const db = await getOhlcDb();
-  const row = await db.get<OhlcRow>(
-    `SELECT Symbol, Datetime, Open, Close FROM ohlc_1d WHERE Symbol = ? AND Datetime = ?`,
-    [symbol, date],
-  );
-  return row ?? null;
-}
-
 /** Get the closest OHLC bar on or before `date` (for non-trading days). */
 async function getOhlcCloseOnOrBefore(symbol: string, date: string): Promise<OhlcRow | null> {
   const db = await getOhlcDb();
@@ -62,18 +53,21 @@ async function getOhlcCloseOnOrBefore(symbol: string, date: string): Promise<Ohl
   return row ?? null;
 }
 
-async function getOhlcCloseNDaysBack(
+/** Get the N-th trading day AFTER baseDate (forward-looking).
+ *  daysForward=1 → next trading day after baseDate.
+ *  daysForward=5 → 5th trading day after baseDate (~7 calendar days). */
+async function getOhlcCloseNDaysForward(
   symbol: string,
   baseDate: string,
-  daysBack: number,
+  daysForward: number,
 ): Promise<OhlcRow | null> {
   const db = await getOhlcDb();
   const row = await db.get<OhlcRow>(
     `SELECT Symbol, Datetime, Open, Close FROM ohlc_1d
-     WHERE Symbol = ? AND Datetime < ?
-     ORDER BY Datetime DESC
+     WHERE Symbol = ? AND Datetime > ?
+     ORDER BY Datetime ASC
      LIMIT 1 OFFSET ?`,
-    [symbol, baseDate, daysBack - 1],
+    [symbol, baseDate, daysForward - 1],
   );
   return row ?? null;
 }
@@ -93,27 +87,29 @@ async function upsertMetric(
   valuePct: number | null,
   ohlcTicker: string,
   referenceDate: string,
-  anchorDate: string,
-  lookbackTradingDays: number | null,
+  targetDate: string,
+  forwardTradingDays: number | null,
 ): Promise<void> {
   await getDb().run(
     `INSERT INTO news_change_metrics
-       (news_id, metric_key, value_pct, ohlc_ticker, reference_date, anchor_date, lookback_trading_days, computed_at)
+       (news_id, metric_key, value_pct, ohlc_ticker, reference_date, target_date, forward_trading_days, computed_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(news_id, metric_key) DO UPDATE SET
        value_pct = excluded.value_pct,
        ohlc_ticker = excluded.ohlc_ticker,
        reference_date = excluded.reference_date,
-       anchor_date = excluded.anchor_date,
-       lookback_trading_days = excluded.lookback_trading_days,
+       target_date = excluded.target_date,
+       forward_trading_days = excluded.forward_trading_days,
        computed_at = excluded.computed_at`,
-    [newsId, metricKey, valuePct, ohlcTicker, referenceDate, anchorDate, lookbackTradingDays, now()],
+    [newsId, metricKey, valuePct, ohlcTicker, referenceDate, targetDate, forwardTradingDays, now()],
   );
 }
 
-// ---------- Standard metrics for one news item ----------
+// ---------- Standard metrics for one news item (forward-looking) ----------
 
 /** Compute and upsert standard change metrics for a single news item.
+ *  Direction: news date close → N trading days AFTER close.
+ *  change_from_open_pct: news date open → news date close (intraday).
  *  Returns true if at least one metric was written. */
 export async function mergeChangeForNewsItem(
   newsId: string,
@@ -127,37 +123,37 @@ export async function mergeChangeForNewsItem(
   if (!dayRow) return false;
 
   const anchorDate = dayRow.Datetime;
-  const close = dayRow.Close;
-  const openPrice = dayRow.Open;
+  const anchorClose = dayRow.Close;
+  const anchorOpen = dayRow.Open;
 
-  // 1d: vs previous day close
-  const prevDay = await getOhlcCloseNDaysBack(ticker, anchorDate, 1);
-  const change1d = prevDay ? pctChange(close, prevDay.Close) : null;
-  await upsertMetric(newsId, "change_1d_pct", change1d, ticker,
-    prevDay ? prevDay.Datetime : anchorDate, anchorDate, 1);
-
-  // from open
-  const changeFromOpen = pctChange(close, openPrice);
+  // from open: intraday (open → close on news day)
+  const changeFromOpen = pctChange(anchorClose, anchorOpen);
   await upsertMetric(newsId, "change_from_open_pct", changeFromOpen, ticker,
     anchorDate, anchorDate, 0);
 
-  // 7d (~5 trading days)
-  const day7 = await getOhlcCloseNDaysBack(ticker, anchorDate, 5);
-  const change7d = day7 ? pctChange(close, day7.Close) : null;
+  // 1d: anchor close → 1 trading day AFTER close
+  const fwd1 = await getOhlcCloseNDaysForward(ticker, anchorDate, 1);
+  const change1d = fwd1 ? pctChange(fwd1.Close, anchorClose) : null;
+  await upsertMetric(newsId, "change_1d_pct", change1d, ticker,
+    anchorDate, fwd1 ? fwd1.Datetime : anchorDate, 1);
+
+  // 7d: anchor close → 5 trading days AFTER close
+  const fwd5 = await getOhlcCloseNDaysForward(ticker, anchorDate, 5);
+  const change7d = fwd5 ? pctChange(fwd5.Close, anchorClose) : null;
   await upsertMetric(newsId, "change_7d_pct", change7d, ticker,
-    day7 ? day7.Datetime : anchorDate, anchorDate, 5);
+    anchorDate, fwd5 ? fwd5.Datetime : anchorDate, 5);
 
-  // 14d (~10 trading days)
-  const day14 = await getOhlcCloseNDaysBack(ticker, anchorDate, 10);
-  const change14d = day14 ? pctChange(close, day14.Close) : null;
+  // 14d: anchor close → 10 trading days AFTER close
+  const fwd10 = await getOhlcCloseNDaysForward(ticker, anchorDate, 10);
+  const change14d = fwd10 ? pctChange(fwd10.Close, anchorClose) : null;
   await upsertMetric(newsId, "change_14d_pct", change14d, ticker,
-    day14 ? day14.Datetime : anchorDate, anchorDate, 10);
+    anchorDate, fwd10 ? fwd10.Datetime : anchorDate, 10);
 
-  // 30d (~22 trading days)
-  const day30 = await getOhlcCloseNDaysBack(ticker, anchorDate, 22);
-  const change30d = day30 ? pctChange(close, day30.Close) : null;
+  // 30d: anchor close → 22 trading days AFTER close
+  const fwd22 = await getOhlcCloseNDaysForward(ticker, anchorDate, 22);
+  const change30d = fwd22 ? pctChange(fwd22.Close, anchorClose) : null;
   await upsertMetric(newsId, "change_30d_pct", change30d, ticker,
-    day30 ? day30.Datetime : anchorDate, anchorDate, 22);
+    anchorDate, fwd22 ? fwd22.Datetime : anchorDate, 22);
 
   return true;
 }
@@ -187,15 +183,23 @@ export async function mergeChangeForNewItems(
   return { merged, skipped };
 }
 
-// ---------- 7D Change Update (bulk) ----------
+// ---------- Recent Change Update (all metrics, last 7 days of news) ----------
 
-/** Recompute change_7d_pct for all news_items that have a ticker.
+/** Compute ALL standard change metrics (open, 1d, 7d, 14d, 30d) for news
+ *  published within the last 7 calendar days.
  *  Progress callback: (completed, total) */
-export async function bulkUpdate7dChange(
+export async function bulkUpdateRecentChange(
   onProgress?: (completed: number, total: number) => void,
 ): Promise<{ updated: number; skipped: number }> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 7);
+  const cutoffIso = cutoff.toISOString();
+
   const rows = await getDb().all<{ id: string; tickers_csv: string; published_at: string }[]>(
-    `SELECT id, tickers_csv, published_at FROM news_items ORDER BY published_at DESC`,
+    `SELECT id, tickers_csv, published_at FROM news_items
+     WHERE published_at >= ?
+     ORDER BY published_at DESC`,
+    [cutoffIso],
   );
   let updated = 0;
   let skipped = 0;
@@ -205,31 +209,31 @@ export async function bulkUpdate7dChange(
     const ticker = tickers[0];
     if (!ticker) { skipped++; continue; }
 
-    const newsDate = row.published_at.slice(0, 10);
-    const dayRow = await getOhlcCloseOnOrBefore(ticker, newsDate);
-    if (!dayRow) { skipped++; continue; }
-
-    const day7 = await getOhlcCloseNDaysBack(ticker, dayRow.Datetime, 5);
-    const change7d = day7 ? pctChange(dayRow.Close, day7.Close) : null;
-    await upsertMetric(row.id, "change_7d_pct", change7d, ticker,
-      day7 ? day7.Datetime : dayRow.Datetime, dayRow.Datetime, 5);
-    updated++;
+    const ok = await mergeChangeForNewsItem(row.id, ticker, row.published_at);
+    if (ok) { updated++; } else { skipped++; }
     if (onProgress && (i + 1) % 50 === 0) onProgress(i + 1, rows.length);
   }
   if (onProgress) onProgress(rows.length, rows.length);
   return { updated, skipped };
 }
 
-// ---------- Custom Change Update (bulk) ----------
+// ---------- Custom Change Update (date range, all metrics) ----------
 
-/** Compute custom_{N}d_pct for all news_items. N = lookback trading days. */
+/** Compute ALL standard change metrics for news published within [from, to].
+ *  from/to are ISO date strings (YYYY-MM-DD). */
 export async function bulkUpdateCustomChange(
-  lookbackTradingDays: number,
+  from: string,
+  to: string,
   onProgress?: (completed: number, total: number) => void,
 ): Promise<{ updated: number; skipped: number }> {
-  const metricKey = `custom_${lookbackTradingDays}d_pct`;
+  const fromIso = `${from}T00:00:00.000Z`;
+  const toIso = `${to}T23:59:59.999Z`;
+
   const rows = await getDb().all<{ id: string; tickers_csv: string; published_at: string }[]>(
-    `SELECT id, tickers_csv, published_at FROM news_items ORDER BY published_at DESC`,
+    `SELECT id, tickers_csv, published_at FROM news_items
+     WHERE published_at >= ? AND published_at <= ?
+     ORDER BY published_at DESC`,
+    [fromIso, toIso],
   );
   let updated = 0;
   let skipped = 0;
@@ -239,15 +243,8 @@ export async function bulkUpdateCustomChange(
     const ticker = tickers[0];
     if (!ticker) { skipped++; continue; }
 
-    const newsDate = row.published_at.slice(0, 10);
-    const dayRow = await getOhlcCloseOnOrBefore(ticker, newsDate);
-    if (!dayRow) { skipped++; continue; }
-
-    const refRow = await getOhlcCloseNDaysBack(ticker, dayRow.Datetime, lookbackTradingDays);
-    const changePct = refRow ? pctChange(dayRow.Close, refRow.Close) : null;
-    await upsertMetric(row.id, metricKey, changePct, ticker,
-      refRow ? refRow.Datetime : dayRow.Datetime, dayRow.Datetime, lookbackTradingDays);
-    updated++;
+    const ok = await mergeChangeForNewsItem(row.id, ticker, row.published_at);
+    if (ok) { updated++; } else { skipped++; }
     if (onProgress && (i + 1) % 50 === 0) onProgress(i + 1, rows.length);
   }
   if (onProgress) onProgress(rows.length, rows.length);

@@ -114,7 +114,7 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
   const sql = `
     SELECT ni.id, ni.published_at, ni.source, ni.publisher, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
            cm_1d.ohlc_ticker,
-           cm_1d.anchor_date AS ohlc_date,
+           cm_1d.target_date AS ohlc_date,
            cm_1d.value_pct AS change_1d_pct,
            cm_open.value_pct AS change_from_open_pct,
            cm_7d.value_pct AS change_7d_pct,
@@ -148,7 +148,7 @@ export async function getNewsById(id: string): Promise<NewsItem | null> {
   const row = await getDb().get<any>(
     `SELECT ni.id, ni.published_at, ni.source, ni.publisher, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
             cm_1d.ohlc_ticker,
-            cm_1d.anchor_date AS ohlc_date,
+            cm_1d.target_date AS ohlc_date,
             cm_1d.value_pct AS change_1d_pct,
             cm_open.value_pct AS change_from_open_pct,
             cm_7d.value_pct AS change_7d_pct,

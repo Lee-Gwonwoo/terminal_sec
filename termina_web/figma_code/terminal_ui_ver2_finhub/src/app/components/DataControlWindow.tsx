@@ -22,7 +22,7 @@ interface JobStatus {
   result?: Record<string, unknown>;
 }
 
-type SectionKey = 'price' | 'calendar' | '7d' | 'custom';
+type SectionKey = 'price' | 'calendar' | 'recent' | 'custom';
 
 export function DataControlWindow() {
   // ─── Status state ───
@@ -32,24 +32,25 @@ export function DataControlWindow() {
 
   // ─── Per-section job state ───
   const [jobIds, setJobIds] = useState<Record<SectionKey, string | null>>({
-    price: null, calendar: null, '7d': null, custom: null,
+    price: null, calendar: null, 'recent': null, custom: null,
   });
   const [updating, setUpdating] = useState<Record<SectionKey, boolean>>({
-    price: false, calendar: false, '7d': false, custom: false,
+    price: false, calendar: false, 'recent': false, custom: false,
   });
   const [errors, setErrors] = useState<Record<SectionKey, string | null>>({
-    price: null, calendar: null, '7d': null, custom: null,
+    price: null, calendar: null, 'recent': null, custom: null,
   });
 
   // ─── View Log state (only one section's log at a time) ───
   const [logSection, setLogSection] = useState<SectionKey | null>(null);
   const [jobStatuses, setJobStatuses] = useState<Record<SectionKey, JobStatus | null>>({
-    price: null, calendar: null, '7d': null, custom: null,
+    price: null, calendar: null, 'recent': null, custom: null,
   });
   const logEndRef = useRef<HTMLDivElement>(null);
 
-  // ─── Custom Change input ───
-  const [lookbackDays, setLookbackDays] = useState(21);
+  // ─── Custom Change date range input ───
+  const [customChangeFrom, setCustomChangeFrom] = useState('');
+  const [customChangeTo, setCustomChangeTo] = useState(() => new Date().toISOString().slice(0, 10));
 
   // ─── Fetch statuses on mount ───
   const fetchStatuses = async () => {
@@ -145,13 +146,13 @@ export function DataControlWindow() {
         case 'calendar':
           url = `${API_BASE}/api/ibkr/calendar/update`;
           break;
-        case '7d':
-          url = `${API_BASE}/api/news/change/update-7d`;
+        case 'recent':
+          url = `${API_BASE}/api/news/change/update-recent`;
           break;
         case 'custom':
           url = `${API_BASE}/api/news/change/update-custom`;
           headers['Content-Type'] = 'application/json';
-          body = JSON.stringify({ lookbackDays: lookbackDays });
+          body = JSON.stringify({ from: customChangeFrom, to: customChangeTo });
           break;
       }
 
@@ -218,24 +219,29 @@ export function DataControlWindow() {
       statusKey: 'ibkr_calendar',
     },
     {
-      key: '7d',
-      label: '7D Change Update',
-      statusKey: 'news_change_7d',
+      key: 'recent',
+      label: 'Recent Change% Update',
+      statusKey: 'news_change_recent',
     },
     {
       key: 'custom',
-      label: 'Custom Change Update',
+      label: 'Custom Change% Update',
       statusKey: 'news_change_custom',
       extra: (
-        <div className="flex items-center gap-2">
-          <label className="text-[11px] text-gray-500 dark:text-gray-400">Lookback (trading days):</label>
+        <div className="flex items-center gap-2 flex-wrap">
+          <label className="text-[11px] text-gray-500 dark:text-gray-400">From:</label>
           <input
-            type="number"
-            min={1}
-            max={252}
-            value={lookbackDays}
-            onChange={e => setLookbackDays(Math.max(1, Math.min(252, Number(e.target.value) || 21)))}
-            className="w-16 px-1.5 py-0.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200"
+            type="date"
+            value={customChangeFrom}
+            onChange={e => setCustomChangeFrom(e.target.value)}
+            className="w-28 px-1.5 py-0.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200"
+          />
+          <label className="text-[11px] text-gray-500 dark:text-gray-400">To:</label>
+          <input
+            type="date"
+            value={customChangeTo}
+            onChange={e => setCustomChangeTo(e.target.value)}
+            className="w-28 px-1.5 py-0.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200"
           />
         </div>
       ),

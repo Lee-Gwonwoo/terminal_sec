@@ -272,12 +272,27 @@ PLAN CHANGE (2026-03-06 #9)
   - `Industry` 값은 운영자가 기준으로 삼는 watchlist CSV와 더 일관되게 보인다.
   - CSV에 값이 없을 때만 Finnhub를 보조 소스로 사용하므로, 기존 provider 의존성을 완전히 제거하지는 않는다.
 ```
----
 
-### 아키텍처(상위)
-- 프론트(Vite/React)가 백엔드(Node/TS, `terminal/backend`) API 호출.
-- 백엔드는 다음을 책임진다.
-  - IBKR 업데이트(가격 + 캘린더)
+```
+PLAN CHANGE (2026-03-06 #10)
+- 왜: 사용자가 change%가 "뉴스 이전 N일"이 아니라 "뉴스 이후 N일 주가 반응"을 측정해야 한다고 지적함. 기존 plan과 구현이 모두 backward-looking(과거→뉴스일)이었으나, 올바른 의도는 forward-looking(뉴스일→미래).
+- 무엇이 바뀌었나:
+  - Change Metrics 아키텍처 섹션: 전면 forward-looking 정의로 변경
+  - `news_change_metrics` 스키마: `anchor_date`→`reference_date`(뉴스 기준일), `reference_date`→`target_date`(N거래일 후), `lookback_trading_days`→`forward_trading_days`
+  - 4-6(newsChangeMerger): forward 방향 계산으로 재정의
+  - 7-8(OHLC 백필): forward metric 백필로 재정의
+  - 7-9(Custom Change): `lookbackTradingDays`→`forwardTradingDays`
+  - `change_from_open_pct`는 기존과 동일(당일 시가→종가, intraday)
+  - `change_1d_pct`: 뉴스일 종가 → 1거래일 후 종가
+  - `change_7d_pct`: 뉴스일 종가 → 5거래일 후 종가
+  - `change_14d_pct`: 뉴스일 종가 → 10거래일 후 종가
+  - `change_30d_pct`: 뉴스일 종가 → 22거래일 후 종가
+  - 아직 해당 기간이 지나지 않아 forward OHLC가 없으면 `NULL`(UI에서 `-` 표시)
+- 영향:
+  - 기존 `news_change_metrics` 데이터 전량 무효 → 테이블 DROP/재생성 필요
+  - `ohlc_1d` 테이블의 파생 컬럼(Change_7d_Pct 등)은 주가 차트용 backward-looking으로 별개이므로 변경 없음
+  - OHLC 데이터가 최신까지 수집되어야 최근 뉴스의 forward change가 채워짐
+```
   - Finnhub 뉴스 수집
   - news 기준 change metric 계산/재계산 잡
   - 티커 CSV read/append + 경로 제한(보안)
@@ -417,6 +432,8 @@ PLAN CHANGE (2026-03-06 #9)
 
 ### Change Metrics 아키텍처
 > change 데이터는 뉴스 row의 부가 컬럼이 아니라, `news_id`에 종속된 별도 파생 데이터로 저장한다.
+> **방향: forward-looking** — 뉴스 발생일 종가를 기준(anchor)으로, N거래일 **이후** 종가와 비교하여 "뉴스 이후 주가 반응"을 측정한다.
+> 예외: `change_from_open_pct`만 당일 시가→종가(intraday).
 
 1. **저장 위치: 별도 테이블 `news_change_metrics`**
    - 물리적으로는 같은 SQLite(app DB) 안에 저장하되, **별도 파일을 새로 만드는 방식이 아니라 별도 테이블**로 관리한다.
@@ -426,9 +443,9 @@ PLAN CHANGE (2026-03-06 #9)
      - `metric_key TEXT NOT NULL` — `change_1d_pct`, `change_from_open_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct`, `custom_{N}d_pct`
      - `value_pct REAL`
      - `ohlc_ticker TEXT NOT NULL`
-     - `reference_date TEXT NOT NULL`
-     - `anchor_date TEXT NOT NULL`
-     - `lookback_trading_days INTEGER`
+     - `reference_date TEXT NOT NULL` — 뉴스 기준 OHLC 날짜(anchor)
+     - `target_date TEXT NOT NULL` — N거래일 후 OHLC 날짜(forward target). `change_from_open_pct`은 anchor_date와 동일.
+     - `forward_trading_days INTEGER` — 앞으로 본 거래일 수 (0=당일, 1, 5, 10, 22 등)
      - `calc_version TEXT NOT NULL`
      - `computed_at TEXT NOT NULL`
      - `PRIMARY KEY (news_id, metric_key)`
@@ -1076,15 +1093,15 @@ UI 동작(최소/명확)
 - **최신 데이터 우선**: 매 수집 시 항상 현재 시각까지를 종료 시점으로 하여 최신 뉴스가 빠지지 않게 한다.
 - DB에 이미 있는 기사는 `INSERT OR IGNORE`로 안전하게 건너뛴다.
 
-change 저장 구조(`news_change_metrics`)
+change 저장 구조(`news_change_metrics`) — **forward-looking**
 - `news_items`에 change 컬럼을 계속 늘리지 않고, 아래 별도 테이블을 migration으로 추가한다:
   - `news_id` (TEXT, FK → `news_items.id`)
   - `metric_key` (TEXT) — 표준: `change_1d_pct`, `change_from_open_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct`; custom: `custom_{N}d_pct`
   - `value_pct` (REAL)
   - `ohlc_ticker` (TEXT) — change 계산에 사용한 티커
-  - `reference_date` (TEXT) — 비교 기준 OHLC 날짜 (`YYYY-MM-DD`)
-  - `anchor_date` (TEXT) — 뉴스 기준 날짜 (`YYYY-MM-DD`)
-  - `lookback_trading_days` (INTEGER)
+  - `reference_date` (TEXT) — 뉴스 기준(anchor) OHLC 날짜 (`YYYY-MM-DD`)
+  - `target_date` (TEXT) — N거래일 후(forward) OHLC 날짜 (`YYYY-MM-DD`)
+  - `forward_trading_days` (INTEGER) — 앞으로 본 거래일 수
   - `calc_version` (TEXT)
   - `computed_at` (TEXT) — 파생값 계산 시각(ISO)
   - PK: `(news_id, metric_key)`
@@ -1192,12 +1209,17 @@ API 계약(초안)
   - 사람 검증(비개발자): curl로 source_type 유/무 2가지를 호출해 결과 개수가 다른지 확인.
   - 흔한 문제/주의: source_type 파라미터를 서버에서 꺼내지 않아 필터가 무시됨; SQL injection 주의(바인드 파라미터 사용).
 - `4-6` 목적: 뉴스 row 기준으로 OHLC 기반 change metric row를 upsert하는 서비스. 설명:
-  - `newsChangeMerger.ts` 구현:
+  - `newsChangeMerger.ts` 구현 — **forward-looking 방향**:
     - 입력: 병합 대상 뉴스 row 목록 (또는 표준 metric row가 누락된 news_id 자동 조회)
-    - 각 row의 `(tickers_csv 첫 번째 ticker, published_at 날짜)` 기준으로 OHLC DB(`ohlc_1d_watchlist.sqlite`)에서 해당 날짜의 OHLC를 조회
-    - `change_1d_pct`, `change_from_open_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct`를 계산
-    - 결과를 `news_change_metrics`에 upsert (`metric_key`, `value_pct`, `ohlc_ticker`, `reference_date`, `anchor_date`, `computed_at`)
-  - OHLC 데이터가 없는 날짜(휴장일 등)는 가장 가까운 이전 거래일의 데이터를 사용하거나 NULL로 남긴다.
+    - 각 row의 `(tickers_csv 첫 번째 ticker, published_at 날짜)` 기준으로 뉴스일(anchor) OHLC를 조회
+    - `change_from_open_pct`: 뉴스일 시가 → 뉴스일 종가 (당일)
+    - `change_1d_pct`: 뉴스일 종가 → **1거래일 후** 종가
+    - `change_7d_pct`: 뉴스일 종가 → **5거래일 후** 종가
+    - `change_14d_pct`: 뉴스일 종가 → **10거래일 후** 종가
+    - `change_30d_pct`: 뉴스일 종가 → **22거래일 후** 종가
+    - 아직 해당 기간이 지나지 않아 forward OHLC가 없으면 `NULL`
+    - 결과를 `news_change_metrics`에 upsert (`metric_key`, `value_pct`, `ohlc_ticker`, `reference_date`, `target_date`, `computed_at`)
+  - 뉴스일이 휴장일이면 가장 가까운 이전 거래일의 OHLC를 anchor로 사용.
   - 완료 조건(눈으로 확인): OHLC 데이터가 있는 날짜의 news_id에 대해 `news_change_metrics`에 표준 metric row가 생긴다.
   - 사람 검증(비개발자): 특정 news_id를 SQL로 조회해 `metric_key='change_7d_pct'` 같은 row가 생겼는지 확인.
   - 흔한 문제/주의: OHLC DB 경로를 잘못 열음; 주말/휴장일 날짜 매칭 실패; 0으로 나누기(Open=0).
@@ -1836,16 +1858,17 @@ API 계약(초안)
   - 흔한 문제/주의: 다른 DB 파일을 열어 확인; `Datetime` 포맷이 어긋나 MAX(Datetime)가 잘못 계산.
 - `7-8` 목적: OHLC 업데이트 후 표준 change metric row를 백필한다. 설명:
   - OHLC upsert + 파생 지표 계산이 완료된 후, `newsChangeMerger`를 호출한다.
-  - 대상: `news_items` 중 이번에 업데이트된 심볼을 포함하고, 표준 metric_key row가 누락된 news_id.
-  - 각 row의 `published_at` 날짜에 대응하는 OHLC 데이터를 `ohlc_1d_watchlist.sqlite`에서 조회하고, 표준 metric row를 `news_change_metrics`에 upsert.
-  - OHLC에 해당 날짜가 없으면(휴장일 등): 가장 가까운 이전 거래일 데이터를 사용하거나 NULL 유지.
+  - 대상: `news_items` 중 이번에 업데이트된 심볼을 포함하고, 표준 metric_key row가 누락이거나 `NULL`인 news_id.
+  - **forward-looking**: 각 row의 `published_at` 날짜를 anchor로, N거래일 **후** OHLC를 `ohlc_1d_watchlist.sqlite`에서 조회해 metric row upsert.
+  - 새로 들어온 OHLC 날짜가 과거 뉴스의 forward target 날짜에 해당하면 기존 `NULL`→값으로 업데이트.
+  - 뉴스일이 휴장일이면: 가장 가까운 이전 거래일 OHLC를 anchor로 사용.
   - `POST /api/ibkr/ohlc1d/update`의 반환 요약에 `newsChangeRowsUpserted: <n>`을 추가한다.
   - 완료 조건(눈으로 확인): OHLC 업데이트 전에 없던 표준 metric row가, 업데이트 후 생성된다.
   - 사람 검증(비개발자): OHLC 업데이트 전후로 `SELECT news_id, metric_key, value_pct FROM news_change_metrics WHERE metric_key='change_7d_pct' LIMIT 5`를 비교.
   - 흔한 문제/주의: newsChangeMerger가 잘못된 DB를 열어 매칭 실패; 심볼 매칭에서 대소문자/접미사 불일치; 대량 upsert 시 트랜잭션 없이 느려짐.
 
 - `7-9` 목적: 운영 UI의 `Custom Change Update` 버튼이 호출할 재계산 엔드포인트를 제공한다. 설명:
-  - 입력: `lookbackTradingDays`, 선택적 `tickers[]`, 선택적 `from/to`.
+  - 입력: `forwardTradingDays`(=뉴스 이후 N거래일), 선택적 `tickers[]`, 선택적 `from/to`.
   - 대상 news_id를 필터링한 뒤 `metric_key = custom_{N}d_pct` row를 upsert한다.
   - 동일한 custom window가 다시 실행되면 기존 row를 overwrite한다.
   - 완료 조건(눈으로 확인): 같은 news_id에 대해 `custom_21d_pct` 같은 row가 생긴다.

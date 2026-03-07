@@ -34,7 +34,7 @@ import {
   getTickerAnchorMap,
 } from "./services/finnhubNewsProvider.js";
 import type { FinnhubMappedItem } from "./services/finnhubNewsProvider.js";
-import { mergeChangeForNewItems, bulkUpdate7dChange, bulkUpdateCustomChange } from "./services/newsChangeMerger.js";
+import { mergeChangeForNewItems, bulkUpdateRecentChange, bulkUpdateCustomChange } from "./services/newsChangeMerger.js";
 import { createJob, getJob, updateProgress, appendLog, completeJob, failJob } from "./services/jobManager.js";
 import { getFulltext, getUnextractedNewsIds } from "./services/fulltextRepository.js";
 import { runFulltextUpdate } from "./services/fulltextUpdateService.js";
@@ -501,15 +501,15 @@ app.get("/api/news/fulltext/:newsId", async (req, res, next) => {
 
 // ── Change Metrics Update endpoints (5-20, 5-21) ──
 
-app.post("/api/news/change/update-7d", async (_req, res, next) => {
+app.post("/api/news/change/update-recent", async (_req, res, next) => {
   try {
     const jobId = createJob(0); // total unknown upfront
     (async () => {
       try {
-        await bulkUpdate7dChange((done, total) => {
+        await bulkUpdateRecentChange((done, total) => {
           updateProgress(jobId, done, total);
         });
-        await setLastSuccess("news_change_7d", new Date().toISOString());
+        await setLastSuccess("news_change_recent", new Date().toISOString());
         completeJob(jobId);
       } catch (err: any) {
         failJob(jobId, err?.message ?? String(err));
@@ -522,19 +522,20 @@ app.post("/api/news/change/update-7d", async (_req, res, next) => {
 });
 
 const customChangeSchema = z.object({
-  lookbackDays: z.number().int().min(1).max(365),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
 
 app.post("/api/news/change/update-custom", async (req, res, next) => {
   try {
-    const { lookbackDays } = customChangeSchema.parse(req.body);
+    const { from, to } = customChangeSchema.parse(req.body);
     const jobId = createJob(0);
     (async () => {
       try {
-        await bulkUpdateCustomChange(lookbackDays, (done, total) => {
+        await bulkUpdateCustomChange(from, to, (done, total) => {
           updateProgress(jobId, done, total);
         });
-        await setLastSuccess("news_change_custom", new Date().toISOString(), { lookbackDays });
+        await setLastSuccess("news_change_custom", new Date().toISOString(), { from, to });
         completeJob(jobId);
       } catch (err: any) {
         failJob(jobId, err?.message ?? String(err));

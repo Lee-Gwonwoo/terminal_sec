@@ -72,11 +72,11 @@ describe("updateStatusRepository", () => {
 
     it("should include extra keys that exist in DB but not in SOURCE_KEYS", async () => {
       await setLastSuccess("news_change_custom", "2026-03-06T22:00:00Z", {
-        lookbackDays: 21,
+        forwardDays: 21,
       });
       const statuses = await listUpdateStatuses();
       expect(statuses).toHaveProperty("news_change_custom");
-      expect(statuses.news_change_custom!.details).toEqual({ lookbackDays: 21 });
+      expect(statuses.news_change_custom!.details).toEqual({ forwardDays: 21 });
     });
   });
 

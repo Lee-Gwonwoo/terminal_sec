@@ -120,7 +120,10 @@ export async function initDb(): Promise<void> {
   await ensureColumn("news_items", "change_30d_pct", "REAL");
   await ensureColumn("news_items", "change_computed_at", "TEXT");
 
-  // Step 4-2: news_change_metrics table (separate change data from news_items)
+  // Step 4-2: news_change_metrics table (separate change data — forward-looking)
+  // PLAN CHANGE #10: renamed anchor_date→target_date, lookback→forward
+  // DROP old table first (direction changed: all old data is invalid)
+  await db.exec(`DROP TABLE IF EXISTS news_change_metrics`);
   await db.exec(`
     CREATE TABLE IF NOT EXISTS news_change_metrics (
       news_id TEXT NOT NULL REFERENCES news_items(id),
@@ -128,9 +131,9 @@ export async function initDb(): Promise<void> {
       value_pct REAL,
       ohlc_ticker TEXT NOT NULL,
       reference_date TEXT NOT NULL,
-      anchor_date TEXT NOT NULL,
-      lookback_trading_days INTEGER,
-      calc_version TEXT NOT NULL DEFAULT 'v1',
+      target_date TEXT NOT NULL,
+      forward_trading_days INTEGER,
+      calc_version TEXT NOT NULL DEFAULT 'v2',
       computed_at TEXT NOT NULL,
       PRIMARY KEY (news_id, metric_key)
     );
