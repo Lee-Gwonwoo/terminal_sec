@@ -159,6 +159,74 @@ export async function initDb(): Promise<void> {
       keywords_updated_at TEXT
     );
   `);
+
+  // ver3: news_sentiment_snapshots — symbol-level sentiment (not per-article)
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS news_sentiment_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ticker TEXT NOT NULL,
+      asof_date TEXT NOT NULL,
+      buzz_articles_in_last_week INTEGER,
+      buzz_weekly_average REAL,
+      buzz REAL,
+      company_news_score REAL,
+      sector_avg_bullish_pct REAL,
+      sector_avg_news_score REAL,
+      sentiment_bullish_pct REAL,
+      sentiment_bearish_pct REAL,
+      fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (ticker, asof_date)
+    );
+  `);
+
+  // ver3: news_ai_analysis — per-article AI analysis results
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS news_ai_analysis (
+      news_id TEXT PRIMARY KEY REFERENCES news_items(id),
+      score REAL,
+      score_evidence TEXT,
+      keywords_json TEXT NOT NULL DEFAULT '[]',
+      analysis_status TEXT NOT NULL DEFAULT 'not_started',
+      analyzed_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
+  // ver3: bookmark_folders — tree structure with parent_id
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS bookmark_folders (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      parent_id TEXT,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (parent_id) REFERENCES bookmark_folders(id) ON DELETE CASCADE
+    );
+  `);
+
+  // ver3: bookmark_items — news_id in a folder (upsert-safe)
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS bookmark_items (
+      folder_id TEXT NOT NULL REFERENCES bookmark_folders(id) ON DELETE CASCADE,
+      news_id TEXT NOT NULL REFERENCES news_items(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (folder_id, news_id)
+    );
+  `);
+
+  // ver3: confirmed_empty_ranges — per ticker+source_type empty confirmation
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS confirmed_empty_ranges (
+      ticker TEXT NOT NULL,
+      source_type TEXT NOT NULL,
+      range_from TEXT NOT NULL,
+      range_to TEXT NOT NULL,
+      confirmed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (ticker, source_type)
+    );
+  `);
 }
 
 async function ensureColumn(tableName: string, columnName: string, definition: string): Promise<void> {

@@ -10,6 +10,7 @@ export type NewsQuery = {
   to?: string;
   limit?: number;
   cursor?: string;
+  bookmarkFolderId?: string;
 };
 
 export type NewsItem = {
@@ -39,4 +40,12 @@ export type NewsItem = {
   keywordsStatus?: string | null;
   // industry (Step 5-22)
   industry?: string | null;
+  // ver3: AI analysis
+  score?: number | null;
+  scoreEvidence?: string | null;
+  analysisStatus?: string | null;
+  // ver3: sentiment snapshot (symbol-level)
+  sentimentBullishPct?: number | null;
+  sentimentBearishPct?: number | null;
+  companyNewsScore?: number | null;
 };

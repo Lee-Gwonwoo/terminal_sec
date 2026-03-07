@@ -84,7 +84,8 @@ function parseNewsQuery(query: Record<string, unknown>): NewsQuery {
     from: typeof query.from === "string" ? query.from : undefined,
     to: typeof query.to === "string" ? query.to : undefined,
     limit,
-    cursor: typeof query.cursor === "string" ? query.cursor : undefined
+    cursor: typeof query.cursor === "string" ? query.cursor : undefined,
+    bookmarkFolderId: typeof query.bookmarkFolderId === "string" ? query.bookmarkFolderId : undefined,
   };
 }
 

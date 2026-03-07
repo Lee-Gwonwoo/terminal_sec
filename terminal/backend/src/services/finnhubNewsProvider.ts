@@ -523,3 +523,124 @@ export async function backfillPublisher(): Promise<number> {
   }
   return updated;
 }
+
+// ---------- Finnhub news-sentiment (symbol-level aggregate) ----------
+
+export type SentimentSnapshot = {
+  ticker: string;
+  asofDate: string;
+  buzzArticlesInLastWeek: number | null;
+  buzzWeeklyAverage: number | null;
+  buzz: number | null;
+  companyNewsScore: number | null;
+  sectorAvgBullishPct: number | null;
+  sectorAvgNewsScore: number | null;
+  sentimentBullishPct: number | null;
+  sentimentBearishPct: number | null;
+};
+
+/**
+ * Fetch symbol-level sentiment from Finnhub `news-sentiment` endpoint.
+ * Returns null if the response is empty or the ticker has no data.
+ */
+export async function fetchSentimentSnapshot(symbol: string): Promise<SentimentSnapshot | null> {
+  const url = `${FINNHUB_BASE}/news-sentiment?symbol=${encodeURIComponent(symbol)}&token=${config.finnhubApiKey}`;
+  const raw = await fetchWithRetry(url);
+
+  if (!raw || !raw.symbol) return null;
+
+  const today = new Date().toISOString().slice(0, 10);
+  return {
+    ticker: raw.symbol?.toUpperCase() ?? symbol.toUpperCase(),
+    asofDate: today,
+    buzzArticlesInLastWeek: raw.buzz?.articlesInLastWeek ?? null,
+    buzzWeeklyAverage: raw.buzz?.weeklyAverage ?? null,
+    buzz: raw.buzz?.buzz ?? null,
+    companyNewsScore: raw.companyNewsScore ?? null,
+    sectorAvgBullishPct: raw.sectorAverageBullishPercent ?? null,
+    sectorAvgNewsScore: raw.sectorAverageNewsScore ?? null,
+    sentimentBullishPct: raw.sentiment?.bullishPercent ?? null,
+    sentimentBearishPct: raw.sentiment?.bearishPercent ?? null,
+  };
+}
+
+/**
+ * Fetch and upsert sentiment snapshot for a single ticker.
+ * Returns true if a row was written, false if no data.
+ */
+export async function upsertSentimentSnapshot(symbol: string): Promise<boolean> {
+  const snapshot = await fetchSentimentSnapshot(symbol);
+  if (!snapshot) return false;
+
+  await getDb().run(
+    `INSERT INTO news_sentiment_snapshots
+       (ticker, asof_date, buzz_articles_in_last_week, buzz_weekly_average, buzz,
+        company_news_score, sector_avg_bullish_pct, sector_avg_news_score,
+        sentiment_bullish_pct, sentiment_bearish_pct)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(ticker, asof_date) DO UPDATE SET
+       buzz_articles_in_last_week = excluded.buzz_articles_in_last_week,
+       buzz_weekly_average = excluded.buzz_weekly_average,
+       buzz = excluded.buzz,
+       company_news_score = excluded.company_news_score,
+       sector_avg_bullish_pct = excluded.sector_avg_bullish_pct,
+       sector_avg_news_score = excluded.sector_avg_news_score,
+       sentiment_bullish_pct = excluded.sentiment_bullish_pct,
+       sentiment_bearish_pct = excluded.sentiment_bearish_pct,
+       fetched_at = datetime('now')`,
+    [
+      snapshot.ticker,
+      snapshot.asofDate,
+      snapshot.buzzArticlesInLastWeek,
+      snapshot.buzzWeeklyAverage,
+      snapshot.buzz,
+      snapshot.companyNewsScore,
+      snapshot.sectorAvgBullishPct,
+      snapshot.sectorAvgNewsScore,
+      snapshot.sentimentBullishPct,
+      snapshot.sentimentBearishPct,
+    ],
+  );
+  return true;
+}
+
+// ---------- Confirmed-empty range helpers ----------
+
+/**
+ * Record that a ticker + source_type returned HTTP 200 + empty array
+ * for a date range. Only call this when you're sure the response was valid.
+ */
+export async function recordConfirmedEmpty(
+  ticker: string,
+  sourceType: string,
+  rangeFrom: string,
+  rangeTo: string,
+): Promise<void> {
+  await getDb().run(
+    `INSERT INTO confirmed_empty_ranges (ticker, source_type, range_from, range_to)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(ticker, source_type) DO UPDATE SET
+       range_from = CASE WHEN excluded.range_from < confirmed_empty_ranges.range_from
+                         THEN excluded.range_from ELSE confirmed_empty_ranges.range_from END,
+       range_to = CASE WHEN excluded.range_to > confirmed_empty_ranges.range_to
+                       THEN excluded.range_to ELSE confirmed_empty_ranges.range_to END,
+       confirmed_at = datetime('now')`,
+    [ticker.toUpperCase(), sourceType, rangeFrom, rangeTo],
+  );
+}
+
+/**
+ * Get confirmed-empty range for a ticker + source_type.
+ * Returns null if no confirmed-empty record exists.
+ */
+export async function getConfirmedEmptyRange(
+  ticker: string,
+  sourceType: string,
+): Promise<{ rangeFrom: string; rangeTo: string } | null> {
+  const row = await getDb().get<{ range_from: string; range_to: string }>(
+    `SELECT range_from, range_to FROM confirmed_empty_ranges
+     WHERE ticker = ? AND source_type = ?`,
+    [ticker.toUpperCase(), sourceType],
+  );
+  return row ? { rangeFrom: row.range_from, rangeTo: row.range_to } : null;
+}

@@ -9,15 +9,15 @@ function clampInt(value: number, min: number, max: number): number {
 
 function capLimitByRangeDays(rangeDays?: number): number {
   if (typeof rangeDays !== "number" || !Number.isFinite(rangeDays) || rangeDays <= 0) {
-    return 200;
+    return 500;
   }
   if (rangeDays <= 7) {
-    return 200;
+    return 500;
   }
   if (rangeDays <= 31) {
-    return 100;
+    return 500;
   }
-  return 50;
+  return 500;
 }
 
 function computeRangeDays(from?: string, to?: string): number | undefined {
@@ -54,6 +54,13 @@ function encodeCursor(item: Pick<NewsItem, "published_at" | "id">): string {
 export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; nextCursor?: string }> {
   const where: string[] = [];
   const values: unknown[] = [];
+  let extraJoins = "";
+
+  // Bookmark folder filter: join bookmark_items to restrict to bookmarked news
+  if (query.bookmarkFolderId) {
+    extraJoins += ` INNER JOIN bookmark_items bi ON bi.news_id = ni.id AND bi.folder_id = ?`;
+    values.push(query.bookmarkFolderId);
+  }
 
   if (query.keyword) {
     values.push(`%${query.keyword.toLowerCase()}%`);
@@ -104,10 +111,10 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
     where.push(`(ni.published_at < ? OR (ni.published_at = ? AND ni.id < ?))`);
   }
 
-  const requestedLimit = typeof query.limit === "number" && Number.isFinite(query.limit) ? query.limit : 200;
+  const requestedLimit = typeof query.limit === "number" && Number.isFinite(query.limit) ? query.limit : 500;
   const rangeDays = computeRangeDays(query.from, query.to);
   const policyMax = capLimitByRangeDays(rangeDays);
-  const limit = clampInt(Math.min(requestedLimit, policyMax), 1, 200);
+  const limit = clampInt(Math.min(requestedLimit, policyMax), 1, 500);
   values.push(limit + 1);
 
   const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
@@ -122,7 +129,11 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
            cm_30d.value_pct AS change_30d_pct,
            cm_1d.computed_at AS change_computed_at,
            CASE WHEN nf.extraction_status = 'success' THEN 1 ELSE 0 END AS has_full_text,
-           nf.keywords_json, nf.keywords_status
+           nf.keywords_json, nf.keywords_status,
+           naa.score AS ai_score,
+           naa.score_evidence AS ai_score_evidence,
+           naa.analysis_status AS ai_analysis_status,
+           naa.keywords_json AS ai_keywords_json
     FROM news_items ni
     LEFT JOIN news_fulltext nf ON nf.news_id = ni.id
     LEFT JOIN news_change_metrics cm_1d ON cm_1d.news_id = ni.id AND cm_1d.metric_key = 'change_1d_pct'
@@ -130,13 +141,44 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
     LEFT JOIN news_change_metrics cm_7d ON cm_7d.news_id = ni.id AND cm_7d.metric_key = 'change_7d_pct'
     LEFT JOIN news_change_metrics cm_14d ON cm_14d.news_id = ni.id AND cm_14d.metric_key = 'change_14d_pct'
     LEFT JOIN news_change_metrics cm_30d ON cm_30d.news_id = ni.id AND cm_30d.metric_key = 'change_30d_pct'
+    LEFT JOIN news_ai_analysis naa ON naa.news_id = ni.id
+    ${extraJoins}
     ${whereSql}
     ORDER BY ni.published_at DESC, ni.id DESC
     LIMIT ?
   `;
 
   const rows = await getDb().all<any[]>(sql, values);
-  const mapped = rows.map((row) => mapNewsRow(row));
+
+  // Collect unique tickers from results for sentiment lookup
+  const tickerSet = new Set<string>();
+  for (const row of rows) {
+    const tickers = splitCsvEnvelope(row.tickers_csv);
+    if (tickers.length > 0) tickerSet.add(tickers[0]);
+  }
+
+  // Batch fetch sentiment snapshots for all tickers in this page
+  const sentimentMap = new Map<string, { bullishPct: number | null; bearishPct: number | null; newsScore: number | null }>();
+  if (tickerSet.size > 0) {
+    const tickerArr = Array.from(tickerSet);
+    const placeholders = tickerArr.map(() => "?").join(",");
+    const sentRows = await getDb().all<any[]>(
+      `SELECT ticker, sentiment_bullish_pct, sentiment_bearish_pct, company_news_score
+       FROM news_sentiment_snapshots
+       WHERE ticker IN (${placeholders})
+       AND asof_date = (SELECT MAX(asof_date) FROM news_sentiment_snapshots s2 WHERE s2.ticker = news_sentiment_snapshots.ticker)`,
+      tickerArr,
+    );
+    for (const sr of sentRows) {
+      sentimentMap.set(sr.ticker, {
+        bullishPct: sr.sentiment_bullish_pct,
+        bearishPct: sr.sentiment_bearish_pct,
+        newsScore: sr.company_news_score,
+      });
+    }
+  }
+
+  const mapped = rows.map((row) => mapNewsRow(row, sentimentMap));
   const hasMore = mapped.length > limit;
   const items = hasMore ? mapped.slice(0, limit) : mapped;
   const nextCursor = hasMore ? encodeCursor(items[items.length - 1]) : undefined;
@@ -156,7 +198,11 @@ export async function getNewsById(id: string): Promise<NewsItem | null> {
             cm_30d.value_pct AS change_30d_pct,
             cm_1d.computed_at AS change_computed_at,
             CASE WHEN nf.extraction_status = 'success' THEN 1 ELSE 0 END AS has_full_text,
-            nf.keywords_json, nf.keywords_status
+            nf.keywords_json, nf.keywords_status,
+            naa.score AS ai_score,
+            naa.score_evidence AS ai_score_evidence,
+            naa.analysis_status AS ai_analysis_status,
+            naa.keywords_json AS ai_keywords_json
      FROM news_items ni
      LEFT JOIN news_fulltext nf ON nf.news_id = ni.id
      LEFT JOIN news_change_metrics cm_1d ON cm_1d.news_id = ni.id AND cm_1d.metric_key = 'change_1d_pct'
@@ -164,10 +210,33 @@ export async function getNewsById(id: string): Promise<NewsItem | null> {
      LEFT JOIN news_change_metrics cm_7d ON cm_7d.news_id = ni.id AND cm_7d.metric_key = 'change_7d_pct'
      LEFT JOIN news_change_metrics cm_14d ON cm_14d.news_id = ni.id AND cm_14d.metric_key = 'change_14d_pct'
      LEFT JOIN news_change_metrics cm_30d ON cm_30d.news_id = ni.id AND cm_30d.metric_key = 'change_30d_pct'
+     LEFT JOIN news_ai_analysis naa ON naa.news_id = ni.id
      WHERE ni.id = ?`,
     [id]
   );
-  return row ? mapNewsRow(row) : null;
+  if (!row) return null;
+
+  // Fetch sentiment for this item's first ticker
+  const tickers = splitCsvEnvelope(row.tickers_csv);
+  const sentimentMap = new Map<string, { bullishPct: number | null; bearishPct: number | null; newsScore: number | null }>();
+  if (tickers.length > 0) {
+    const sentRow = await getDb().get<any>(
+      `SELECT sentiment_bullish_pct, sentiment_bearish_pct, company_news_score
+       FROM news_sentiment_snapshots
+       WHERE ticker = ?
+       ORDER BY asof_date DESC LIMIT 1`,
+      [tickers[0]],
+    );
+    if (sentRow) {
+      sentimentMap.set(tickers[0], {
+        bullishPct: sentRow.sentiment_bullish_pct,
+        bearishPct: sentRow.sentiment_bearish_pct,
+        newsScore: sentRow.company_news_score,
+      });
+    }
+  }
+
+  return mapNewsRow(row, sentimentMap);
 }
 
 export async function insertNewsItem(params: {
@@ -221,7 +290,21 @@ export async function insertNewsItem(params: {
   };
 }
 
-function mapNewsRow(row: any): NewsItem {
+function mapNewsRow(
+  row: any,
+  sentimentMap?: Map<string, { bullishPct: number | null; bearishPct: number | null; newsScore: number | null }>,
+): NewsItem {
+  const tickers = splitCsvEnvelope(row.tickers_csv);
+
+  // AI analysis fields: use ai_keywords_json if analysis is completed, otherwise fall back to fulltext keywords
+  const aiKeywords: string[] = row.ai_analysis_status === "completed" && row.ai_keywords_json
+    ? JSON.parse(row.ai_keywords_json)
+    : (row.keywords_json ? JSON.parse(row.keywords_json) : []);
+
+  // Sentiment from pre-fetched map
+  const primaryTicker = tickers.length > 0 ? tickers[0] : null;
+  const sent = primaryTicker && sentimentMap ? sentimentMap.get(primaryTicker) : undefined;
+
   return {
     id: row.id,
     published_at: row.published_at,
@@ -231,7 +314,7 @@ function mapNewsRow(row: any): NewsItem {
     title: row.title,
     body: row.body,
     url: row.url,
-    tickers: splitCsvEnvelope(row.tickers_csv),
+    tickers,
     tags: splitCsvEnvelope(row.tags_csv),
     created_at: row.created_at,
     ohlc_ticker: row.ohlc_ticker ?? null,
@@ -243,13 +326,20 @@ function mapNewsRow(row: any): NewsItem {
     change_30d_pct: row.change_30d_pct ?? null,
     change_computed_at: row.change_computed_at ?? null,
     hasFullText: row.has_full_text === 1,
-    keywords: row.keywords_json ? JSON.parse(row.keywords_json) : [],
+    keywords: aiKeywords,
     keywordsStatus: row.keywords_status ?? null,
     industry: (() => {
-      const tickers = splitCsvEnvelope(row.tickers_csv);
       for (const t of tickers) { const ind = getIndustry(t); if (ind) return ind; }
       return null;
     })(),
+    // AI analysis
+    score: row.ai_score ?? null,
+    scoreEvidence: row.ai_score_evidence ?? null,
+    analysisStatus: row.ai_analysis_status ?? null,
+    // Sentiment
+    sentimentBullishPct: sent?.bullishPct ?? null,
+    sentimentBearishPct: sent?.bearishPct ?? null,
+    companyNewsScore: sent?.newsScore ?? null,
   };
 }
 

@@ -52,6 +52,7 @@
 - 현재는 “이미 조회했지만 뉴스가 없었다”는 confirmed-empty 기록 저장소가 없어서, 뉴스가 한 번도 없던 ticker는 recent update 때 같은 구간을 반복 조회할 수 있다.
 - `FinnhubNewsWindow.tsx`의 Recent Update 메뉴는 automatic recent retry 정책을 작은 보조 설명 문구로 항상 표시한다.
 - Finnhub comprehensive probe 기록상 `news-sentiment` 엔드포인트는 접근 가능하다. 다만 현재 backend 수집/저장 흐름에는 아직 연결되어 있지 않다.
+- 2026-03-07 실제 probe 결과 `news-sentiment?symbol=AAPL` 응답은 `buzz`, `companyNewsScore`, `sectorAverageBullishPercent`, `sectorAverageNewsScore`, `sentiment`, `symbol` top-level object이며, 기사 `id` 배열이나 기사별 sentiment row를 반환하지 않는다.
 - AI 뉴스 분석 skills 지침 명칭은 `ai-news-analysis`로 고정한다.
 - 현재 프론트 문서 기준으로 `Finnhub News`, `Default Ticker`, `Data Control`은 실제 API 연동이 있고, `Watchlist`, `Calendar`는 일부 mock/stub 흔적이 남아 있다.
 
@@ -62,6 +63,9 @@
 - `Score`, `Score Evidence`, `Keywords`는 기본적으로 비워 둔다. AI 분석이 아직 실행되지 않은 row에 placeholder 값을 넣지 않는다.
 - `Score`는 Finnhub raw sentiment가 아니라, `ai-news-analysis` 규칙으로 계산하는 AI 결과다.
 - `Score Evidence` 또는 `Score`가 저장 후 직접 지워져도 통과해 버리는 구조를 허용하지 않는다. 삭제/유실 감지 테스트를 포함해야 한다.
+- `analysis_status=completed`인 row에서 `score` 또는 `scoreEvidence`가 비면 테스트 실패로 본다.
+- `analysis_status=completed`인 row에서 `keywords=[]`이면 최소 warning 대상으로 기록하고, stricter 삭제 감지 테스트에서는 실패로 승격할 수 있다.
+- `analysis_status!=completed` row는 기본 빈 상태를 허용하며 삭제/유실 실패 대상으로 보지 않는다.
 - Finnhub recent no-news 기록은 API 실패와 구분해야 한다. HTTP 200 + 실제 빈 배열일 때만 confirmed-empty로 기록한다.
 - Finnhub recent no-news 기록은 `source_type`별로 분리한다. `company_news`와 `press_release`를 한 덩어리로 기록하지 않는다.
 - 당일 범위는 보수적으로 취급한다. 자동 recent skip 대상은 당일 이전 confirmed-empty 범위까지만 허용한다.
@@ -171,6 +175,16 @@ Step N — <제목>
 - 무엇이 바뀌었나: 목표에 북마크 폴더/단건 북마크/Bookmark view를 추가했고, 현재 상태/제약/결정사항/Step 1~3/결정 상세에 북마크 전용 데이터 모델과 UI 흐름을 반영했다.
 - 영향: bookmark schema/API, `FinnhubNewsWindow.tsx` 우클릭 메뉴/Bookmark view UX, workspace persistence payload, backend/frontend prompt 문서가 함께 바뀐다.
 
+### PLAN CHANGE (2026-03-07)
+- 왜: 사용자가 Track A 권장안을 그대로 확정하라고 요청했고, 실제 Finnhub `news-sentiment` probe 결과도 함께 확인했다.
+- 무엇이 바뀌었나: AI 분석 실행 시점, sentiment 저장 단위, AI analysis 저장 위치, 북마크 데이터 모델을 사용자 확정 상태로 승격했고, `news-sentiment`를 기사별이 아닌 symbol-level snapshot으로 문서에 명시했다.
+- 영향: Step 0의 일부 차단이 해소되고, Step 1 schema/API 설계가 `news_sentiment_snapshots`, `news_ai_analysis`, `bookmark_folders`, `bookmark_items` 기준으로 고정된다.
+
+### PLAN CHANGE (2026-03-07)
+- 왜: 사용자가 삭제/유실 감지 테스트 기준을 `analysis_status=completed` 예외 규칙까지 포함해 구체적으로 확정했다.
+- 무엇이 바뀌었나: Step 0-5, Step 1-6, Step 4 검증 기준과 차단 상태를 status 기반 규칙으로 갱신했다.
+- 영향: Track A 차단이 해소되고, backend 삭제 감지 테스트와 운영 로그 정책을 같은 기준으로 맞출 수 있다.
+
 권장 저장 구조:
 - 뉴스 원본 메타: `[][][]news_items[][][]`
 - 뉴스 full text / keywords: `[][][]news_fulltext[][][]`
@@ -183,17 +197,17 @@ Step N — <제목>
    - 선택지 A: 뉴스 pull 직후 자동 enqueue
    - 선택지 B: 별도 `AI Analysis Update` job으로 수동 실행
    - 선택지 C: full text 추출 성공한 row만 후속 배치 실행
-   - 현재 권장: B 또는 C. 기본값이 빈 상태여야 하므로, 분석 시점을 명시적으로 관리하는 편이 안전하다.
+   - 사용자 확정: C. plain text canonical로 정리된 full text 추출 성공 row만 후속 batch 대상으로 본다.
 
 2. sentiment 저장 위치
    - 선택지 A: `news_items` 직접 컬럼 추가
    - 선택지 B: `news_id` 또는 `(ticker, asof_date)` 기준 별도 테이블
-   - 현재 권장: B. 뉴스 원문과 enrichment를 분리하면 재수집/재계산이 안전하다.
+   - 사용자 확정: B 중에서도 `(ticker, asof_date)` 기준 `news_sentiment_snapshots` 별도 테이블로 고정한다. 2026-03-07 probe 결과 `news-sentiment`는 기사별 row가 아니라 symbol-level aggregate object이므로 `news_id` 1:1 매핑을 전제하지 않는다.
 
 3. AI analysis 저장 위치
    - 선택지 A: `news_fulltext` 확장
    - 선택지 B: `news_ai_analysis` 별도 테이블
-   - 현재 권장: B. `Score`/`Score Evidence`/`Keywords`는 full text 추출과 다른 lifecycle을 가진다.
+   - 사용자 확정: B. `Score`/`Score Evidence`/`Keywords`는 `news_ai_analysis` 별도 테이블에 저장한다.
 
 4. workspace persistence 저장소
    - 선택지 A: 프론트 `localStorage`만 사용
@@ -228,7 +242,7 @@ Step N — <제목>
 10. 북마크 데이터 모델
    - 선택지 A: 기존 `news_saved_views`를 북마크 용도로 확장
    - 선택지 B: 북마크 폴더/북마크 아이템을 별도 테이블로 분리
-   - 현재 권장: B. saved view는 검색 조건 저장이고, 북마크는 뉴스 row 저장 + 폴더 트리라는 다른 lifecycle을 가진다.
+   - 사용자 확정: B. saved view는 검색 조건 저장으로 유지하고, 북마크는 `bookmark_folders` + `bookmark_items` 별도 구조로 분리한다.
 
 11. 북마크 폴더 계층 방식
    - 선택지 A: 1단계 폴더만 허용
@@ -243,21 +257,23 @@ Step N — <제목>
 ### 계획 중간 필수 확인
 중간 구현 전에 반드시 아래를 확인한다.
 
-1. Finnhub `news-sentiment` 응답 필드가 어떤 단위인지 확인
-   - 종목 기준인지, 기사 기준인지
-   - 날짜 범위와 timestamp 단위
-   - 동일 뉴스 row에 매핑할 때 어떤 key를 사용할지
+1. Finnhub `news-sentiment` 응답 필드 단위 확인 완료
+   - 2026-03-07 실제 probe 결과, `news-sentiment`는 기사 배열이 아니라 `symbol` 기준 object 응답이다.
+   - 확인된 top-level key: `buzz`, `companyNewsScore`, `sectorAverageBullishPercent`, `sectorAverageNewsScore`, `sentiment`, `symbol`
+   - 따라서 동일 뉴스 row에 `news_id` 1:1로 직접 매핑하지 않고, `(ticker, asof_date)` 기준 snapshot으로 저장한다.
 
-2. `ai-news-analysis` 결과 저장 형태 확인
-   - `Score`, `Score Evidence`, `Keywords`를 `news_id` 기준으로 저장할지 확정
-   - 기본 빈 상태와 분석 완료 상태를 구분할 status 필드 필요 여부 확인
+2. `ai-news-analysis` 결과 저장 형태 확인 완료
+   - `Score`, `Score Evidence`, `Keywords`는 `news_id` 기준 `news_ai_analysis` 별도 테이블에 저장한다.
+   - 기본 빈 상태와 분석 완료 상태를 구분하는 status 필드는 Step 1 설계 시 포함한다.
 
 3. workspace state 직렬화 범위 확인
    - 창 내부 상태를 어디까지 저장할지 명시
    - localStorage key versioning 필요 여부 확인
 
-4. 삭제/유실 테스트 범위 확인
-   - `Score`, `Score Evidence`, `Keywords` 중 무엇이 비면 실패로 간주할지 테스트 규칙을 문서화
+4. 삭제/유실 테스트 범위 확인 완료
+   - `analysis_status=completed` row에서 `score` 또는 `scoreEvidence`가 비면 실패로 본다.
+   - `analysis_status=completed` row에서 `keywords=[]`는 최소 warning 대상으로 기록하고, stricter 삭제 감지 테스트에서는 실패로 승격할 수 있다.
+   - `analysis_status!=completed` row는 기본 빈 상태를 허용하고 삭제/유실 실패 대상으로 보지 않는다.
 
 5. Finnhub confirmed-empty 기록 조건 확인
    - HTTP 200 + 실제 빈 배열일 때만 기록하는지
@@ -303,21 +319,21 @@ Step N — <제목>
 
 ### 단계별 계획(각 단계: 구현 → 검증)
 
-#### 🚫 Step 0 — 요구 해석과 데이터 계약 확정
+#### ✅ Step 0 — 요구 해석과 데이터 계약 확정
 
 | 세부 단계 | 작업 | 상태 |
 |-----------|------|------|
-| 0-1 | Finnhub `news-sentiment` 응답 구조를 다시 확인하고 기사 단위 매핑 가능 여부를 결정 | 🚫 |
+| 0-1 | Finnhub `news-sentiment` 응답 구조를 확인하고 symbol-level snapshot 저장으로 확정 | ✅ |
 | 0-2 | `ai-news-analysis` 기준으로 `Score(-10~10)`, `Score Evidence`, `Keywords(30개)` 정의를 문서에 고정 | ✅ |
-| 0-3 | sentiment와 AI analysis 저장 위치를 `app.db` 내 별도 테이블 기준으로 확정 | 🚫 |
+| 0-3 | sentiment와 AI analysis 저장 위치를 `app.db` 내 별도 테이블 기준으로 확정 | ✅ |
 | 0-4 | workspace persistence 범위를 권장범위로 확정한다 | ✅ |
-| 0-5 | `Score`/`Score Evidence`/`Keywords` 삭제·유실 감지 테스트 요구를 고정 | 🚫 |
+| 0-5 | `Score`/`Score Evidence`/`Keywords` 삭제·유실 감지 테스트 요구를 status 기반 규칙으로 고정 | ✅ |
 | 0-6 | Finnhub recent confirmed-empty 기록 규칙(실패 구분, `source_type` 분리, 당일 제외, custom range 예외)을 고정 | ✅ |
 
 0-1 목적: sentiment가 뉴스 기사와 1:1인지, ticker snapshot인지 확인한다.
-0-1 설명: 어떤 key로 `news_items`와 연결할지 정해져야 DB 설계가 가능하다.
-0-1 완료 조건(눈으로 확인): probe/문서에 sentiment 필드명과 key 규칙이 정리된다.
-0-1 사람 검증(비개발자): 문서에 “뉴스 한 건에 어떤 sentiment가 붙는지” 예시 2개가 보인다.
+0-1 설명: 2026-03-07 실제 probe 결과 `news-sentiment`는 기사 배열이 아니라 symbol-level aggregate object이므로 `(ticker, asof_date)` snapshot으로 저장하기로 확정했다.
+0-1 완료 조건(눈으로 확인): 문서에 `buzz`, `companyNewsScore`, `sentiment`, `symbol` 같은 실제 응답 key와 저장 key 규칙이 함께 적혀 있다.
+0-1 사람 검증(비개발자): 문서만 봐도 “기사 한 건에 붙는 값”이 아니라 “종목 시점 요약값”이라는 점을 이해할 수 있다.
 0-1 흔한 문제/주의: ticker-day aggregate를 기사 score처럼 오해하면 잘못 저장된다.
 
 0-2 목적: AI 뉴스 분석 출력 계약을 UI/DB 모두에서 한 가지로 통일한다.
@@ -327,7 +343,7 @@ Step N — <제목>
 0-2 흔한 문제/주의: sentiment와 AI score를 같은 값으로 오해하면 컬럼 의미가 붕괴한다.
 
 0-3 목적: sentiment와 AI analysis의 canonical 저장소를 고정한다.
-0-3 설명: runtime 조회 대상이 `app.db` 하나로 수렴되게 한다.
+0-3 설명: sentiment는 `news_sentiment_snapshots`, AI 결과는 `news_ai_analysis`, 북마크는 `bookmark_folders` + `bookmark_items`로 분리해 runtime 조회 대상이 `app.db` 하나로 수렴되게 한다.
 0-3 완료 조건(눈으로 확인): 테이블 이름/주요 컬럼/PK가 plan에 나온다.
 0-3 사람 검증(비개발자): 어느 DB 파일을 보면 되는지 하나만 확인하면 된다.
 0-3 흔한 문제/주의: `news_items`에 직접 붙이면 migration 부담이 커질 수 있다.
@@ -344,9 +360,9 @@ Step N — <제목>
 - 비저장 대상: 순간적인 modal open 상태, 일회성 loading 상태, 임시 hover/selection UI
 
 0-5 목적: 분석 결과 유실을 놓치지 않게 한다.
-0-5 설명: `Score`, `Score Evidence`, `Keywords`가 저장/조회 중 지워지면 실패하는 테스트 기준을 고정한다.
-0-5 완료 조건(눈으로 확인): 삭제 감지 테스트 시나리오가 문서에 나온다.
-0-5 사람 검증(비개발자): 값을 지우면 테스트가 실패해야 한다는 규칙을 이해할 수 있다.
+0-5 설명: `analysis_status=completed` row에서 `score` 또는 `scoreEvidence`가 비면 실패, `keywords=[]`는 최소 warning(필요 시 stricter 실패)으로 보고, `analysis_status!=completed` row는 예외로 두는 테스트 기준을 고정한다.
+0-5 완료 조건(눈으로 확인): 삭제 감지 테스트 시나리오에 completed row와 non-completed row의 성공/실패 기준이 함께 적혀 있다.
+0-5 사람 검증(비개발자): 분석 완료 뉴스에서 점수나 근거를 지우면 실패지만, 아직 분석 전 뉴스가 빈 값인 것은 실패가 아니라는 점을 이해할 수 있다.
 0-5 흔한 문제/주의: null 기본값과 저장 후 유실 상태를 같은 것으로 취급하면 안 된다.
 
 0-6 목적: 뉴스가 없는 ticker를 같은 기간으로 반복 조회하는 낭비를 막되, 실패 응답을 잘못된 empty로 저장하지 않게 한다.
@@ -415,7 +431,7 @@ Step N — <제목>
 1-5 흔한 문제/주의: 빈 기본값과 데이터 유실을 동일하게 취급하면 안 된다.
 
 1-6 목적: 값이 직접 지워지는 문제를 테스트에서 잡는다.
-1-6 설명: 저장 후 `score`/`score_evidence` 삭제 시 실패하는 테스트를 넣는다.
+1-6 설명: `analysis_status=completed` row에서 `score`/`score_evidence` 삭제 시 실패하고, `keywords=[]`는 최소 warning 또는 stricter 실패로 잡히는 테스트를 넣는다.
 1-6 완료 조건(눈으로 확인): 관련 테스트가 red/green으로 동작한다.
 1-6 사람 검증(비개발자): 값을 지우면 테스트 실패 메시지가 나온다.
 1-6 흔한 문제/주의: 정상적인 미분석 row까지 실패시키면 운영이 불편해진다.
@@ -670,13 +686,13 @@ npm run build
 4-1 흔한 문제/주의: plan만 바뀌고 prompt가 안 바뀌면 다음 작업에서 혼선이 생긴다.
 
 4-2 목적: 기본 빈 상태와 유실 상태를 운영자가 구분할 수 있게 만든다.
-4-2 설명: 분석 미실행 null과 저장 후 유실 null을 문서/로그에서 구분한다.
+4-2 설명: `analysis_status!=completed`의 정상 empty와 `analysis_status=completed` 이후 유실된 empty를 문서/로그에서 구분한다.
 4-2 완료 조건(눈으로 확인): 로그/문서에 empty vs lost 기준이 적힌다.
 4-2 사람 검증(비개발자): 에러 메시지가 “아직 분석 안 됨”과 “지워짐”을 구분한다.
 4-2 흔한 문제/주의: null과 0을 혼동하면 잘못된 score로 보인다.
 
 4-3 목적: 실제 사용 시나리오와 유실 감지까지 최종 확인을 준비한다.
-4-3 설명: update → AI analysis → 조회 → 값 삭제 → 테스트 실패 → 탭 전환 → 재실행 흐름을 검증한다.
+4-3 설명: update → AI analysis(`completed`) → 조회 → 값 삭제 → 테스트 실패 → non-completed row 예외 확인 → 탭 전환 → 재실행 흐름을 검증한다.
 4-3 완료 조건(눈으로 확인): 체크리스트가 1회 실행 가능한 순서로 정리된다.
 4-3 사람 검증(비개발자): 체크리스트 순서대로 따라 하면 핵심 기능을 다 볼 수 있다.
 4-3 흔한 문제/주의: backend/frontend를 따로만 확인하면 persistence 버그나 자동 로드/`Load more` 간 cursor append 중복·누락 버그를 놓칠 수 있다.
@@ -709,25 +725,9 @@ npm run test
 ```
 
 ### 미확정 사항(명시 결정 필요)
-1. 결정 #1 — AI 분석 실행 시점
-   - 선택지: news pull 직후 / 별도 수동 job / full text 이후 batch
-   - 차단 대상 Step: 1, 4
-
-2. 결정 #2 — sentiment 저장 단위
-   - 선택지: 기사별 snapshot / ticker-date snapshot / 직접 컬럼
-   - 차단 대상 Step: 1
-
-3. 결정 #3 — AI analysis 저장 위치
-   - 선택지: `news_fulltext` 확장 / `news_ai_analysis` 별도 테이블
-   - 차단 대상 Step: 1
-
-4. 결정 #5 — font size 저장 위치
+1. 결정 #5 — font size 저장 위치
    - 선택지: global localStorage / tab별 저장 / backend saved settings
    - 차단 대상 Step: 2, 3
-
-5. 결정 #8 — 북마크 데이터 모델
-   - 선택지: `news_saved_views` 확장 / `bookmark_folders` + `bookmark_items` 별도
-   - 차단 대상 Step: 1, 2, 3
 
 ### 실행 의존성 그래프
 
@@ -739,10 +739,10 @@ Legend
 
 ```text
 [Track A: 데이터 계약 / 백엔드]
-🚫 0-1 sentiment 응답 구조 확정
+✅ 0-1 sentiment 응답 구조 확정(symbol-level snapshot)
 ✅ 0-2 ai-news-analysis 출력 기준 정리
-🚫 0-3 저장 위치 확정
-🚫 0-5 삭제 감지 테스트 규칙 확정
+✅ 0-3 저장 위치 확정
+✅ 0-5 삭제 감지 테스트 규칙 확정
 ✅ 0-6 confirmed-empty recent skip 규칙 확정
    |
    v
@@ -794,13 +794,14 @@ Legend
 ⬜ 4-4 bookmark 문서/체크리스트 정리
 
 ================ BLOCKER ================
-sentiment 매핑 방식, 저장 위치, AI 실행 시점이 정리되지 않으면
-Step 1 backend schema와 Step 2 UI 컬럼 의미가 고정되지 않는다.
+Track A의 선행 결정 차단은 해소되었다.
+이제 backend schema/API 설계와 삭제 감지 테스트 구현은 같은 status 기반 규칙으로 진행 가능하다.
+남은 미확정 사항은 font size 저장 위치처럼 Track B/C 영역에 가깝다.
 =========================================
 ```
 
 병렬 트랙 요약:
-- Track A와 Track B/C는 Step 0 결정이 끝난 뒤 병렬 진행 가능하다.
+- Track A의 핵심 결정(#1, #2, #3, #8, 0-5)은 확정되었으므로 Step 1 backend 작업 전체를 진행 가능하다.
 - Track B와 Track C는 서로 독립 작업이 많지만, font size 저장 위치와 app state schema는 공유한다.
 - Track D는 A/B/C가 끝난 뒤 마감 단계로 수행한다.
 
@@ -808,13 +809,9 @@ Step 1 backend schema와 Step 2 UI 컬럼 의미가 고정되지 않는다.
 
 | 결정 | 차단 대상 | 선택지 |
 |------|-----------|--------|
-| AI 분석 실행 시점 | Step 1, Step 4 | pull 직후 / 수동 job / fulltext 이후 |
-| sentiment 저장 단위 | Step 1 | 기사별 / ticker-date / direct column |
-| AI analysis 저장 위치 | Step 1 | `news_fulltext` 확장 / `news_ai_analysis` 별도 |
 | 검색 paging 방식 | Step 1, Step 2 | 200 고정 / 500 cursor 자동 append + Load more 버튼 |
 | 검색 날짜 기간 방식 | Step 1, Step 2 | 날짜 없음 / 비워두면 전체 + 값 있으면 기간 검색 |
 | font size 저장 위치 | Step 2, Step 3 | global localStorage / tab scoped / backend |
-| 북마크 데이터 모델 | Step 1, Step 2, Step 3 | saved view 확장 / 별도 folder+item 테이블 |
 
 ### 결정 #1 — AI 뉴스 분석 출력 계약(상세, 사용자 확인 완료)
 권장 기준:
@@ -976,3 +973,44 @@ Step 1 backend schema와 Step 2 UI 컬럼 의미가 고정되지 않는다.
 - 뉴스 row 우클릭 시 `Add bookmark`가 보인다.
 - 폴더 선택 후 해당 뉴스가 그 폴더의 `Bookmark view`에서만 보인다.
 - saved view와 bookmark가 UI에서 서로 다른 개념으로 보인다.
+
+### 결정 #9 — Finnhub sentiment 저장 단위 / AI 실행 시점 / 저장 위치(상세, 사용자 확정 완료)
+사용자 확정 결과:
+- AI 분석 실행 시점: `full text` plain text canonical 정리가 끝난 row만 후속 batch 대상으로 본다.
+- sentiment 저장 단위: 기사별이 아니라 `(ticker, asof_date)` 기준 snapshot으로 저장한다.
+- AI analysis 저장 위치: `news_ai_analysis` 별도 테이블로 둔다.
+- 북마크 데이터 모델: `bookmark_folders` + `bookmark_items` 별도 테이블로 둔다.
+
+근거:
+- 2026-03-07 실제 probe 결과 `news-sentiment?symbol=AAPL` 응답은 기사 배열이 아니라 object였다.
+- 확인된 key는 `buzz`, `companyNewsScore`, `sectorAverageBullishPercent`, `sectorAverageNewsScore`, `sentiment`, `symbol` 이다.
+- 같은 시점 `company-news` 응답은 별도 기사 배열이며 각 기사에 `id`, `headline`, `datetime`, `summary`, `url`이 있다.
+- 따라서 `news-sentiment`는 기사 `id` 1:1 매핑 데이터가 아니라 symbol-level aggregate snapshot으로 보는 편이 맞다.
+
+운영적 정의:
+- 예시 1: `AAPL`의 `companyNewsScore=0.9658`, `sentiment.bullishPercent=1`은 특정 기사 A 하나의 점수가 아니라, 해당 시점 `AAPL` 뉴스 전반 분위기 snapshot이다.
+- 예시 2: 같은 날 기사 A와 기사 B가 여러 건 있어도, backend는 둘 모두에 같은 `AAPL` snapshot을 참조 표시할 수는 있지만 기사 고유 sentiment row처럼 저장하지는 않는다.
+- 예시 3: AI 분석은 full text가 HTML fragment가 아니라 plain text canonical 상태로 정리된 뒤에만 후속 batch로 실행한다.
+
+사람 확인 체크 항목:
+- plan만 읽어도 `Sentiment` 컬럼은 기사 고유 점수가 아니라 종목 snapshot 기반이라는 점이 보인다.
+- AI 분석 실행 조건이 “뉴스 pull 직후 무조건”이 아니라 “plain text full text 준비 완료 후”라는 점이 명확하다.
+- 북마크와 saved view가 저장 구조부터 분리된다는 점이 문서에 분명히 적혀 있다.
+
+### 결정 #10 — 삭제/유실 테스트 실패 기준(상세, 사용자 확정 완료)
+사용자 확정 결과:
+- `analysis_status=completed`인 row에서 `score`가 비면 실패로 본다.
+- `analysis_status=completed`인 row에서 `scoreEvidence`가 비면 실패로 본다.
+- `analysis_status=completed`인 row에서 `keywords=[]`이면 최소 warning 대상으로 기록하고, stricter 삭제 감지 테스트에서는 실패로 승격할 수 있다.
+- `analysis_status!=completed` row는 기본 빈 상태를 허용하며 실패 대상으로 보지 않는다.
+
+운영적 정의:
+- 예시 1: `analysis_status=completed`, `score=7`, `scoreEvidence="positive demand outlook"`, `keywords=[...]`인 row는 정상이다.
+- 예시 2: 같은 row에서 `scoreEvidence=null`로 지워지면 삭제/유실 테스트는 실패해야 한다.
+- 예시 3: `analysis_status=not_started` 또는 `pending`인 row에서 `score=null`, `scoreEvidence=null`, `keywords=[]`인 것은 실패가 아니라 정상 empty 상태다.
+- 예시 4: `analysis_status=completed`인데 `keywords=[]`이면 최소 warning 로그를 남기고, stricter suite에서는 실패로 승격할 수 있다.
+
+사람 확인 체크 항목:
+- 분석 완료 뉴스에서 점수나 근거를 일부러 지우면 테스트가 실패해야 한다.
+- 아직 분석하지 않은 뉴스가 비어 있는 것은 테스트 실패가 아니어야 한다.
+- `keywords=[]`는 조용히 통과하지 않고 최소 warning 이상으로 남아야 한다.
