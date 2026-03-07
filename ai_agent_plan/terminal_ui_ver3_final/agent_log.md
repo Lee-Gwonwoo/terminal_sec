@@ -289,6 +289,108 @@
    - 완화 방안 2: 필요 시 모달형 help로 승격
 3. 현재 tooltip은 메뉴 열림 상태에서만 접근 가능하다.
    - 완화 방안 1: main Update 버튼 주변 도움말 재노출 검토
+
+### Step 2 Frontend 구현 완료
+
+**작성 시각:** 2026-03-07 (local)
+
+**상태:** 확인 대기(awaiting user confirmation)
+
+#### 수행 내용
+
+1. `FinnhubNewsWindow.tsx`의 backend 응답 매핑을 실제 backend camelCase 계약에 맞게 수정했다.
+   - `scoreEvidence`
+   - `sentimentBullishPct` 기반 sentiment 표시
+2. 검색창 바로 아래에 ticker 전용 검색창을 추가하고 `tickers` query로만 동작하게 연결했다.
+3. `GET /api/news`를 500개 배치 + `nextCursor` 기반으로 바꾸고, 하단 자동 append + `Load more` 버튼을 함께 연결했다.
+4. 검색 영역에 `From` / `To` 날짜 입력을 추가하고 `from` / `to` query와 연결했다.
+5. 검색 영역에 `Bookmark view` 폴더 선택 메뉴를 추가하고 `bookmarkFolderId` query와 연결했다.
+6. 뉴스 row 우클릭 메뉴에 `Add bookmark` 흐름을 추가하고, 선택한 폴더에 저장되도록 연결했다.
+7. 북마크 폴더를 선택하면 같은 리스트 UI가 해당 폴더 뉴스만 보이도록 bookmark mode를 연결했다.
+8. 기존 코드 상태를 확인한 결과 아래 항목은 이미 구현되어 있었고 이번 빌드 검증 범위에 포함됐다.
+   - Score / Score Evidence / Keywords / Sentiment 컬럼
+   - Keywords 렌더 및 정렬
+   - Data Control `Updates` / `Settings` 탭
+   - 전체 글자 크기 조절 UI
+
+#### 생성/수정 파일
+
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. `cd termina_web/figma_code/terminal_ui_ver2_finhub && npm run build` → 성공 확인 ✅
+2. UI에서 일반 검색 / ticker 검색 / 날짜 검색을 각각 바꿔가며 결과가 재조회되는지 확인
+3. 많은 결과가 나오는 검색으로 하단 스크롤 시 자동 append, 또는 `Load more` 버튼으로 추가 로드 확인
+4. `Bookmark view`에서 폴더 선택 시 해당 폴더 뉴스만 보이는지 확인
+5. 뉴스 row 우클릭 후 `Add bookmark`로 폴더 저장 뒤 bookmark mode에서 다시 보이는지 확인
+
+#### 문제점 / 리스크
+
+1. `Bookmark view` 메뉴는 현재 평면 목록이며 트리 UI는 아직 아니다.
+   - 완화 방안 1: parent/child 들여쓰기 렌더 추가
+   - 완화 방안 2: 폴더 수가 늘면 tree popover로 교체
+2. row 우클릭 메뉴는 현재 북마크 전용이고, source cell 우클릭의 `Copy URL` 메뉴와 별도다.
+   - 완화 방안 1: 추후 통합 context menu로 정리
+   - 완화 방안 2: menu label을 더 명확히 분리
+3. 500개 append는 동작하지만 데이터가 아주 많으면 메모리/렌더 비용이 커질 수 있다.
+   - 완화 방안 1: 현재는 `react-window`로 리스트 virtualization 유지
+   - 완화 방안 2: 필요 시 검색 조건 변경 시 더 공격적으로 상태 초기화
+
+### Step 1 Backend 구현 완료
+
+**작성 시각:** 2026-03-07 (local)
+
+**상태:** 확인 대기(awaiting user confirmation)
+
+#### 수행 내용
+
+Step 1 전체 (1-1 ~ 1-13)를 구현하고 빌드/테스트를 통과시켰다.
+
+1. **1-1 DB migration** — `db.ts`에 5개 테이블 추가: `news_sentiment_snapshots`, `news_ai_analysis`, `bookmark_folders`, `bookmark_items`, `confirmed_empty_ranges`
+2. **1-2 Finnhub sentiment fetch** — `finnhubNewsProvider.ts`에 `fetchSentimentSnapshot`, `upsertSentimentSnapshot` 추가. pull-finhub 배경 작업에서 ticker마다 sentiment 자동 fetch
+3. **1-3 AI analysis repository** — 새 파일 `aiAnalysisRepository.ts` 생성 (CRUD + batch + ready-for-analysis + validateAnalysisCompleteness)
+4. **1-4 GET /api/news contract** — `types.ts`에 score/scoreEvidence/analysisStatus/sentiment 필드 추가, `newsRepository.ts`에 LEFT JOIN news_ai_analysis + sentiment batch lookup
+5. **1-5 기본 빈 상태 규칙** — `mapNewsRow`에서 AI analysis 미실행 row는 null로 내려감
+6. **1-6 삭제 감지 테스트** — `tests/aiAnalysisRepository.test.ts` 생성 (8개 테스트: upsert, batch, score null FAIL, evidence null FAIL, empty keywords WARN, not_started 미오탐)
+7. **1-7 confirmed-empty range** — `finnhubNewsProvider.ts`에 `recordConfirmedEmpty`/`getConfirmedEmptyRange`, `server.ts` pull-finhub에서 company_news/press_release 모두 적용
+8. **1-8 500-item cursor paging** — `capLimitByRangeDays()` → 항상 500, 기본/최대 제한 500
+9. **1-9 날짜 기간 검색** — 기존 from/to 지원 확인, limit 정책 업데이트
+10. **1-10 plain text extractor** — `fulltextExtractors.ts`에 `htmlToPlainText()` 유틸 추가, `extractNasdaq`·`extractTmx` 모두 plain text 반환으로 변경
+11. **1-11 HTML backfill** — `fulltextUpdateService.ts`에 `runFulltextPlainTextBackfill()` 추가, `POST /api/news/fulltext/backfill-plaintext` 엔드포인트
+12. **1-12 북마크 schema/API** — `server.ts`에 CRUD 6개 라우트 (GET/POST/PUT/DELETE folders, POST/DELETE items, GET folder items)
+13. **1-13 북마크 폴더 뉴스 조회** — `newsRepository.ts`의 `getNews()`에 `bookmarkFolderId` INNER JOIN 지원
+
+#### 생성/수정 파일
+
+- `terminal/backend/src/db.ts` — 5개 테이블 추가
+- `terminal/backend/src/types.ts` — NewsQuery.bookmarkFolderId, NewsItem에 6개 필드 추가
+- `terminal/backend/src/services/newsRepository.ts` — JOIN, sentiment batch, mapNewsRow 확장, 500 limit
+- `terminal/backend/src/services/finnhubNewsProvider.ts` — sentiment fetch/upsert, confirmed-empty CRUD
+- `terminal/backend/src/services/aiAnalysisRepository.ts` — **신규 생성**
+- `terminal/backend/src/services/fulltextExtractors.ts` — htmlToPlainText, plain text 반환
+- `terminal/backend/src/services/fulltextUpdateService.ts` — runFulltextPlainTextBackfill 추가
+- `terminal/backend/src/server.ts` — 북마크 라우트, sentiment update, AI validation, backfill, confirmed-empty pull-finhub 통합, sentiment per-ticker fetch
+- `terminal/backend/tests/aiAnalysisRepository.test.ts` — **신규 생성**
+
+#### 검증 방법
+
+1. `cd terminal/backend && npm run build` — TypeScript 빌드 성공 확인 ✅
+2. `cd terminal/backend && npx vitest run` — 전체 48개 테스트 통과 ✅ (6 파일)
+3. 서버 시작 후 `SELECT name FROM sqlite_master WHERE type='table'`로 5개 새 테이블 확인
+4. `POST /api/news/fulltext/backfill-plaintext`로 기존 HTML row 정리 가능
+5. `GET /api/news/ai-analysis/validate`로 0-5 삭제/유실 감지 규칙 확인 가능
+
+#### 문제점 / 리스크
+
+1. 북마크 라우트에서 user_id는 현재 하드코딩 `DEMO_USER_ID` — 인증 도입 시 교체 필요
+   - 완화 방안: 상수를 한 곳에서 관리, 추후 auth 미들웨어로 대체
+2. sentiment API 호출이 pull-finhub 작업 시간을 늘릴 수 있다
+   - 완화 방안: fire-and-forget으로 에러 시 skip, 250ms 딜레이 내에서 처리
+3. htmlToPlainText가 cheerio.load를 매번 호출해 backfill 대량 처리 시 느릴 수 있다
+   - 완화 방안: 50건마다 progress 로그, 필요 시 batch 크기 조절
    - 완화 방안 2: 추후 Data Control 문서/설정 화면에도 같은 정책 요약 추가
 
 #### 비고

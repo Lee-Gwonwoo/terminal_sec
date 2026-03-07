@@ -27,11 +27,39 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Convert an HTML string to plain text using cheerio.
+ * - Removes script, style, noscript, svg, iframe nodes
+ * - Inserts newlines at block-level boundaries (p, div, br, h1-h6, li, tr, blockquote)
+ * - Strips remaining tags
+ * - Normalises whitespace (collapse runs, trim blank lines)
+ */
+export function htmlToPlainText(html: string): string {
+  const $ = cheerio.load(html);
+
+  // Remove non-content nodes entirely
+  $("script, style, noscript, svg, iframe").remove();
+
+  // Insert newlines at block boundaries to preserve paragraph structure
+  $("p, div, br, h1, h2, h3, h4, h5, h6, li, tr, blockquote, section, article, header, footer").each((_i, el) => {
+    $(el).before("\n");
+    $(el).after("\n");
+  });
+
+  // Extract text (cheerio strips tags)
+  const raw = $.text();
+
+  // Collapse multiple spaces on the same line, then collapse 3+ newlines into 2
+  return raw
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+/g, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function countWords(text: string): number {
-  return text
-    .replace(/<[^>]*>/g, " ")
-    .split(/\s+/)
-    .filter(Boolean).length;
+  return text.split(/\s+/).filter(Boolean).length;
 }
 
 async function fetchWithRetry(
@@ -102,9 +130,18 @@ export async function extractNasdaq(url: string): Promise<ExtractionResult> {
       };
     }
 
-    const wc = countWords(bodyHtml);
+    const plainText = htmlToPlainText(bodyHtml);
+    if (plainText.length < 20) {
+      return {
+        fullText: "",
+        extractionStatus: "failed",
+        extractionNote: "article-body-empty-after-html-strip",
+      };
+    }
+
+    const wc = countWords(plainText);
     return {
-      fullText: bodyHtml.trim(),
+      fullText: plainText,
       extractionStatus: "success",
       wordCount: wc,
     };
@@ -180,9 +217,19 @@ export async function extractTmx(url: string): Promise<ExtractionResult> {
       };
     }
 
-    const wc = countWords(story);
+    // Convert potential HTML in story field to plain text
+    const plainText = /<[a-z][\s\S]*>/i.test(story) ? htmlToPlainText(story) : story.trim();
+    if (plainText.length < 20) {
+      return {
+        fullText: "",
+        extractionStatus: "failed",
+        extractionNote: "story-empty-after-html-strip",
+      };
+    }
+
+    const wc = countWords(plainText);
     return {
-      fullText: story.trim(),
+      fullText: plainText,
       extractionStatus: "success",
       wordCount: wc,
     };

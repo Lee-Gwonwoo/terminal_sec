@@ -386,19 +386,19 @@ Step N — <제목>
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 1-1 | sentiment 저장 구조와 AI analysis 저장 구조 migration 추가 | `terminal/backend/src/db.ts` | 서버 시작 후 테이블 생성 확인 | ⬜ |
-| 1-2 | Finnhub sentiment fetch + retry + mapping 로직 추가 | `terminal/backend/src/services/finnhubNewsProvider.ts` | sentiment fetch probe 통과 | ⬜ |
-| 1-3 | `ai-news-analysis` 결과 저장/retrieve repository 추가 | `terminal/backend/src/services/` | TypeScript build 통과 | ⬜ |
-| 1-4 | `GET /api/news` 응답에 score/scoreEvidence/sentiment/keywords 계약 반영 | `terminal/backend/src/services/newsRepository.ts`, `terminal/backend/src/server.ts`, `terminal/backend/src/types.ts` | `/api/news` JSON 필드 확인 | ⬜ |
-| 1-5 | AI analysis 미실행 row는 기본 빈 상태로 내려가도록 null/empty 규칙 고정 | 같은 영역 | API 응답 null/empty 확인 | ⬜ |
-| 1-6 | 분석 결과 유실 감지용 backend 테스트 추가 | `terminal/backend/tests/` 또는 probe 스크립트 | 테스트 실패/성공 확인 | ⬜ |
-| 1-7 | Finnhub recent confirmed-empty range 저장/skip 로직 추가 | `terminal/backend/src/services/finnhubNewsProvider.ts`, `terminal/backend/src/db.ts` 또는 상태 저장소 | repeated recent pull 비교 확인 | ⬜ |
-| 1-8 | `GET /api/news` 검색 paging 정책을 500개 배치 + `nextCursor` append 계약으로 고정 | `terminal/backend/src/services/newsRepository.ts`, `terminal/backend/src/server.ts`, `terminal/backend/src/types.ts` | 첫 페이지/다음 페이지 cursor 응답 확인 | ⬜ |
-| 1-9 | `GET /api/news` 검색 contract에 `from`/`to` 기간 조건과 빈 기본값(전체 검색) 규칙을 명시 | `terminal/backend/src/services/newsRepository.ts`, `terminal/backend/src/server.ts`, `terminal/backend/src/types.ts` | 날짜 조건별 API 응답 확인 | ⬜ |
-| 1-10 | full text extractor를 HTML fragment 저장에서 plain text canonical 저장으로 변경 | `terminal/backend/src/services/fulltextExtractors.ts`, 필요 시 `terminal/backend/src/services/fulltextUpdateService.ts` | extractor 결과 샘플 확인 | ⬜ |
-| 1-11 | 기존 HTML 기반 `news_fulltext` row를 삭제 또는 재생성해 plain text로 backfill | `terminal/backend/backend/data/app.db`, 필요 시 보조 스크립트/운영 절차 문서 | 재추출 후 DB 샘플 확인 | ⬜ |
-| 1-12 | 북마크 폴더/북마크 아이템 schema 및 repository/API 추가 | `terminal/backend/src/db.ts`, `terminal/backend/src/services/`, `terminal/backend/src/server.ts`, `terminal/backend/src/types.ts` | 폴더 생성/북마크 추가 API 확인 | ⬜ |
-| 1-13 | 북마크 폴더 선택 기준 북마크 뉴스 조회 API 추가 | `terminal/backend/src/services/newsRepository.ts`, `terminal/backend/src/server.ts`, `terminal/backend/src/types.ts` | 폴더별 뉴스 응답 확인 | ⬜ |
+| 1-1 | sentiment 저장 구조와 AI analysis 저장 구조 migration 추가 | `terminal/backend/src/db.ts` | 서버 시작 후 테이블 생성 확인 | ✅ |
+| 1-2 | Finnhub sentiment fetch + retry + mapping 로직 추가 | `terminal/backend/src/services/finnhubNewsProvider.ts` | sentiment fetch probe 통과 | ✅ |
+| 1-3 | `ai-news-analysis` 결과 저장/retrieve repository 추가 | `terminal/backend/src/services/aiAnalysisRepository.ts` | TypeScript build 통과 | ✅ |
+| 1-4 | `GET /api/news` 응답에 score/scoreEvidence/sentiment/keywords 계약 반영 | `terminal/backend/src/services/newsRepository.ts`, `terminal/backend/src/server.ts`, `terminal/backend/src/types.ts` | `/api/news` JSON 필드 확인 | ✅ |
+| 1-5 | AI analysis 미실행 row는 기본 빈 상태로 내려가도록 null/empty 규칙 고정 | 같은 영역 | API 응답 null/empty 확인 | ✅ |
+| 1-6 | 분석 결과 유실 감지용 backend 테스트 추가 | `terminal/backend/tests/aiAnalysisRepository.test.ts` | 테스트 실패/성공 확인 | ✅ |
+| 1-7 | Finnhub recent confirmed-empty range 저장/skip 로직 추가 | `terminal/backend/src/services/finnhubNewsProvider.ts`, `terminal/backend/src/db.ts`, `terminal/backend/src/server.ts` | repeated recent pull 비교 확인 | ✅ |
+| 1-8 | `GET /api/news` 검색 paging 정책을 500개 배치 + `nextCursor` append 계약으로 고정 | `terminal/backend/src/services/newsRepository.ts` | 첫 페이지/다음 페이지 cursor 응답 확인 | ✅ |
+| 1-9 | `GET /api/news` 검색 contract에 `from`/`to` 기간 조건과 빈 기본값(전체 검색) 규칙을 명시 | `terminal/backend/src/services/newsRepository.ts` | 날짜 조건별 API 응답 확인 | ✅ |
+| 1-10 | full text extractor를 HTML fragment 저장에서 plain text canonical 저장으로 변경 | `terminal/backend/src/services/fulltextExtractors.ts` | extractor 결과 샘플 확인 | ✅ |
+| 1-11 | 기존 HTML 기반 `news_fulltext` row를 삭제 또는 재생성해 plain text로 backfill | `terminal/backend/src/services/fulltextUpdateService.ts`, `terminal/backend/src/server.ts` (`POST /api/news/fulltext/backfill-plaintext`) | 재추출 후 DB 샘플 확인 | ✅ |
+| 1-12 | 북마크 폴더/북마크 아이템 schema 및 repository/API 추가 | `terminal/backend/src/db.ts`, `terminal/backend/src/server.ts` | 폴더 생성/북마크 추가 API 확인 | ✅ |
+| 1-13 | 북마크 폴더 선택 기준 북마크 뉴스 조회 API 추가 | `terminal/backend/src/services/newsRepository.ts`, `terminal/backend/src/server.ts`, `terminal/backend/src/types.ts` | 폴더별 뉴스 응답 확인 | ✅ |
 
 1-1 목적: runtime DB가 sentiment와 AI analysis 결과를 영속 저장할 수 있게 만든다.
 1-1 설명: 테이블 생성과 기존 DB migration을 안전하게 처리한다.
@@ -508,17 +508,17 @@ node test_check_news_db.mjs
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 2-1 | News Feed 컬럼 정의에 `Score`, `Score Evidence`, `Keywords`, `Sentiment`를 반영 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | UI 컬럼 메뉴 확인 | ⏳ |
-| 2-2 | `Keywords`를 30개 기준 default/선택 컬럼 동작으로 정상 연결 | 같은 파일 | 컬럼 토글 및 렌더 확인 | ⏳ |
-| 2-3 | score/score evidence/sentiment 셀 렌더, 정렬, null 표시 규칙 추가 | 같은 파일 | 정렬/표시 확인 | ⏳ |
-| 2-4 | Data Control Window에 `Updates` / `Settings` 탭 구조 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx` | 탭 전환 확인 | ⏳ |
-| 2-5 | Settings 탭에 전체 글자 크기 조절 UI 추가 | 같은 파일 및 app shell styling | 슬라이더/프리셋 반영 확인 | ⏳ |
-| 2-6 | 일반 검색창 바로 아래에 ticker 전용 검색창을 추가하고 `tickers` query로만 동작하도록 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | ticker-only 검색 결과 확인 | ⬜ |
-| 2-7 | 검색 결과를 최초 500개 로드 후 하단 스크롤 시 자동으로 `nextCursor` 500개 append 하고, 동시에 하단 `Load more` 버튼으로도 같은 추가 로드를 가능하게 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 자동 로드/버튼 로드 확인 | ⬜ |
-| 2-8 | 검색창 영역에 날짜 From/To 입력을 추가하고 비어 있으면 전체 검색, 값이 있으면 기간 검색으로 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 날짜 조건 검색 확인 | ⬜ |
-| 2-9 | 검색창 근처에 `Bookmark view` UI와 북마크 폴더 선택 메뉴 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 폴더 선택 UI 확인 | ⬜ |
-| 2-10 | News row 우클릭 메뉴에 `Add bookmark`와 폴더 선택 흐름 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 우클릭 북마크 저장 확인 | ⬜ |
-| 2-11 | 선택한 북마크 폴더 안의 뉴스만 리스트에 표시하는 bookmark mode 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 북마크 폴더별 결과 확인 | ⬜ |
+| 2-1 | News Feed 컬럼 정의에 `Score`, `Score Evidence`, `Keywords`, `Sentiment`를 반영 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | UI 컬럼 메뉴 확인 | ✅ |
+| 2-2 | `Keywords`를 30개 기준 default/선택 컬럼 동작으로 정상 연결 | 같은 파일 | 컬럼 토글 및 렌더 확인 | ✅ |
+| 2-3 | score/score evidence/sentiment 셀 렌더, 정렬, null 표시 규칙 추가 | 같은 파일 | 정렬/표시 확인 | ✅ |
+| 2-4 | Data Control Window에 `Updates` / `Settings` 탭 구조 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx` | 탭 전환 확인 | ✅ |
+| 2-5 | Settings 탭에 전체 글자 크기 조절 UI 추가 | 같은 파일 및 app shell styling | 슬라이더/프리셋 반영 확인 | ✅ |
+| 2-6 | 일반 검색창 바로 아래에 ticker 전용 검색창을 추가하고 `tickers` query로만 동작하도록 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | ticker-only 검색 결과 확인 | ✅ |
+| 2-7 | 검색 결과를 최초 500개 로드 후 하단 스크롤 시 자동으로 `nextCursor` 500개 append 하고, 동시에 하단 `Load more` 버튼으로도 같은 추가 로드를 가능하게 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 자동 로드/버튼 로드 확인 | ✅ |
+| 2-8 | 검색창 영역에 날짜 From/To 입력을 추가하고 비어 있으면 전체 검색, 값이 있으면 기간 검색으로 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 날짜 조건 검색 확인 | ✅ |
+| 2-9 | 검색창 근처에 `Bookmark view` UI와 북마크 폴더 선택 메뉴 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 폴더 선택 UI 확인 | ✅ |
+| 2-10 | News row 우클릭 메뉴에 `Add bookmark`와 폴더 선택 흐름 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 우클릭 북마크 저장 확인 | ✅ |
+| 2-11 | 선택한 북마크 폴더 안의 뉴스만 리스트에 표시하는 bookmark mode 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 북마크 폴더별 결과 확인 | ✅ |
 
 2-1 목적: 사용자가 필요한 4개 컬럼을 실제로 보이게 만든다.
 2-1 설명: 단순 타입 선언이 아니라 메뉴/헤더/행 렌더까지 연결한다.
@@ -746,35 +746,35 @@ Legend
 ✅ 0-6 confirmed-empty recent skip 규칙 확정
    |
    v
-⬜ 1-1 DB migration
-⬜ 1-2 Finnhub sentiment fetch
-⬜ 1-3 AI analysis repository
-⬜ 1-4 GET /api/news contract 확장
-⬜ 1-5 기본 빈 상태 규칙
-⬜ 1-6 삭제 감지 backend 테스트
-⬜ 1-7 confirmed-empty range 저장/skip
-⬜ 1-8 GET /api/news 500개 cursor paging 계약
-⬜ 1-9 GET /api/news 날짜 기간 검색 계약
-⬜ 1-10 full text plain text extractor
-⬜ 1-11 기존 HTML full_text 정리/backfill
-⬜ 1-12 북마크 schema/repository/API
-⬜ 1-13 북마크 폴더별 뉴스 조회 API
+✅ 1-1 DB migration
+✅ 1-2 Finnhub sentiment fetch
+✅ 1-3 AI analysis repository
+✅ 1-4 GET /api/news contract 확장
+✅ 1-5 기본 빈 상태 규칙
+✅ 1-6 삭제 감지 backend 테스트
+✅ 1-7 confirmed-empty range 저장/skip
+✅ 1-8 GET /api/news 500개 cursor paging 계약
+✅ 1-9 GET /api/news 날짜 기간 검색 계약
+✅ 1-10 full text plain text extractor
+✅ 1-11 기존 HTML full_text 정리/backfill
+✅ 1-12 북마크 schema/repository/API
+✅ 1-13 북마크 폴더별 뉴스 조회 API
 
 [Track B: 프론트 컬럼 / 운영 UI]
 ✅ 0-2 ai-news-analysis 출력 기준 정리
 ✅ 0-4 persistence 범위 확정
    |
-   +--> ⏳ 2-1 Score/Score Evidence/Keywords/Sentiment 컬럼 반영
-   +--> ⏳ 2-2 Keywords 컬럼 활성화
-   +--> ⏳ 2-3 score/evidence/sentiment 정렬/렌더
-   +--> ⬜ 2-6 ticker 전용 검색창 + tickers query 연결
-   +--> ⬜ 2-7 500개 cursor 자동 append + Load more 버튼
-   +--> ⬜ 2-8 날짜 기간 검색 UI + from/to query 연결
-   +--> ⬜ 2-9 Bookmark view 폴더 선택 UI
-   +--> ⬜ 2-10 row 우클릭 Add bookmark
-   +--> ⬜ 2-11 폴더별 bookmark mode 결과 표시
-   +--> ⏳ 2-4 Data Control Settings 탭 추가
-   +--> ⏳ 2-5 전체 글자 크기 조절 UI
+   +--> ✅ 2-1 Score/Score Evidence/Keywords/Sentiment 컬럼 반영
+   +--> ✅ 2-2 Keywords 컬럼 활성화
+   +--> ✅ 2-3 score/evidence/sentiment 정렬/렌더
+   +--> ✅ 2-6 ticker 전용 검색창 + tickers query 연결
+   +--> ✅ 2-7 500개 cursor 자동 append + Load more 버튼
+   +--> ✅ 2-8 날짜 기간 검색 UI + from/to query 연결
+   +--> ✅ 2-9 Bookmark view 폴더 선택 UI
+   +--> ✅ 2-10 row 우클릭 Add bookmark
+   +--> ✅ 2-11 폴더별 bookmark mode 결과 표시
+   +--> ✅ 2-4 Data Control Settings 탭 추가
+   +--> ✅ 2-5 전체 글자 크기 조절 UI
 
 [Track C: workspace persistence]
 ✅ 0-4 persistence 범위 확정

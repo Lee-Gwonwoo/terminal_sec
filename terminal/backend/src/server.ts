@@ -32,13 +32,18 @@ import {
   pullPressReleasesBackfill,
   getTickersWithNews,
   getTickerAnchorMap,
+  upsertSentimentSnapshot,
+  recordConfirmedEmpty,
+  getConfirmedEmptyRange,
 } from "./services/finnhubNewsProvider.js";
 import type { FinnhubMappedItem } from "./services/finnhubNewsProvider.js";
 import { mergeChangeForNewItems, bulkUpdateRecentChange, bulkUpdateCustomChange } from "./services/newsChangeMerger.js";
 import { createJob, getJob, updateProgress, appendLog, completeJob, failJob } from "./services/jobManager.js";
 import { getFulltext, getUnextractedNewsIds } from "./services/fulltextRepository.js";
-import { runFulltextUpdate } from "./services/fulltextUpdateService.js";
+import { runFulltextUpdate, runFulltextPlainTextBackfill } from "./services/fulltextUpdateService.js";
 import { backfillPublisher } from "./services/finnhubNewsProvider.js";
+import { validateAnalysisCompleteness } from "./services/aiAnalysisRepository.js";
+import { getDb } from "./db.js";
 import {
   getOhlcDbPath,
   getOverallMaxDate,
@@ -333,8 +338,23 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
                 if (isRecent) {
                   const anchor = companyAnchorMap?.get(ticker.toUpperCase());
                   tickerFrom = anchor ? anchor.slice(0, 10) : fallback7d;
+
+                  // Check confirmed-empty range — skip if the entire range is already confirmed empty (before today)
+                  const emptyRange = await getConfirmedEmptyRange(ticker, "company_news");
+                  const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+                  if (emptyRange && tickerFrom >= emptyRange.rangeFrom && yesterday <= emptyRange.rangeTo) {
+                    appendLog(jobId, `  company_news ${ticker}: confirmed-empty skip (${emptyRange.rangeFrom}~${emptyRange.rangeTo})`);
+                    items = [];
+                  } else {
+                    items = await fetchCompanyNewsRaw(ticker, tickerFrom, effectiveTo);
+                    // Record confirmed-empty if HTTP 200 + empty array (only for range before today)
+                    if (items.length === 0 && tickerFrom <= yesterday) {
+                      await recordConfirmedEmpty(ticker, "company_news", tickerFrom, yesterday);
+                    }
+                  }
+                } else {
+                  items = await fetchCompanyNewsRaw(ticker, tickerFrom, effectiveTo);
                 }
-                items = await fetchCompanyNewsRaw(ticker, tickerFrom, effectiveTo);
               }
               await insertFetchedItems(items, detailsPerType.company_news, newItems, counters);
               if (items.length > 0) {
@@ -357,8 +377,22 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
                 if (isRecent) {
                   const anchor = pressAnchorMap?.get(ticker.toUpperCase());
                   tickerFrom = anchor ? anchor.slice(0, 10) : fallback7d;
+
+                  // Check confirmed-empty range
+                  const emptyRange = await getConfirmedEmptyRange(ticker, "press_release");
+                  const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+                  if (emptyRange && tickerFrom >= emptyRange.rangeFrom && yesterday <= emptyRange.rangeTo) {
+                    appendLog(jobId, `  press_release ${ticker}: confirmed-empty skip (${emptyRange.rangeFrom}~${emptyRange.rangeTo})`);
+                    items = [];
+                  } else {
+                    items = await fetchPressReleasesRaw(ticker, tickerFrom, effectiveTo);
+                    if (items.length === 0 && tickerFrom <= yesterday) {
+                      await recordConfirmedEmpty(ticker, "press_release", tickerFrom, yesterday);
+                    }
+                  }
+                } else {
+                  items = await fetchPressReleasesRaw(ticker, tickerFrom, effectiveTo);
                 }
-                items = await fetchPressReleasesRaw(ticker, tickerFrom, effectiveTo);
               }
               await insertFetchedItems(items, detailsPerType.press_release, newItems, counters);
               if (items.length > 0) {
@@ -368,6 +402,13 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
               console.error(`[pull-finhub] press_release ${ticker}: ${err.message}`);
               appendLog(jobId, `  ⚠ press_release ${ticker}: ${err.message}`);
             }
+          }
+
+          // Sentiment snapshot — fire & forget per ticker
+          try {
+            await upsertSentimentSnapshot(ticker);
+          } catch (err: any) {
+            console.error(`[pull-finhub] sentiment ${ticker}: ${err.message}`);
           }
 
           // Update progress
@@ -473,6 +514,19 @@ app.post("/api/news/fulltext/update", async (req, res, next) => {
     });
 
     res.json({ jobId, total });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Backfill: convert existing HTML-based fulltext to plain text
+app.post("/api/news/fulltext/backfill-plaintext", async (_req, res, next) => {
+  try {
+    const jobId = createJob(0);
+    runFulltextPlainTextBackfill(jobId).catch((err) => {
+      console.error("[fulltext-backfill] unhandled:", err);
+    });
+    res.json({ jobId });
   } catch (error) {
     next(error);
   }
@@ -1025,6 +1079,146 @@ app.post("/api/settings/alerts", async (req, res, next) => {
   }
 });
 
+// ── ver3: Bookmark folder CRUD ──
+
+const bookmarkFolderSchema = z.object({
+  name: z.string().min(1),
+  parentId: z.string().nullable().default(null),
+  sortOrder: z.number().int().default(0),
+});
+
+app.get("/api/bookmarks/folders", async (_req, res, next) => {
+  try {
+    const rows = await getDb().all(
+      `SELECT id, user_id, name, parent_id, sort_order, created_at
+       FROM bookmark_folders WHERE user_id = ? ORDER BY sort_order, name`,
+      [DEMO_USER_ID],
+    );
+    res.json(rows);
+  } catch (error) { next(error); }
+});
+
+app.post("/api/bookmarks/folders", async (req, res, next) => {
+  try {
+    const input = bookmarkFolderSchema.parse(req.body);
+    const id = randomUUID();
+    await getDb().run(
+      `INSERT INTO bookmark_folders (id, user_id, name, parent_id, sort_order) VALUES (?, ?, ?, ?, ?)`,
+      [id, DEMO_USER_ID, input.name, input.parentId, input.sortOrder],
+    );
+    res.status(201).json({ id, name: input.name, parent_id: input.parentId, sort_order: input.sortOrder });
+  } catch (error) { next(error); }
+});
+
+app.put("/api/bookmarks/folders/:id", async (req, res, next) => {
+  try {
+    const input = bookmarkFolderSchema.parse(req.body);
+    const result = await getDb().run(
+      `UPDATE bookmark_folders SET name = ?, parent_id = ?, sort_order = ? WHERE id = ? AND user_id = ?`,
+      [input.name, input.parentId, input.sortOrder, req.params.id, DEMO_USER_ID],
+    );
+    if (!result.changes) { res.status(404).json({ error: "Folder not found" }); return; }
+    res.json({ id: req.params.id, name: input.name, parent_id: input.parentId, sort_order: input.sortOrder });
+  } catch (error) { next(error); }
+});
+
+app.delete("/api/bookmarks/folders/:id", async (req, res, next) => {
+  try {
+    const result = await getDb().run(
+      `DELETE FROM bookmark_folders WHERE id = ? AND user_id = ?`,
+      [req.params.id, DEMO_USER_ID],
+    );
+    if (!result.changes) { res.status(404).json({ error: "Folder not found" }); return; }
+    res.status(204).send();
+  } catch (error) { next(error); }
+});
+
+// ── ver3: Bookmark items ──
+
+app.post("/api/bookmarks/items", async (req, res, next) => {
+  try {
+    const { folderId, newsId } = z.object({
+      folderId: z.string().min(1),
+      newsId: z.string().min(1),
+    }).parse(req.body);
+    await getDb().run(
+      `INSERT OR IGNORE INTO bookmark_items (folder_id, news_id) VALUES (?, ?)`,
+      [folderId, newsId],
+    );
+    res.status(201).json({ folderId, newsId });
+  } catch (error) { next(error); }
+});
+
+app.delete("/api/bookmarks/items", async (req, res, next) => {
+  try {
+    const { folderId, newsId } = z.object({
+      folderId: z.string().min(1),
+      newsId: z.string().min(1),
+    }).parse(req.body);
+    await getDb().run(
+      `DELETE FROM bookmark_items WHERE folder_id = ? AND news_id = ?`,
+      [folderId, newsId],
+    );
+    res.status(204).send();
+  } catch (error) { next(error); }
+});
+
+app.get("/api/bookmarks/folders/:folderId/items", async (req, res, next) => {
+  try {
+    const rows = await getDb().all(
+      `SELECT bi.news_id, bi.created_at AS bookmarked_at
+       FROM bookmark_items bi
+       WHERE bi.folder_id = ?
+       ORDER BY bi.created_at DESC`,
+      [req.params.folderId],
+    );
+    res.json(rows);
+  } catch (error) { next(error); }
+});
+
+// ── ver3: Sentiment snapshot trigger ──
+
+app.post("/api/news/sentiment/update", async (req, res, next) => {
+  try {
+    const { tickers } = z.object({
+      tickers: z.array(z.string().min(1)).min(1),
+    }).parse(req.body);
+
+    const jobId = createJob(tickers.length);
+    res.json({ jobId });
+
+    (async () => {
+      let updated = 0;
+      try {
+        for (let i = 0; i < tickers.length; i++) {
+          try {
+            const wrote = await upsertSentimentSnapshot(tickers[i]);
+            if (wrote) updated++;
+            appendLog(jobId, `${tickers[i]}: ${wrote ? "updated" : "no data"}`);
+          } catch (err: any) {
+            appendLog(jobId, `${tickers[i]}: error — ${err.message}`);
+          }
+          updateProgress(jobId, i + 1);
+          await new Promise((r) => setTimeout(r, 300));
+        }
+        completeJob(jobId, { updated, total: tickers.length });
+      } catch (err: any) {
+        failJob(jobId, err.message);
+      }
+    })();
+  } catch (error) { next(error); }
+});
+
+// ── ver3: AI analysis validation ──
+
+app.get("/api/news/ai-analysis/validate", async (_req, res, next) => {
+  try {
+    const result = await validateAnalysisCompleteness();
+    res.json(result);
+  } catch (error) { next(error); }
+});
+
+// ── SSE news stream ──
 app.get("/api/news/stream", (req, res) => {
   const filters = parseNewsQuery(req.query as Record<string, unknown>);
   const clientId = randomUUID();

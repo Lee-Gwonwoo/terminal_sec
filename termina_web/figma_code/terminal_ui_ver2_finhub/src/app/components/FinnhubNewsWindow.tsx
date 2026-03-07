@@ -90,9 +90,11 @@ interface BackendNewsItem {
   keywordsStatus?: string | null;
   industry?: string | null;
   score?: number | null;
-  score_evidence?: string | null;
-  sentiment_score?: number | null;
-  sentiment_label?: string | null;
+  scoreEvidence?: string | null;
+  analysisStatus?: string | null;
+  sentimentBullishPct?: number | null;
+  sentimentBearishPct?: number | null;
+  companyNewsScore?: number | null;
 }
 
 // ─── Display item ───
@@ -123,6 +125,12 @@ interface DisplayItem {
   sentimentLabel: string | null;
 }
 
+interface BookmarkFolder {
+  id: string;
+  name: string;
+  parent_id?: string | null;
+}
+
 function mapBackendItem(item: BackendNewsItem): DisplayItem {
   const d = new Date(item.published_at);
   return {
@@ -147,9 +155,11 @@ function mapBackendItem(item: BackendNewsItem): DisplayItem {
     keywordsStatus: item.keywordsStatus ?? null,
     industry: item.industry ?? null,
     score: item.score ?? null,
-    scoreEvidence: item.score_evidence ?? null,
-    sentiment: item.sentiment_score ?? null,
-    sentimentLabel: item.sentiment_label ?? null,
+    scoreEvidence: item.scoreEvidence ?? null,
+    sentiment: item.sentimentBullishPct ?? null,
+    sentimentLabel: item.sentimentBullishPct != null
+      ? (item.sentimentBullishPct > 0.6 ? 'Bullish' : item.sentimentBullishPct < 0.4 ? 'Bearish' : 'Neutral')
+      : null,
   };
 }
 
@@ -191,6 +201,49 @@ export function FinnhubNewsWindow({
     } catch { /* ignore */ }
     return '';
   });
+  const [tickerQuery, setTickerQuery] = useState(() => {
+    if (initialTicker) return initialTicker;
+    try {
+      const saved = localStorage.getItem('finhub-news-ui-state');
+      if (saved) {
+        const p = JSON.parse(saved);
+        if (typeof p.tickerQuery === 'string') return p.tickerQuery;
+      }
+    } catch { /* ignore */ }
+    return '';
+  });
+  const [fromDate, setFromDate] = useState(() => {
+    try {
+      const saved = localStorage.getItem('finhub-news-ui-state');
+      if (saved) {
+        const p = JSON.parse(saved);
+        if (typeof p.fromDate === 'string') return p.fromDate;
+      }
+    } catch { /* ignore */ }
+    return '';
+  });
+  const [toDate, setToDate] = useState(() => {
+    try {
+      const saved = localStorage.getItem('finhub-news-ui-state');
+      if (saved) {
+        const p = JSON.parse(saved);
+        if (typeof p.toDate === 'string') return p.toDate;
+      }
+    } catch { /* ignore */ }
+    return '';
+  });
+  const [bookmarkFolders, setBookmarkFolders] = useState<BookmarkFolder[]>([]);
+  const [selectedBookmarkFolderId, setSelectedBookmarkFolderId] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('finhub-news-ui-state');
+      if (saved) {
+        const p = JSON.parse(saved);
+        if (typeof p.selectedBookmarkFolderId === 'string') return p.selectedBookmarkFolderId;
+      }
+    } catch { /* ignore */ }
+    return '';
+  });
+  const [showBookmarkMenu, setShowBookmarkMenu] = useState(false);
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [showWatchlistMenu, setShowWatchlistMenu] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
@@ -203,6 +256,8 @@ export function FinnhubNewsWindow({
   // Source cell context menu (Copy URL)
   const [sourceCtxMenu, setSourceCtxMenu] = useState<null | { x: number; y: number; url: string }>(null);
   const sourceCtxMenuRef = useRef<HTMLDivElement>(null);
+  const [rowCtxMenu, setRowCtxMenu] = useState<null | { x: number; y: number; newsId: string }>(null);
+  const rowCtxMenuRef = useRef<HTMLDivElement>(null);
 
   // Full text popup
   const [showFulltextModal, setShowFulltextModal] = useState(false);
@@ -287,6 +342,8 @@ export function FinnhubNewsWindow({
   // Backend data
   const [newsData, setNewsData] = useState<DisplayItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -372,6 +429,25 @@ export function FinnhubNewsWindow({
     };
   }, [sourceCtxMenu]);
 
+  useEffect(() => {
+    if (!rowCtxMenu) return;
+
+    const onMouseDown = (e: MouseEvent) => {
+      if (rowCtxMenuRef.current && rowCtxMenuRef.current.contains(e.target as Node)) return;
+      setRowCtxMenu(null);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setRowCtxMenu(null);
+    };
+
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [rowCtxMenu]);
+
   // ─── Saved searches (local state) ───
   interface SavedSearch {
     id: string;
@@ -381,20 +457,61 @@ export function FinnhubNewsWindow({
   }
   const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
 
+  const handleAddBookmark = useCallback(async (folderId: string, newsId: string) => {
+    try {
+      await fetch(`${API_BASE}/api/bookmarks/items`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folderId, newsId }),
+      });
+    } finally {
+      setRowCtxMenu(null);
+    }
+  }, []);
+
+  const fetchBookmarkFolders = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/bookmarks/folders`);
+      const data = await res.json();
+      if (!res.ok) return;
+      const folders: BookmarkFolder[] = Array.isArray(data) ? data : Array.isArray(data.folders) ? data.folders : [];
+      setBookmarkFolders(folders);
+      // fallback: if restored selectedBookmarkFolderId no longer exists, reset
+      if (selectedBookmarkFolderId && folders.length > 0 && !folders.some(f => f.id === selectedBookmarkFolderId)) {
+        setSelectedBookmarkFolderId('');
+      }
+    } catch {
+      // keep bookmark UI empty on failure
+    }
+  }, [selectedBookmarkFolderId]);
+
   // ─── Fetch news from backend (server-side search via keyword param) ───
   const fetchNews = useCallback(async (keyword?: string) => {
     setLoading(true);
     setError(null);
+    setNextCursor(null);
     try {
       const params = new URLSearchParams();
       params.set('source_names', 'FINNHUB');
+      if (selectedBookmarkFolderId) {
+        params.set('bookmarkFolderId', selectedBookmarkFolderId);
+      }
       if (sourceTypeFilter !== 'all') {
         params.set('source_type', sourceTypeFilter);
       }
       if (keyword) {
         params.set('keyword', keyword);
       }
-      params.set('limit', '200');
+      if (tickerQuery.trim()) {
+        params.set('tickers', tickerQuery.trim().toUpperCase());
+      }
+      if (fromDate) {
+        params.set('from', fromDate);
+      }
+      if (toDate) {
+        params.set('to', toDate);
+      }
+      params.set('limit', '500');
 
       const res = await fetch(`${API_BASE}/api/news?${params.toString()}`);
       const data = await res.json();
@@ -404,17 +521,65 @@ export function FinnhubNewsWindow({
       }
       const items: BackendNewsItem[] = data.items ?? [];
       setNewsData(items.map(mapBackendItem));
+      setNextCursor(data.nextCursor ?? null);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch news');
     } finally {
       setLoading(false);
     }
-  }, [sourceTypeFilter]);
+  }, [selectedBookmarkFolderId, sourceTypeFilter, tickerQuery, fromDate, toDate]);
+
+  // ─── Fetch more (cursor-based append) ───
+  const fetchMore = useCallback(async () => {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const params = new URLSearchParams();
+      params.set('source_names', 'FINNHUB');
+      if (selectedBookmarkFolderId) {
+        params.set('bookmarkFolderId', selectedBookmarkFolderId);
+      }
+      if (sourceTypeFilter !== 'all') {
+        params.set('source_type', sourceTypeFilter);
+      }
+      if (searchQuery) {
+        params.set('keyword', searchQuery);
+      }
+      if (tickerQuery.trim()) {
+        params.set('tickers', tickerQuery.trim().toUpperCase());
+      }
+      if (fromDate) {
+        params.set('from', fromDate);
+      }
+      if (toDate) {
+        params.set('to', toDate);
+      }
+      params.set('limit', '500');
+      params.set('cursor', nextCursor);
+
+      const res = await fetch(`${API_BASE}/api/news?${params.toString()}`);
+      const data = await res.json();
+      if (!res.ok) return;
+      const items: BackendNewsItem[] = data.items ?? [];
+      if (items.length > 0) {
+        setNewsData(prev => [...prev, ...items.map(mapBackendItem)]);
+      }
+      setNextCursor(data.nextCursor ?? null);
+    } catch {
+      // silent — user can retry via button
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [nextCursor, loadingMore, selectedBookmarkFolderId, sourceTypeFilter, searchQuery, tickerQuery, fromDate, toDate]);
 
   // Initial load + refresh on filter change
   useEffect(() => {
     fetchNews(searchQuery || undefined);
   }, [fetchNews]);
+
+  useEffect(() => {
+    fetchBookmarkFolders();
+  }, [fetchBookmarkFolders]);
 
   // ─── Debounced server-side search (300ms) ───
   useEffect(() => {
@@ -423,7 +588,7 @@ export function FinnhubNewsWindow({
     }, 300);
     return () => clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchQuery]);
+  }, [searchQuery, tickerQuery, fromDate, toDate]);
 
   // ─── Update (pull from Finnhub — background job) ───
   const handleUpdate = async (
@@ -730,13 +895,17 @@ export function FinnhubNewsWindow({
       groups.get(item.date)!.push(item);
     });
 
-    const result: Array<{ type: 'header'; date: string } | { type: 'item'; item: DisplayItem }> = [];
+    const result: Array<{ type: 'header'; date: string } | { type: 'item'; item: DisplayItem } | { type: 'load-more' }> = [];
     groups.forEach((items, date) => {
       result.push({ type: 'header', date });
       items.forEach(item => result.push({ type: 'item', item }));
     });
+    // Append load-more sentinel if there's a next page
+    if (nextCursor) {
+      result.push({ type: 'load-more' });
+    }
     return result;
-  }, [newsData, sort, getSortValue]);
+  }, [newsData, sort, getSortValue, nextCursor]);
 
   // Reset list on data/mode/expand changes
   useEffect(() => {
@@ -746,6 +915,7 @@ export function FinnhubNewsWindow({
   const getItemSize = useCallback((index: number) => {
     const item = groupedNews[index];
     if (item.type === 'header') return STICKY_DATE_HEADER_HEIGHT;
+    if (item.type === 'load-more') return 48;
     if (displayMode === 'title-abstract') return ROW_HEIGHT_WITH_ABSTRACT;
     if (expandedItems.has(item.item.id)) return ROW_HEIGHT_WITH_ABSTRACT;
     return ROW_HEIGHT_TITLE_ONLY;
@@ -761,7 +931,7 @@ export function FinnhubNewsWindow({
     });
   }, [displayMode]);
 
-  // ─── Persist UI state (visibleCols / displayMode / sourceTypeFilter / searchQuery) ───
+  // ─── Persist UI state (visibleCols / displayMode / sourceTypeFilter / searchQuery / tickerQuery / fromDate / toDate) ───
   useEffect(() => {
     try {
       localStorage.setItem('finhub-news-ui-state', JSON.stringify({
@@ -769,9 +939,13 @@ export function FinnhubNewsWindow({
         displayMode,
         sourceTypeFilter,
         searchQuery,
+        tickerQuery,
+        fromDate,
+        toDate,
+        selectedBookmarkFolderId,
       }));
     } catch { /* quota / SSR */ }
-  }, [visibleCols, displayMode, sourceTypeFilter, searchQuery]);
+  }, [visibleCols, displayMode, sourceTypeFilter, searchQuery, tickerQuery, fromDate, toDate, selectedBookmarkFolderId]);
 
   // ─── Save / Load ───
   const handleSaveSearch = () => {
@@ -1002,11 +1176,35 @@ export function FinnhubNewsWindow({
       );
     }
 
+    if (item.type === 'load-more') {
+      return (
+        <div style={style} className="flex items-center justify-center gap-2 text-xs text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+          {loadingMore ? (
+            <span className="animate-pulse">Loading more…</span>
+          ) : (
+            <button
+              onClick={fetchMore}
+              className="px-3 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            >
+              Load more ({newsData.length} loaded)
+            </button>
+          )}
+        </div>
+      );
+    }
+
     const newsItem = item.item;
     const isExpanded = displayMode === 'title-abstract' || expandedItems.has(newsItem.id);
 
     return (
-      <div style={style} className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/60 cursor-pointer transition-colors">
+      <div
+        style={style}
+        className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/60 cursor-pointer transition-colors"
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setRowCtxMenu({ x: e.clientX, y: e.clientY, newsId: newsItem.id });
+        }}
+      >
         <div className="h-full flex items-stretch text-xs">
           {activeColumns.map((col, colIdx) => {
             const isLast = colIdx === activeColumns.length - 1;
@@ -1028,7 +1226,7 @@ export function FinnhubNewsWindow({
         </div>
       </div>
     );
-  }, [groupedNews, activeColumns, activeColWidths, displayMode, expandedItems, renderCell]);
+  }, [groupedNews, activeColumns, activeColWidths, displayMode, expandedItems, renderCell, loadingMore, fetchMore, newsData.length]);
 
   const displayModeLabel = displayMode === 'title-only' ? 'Title Only' : 'Title + Abstract';
 
@@ -1037,10 +1235,29 @@ export function FinnhubNewsWindow({
       {/* Row 1: Search bar | Source type filter | Update | Refresh | Save | Load | Filter */}
       <div className="px-3 pt-3 pb-2 border-b border-gray-200 dark:border-gray-700 space-y-2">
         <div className="flex items-center gap-2">
-          <div className="flex-1 relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search news..."
-              className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+          <div className="flex-1 flex flex-col gap-2">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search news..."
+                className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+            </div>
+            <div className="relative">
+              <TrendingUp className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input type="text" value={tickerQuery} onChange={(e) => setTickerQuery(e.target.value)} placeholder="Ticker only (e.g. AAPL, TSLA)"
+                className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="relative">
+                <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)}
+                  className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+              </div>
+              <div className="relative">
+                <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)}
+                  className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+              </div>
+            </div>
           </div>
 
           {/* Source type filter toggle */}
@@ -1058,6 +1275,47 @@ export function FinnhubNewsWindow({
                 {getSourceTypeLabel(st)}
               </button>
             ))}
+          </div>
+
+          <div className="relative">
+            <button
+              onClick={() => setShowBookmarkMenu(prev => !prev)}
+              className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5"
+              title="Bookmark view"
+            >
+              <FolderOpen className="w-3.5 h-3.5" />
+              <span className="text-xs">
+                {selectedBookmarkFolderId
+                  ? (bookmarkFolders.find((folder) => folder.id === selectedBookmarkFolderId)?.name ?? 'Bookmark view')
+                  : 'Bookmark view'}
+              </span>
+              <ChevronDown className="w-3 h-3" />
+            </button>
+            {showBookmarkMenu && (
+              <div className="absolute top-full left-0 mt-1 w-56 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg z-30 overflow-hidden">
+                <button
+                  onClick={() => {
+                    setSelectedBookmarkFolderId('');
+                    setShowBookmarkMenu(false);
+                  }}
+                  className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800 ${selectedBookmarkFolderId === '' ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
+                >
+                  All news
+                </button>
+                {bookmarkFolders.map((folder) => (
+                  <button
+                    key={folder.id}
+                    onClick={() => {
+                      setSelectedBookmarkFolderId(folder.id);
+                      setShowBookmarkMenu(false);
+                    }}
+                    className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800 ${selectedBookmarkFolderId === folder.id ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
+                  >
+                    {folder.name}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Update split-button with dropdown menu */}
@@ -1355,8 +1613,9 @@ export function FinnhubNewsWindow({
 
           {/* Status indicator */}
           <div className="flex items-center gap-1.5 text-[10px] text-gray-400">
-            <span>{newsData.length} items</span>
+            <span>{newsData.length} items{nextCursor ? '+' : ''}</span>
             {loading && <span className="text-blue-500">Loading...</span>}
+            {loadingMore && <span className="text-blue-500">Loading more...</span>}
           </div>
 
           {/* Error message */}
@@ -1463,7 +1722,20 @@ export function FinnhubNewsWindow({
             No news items. Click "Update" to pull from Finnhub.
           </div>
         ) : (
-          <List ref={listRef} height={listHeight} itemCount={groupedNews.length} itemSize={getItemSize} width="100%" className="scrollbar-thin">
+          <List
+            ref={listRef}
+            height={listHeight}
+            itemCount={groupedNews.length}
+            itemSize={getItemSize}
+            width="100%"
+            className="scrollbar-thin"
+            onItemsRendered={({ visibleStopIndex }) => {
+              // Auto-load when the load-more sentinel is visible
+              if (nextCursor && !loadingMore && visibleStopIndex >= groupedNews.length - 1) {
+                fetchMore();
+              }
+            }}
+          >
             {Row}
           </List>
         )}
@@ -1666,6 +1938,41 @@ export function FinnhubNewsWindow({
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Row context menu */}
+      {rowCtxMenu && (
+        <div
+          ref={rowCtxMenuRef}
+          className="fixed z-[60] bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-lg min-w-[180px] overflow-hidden"
+          style={(() => {
+            const menuW = 220;
+            const menuH = Math.max(48, 36 + bookmarkFolders.length * 32);
+            const maxX = typeof window !== 'undefined' ? window.innerWidth - menuW - 8 : rowCtxMenu.x;
+            const maxY = typeof window !== 'undefined' ? window.innerHeight - menuH - 8 : rowCtxMenu.y;
+            return {
+              left: Math.max(8, Math.min(rowCtxMenu.x, maxX)),
+              top: Math.max(8, Math.min(rowCtxMenu.y, maxY)),
+            } as React.CSSProperties;
+          })()}
+        >
+          <div className="px-3 py-2 text-[10px] text-gray-400 border-b border-gray-200 dark:border-gray-700">
+            Add bookmark
+          </div>
+          {bookmarkFolders.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-gray-500">No bookmark folders</div>
+          ) : (
+            bookmarkFolders.map((folder) => (
+              <button
+                key={folder.id}
+                className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700"
+                onClick={() => handleAddBookmark(folder.id, rowCtxMenu.newsId)}
+              >
+                {folder.name}
+              </button>
+            ))
+          )}
         </div>
       )}
 
