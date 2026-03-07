@@ -36,6 +36,7 @@ export type FinnhubMappedItem = {
   url: string;
   providerTickers: string[];
   tags: string[];
+  publisher?: string;
 };
 
 // ---------- Helpers ----------
@@ -185,6 +186,7 @@ export async function fetchCompanyNewsRaw(
           .filter(Boolean)
       : [symbol.toUpperCase()],
     tags: item.category ? [item.category.toLowerCase()] : [],
+    publisher: item.source ? String(item.source).toUpperCase() : derivePublisher(item.url ?? ""),
   }));
 }
 
@@ -208,6 +210,7 @@ export async function fetchPressReleasesRaw(
     url: item.url ?? "",
     providerTickers: [symbol.toUpperCase()],
     tags: item.category ? [item.category.toLowerCase()] : ["press_release"],
+    publisher: derivePublisher(item.url ?? ""),
   }));
 }
 
@@ -236,6 +239,7 @@ export async function fetchMarketNewsPageRaw(
           .filter(Boolean)
       : [],
     tags: item.category ? [String(item.category).toLowerCase()] : [MARKET_NEWS_CATEGORY],
+    publisher: item.source ? String(item.source).toUpperCase() : derivePublisher(item.url ?? ""),
   }));
 
   return {

@@ -248,6 +248,7 @@ export async function insertNewsItem(params: {
   url: string;
   tickers: string[];
   tags: string[];
+  publisher?: string;
 }): Promise<NewsItem | null> {
   const id = randomUUID();
   const tickers = Array.from(new Set(params.tickers.map((ticker) => ticker.toUpperCase())));
@@ -257,8 +258,8 @@ export async function insertNewsItem(params: {
 
   const result = await getDb().run(
     `INSERT OR IGNORE INTO news_items
-      (id, published_at, source, source_type, title, body, url, tickers_csv, tags_csv)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, published_at, source, source_type, title, body, url, tickers_csv, tags_csv, publisher)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       params.publishedAt,
@@ -268,7 +269,8 @@ export async function insertNewsItem(params: {
       params.body,
       params.url,
       tickersCsv,
-      tagsCsv
+      tagsCsv,
+      params.publisher ?? null
     ]
   );
 
@@ -280,6 +282,7 @@ export async function insertNewsItem(params: {
     id,
     published_at: params.publishedAt,
     source: params.source,
+    publisher: params.publisher ?? null,
     source_type: params.sourceType,
     title: params.title,
     body: params.body,

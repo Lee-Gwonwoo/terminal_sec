@@ -193,6 +193,7 @@ async function insertFetchedItems(
       url: rawItem.url,
       tickers: rawItem.providerTickers,
       tags: rawItem.tags,
+      publisher: rawItem.publisher,
     });
     if (inserted) {
       counters.totalInserted++;

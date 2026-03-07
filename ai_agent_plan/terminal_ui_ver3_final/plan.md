@@ -200,6 +200,17 @@ Step N — <제목>
 - 무엇이 바뀌었나: Step 2 범위에 Bookmark Manager의 빈 폴더/빈 여백 우클릭 `Paste` context menu를 추가했다.
 - 영향: `BookmarkManager.tsx` 아이템 패널 context menu 동작과 북마크 수동 검증 체크리스트가 함께 바뀐다.
 
+### PLAN CHANGE (2026-03-07)
+- 왜: market news에서 publisher가 제대로 표시/기능되지 않는 버그 리포트.
+- 원인: `insertNewsItem` INSERT SQL에 publisher 컬럼 미포함, `FinnhubMappedItem`에 publisher 필드 없음, Finnhub API `item.source`(실제 publisher명) 미사용. publisher는 서버 시작 시 backfill로만 설정되어 런타임 중 새 뉴스는 항상 NULL.
+- 무엇이 바뀌었나:
+  1. `FinnhubMappedItem` type에 `publisher?` 필드 추가
+  2. `fetchMarketNewsPageRaw`, `fetchCompanyNewsRaw`에서 Finnhub `item.source`를 publisher로 사용 (fallback: `derivePublisher(url)`)
+  3. `fetchPressReleasesRaw`에서 URL 기반 `derivePublisher()` 사용
+  4. `insertNewsItem` params/SQL에 publisher 추가, 반환값에도 publisher 포함
+  5. `insertFetchedItems`에서 publisher 전달
+- 영향: 새로 pull한 뉴스에 즉시 publisher가 설정되며, SSE로 push된 실시간 뉴스에도 publisher 표시. 기존 NULL row는 서버 시작 시 backfill이 처리.
+
 권장 저장 구조:
 - 뉴스 원본 메타: `[][][]news_items[][][]`
 - 뉴스 full text / keywords: `[][][]news_fulltext[][][]`

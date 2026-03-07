@@ -508,6 +508,45 @@ Step 1 전체 (1-1 ~ 1-13)를 구현하고 빌드/테스트를 통과시켰다.
 10. **1-10 plain text extractor** — `fulltextExtractors.ts`에 `htmlToPlainText()` 유틸 추가, `extractNasdaq`·`extractTmx` 모두 plain text 반환으로 변경
 11. **1-11 HTML backfill** — `fulltextUpdateService.ts`에 `runFulltextPlainTextBackfill()` 추가, `POST /api/news/fulltext/backfill-plaintext` 엔드포인트
 12. **1-12 북마크 schema/API** — `server.ts`에 CRUD 6개 라우트 (GET/POST/PUT/DELETE folders, POST/DELETE items, GET folder items)
+
+---
+
+### Market News publisher 표시 버그 수정
+
+**작성 시각:** 2026-03-07 10:50 (local)
+
+**상태:** 확인 대기(awaiting user confirmation)
+
+#### 수행 내용
+
+market news에서 publisher가 표시되지 않는 버그를 수정했다.
+
+**원인 분석:**
+1. `FinnhubMappedItem` type에 `publisher` 필드가 없었다.
+2. Finnhub API의 `item.source`(publisher명: "Yahoo", "CNBC" 등)를 버리고 `source: "FINNHUB"`로 하드코딩했다.
+3. `insertNewsItem` INSERT SQL에 `publisher` 컬럼이 포함되지 않아 항상 NULL로 삽입되었다.
+4. `backfillPublisher()`가 서버 시작 시에만 실행되어, 런타임 중 새 뉴스는 다음 재시작까지 publisher가 NULL이었다.
+
+**수정 내용:**
+1. `FinnhubMappedItem` type에 `publisher?: string` 필드 추가
+2. `fetchMarketNewsPageRaw` — Finnhub `item.source`를 publisher로 사용 (fallback: `derivePublisher(url)`)
+3. `fetchCompanyNewsRaw` — Finnhub `item.source`를 publisher로 사용 (fallback: `derivePublisher(url)`)
+4. `fetchPressReleasesRaw` — URL 기반 `derivePublisher()` 사용
+5. `insertNewsItem` params/SQL에 publisher 추가 (10번째 VALUES 파라미터), 반환값에도 publisher 포함
+6. `insertFetchedItems`에서 `rawItem.publisher` 전달
+
+#### 생성/수정 파일
+
+- `terminal/backend/src/services/finnhubNewsProvider.ts` — FinnhubMappedItem type 확장, fetch 3개 함수에 publisher 매핑 추가
+- `terminal/backend/src/services/newsRepository.ts` — insertNewsItem params/SQL/반환값에 publisher 추가
+- `terminal/backend/src/server.ts` — insertFetchedItems에서 publisher 전달
+
+#### 검증 방법
+
+- `npm run test` → 48/48 테스트 통과
+- `npx tsc --noEmit` → type error 0개
+- `npm run build` (frontend) → 빌드 성공
+- 사용자 확인: 백엔드 재시작 후 market news pull 실행 → publisher 컬럼에 값이 표시되는지 확인
 13. **1-13 북마크 폴더 뉴스 조회** — `newsRepository.ts`의 `getNews()`에 `bookmarkFolderId` INNER JOIN 지원
 
 #### 생성/수정 파일
