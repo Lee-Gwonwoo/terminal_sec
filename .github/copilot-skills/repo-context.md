@@ -27,7 +27,10 @@
 - **앱 런타임 SQLite (terminal 백엔드 기본 DB)**
 	- 경로: `terminal/backend/backend/data/app.db`
 	- 용도: terminal 앱의 기본 영속 데이터
-	- 포함 예시: `news_items`, `news_fulltext`, `news_change_metrics`, `calendar_events`, `update_status`, watchlist/alerts 관련 테이블
+	- 포함 예시: `news_items`, `news_fulltext`, `news_change_metrics`, `calendar_events`, `update_status`, `news_saved_views`, watchlist/alerts 관련 테이블
+	- 현재 코드 기준 주의:
+		- `news_change_metrics`는 별도 테이블이지만, 서버 시작 시 재생성(`DROP TABLE IF EXISTS` 후 `CREATE TABLE`)된다. 즉 현재 구현에서는 재시작 후 유지되는 영구 캐시가 아니다.
+		- `news_items`에는 legacy change 관련 컬럼이 남아 있지만, 실제 조회(`GET /api/news`)는 `news_change_metrics`와 `news_fulltext`를 join해서 내려주는 구조다.
 
 - **OHLC 일봉 SQLite (watchlist canonical price DB)**
 	- 경로: `OHLC_data/ohlc_1d_watchlist.sqlite`
@@ -40,8 +43,20 @@
 		- 뉴스 메타데이터 → `news_items`
 		- full text 추출 결과 → `news_fulltext`
 		- change metric 파생값 → `news_change_metrics`
-		- keyword 분석 결과 → `news_fulltext` 옆 keyword 컬럼 또는 같은 DB의 인접 테이블
+		- keyword 분석 결과 → 현재는 `news_fulltext.keywords_json`, `news_fulltext.keywords_status`, `news_fulltext.keywords_updated_at`
+		- publisher 보강값 → 현재는 `news_items.publisher`
+		- sentiment / score 같은 신규 뉴스 enrichment → 아직 canonical runtime 테이블은 없음. 추가 시 `app.db` 안의 인접 별도 테이블 또는 명시적 컬럼으로 관리
+	- 현재 코드 기준 운영 규칙:
+		- `GET /api/news`는 `news_items` 단독 조회가 아니라 `news_fulltext`, `news_change_metrics`, industry lookup 결과를 join/병합해서 응답한다.
+		- full text 추출 대상 판단은 현재 `news_fulltext` row 존재 여부 기준이다. 한 번 `failed`/`skipped` row가 생기면 자동 재시도 대상에서 빠질 수 있다.
+		- keyword는 이미 runtime DB 내부 컬럼으로 관리되고 있으므로, 별도 JSONL/CSV를 canonical source로 취급하지 않는다.
 	- 주의: 테스트/실험 산출물(JSONL/CSV)은 canonical 저장소로 간주하지 않음
+
+- **프론트엔드 런타임 상태 저장**
+	- 현재 상태: `termina_web/figma_code/terminal_ui_ver2_finhub` 프론트는 앱 전체 workspace/tabs/theme를 영속 저장하지 않는다.
+	- 현재 예외: `FinnhubNewsWindow`의 일부 설정(`finnhub-last-update-config`)만 `localStorage`에 저장한다.
+	- 의미: “앱을 껐다 켜도 마지막 상태 유지”, “탭 상태 유지”, “전역 글자 크기 유지” 같은 기능은 아직 canonical 저장 구조가 구현되지 않은 상태다.
+	- 향후 원칙: 프론트 전용 UI state는 1차로 `localStorage`를 사용하고, runtime 데이터 source of truth(`app.db`)와 혼동하지 않는다.
 
 - **뉴스 실험 산출물 / 외부 export / 임시 정리본**
 	- 대표 경로: `storage/`, `storage/storage_eodhd/news_data/`, `tmp/probes/`
@@ -71,7 +86,9 @@
 #### 빠른 판단 규칙
 - terminal 앱이 실시간/운영 시 읽는 데이터면 먼저 `terminal/backend/backend/data/app.db` 또는 `OHLC_data/ohlc_1d_watchlist.sqlite`를 canonical 후보로 본다.
 - `storage/`, `tmp/`, `tmp/probes/` 아래 파일은 우선 실험/검증 산출물로 보고, source of truth로 가정하지 않는다.
-- 새 뉴스 후처리 타입(full text, keyword, sentiment, change metric 등)을 추가할 때는 가능하면 app DB 안의 별도 테이블/컬럼으로 붙이고, 개별 flat file을 새 canonical 저장소로 만들지 않는다.
+- 새 뉴스 후처리 타입(full text, keyword, sentiment, score, change metric 등)을 추가할 때는 가능하면 app DB 안의 별도 테이블/컬럼으로 붙이고, 개별 flat file을 새 canonical 저장소로 만들지 않는다.
+- keyword처럼 이미 `news_fulltext` 안에 저장되는 값은 같은 계열의 후처리 데이터와 함께 `app.db` 내부에서 관리하는 쪽을 우선한다.
+- 프론트 UI state(`localStorage`)와 운영 데이터(`app.db`)를 섞지 않는다. 복원용 탭/창 상태는 프론트 저장소, 뉴스/캘린더/가격 데이터는 backend DB가 source of truth다.
 
 ### 프롬프트/스펙 문서(최신 기준)
 현재 구현과 맞는 “prompt/spec” 문서(코드가 어떻게 동작하는지 설명)는 아래를 우선 참고합니다:
