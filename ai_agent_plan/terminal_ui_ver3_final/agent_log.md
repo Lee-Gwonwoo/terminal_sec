@@ -192,3 +192,216 @@
 3. News Feed 내부 localStorage와 workspace localStorage를 동시에 쓰면 설정 충돌 위험이 있다.
    - 완화 방안 1: title/summary 값은 News Feed localStorage 저장 대상에서 제거
    - 완화 방안 2: Control Window Settings를 단일 source로 유지
+
+### Plan 리비전 — Finnhub confirmed-empty recent skip 정책 반영
+
+**작성 시각:** 2026-03-06 21:25 (local)
+
+**상태:** 확인 대기
+
+#### 수행 내용
+
+1. 사용자가 recent news pull의 empty 재조회 낭비를 막는 정책을 plan에 명시하라고 요청했다.
+2. `plan.md` 목표에 Finnhub recent confirmed-empty range 기록 항목을 추가했다.
+3. 아래 핵심 규칙을 plan의 제약/결정/Step 0/Step 1/실행 그래프에 반영했다.
+   - API 실패, timeout, 429, 5xx는 empty confirmation으로 기록하지 않음
+   - HTTP 200 + 실제 빈 배열일 때만 confirmed-empty로 기록
+   - `company_news`, `press_release`를 `source_type`별로 분리 기록
+   - automatic recent retry는 당일 제외 confirmed-empty 범위를 영구 스킵
+   - 수동 `custom range` 재조회는 계속 허용
+4. Step 0에 정책 확정 항목(`0-6`)을 추가하고, Step 1에 구현 항목(`1-7`)을 추가했다.
+5. 결정 상세 섹션에 운영적 정의와 사람이 확인할 체크 항목을 추가했다.
+
+#### 생성/수정 파일
+
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. `plan.md`에서 목표 12번에 confirmed-empty range 기록 항목이 추가됐는지 확인한다.
+2. `제약 / 비범위`에 아래 4개가 함께 있는지 확인한다.
+   - API 실패와 empty 구분
+   - `source_type`별 분리
+   - 당일 제외
+   - `custom range` 예외 유지
+3. Step 0 표에 `0-6`, Step 1 표에 `1-7`이 추가됐는지 확인한다.
+4. `결정 #6 — Finnhub recent confirmed-empty skip 정책(상세)` 섹션이 있는지 확인한다.
+
+#### 문제점 / 리스크
+
+1. 영구 스킵 정책은 provider가 과거 데이터를 늦게 보정할 경우 놓침 리스크가 있다.
+   - 완화 방안 1: automatic recent만 영구 스킵하고 `custom range`는 항상 허용
+   - 완화 방안 2: 운영 문서에 “필요 시 수동 재조회” 경로를 명시
+2. empty와 실패를 헷갈리면 실제 데이터가 영구 누락될 수 있다.
+   - 완화 방안 1: HTTP 200 + 빈 배열 조건을 코드/문서/테스트에 동일하게 강제
+   - 완화 방안 2: 429/5xx/timeout은 별도 failure 로그로 남김
+3. `source_type`를 합쳐 기록하면 실제 데이터가 있는 소스까지 막을 수 있다.
+   - 완화 방안 1: `ticker + source_type` 단위 key를 강제
+   - 완화 방안 2: 테스트 fixture를 `company_news` / `press_release` 분리 케이스로 준비
+
+#### 비고
+
+- 이번 변경은 plan/로그 문서 동기화 작업이다.
+- 코드 구현은 아직 시작하지 않았다.
+- 사용자 확인 전까지 이 리비전 상태는 `확인 대기`로 유지한다.
+
+### Finnhub News Recent Update 정책 tooltip 추가
+
+**작성 시각:** 2026-03-06 21:25 (local)
+
+**상태:** 확인 대기
+
+#### 수행 내용
+
+1. `FinnhubNewsWindow.tsx`의 Recent Update 섹션 제목 옆에 info 아이콘을 추가했다.
+2. 마우스를 3초 이상 올렸을 때만 tooltip이 열리도록 hover timer를 넣었다.
+3. tooltip에 아래 정책 설명을 노출하도록 했다.
+   - automatic recent retry confirmed-empty 과거 구간 영구 스킵
+   - HTTP 200 + 빈 배열일 때만 confirmed-empty 기록
+   - `company_news`, `press_release` 분리 기록
+   - 당일 제외
+   - 강제 재조회는 `Custom Update` 사용
+4. `figma_frontend_prompt.md`와 `plan.md`에 tooltip 동작을 현재 구현 기준으로 반영했다.
+
+#### 생성/수정 파일
+
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+- `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. Finnhub News 창에서 Update 드롭다운을 연다.
+2. `Recent Update` 제목 옆 info 아이콘에 마우스를 3초 이상 올린다.
+3. 정책 설명 tooltip이 열리는지 확인한다.
+4. 마우스를 떼면 tooltip이 닫히는지 확인한다.
+5. `npm run build`로 프론트 빌드가 통과하는지 확인한다.
+
+#### 문제점 / 리스크
+
+1. hover 3초는 사용자에 따라 길게 느껴질 수 있다.
+   - 완화 방안 1: 필요 시 2초 또는 클릭형 help로 조정
+   - 완화 방안 2: 추후 설정값으로 분리 검토
+2. tooltip 문구가 길어 작은 화면에서 가려질 수 있다.
+   - 완화 방안 1: 폭을 제한하고 줄바꿈 유지
+   - 완화 방안 2: 필요 시 모달형 help로 승격
+3. 현재 tooltip은 메뉴 열림 상태에서만 접근 가능하다.
+   - 완화 방안 1: main Update 버튼 주변 도움말 재노출 검토
+   - 완화 방안 2: 추후 Data Control 문서/설정 화면에도 같은 정책 요약 추가
+
+#### 비고
+
+- 이 항목은 코드 변경을 포함한다.
+- 사용자 확인 전까지 상태는 `확인 대기`로 유지한다.
+
+### Finnhub News Recent Update tooltip 렌더 방식 수정
+
+**작성 시각:** 2026-03-06 21:25 (local)
+
+**상태:** 확인 대기
+
+#### 수행 내용
+
+1. 사용자가 3초 hover tooltip이 실제로 뜨지 않는다고 보고했다.
+2. 원인을 메뉴 내부 absolute tooltip이 dropdown scroll/overflow에 영향을 받는 구조로 판단했다.
+3. `FinnhubNewsWindow.tsx`에서 수동 hover timer 상태를 제거하고, 포털 기반 `Tooltip` 컴포넌트로 교체했다.
+4. delay는 기존 요구대로 3초(`delayDuration=3000`)를 유지했다.
+
+#### 생성/수정 파일
+
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. Finnhub News 창에서 Update 드롭다운을 연다.
+2. `Recent Update` 제목 옆 info 아이콘에 마우스를 3초 이상 올린다.
+3. dropdown 바깥쪽으로 잘리지 않고 tooltip이 떠야 한다.
+4. `npm run build`가 통과하는지 확인한다.
+
+#### 문제점 / 리스크
+
+1. tooltip 위치가 화면 오른쪽 가장자리에서는 좁아질 수 있다.
+   - 완화 방안 1: 필요 시 side를 bottom으로 자동 전환
+   - 완화 방안 2: tooltip 폭을 더 줄여 모바일 대응
+
+#### 비고
+
+- 이 항목은 기존 tooltip 구현의 표시 버그 수정이다.
+- 사용자 확인 전까지 상태는 `확인 대기`로 유지한다.
+
+### Finnhub News Recent Update 정책 설명 방식 변경
+
+**작성 시각:** 2026-03-06 21:40 (local)
+
+**상태:** 확인 대기
+
+#### 수행 내용
+
+1. 사용자가 hover 기반 tooltip 대신 메뉴 안에 바로 보이는 설명 문구가 더 낫다고 요청했다.
+2. `FinnhubNewsWindow.tsx`에서 Recent Update 제목 옆 info 아이콘과 tooltip 의존 코드를 제거했다.
+3. 같은 섹션 바로 아래에 automatic recent retry 정책을 항상 보이는 작은 안내 문구로 추가했다.
+4. `figma_frontend_prompt.md`와 `plan.md`를 현재 동작 기준으로 함께 수정했다.
+
+#### 생성/수정 파일
+
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+- `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. Finnhub News 창에서 Update 드롭다운을 연다.
+2. `Recent Update` 섹션 제목 바로 아래에 정책 설명 문구가 항상 보이는지 확인한다.
+3. `Recent Update (All)` 등 메뉴 항목 클릭 동작이 그대로 유지되는지 확인한다.
+4. `npm run build`가 통과하는지 확인한다.
+
+#### 문제점 / 리스크
+
+1. 안내 문구가 길면 작은 화면에서 메뉴 높이를 더 차지할 수 있다.
+   - 완화 방안 1: 필요 시 문장을 2줄 이내로 더 압축
+   - 완화 방안 2: source별 설명은 유지하되 문구 폭을 더 줄임
+
+#### 비고
+
+- hover 실패를 피하기 위해 상시 노출형 보조 문구로 전환했다.
+- 사용자 확인 전까지 상태는 `확인 대기`로 유지한다.
+
+### Plan 상태 표기 동기화 수정
+
+**작성 시각:** 2026-03-06 21:48 (local)
+
+**상태:** 확인 대기
+
+#### 수행 내용
+
+1. 사용자가 plan에 지금까지 구현한 내용이 제대로 반영되지 않았다고 지적했다.
+2. 원인을 Step 2/3의 세부 단계 표와 Step 제목, 실행 의존성 그래프의 상태 이모지가 서로 어긋난 것으로 확인했다.
+3. 사용자 확인이 아직 없으므로 Step 2/3 관련 구현 항목을 `✅`가 아니라 `⏳`로 정정했다.
+4. Recent Update 정책 설명 방식이 tooltip이 아니라 상시 보조 문구로 바뀐 PLAN CHANGE도 plan에 추가했다.
+
+#### 생성/수정 파일
+
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. `plan.md`에서 `Step 2`, `Step 3` 제목이 `⏳`로 표시되는지 확인한다.
+2. 같은 섹션의 세부 단계 표 상태가 모두 `⏳`로 일치하는지 확인한다.
+3. 실행 의존성 그래프의 Track B/C 상태도 동일하게 `⏳`로 반영됐는지 확인한다.
+4. PLAN CHANGE 섹션에 Recent Update 설명 방식 변경 항목이 추가됐는지 확인한다.
+
+#### 문제점 / 리스크
+
+1. plan 상태를 구현 완료와 사용자 확인 완료로 구분하지 않으면 다시 드리프트가 생길 수 있다.
+   - 완화 방안 1: 이후에도 `✅`는 사용자 명시 확인 후에만 사용
+   - 완화 방안 2: Step 제목, 표, 그래프 3곳을 한 번에 갱신
+
+#### 비고
+
+- 이번 수정은 구현 상태 표현을 실제 진행 상태에 맞게 정정한 문서 동기화 작업이다.
+- 사용자 확인 전까지 상태는 `확인 대기`로 유지한다.

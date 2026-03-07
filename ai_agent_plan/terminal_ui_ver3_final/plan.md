@@ -18,6 +18,7 @@
 9. Data Control Window 안에 `Settings` 탭을 추가하고, 전체 글자 크기를 조절 가능하게 한다.
 10. Data Control Window `Settings`에서 News Feed title/summary 글자 크기를 각각 따로 조절 가능하게 한다.
 11. 탭 바에서 탭 순서를 drag 해서 바꿀 수 있게 한다.
+12. Finnhub recent 뉴스 pull에서 당일 제외 confirmed-empty 범위를 `source_type`별로 기록해 자동 재조회 낭비를 줄인다.
 
 ### 현재 레포 상태(중요, 확인됨)
 - 백엔드 runtime DB는 `terminal/backend/backend/data/app.db` 이다.
@@ -32,6 +33,9 @@
 - `App.tsx`는 `terminal-workspace-v1`를 사용해 tabs, activeTabId, theme, linkedTicker, fontScale, News Feed title/summary font size를 저장/복원한다.
 - `DataControlWindow.tsx`는 `Updates` / `Settings` 탭 구조와 전역 font scale, News Feed title/summary 글자 크기 제어 UI를 가진다.
 - 탭 바는 drag/drop으로 순서를 재배치할 수 있다.
+- 현재 Finnhub recent pull은 ticker별 기존 뉴스 anchor가 없으면 7일 fallback으로 다시 조회한다.
+- 현재는 “이미 조회했지만 뉴스가 없었다”는 confirmed-empty 기록 저장소가 없어서, 뉴스가 한 번도 없던 ticker는 recent update 때 같은 구간을 반복 조회할 수 있다.
+- `FinnhubNewsWindow.tsx`의 Recent Update 메뉴는 automatic recent retry 정책을 작은 보조 설명 문구로 항상 표시한다.
 - Finnhub comprehensive probe 기록상 `news-sentiment` 엔드포인트는 접근 가능하다. 다만 현재 backend 수집/저장 흐름에는 아직 연결되어 있지 않다.
 - AI 뉴스 분석 skills 지침 명칭은 `ai-news-analysis`로 고정한다.
 - 현재 프론트 문서 기준으로 `Finnhub News`, `Default Ticker`, `Data Control`은 실제 API 연동이 있고, `Watchlist`, `Calendar`는 일부 mock/stub 흔적이 남아 있다.
@@ -43,6 +47,10 @@
 - `Score`, `Score Evidence`, `Keywords`는 기본적으로 비워 둔다. AI 분석이 아직 실행되지 않은 row에 placeholder 값을 넣지 않는다.
 - `Score`는 Finnhub raw sentiment가 아니라, `ai-news-analysis` 규칙으로 계산하는 AI 결과다.
 - `Score Evidence` 또는 `Score`가 저장 후 직접 지워져도 통과해 버리는 구조를 허용하지 않는다. 삭제/유실 감지 테스트를 포함해야 한다.
+- Finnhub recent no-news 기록은 API 실패와 구분해야 한다. HTTP 200 + 실제 빈 배열일 때만 confirmed-empty로 기록한다.
+- Finnhub recent no-news 기록은 `source_type`별로 분리한다. `company_news`와 `press_release`를 한 덩어리로 기록하지 않는다.
+- 당일 범위는 보수적으로 취급한다. 자동 recent skip 대상은 당일 이전 confirmed-empty 범위까지만 허용한다.
+- 자동 recent retry는 confirmed-empty 범위에 대해 영구 스킵하되, 수동 `custom range` 재조회 경로는 유지한다.
 - 전체 글자 크기 조절은 우선 `terminal_ui_ver3_final` 앱 범위의 UI scale/font scale을 뜻한다. OS 전체 폰트나 브라우저 줌 제어는 비범위다.
 - 서버 재시작 후 background job 상태 복구까지 이번 범위에 포함할지 여부는 미확정 사항으로 둔다.
 
@@ -71,6 +79,7 @@
 - `score evidence`: 왜 그 점수를 줬는지 설명하는 근거 텍스트
 - `keywords`: AI가 뉴스에서 중요하다고 본 키워드 30개
 - `canonical DB`: 앱이 실제로 조회하는 단일 source of truth 저장소. 현재 기본 후보는 `terminal/backend/backend/data/app.db`
+- `confirmed-empty range`: 특정 ticker + `source_type` 조합에 대해 “당일 이전 구간은 정상 응답 200으로 확인했지만 뉴스가 없었다”고 확정된 자동 스킵 범위
 
 ### 프로세스 템플릿(plan 변경 + 단계 완료 확인)
 plan 진행 중 요구가 바뀌면 아래 형식으로 리비전 노트를 추가한다.
@@ -99,14 +108,15 @@ Step N — <제목>
 - 무엇이 바뀌었나: Step 2의 Settings 범위를 전역 font scale + News Feed title/summary typography control까지 확장했고, Step 3의 persistence 범위에 두 typography 값과 탭 순서 저장을 반영했다.
 - 영향: `App.tsx`, `DataControlWindow.tsx`, `DraggableWindow.tsx`, `FinnhubNewsWindow.tsx` 배선과 workspace payload 검증 항목이 함께 바뀐다.
 
-   - 앱 셸의 `tabs`, `activeTabId`, `linkedTicker`, `isDarkMode`, 각 window position/size/title/linkId를 저장한다.
-10. Data Control Window `Settings`에서 News Feed title/summary 글자 크기를 각각 따로 조절 가능하게 한다.
-11. 탭 바에서 탭 순서를 drag 해서 바꿀 수 있게 한다.
-   - 창별 로컬 UI 상태(예: Finnhub source filter, columns, display mode, Data Control active tab)는 저장 범위를 정해서 직렬화한다.
+### PLAN CHANGE (2026-03-06)
+- 왜: 사용자가 Finnhub recent update에서 뉴스가 없던 ticker를 같은 7일 범위로 반복 조회하는 API 낭비를 막고, 영구 스킵 규칙과 예외 조건을 문서에 명시하길 요구했다.
+- 무엇이 바뀌었나: 목표에 confirmed-empty range 기록을 추가했고, Step 0/1에 “API 실패와 빈 결과 구분, `source_type`별 분리, 당일 제외, 자동 recent 영구 스킵 + 수동 custom range 허용” 규칙을 반영했다.
+- 영향: `finnhubNewsProvider.ts`, recent pull anchor/skip 저장 구조, backend prompt/spec, 테스트 시나리오가 함께 바뀐다.
 
-4. UI settings 축
-   - Data Control Window 내부에 `Updates` / `Settings` 탭 구조를 추가한다.
-   - Settings 탭에서 전역 font scale을 CSS variable 또는 app-level class로 제어한다.
+### PLAN CHANGE (2026-03-06)
+- 왜: Recent Update 정책 설명을 hover tooltip으로 두는 방식이 실제 사용에서 잘 보이지 않아, 사용자가 메뉴 내부 상시 노출 문구로 바꾸길 요청했다.
+- 무엇이 바뀌었나: Recent Update 정책 안내를 info 아이콘 + hover tooltip에서 메뉴 본문 아래의 작은 보조 설명 문구로 변경했다.
+- 영향: `FinnhubNewsWindow.tsx`의 메뉴 UX와 `figma_frontend_prompt.md`, 현재 레포 상태 문구가 함께 바뀐다.
 
 권장 저장 구조:
 - 뉴스 원본 메타: `[][][]news_items[][][]`
@@ -142,6 +152,11 @@ Step N — <제목>
    - 선택지 B: 창 내부 필터/컬럼/검색어까지 저장
    - 현재 권장: B. 사용자가 말한 “마지막 상태”에 더 가깝다.
 
+6. Finnhub recent no-news 재조회 정책
+   - 선택지 A: 기존처럼 anchor가 없는 ticker는 매번 7일 fallback 반복
+   - 선택지 B: `source_type`별 confirmed-empty range를 저장하고 automatic recent retry에서는 영구 스킵
+   - 현재 권장: B. 다만 당일은 제외하고, 수동 `custom range` 재조회는 계속 허용한다.
+
 ### 계획 중간 필수 확인
 중간 구현 전에 반드시 아래를 확인한다.
 
@@ -160,6 +175,11 @@ Step N — <제목>
 
 4. 삭제/유실 테스트 범위 확인
    - `Score`, `Score Evidence`, `Keywords` 중 무엇이 비면 실패로 간주할지 테스트 규칙을 문서화
+
+5. Finnhub confirmed-empty 기록 조건 확인
+   - HTTP 200 + 실제 빈 배열일 때만 기록하는지
+   - `company_news`, `press_release`를 분리 저장하는지
+   - 당일 이전 범위만 자동 skip 대상으로 확정하는지
 
 ### 제안하는 구현 순서(이유)
 1. Step 0에서 `Score`/sentiment 매핑과 저장 모델을 먼저 고정한다.
@@ -183,6 +203,7 @@ Step N — <제목>
 | 0-3 | sentiment와 AI analysis 저장 위치를 `app.db` 내 별도 테이블 기준으로 확정 | 🚫 |
 | 0-4 | workspace persistence 범위를 권장범위로 확정한다 | ✅ |
 | 0-5 | `Score`/`Score Evidence`/`Keywords` 삭제·유실 감지 테스트 요구를 고정 | 🚫 |
+| 0-6 | Finnhub recent confirmed-empty 기록 규칙(실패 구분, `source_type` 분리, 당일 제외, custom range 예외)을 고정 | ✅ |
 
 0-1 목적: sentiment가 뉴스 기사와 1:1인지, ticker snapshot인지 확인한다.
 0-1 설명: 어떤 key로 `news_items`와 연결할지 정해져야 DB 설계가 가능하다.
@@ -219,12 +240,19 @@ Step N — <제목>
 0-5 사람 검증(비개발자): 값을 지우면 테스트가 실패해야 한다는 규칙을 이해할 수 있다.
 0-5 흔한 문제/주의: null 기본값과 저장 후 유실 상태를 같은 것으로 취급하면 안 된다.
 
+0-6 목적: 뉴스가 없는 ticker를 같은 기간으로 반복 조회하는 낭비를 막되, 실패 응답을 잘못된 empty로 저장하지 않게 한다.
+0-6 설명: automatic recent retry에는 confirmed-empty range 영구 스킵을 적용하고, 수동 `custom range`는 예외로 남긴다.
+0-6 완료 조건(눈으로 확인): 문서에 “HTTP 200 + 빈 배열만 기록”, “`source_type`별 분리”, “당일 제외”, “custom range 허용”이 함께 적혀 있다.
+0-6 사람 검증(비개발자): 이미 뉴스가 없다고 확인된 ticker가 다음 recent update에서 또 같은 과거 범위를 긁지 않는다는 설명을 문서만 보고 이해할 수 있다.
+0-6 흔한 문제/주의: timeout/429/5xx를 empty로 착각해 영구 스킵하면 실제 뉴스를 영영 놓칠 수 있다.
+
 검증 훅:
 ```text
 - Finnhub sentiment sample 응답을 문서에 정리
 - `ai-news-analysis` 출력 계약을 예시 2개와 함께 문서에 기재
 - persistence 저장 범위를 체크리스트로 확정
 - 삭제 감지 테스트 시나리오를 문서에 기재
+- Finnhub confirmed-empty 기록 규칙을 예시 2개와 함께 문서에 기재
 
 사용자 확인 필요: 예
 ```
@@ -239,6 +267,7 @@ Step N — <제목>
 | 1-4 | `GET /api/news` 응답에 score/scoreEvidence/sentiment/keywords 계약 반영 | `terminal/backend/src/services/newsRepository.ts`, `terminal/backend/src/server.ts`, `terminal/backend/src/types.ts` | `/api/news` JSON 필드 확인 | ⬜ |
 | 1-5 | AI analysis 미실행 row는 기본 빈 상태로 내려가도록 null/empty 규칙 고정 | 같은 영역 | API 응답 null/empty 확인 | ⬜ |
 | 1-6 | 분석 결과 유실 감지용 backend 테스트 추가 | `terminal/backend/tests/` 또는 probe 스크립트 | 테스트 실패/성공 확인 | ⬜ |
+| 1-7 | Finnhub recent confirmed-empty range 저장/skip 로직 추가 | `terminal/backend/src/services/finnhubNewsProvider.ts`, `terminal/backend/src/db.ts` 또는 상태 저장소 | repeated recent pull 비교 확인 | ⬜ |
 
 1-1 목적: runtime DB가 sentiment와 AI analysis 결과를 영속 저장할 수 있게 만든다.
 1-1 설명: 테이블 생성과 기존 DB migration을 안전하게 처리한다.
@@ -276,6 +305,12 @@ Step N — <제목>
 1-6 사람 검증(비개발자): 값을 지우면 테스트 실패 메시지가 나온다.
 1-6 흔한 문제/주의: 정상적인 미분석 row까지 실패시키면 운영이 불편해진다.
 
+1-7 목적: 뉴스가 한 번도 없던 ticker가 같은 과거 7일 구간을 반복 조회하지 않게 만든다.
+1-7 설명: `source_type`별 confirmed-empty range를 저장하고, automatic recent retry에서는 당일 이전 확정 구간을 영구 스킵한다.
+1-7 완료 조건(눈으로 확인): 같은 ticker로 recent update를 연속 실행해도 confirmed-empty 과거 구간 재조회 로그가 줄어든다.
+1-7 사람 검증(비개발자): 뉴스가 없던 ticker는 다시 recent를 눌렀을 때 “이미 빈 구간으로 확인됨”에 해당하는 스킵 효과가 보인다.
+1-7 흔한 문제/주의: HTTP 실패를 empty로 잘못 저장하거나 `company_news`와 `press_release`를 합쳐 저장하면 실제 데이터가 있는 소스까지 막을 수 있다.
+
 검증 훅:
 ```bash
 cd terminal/backend
@@ -288,19 +323,20 @@ node test_check_news_db.mjs
 - GET /api/news?source_names=FINNHUB&limit=5 응답에 score/scoreEvidence/sentiment/keywords 포함 여부 확인
 - AI analysis 저장 테이블 row count 확인
 - 저장 후 `score_evidence`를 지웠을 때 테스트가 실패하는지 확인
+- 동일 ticker에 대해 recent update를 두 번 실행했을 때 confirmed-empty 과거 구간 재조회가 줄어드는지 확인
 
 사용자 확인 필요: 예
 ```
 
-#### ✅ Step 2 — News Feed / Data Control UI 확장
+#### ⏳ Step 2 — News Feed / Data Control UI 확장
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 2-1 | News Feed 컬럼 정의에 `Score`, `Score Evidence`, `Keywords`, `Sentiment`를 반영 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | UI 컬럼 메뉴 확인 | ✅ |
-| 2-2 | `Keywords`를 30개 기준 default/선택 컬럼 동작으로 정상 연결 | 같은 파일 | 컬럼 토글 및 렌더 확인 | ✅ |
-| 2-3 | score/score evidence/sentiment 셀 렌더, 정렬, null 표시 규칙 추가 | 같은 파일 | 정렬/표시 확인 | ✅ |
-| 2-4 | Data Control Window에 `Updates` / `Settings` 탭 구조 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx` | 탭 전환 확인 | ✅ |
-| 2-5 | Settings 탭에 전체 글자 크기 조절 UI 추가 | 같은 파일 및 app shell styling | 슬라이더/프리셋 반영 확인 | ✅ |
+| 2-1 | News Feed 컬럼 정의에 `Score`, `Score Evidence`, `Keywords`, `Sentiment`를 반영 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | UI 컬럼 메뉴 확인 | ⏳ |
+| 2-2 | `Keywords`를 30개 기준 default/선택 컬럼 동작으로 정상 연결 | 같은 파일 | 컬럼 토글 및 렌더 확인 | ⏳ |
+| 2-3 | score/score evidence/sentiment 셀 렌더, 정렬, null 표시 규칙 추가 | 같은 파일 | 정렬/표시 확인 | ⏳ |
+| 2-4 | Data Control Window에 `Updates` / `Settings` 탭 구조 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx` | 탭 전환 확인 | ⏳ |
+| 2-5 | Settings 탭에 전체 글자 크기 조절 UI 추가 | 같은 파일 및 app shell styling | 슬라이더/프리셋 반영 확인 | ⏳ |
 
 2-1 목적: 사용자가 필요한 4개 컬럼을 실제로 보이게 만든다.
 2-1 설명: 단순 타입 선언이 아니라 메뉴/헤더/행 렌더까지 연결한다.
@@ -348,15 +384,15 @@ npm run build
 사용자 확인 필요: 예
 ```
 
-#### ✅ Step 3 — Workspace state persistence 구현
+#### ⏳ Step 3 — Workspace state persistence 구현
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 3-1 | 앱 셸의 tabs/activeTab/theme/linkedTicker 저장 구조 설계 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/App.tsx` | 새 localStorage payload 확인 | ✅ |
-| 3-2 | 창 배치(position/size/title/type/linkId) 저장/복원 구현 | `App.tsx`, `DraggableWindow.tsx` 관련 파일 | 재실행 후 복원 확인 | ✅ |
-| 3-3 | 탭 전환 후 탭별 window state 유지 확인 및 보강 | `App.tsx` 및 창 컴포넌트 state wiring | 탭 왕복 테스트 | ✅ |
-| 3-4 | 창별 중요 UI state(컬럼/필터/검색/active Settings tab) 저장 범위 반영 | `FinnhubNewsWindow.tsx`, `DataControlWindow.tsx` 등 | 창 재오픈 후 상태 복원 확인 | ✅ |
-| 3-5 | storage versioning / fallback reset 로직 추가 | app shell 공용 유틸 | 깨진 payload 복구 확인 | ✅ |
+| 3-1 | 앱 셸의 tabs/activeTab/theme/linkedTicker 저장 구조 설계 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/App.tsx` | 새 localStorage payload 확인 | ⏳ |
+| 3-2 | 창 배치(position/size/title/type/linkId) 저장/복원 구현 | `App.tsx`, `DraggableWindow.tsx` 관련 파일 | 재실행 후 복원 확인 | ⏳ |
+| 3-3 | 탭 전환 후 탭별 window state 유지 확인 및 보강 | `App.tsx` 및 창 컴포넌트 state wiring | 탭 왕복 테스트 | ⏳ |
+| 3-4 | 창별 중요 UI state(컬럼/필터/검색/active Settings tab) 저장 범위 반영 | `FinnhubNewsWindow.tsx`, `DataControlWindow.tsx` 등 | 창 재오픈 후 상태 복원 확인 | ⏳ |
+| 3-5 | storage versioning / fallback reset 로직 추가 | app shell 공용 유틸 | 깨진 payload 복구 확인 | ⏳ |
 
 3-1 목적: 앱 전체 복원의 기준 payload를 만든다.
 3-1 설명: localStorage key, version, schema를 정한다.
@@ -473,6 +509,7 @@ Legend
 ✅ 0-2 ai-news-analysis 출력 기준 정리
 🚫 0-3 저장 위치 확정
 🚫 0-5 삭제 감지 테스트 규칙 확정
+✅ 0-6 confirmed-empty recent skip 규칙 확정
    |
    v
 ⬜ 1-1 DB migration
@@ -481,26 +518,27 @@ Legend
 ⬜ 1-4 GET /api/news contract 확장
 ⬜ 1-5 기본 빈 상태 규칙
 ⬜ 1-6 삭제 감지 backend 테스트
+⬜ 1-7 confirmed-empty range 저장/skip
 
 [Track B: 프론트 컬럼 / 운영 UI]
 ✅ 0-2 ai-news-analysis 출력 기준 정리
 ✅ 0-4 persistence 범위 확정
    |
-   +--> ⬜ 2-1 Score/Score Evidence/Keywords/Sentiment 컬럼 반영
-   +--> ⬜ 2-2 Keywords 컬럼 활성화
-   +--> ⬜ 2-3 score/evidence/sentiment 정렬/렌더
-   +--> ⬜ 2-4 Data Control Settings 탭 추가
-   +--> ⬜ 2-5 전체 글자 크기 조절 UI
+   +--> ⏳ 2-1 Score/Score Evidence/Keywords/Sentiment 컬럼 반영
+   +--> ⏳ 2-2 Keywords 컬럼 활성화
+   +--> ⏳ 2-3 score/evidence/sentiment 정렬/렌더
+   +--> ⏳ 2-4 Data Control Settings 탭 추가
+   +--> ⏳ 2-5 전체 글자 크기 조절 UI
 
 [Track C: workspace persistence]
 ✅ 0-4 persistence 범위 확정
    |
    v
-⬜ 3-1 workspace state schema
-⬜ 3-2 창 배치 저장/복원
-⬜ 3-3 탭 왕복 상태 유지
-⬜ 3-4 창 내부 UI state 저장
-⬜ 3-5 storage version/fallback
+⏳ 3-1 workspace state schema
+⏳ 3-2 창 배치 저장/복원
+⏳ 3-3 탭 왕복 상태 유지
+⏳ 3-4 창 내부 UI state 저장
+⏳ 3-5 storage version/fallback
 
 [Track D: 마감]
 ⬜ 4-1 prompt 문서 동기화
@@ -608,3 +646,24 @@ Step 1 backend schema와 Step 2 UI 컬럼 의미가 고정되지 않는다.
 - 앱을 다시 열었을 때 마지막 탭이 자동으로 열린다.
 - News Feed의 컬럼 on/off 상태가 이전과 같다.
 - 글자 크기가 마지막 설정값으로 유지된다.
+
+### 결정 #6 — Finnhub recent confirmed-empty skip 정책(상세)
+사용자 요구 기준:
+- automatic recent retry는 confirmed-empty 과거 구간에 대해 영구 스킵한다.
+- 수동 `custom range` 재조회는 계속 허용한다.
+
+권장 기준:
+- confirmed-empty 기록은 `ticker + source_type` 단위로 분리한다.
+- 기록 조건은 **정상 응답 200 + 실제 빈 배열 길이 0** 으로 제한한다.
+- timeout, 429, 5xx, 파싱 실패, 기타 오류는 empty confirmation으로 기록하지 않는다.
+- 자동 스킵 대상은 **당일 제외, 당일 이전 범위** 로 제한한다.
+
+운영적 정의:
+- 예시 1: `AAPL + company_news`를 `2026-03-01 ~ 2026-03-06`로 조회했고 200 + 빈 배열이면, automatic recent retry에서는 `2026-03-05`까지 confirmed-empty 범위로 취급한다.
+- 예시 2: 같은 날 `AAPL + press_release`에서 1건이라도 반환되면 `company_news` confirmed-empty와 별개로 취급한다.
+- 예시 3: `MSFT + company_news` 조회가 timeout/429/5xx이면 confirmed-empty를 기록하지 않고, 다음 recent retry 대상에서 제외하지 않는다.
+
+사람 확인 체크 항목:
+- 뉴스가 없던 ticker는 같은 과거 범위를 recent update에서 반복 조회하지 않는다.
+- `company_news`와 `press_release`의 스킵 판단이 서로 섞이지 않는다.
+- 당일 범위는 여전히 조회될 수 있고, 필요하면 `custom range`로 과거를 강제 재조회할 수 있다.

@@ -222,6 +222,16 @@ Finnhub 뉴스 적재는 직접 API response를 표에 그리지 않고, backend
 
 `recent`를 시작하면 preflight modal이 먼저 열리고, 기존 데이터가 없는 fallback ticker 수를 보여준다.
 
+Recent Update 섹션 바로 아래에 automatic recent retry 정책 설명이 작은 보조 문구로 항상 표시된다.
+
+보조 문구 핵심 내용:
+
+- confirmed-empty 과거 구간은 automatic recent retry에서 영구 스킵
+- HTTP 200 + 실제 빈 배열일 때만 confirmed-empty로 기록
+- `company_news`, `press_release`는 분리 기록
+- 당일 범위는 영구 스킵에서 제외
+- 강제 재조회가 필요하면 `Custom Update` 사용
+
 custom update는 별도 날짜 선택 modal에서 `from/to`를 입력한 뒤 시작한다.
 
 ### Change Update 버튼

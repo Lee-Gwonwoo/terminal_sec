@@ -1120,7 +1120,12 @@ export function FinnhubNewsWindow({
 
                       {/* ── Recent Update ── */}
                       <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
-                      <div className="px-2 py-1 text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Recent Update</div>
+                      <div className="px-2 py-1 text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                        <span>Recent Update</span>
+                      </div>
+                      <div className="px-3 pb-2 text-[10px] leading-4 text-gray-500 dark:text-gray-400">
+                        Auto recent skips previously confirmed-empty past ranges only after HTTP 200 + empty array. `company_news` and `press_release` are tracked separately, today is excluded, and `Custom Update` can still force a manual re-check.
+                      </div>
                       <button onClick={() => { setShowUpdateMenu(false); handleRecentWithPreflight('all'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <RotateCw className="w-3.5 h-3.5 shrink-0 text-purple-500" />
                         <div><div className="font-medium">Recent Update (All)</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">From last collected date · per ticker</div></div>
