@@ -621,8 +621,8 @@ node test_check_news_db.mjs
 | 2-12 | `Bookmark view` 폴더 항목 우클릭 context menu에 `Rename`을 추가하고 인라인 이름 수정으로 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 우클릭 rename 확인 | ⏳ |
 | 2-13 | Bookmark Manager 사이드바에 `+` 버튼을 추가하고 인라인 폴더 생성으로 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/BookmarkManager.tsx` | 매니저 내 폴더 생성 확인 | ⏳ |
 | 2-14 | Bookmark Manager의 빈 폴더 영역 우클릭에서 `Paste`가 뜨도록 context menu를 확장 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/BookmarkManager.tsx` | 빈 폴더 paste 확인 | ⏳ |
-| 2-15 | Data Control `Updates` 탭에 company description update 버튼을 추가하고, 기본 대상이 `ticker_universes/default`임을 명시한다 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx` | 버튼 클릭 후 `POST /api/company-profiles/pull-fmp` 호출/결과 표시 확인 | ⬜ |
-| 2-16 | Data Control `Updates` 탭에 `Calendar Update` 섹션을 만들고 `Initial Calendar Backfill` / `Refresh Upcoming Calendar` 버튼을 분리한다 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx` | 두 버튼과 보조 설명 문구 확인 | ⬜ |
+| 2-15 | Data Control `Updates` 탭에 company description update 버튼을 추가하고, 기본 대상이 `ticker_universes/default`임을 명시한다 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx` | 버튼 클릭 후 `POST /api/company-profiles/pull-fmp` 호출/결과 표시 확인 | ✅ |
+| 2-16 | Data Control `Updates` 탭에 `Calendar Update` 섹션을 만들고 `Initial Calendar Backfill` / `Refresh Upcoming Calendar` 버튼을 분리한다 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx` | 두 버튼과 보조 설명 문구 확인 | ✅ |
 
 2-1 목적: 사용자가 필요한 4개 컬럼을 실제로 보이게 만든다.
 2-1 설명: 단순 타입 선언이 아니라 메뉴/헤더/행 렌더까지 연결한다.

@@ -22,7 +22,7 @@ interface JobStatus {
   result?: Record<string, unknown>;
 }
 
-type SectionKey = 'price' | 'calendar' | 'recent' | 'custom';
+type SectionKey = 'price' | 'calendarBackfill' | 'calendarRefresh' | 'companyDesc' | 'recent' | 'custom';
 
 interface DataControlWindowProps {
   fontScale?: number;
@@ -53,19 +53,19 @@ export function DataControlWindow({
 
   // ─── Per-section job state ───
   const [jobIds, setJobIds] = useState<Record<SectionKey, string | null>>({
-    price: null, calendar: null, 'recent': null, custom: null,
+    price: null, calendarBackfill: null, calendarRefresh: null, companyDesc: null, 'recent': null, custom: null,
   });
   const [updating, setUpdating] = useState<Record<SectionKey, boolean>>({
-    price: false, calendar: false, 'recent': false, custom: false,
+    price: false, calendarBackfill: false, calendarRefresh: false, companyDesc: false, 'recent': false, custom: false,
   });
   const [errors, setErrors] = useState<Record<SectionKey, string | null>>({
-    price: null, calendar: null, 'recent': null, custom: null,
+    price: null, calendarBackfill: null, calendarRefresh: null, companyDesc: null, 'recent': null, custom: null,
   });
 
   // ─── View Log state (only one section's log at a time) ───
   const [logSection, setLogSection] = useState<SectionKey | null>(null);
   const [jobStatuses, setJobStatuses] = useState<Record<SectionKey, JobStatus | null>>({
-    price: null, calendar: null, 'recent': null, custom: null,
+    price: null, calendarBackfill: null, calendarRefresh: null, companyDesc: null, 'recent': null, custom: null,
   });
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -199,8 +199,18 @@ export function DataControlWindow({
         case 'price':
           url = `${API_BASE}/api/ibkr/ohlc1d/update`;
           break;
-        case 'calendar':
+        case 'calendarBackfill':
           url = `${API_BASE}/api/ibkr/calendar/update`;
+          headers['Content-Type'] = 'application/json';
+          body = JSON.stringify({ mode: 'backfill' });
+          break;
+        case 'calendarRefresh':
+          url = `${API_BASE}/api/ibkr/calendar/update`;
+          headers['Content-Type'] = 'application/json';
+          body = JSON.stringify({ mode: 'refresh' });
+          break;
+        case 'companyDesc':
+          url = `${API_BASE}/api/company-profiles/pull-fmp`;
           break;
         case 'recent':
           url = `${API_BASE}/api/news/change/update-recent`;
@@ -257,12 +267,16 @@ export function DataControlWindow({
     key: SectionKey;
     label: string;
     statusKey: string;
+    group?: string;
+    description?: string;
     extra?: React.ReactNode;
   }[] = [
     {
       key: 'price',
       label: 'IBKR Price Data',
       statusKey: 'ibkr_ohlc_1d',
+      group: 'IBKR Data',
+      description: 'IBKR에서 일봉 OHLC 데이터를 수집합니다.',
       extra: (
         <span className="text-[11px] text-gray-500 dark:text-gray-400">
           DB Max Date: <strong className="text-gray-700 dark:text-gray-200">{ohlcStatus?.overallMaxDate ?? '—'}</strong>
@@ -270,19 +284,38 @@ export function DataControlWindow({
       ),
     },
     {
-      key: 'calendar',
-      label: 'IBKR Calendar Data',
+      key: 'calendarBackfill',
+      label: 'Initial Calendar Backfill',
       statusKey: 'ibkr_calendar',
+      group: 'Calendar Update',
+      description: '과거 1–2년 + 미래 90–180일 이벤트를 한번에 적재합니다. 초기 세팅 시 실행합니다.',
     },
+    {
+      key: 'calendarRefresh',
+      label: 'Refresh Upcoming Calendar',
+      statusKey: 'ibkr_calendar',
+      group: 'Calendar Update',
+      description: '최근 14–30일 overlap + 앞으로 90일만 갱신합니다. 과거 전체를 다시 받지 않습니다.',
+    },
+    {
+      key: 'companyDesc',
+      label: 'Company Description Update',
+      statusKey: 'company_profiles',
+      group: 'Company Data',
+      description: 'ticker_universes/default 기준으로 FMP 회사 설명을 일괄 수집합니다.',
+    },
+
     {
       key: 'recent',
       label: 'Recent Change% Update',
       statusKey: 'news_change_recent',
+      group: 'Change Update',
     },
     {
       key: 'custom',
       label: 'Custom Change% Update',
       statusKey: 'news_change_custom',
+      group: 'Change Update',
       extra: (
         <div className="flex items-center gap-2 flex-wrap">
           <label className="text-[11px] text-gray-500 dark:text-gray-400">From:</label>
@@ -534,20 +567,32 @@ export function DataControlWindow({
       {/* Sections (Updates tab) */}
       {activeDataTab === 'updates' && (
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {sections.map(({ key, label, statusKey, extra }) => {
+        {sections.map(({ key, label, statusKey, group, description, extra }, idx) => {
           const isRunning = updating[key];
           const error = errors[key];
           const jobId = jobIds[key];
+          const prevGroup = idx > 0 ? sections[idx - 1].group : undefined;
           const js = jobStatuses[key];
 
           return (
+            <React.Fragment key={key}>
+              {/* Group header */}
+              {group && group !== prevGroup && (
+                <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide pt-2 pb-0.5">
+                  {group}
+                </div>
+              )}
             <div
-              key={key}
               className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 bg-white dark:bg-gray-850"
             >
               {/* Row 1: Label + buttons */}
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-medium text-gray-800 dark:text-gray-100">{label}</span>
+                <div>
+                  <span className="text-xs font-medium text-gray-800 dark:text-gray-100">{label}</span>
+                  {description && (
+                    <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">{description}</p>
+                  )}
+                </div>
                 <div className="flex items-center gap-1.5">
                   {/* Update button */}
                   <button
@@ -599,6 +644,7 @@ export function DataControlWindow({
                 )}
               </div>
             </div>
+            </React.Fragment>
           );
         })}
       </div>

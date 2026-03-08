@@ -1255,3 +1255,56 @@ Step 4 전체 (4-1 ~ 4-4)를 완료했다.
 
 - `calendar_events` 데이터 정체: 전부 mock_provider. event_type 분포: economics 1,208건, sec_filings 832건, earnings 349건, splits 220건, analyst_ratings 213건, dividends 119건 등.
 - 사용자 확인 전까지 상태는 `확인 대기`로 유지한다.
+
+---
+
+### 2-15 Company Description Update 버튼 + 2-16 Calendar Update 이원화 구현
+
+**작성 시각:** 2026-03-07 18:48 (local)
+
+**상태:** 확인 대기
+
+#### 수행 내용
+
+1. `DataControlWindow.tsx`의 `SectionKey` 타입을 확장했다:
+   - 기존: `'price' | 'calendar' | 'recent' | 'custom'`
+   - 변경: `'price' | 'calendarBackfill' | 'calendarRefresh' | 'companyDesc' | 'recent' | 'custom'`
+2. 모든 상태 Record(jobIds, updating, errors, jobStatuses)를 새 키로 업데이트했다.
+3. `startUpdate()` switch 분기를 추가했다:
+   - `calendarBackfill` → `POST /api/ibkr/calendar/update` (`{mode: 'backfill'}`)
+   - `calendarRefresh` → `POST /api/ibkr/calendar/update` (`{mode: 'refresh'}`)
+   - `companyDesc` → `POST /api/company-profiles/pull-fmp`
+4. sections 배열에 group/description 필드를 추가하고 4개 그룹으로 분류했다:
+   - **IBKR Data**: Price (기존)
+   - **Calendar Update**: Initial Calendar Backfill, Refresh Upcoming Calendar (신규)
+   - **Company Data**: Company Description Update (신규)
+   - **Change Update**: Recent Change%, Custom Change% (기존)
+5. sections.map() JSX에 그룹 헤더(uppercase 소제목)와 description 텍스트를 추가해 시각적으로 구분되게 했다.
+6. 빌드 검증:
+   - Frontend `npm run build`: vite build 성공 (4.32s)
+   - Backend `npm run build`: tsc 성공
+   - Backend `npm test`: 48/48 pass
+7. `plan.md`에서 2-15, 2-16 상태를 ⬜ → ✅로 변경했다.
+
+#### 생성/수정 파일
+
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx`
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. 앱에서 Data Control → `Updates` 탭에서:
+   - "IBKR DATA" 그룹 아래 Price 버튼이 보이는지 확인
+   - "CALENDAR UPDATE" 그룹 아래 Initial Calendar Backfill / Refresh Upcoming Calendar 두 버튼이 각각 다른 설명과 함께 보이는지 확인
+   - "COMPANY DATA" 그룹 아래 Company Description Update 버튼이 보이는지 확인
+   - "CHANGE UPDATE" 그룹 아래 Recent/Custom 버튼이 보이는지 확인
+2. Company Description Update 버튼을 클릭하면 `POST /api/company-profiles/pull-fmp` 호출이 정상 동작하는지 확인한다.
+3. Calendar 버튼은 backend `pullIbkrCalendar()`가 아직 stub이므로 에러가 표시되는 것이 정상이다 (Step 9 구현 후 동작 예정).
+
+#### 문제점 / 리스크
+
+1. Backend calendar endpoint는 `mode` 파라미터를 아직 읽지 않는다 (stub 상태).
+   - 완화: Step 9-1 구현 시 `mode` 분기 처리 추가 예정
+2. `companyDesc` statusKey가 `company_profiles`인데, 해당 키의 update_status row가 아직 없을 수 있다.
+   - 완화: backend pull-fmp가 성공 시 자동으로 update_status를 upsert하도록 이미 구현돼 있음
