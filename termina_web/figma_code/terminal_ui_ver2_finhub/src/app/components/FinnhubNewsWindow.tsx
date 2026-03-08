@@ -571,6 +571,7 @@ export function FinnhubNewsWindow({
     try {
       const params = new URLSearchParams();
       params.set('source_names', 'FINNHUB');
+      params.set('source_names', 'FINNHUB');
       if (selectedBookmarkFolderId) {
         params.set('bookmarkFolderId', selectedBookmarkFolderId);
       }
@@ -613,6 +614,7 @@ export function FinnhubNewsWindow({
     setLoadingMore(true);
     try {
       const params = new URLSearchParams();
+      params.set('source_names', 'FINNHUB');
       params.set('source_names', 'FINNHUB');
       if (selectedBookmarkFolderId) {
         params.set('bookmarkFolderId', selectedBookmarkFolderId);
@@ -2232,7 +2234,7 @@ export function FinnhubNewsWindow({
           className="fixed z-[60] bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-lg min-w-[180px] overflow-hidden"
           style={(() => {
             const menuW = 220;
-            const menuH = Math.max(48, 36 + bookmarkFolders.length * 32);
+            const menuH = bookmarkFolders.length === 0 ? 112 : 112 + bookmarkFolders.length * 32;
             const maxX = typeof window !== 'undefined' ? window.innerWidth - menuW - 8 : rowCtxMenu.x;
             const maxY = typeof window !== 'undefined' ? window.innerHeight - menuH - 8 : rowCtxMenu.y;
             return {
@@ -2241,6 +2243,19 @@ export function FinnhubNewsWindow({
             } as React.CSSProperties;
           })()}
         >
+          <div className="px-3 py-2 text-[10px] text-gray-400 border-b border-gray-200 dark:border-gray-700">
+            Row actions
+          </div>
+          <button
+            className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700"
+            onClick={async () => {
+              await copyToClipboard(rowCtxMenu.newsId);
+              setRowCtxMenu(null);
+            }}
+          >
+            Copy ID
+          </button>
+          <div className="border-t border-gray-200 dark:border-gray-700" />
           <div className="px-3 py-2 text-[10px] text-gray-400 border-b border-gray-200 dark:border-gray-700">
             Add bookmark
           </div>

@@ -24,7 +24,7 @@
 15. News Feed 검색에 날짜 기간(`from`/`to`) 필터를 추가하고, 날짜가 비어 있으면 전체 기간 검색이 되게 한다.
 16. `news_fulltext.full_text`는 HTML fragment가 아니라 plain text 본문만 canonical하게 저장하고, 기존 HTML 기반 row는 삭제 또는 재생성으로 정리한다.
 17. News Feed에 크롬 북마크처럼 폴더형 북마크 구조를 추가하고, 북마크 폴더를 생성/선택할 수 있게 한다.
-18. News row를 우클릭했을 때 `Add bookmark`를 표시하고, 이미 만든 북마크 폴더 중 어디에 저장할지 선택해서 저장할 수 있게 한다.
+18. News row를 우클릭했을 때 `Copy ID`와 `Add bookmark`를 표시하고, news id 복사 또는 기존 북마크 폴더 저장을 바로 할 수 있게 한다.
 19. 검색창 근처에 `Bookmark view`를 두고, 북마크 폴더를 선택하면 그 폴더에 저장된 뉴스 row만 UI에 보이게 한다.
 20. Default ticker / company description / watchlist가 장기적으로 같은 종목 엔터티를 바라보도록 `securities.id` 중심 canonical 종목 모델을 도입한다.
 21. News Feed Window에 `Peers` 컬럼을 추가하되, 기본 visible 컬럼 세트에는 포함하지 않는다.
@@ -127,7 +127,7 @@
 - News Feed 컬럼 메뉴에서 `Company Description`을 켜면 셀에는 잘린 텍스트만 보이고, 셀을 클릭했을 때 전체 설명을 보는 별도 창 또는 팝업이 열린다.
 - Data Control `Updates`와 News Feed update 메뉴 양쪽에 `Calendar Update` 섹션이 보이고, 그 안에 `Initial Calendar Backfill`, `Refresh Upcoming Calendar` 두 액션이 따로 보인다.
 - `Refresh Upcoming Calendar`를 반복 실행해도 과거 전체를 다시 받는 식이 아니라, 최근 짧은 overlap + 앞으로 upcoming 범위만 갱신한다는 설명과 결과 요약이 보인다.
-- News row를 우클릭하면 `Add bookmark`가 뜨고, 원하는 북마크 폴더를 골라 저장할 수 있다.
+- News row를 우클릭하면 `Copy ID`와 `Add bookmark`가 뜨고, news id 복사 또는 원하는 북마크 폴더 저장을 바로 할 수 있다.
 - 검색창 근처의 `Bookmark view`를 누르면 폴더 목록이 보이고, 특정 폴더를 선택하면 그 폴더 안의 북마크 뉴스만 리스트에 보인다.
 - 분석 전 뉴스 row는 `Score`, `Score Evidence`, `Keywords`가 비어 있고, 분석 후에만 채워진다.
 - 테스트에서 `Score` 또는 `Score Evidence`가 지워진 경우 실패로 잡힌다.
@@ -234,6 +234,11 @@ Step N — <제목>
 - 왜: 사용자가 copy/cut 이후 빈 폴더 안을 우클릭했을 때도 자연스럽게 `Paste`가 보여야 한다고 요청했다.
 - 무엇이 바뀌었나: Step 2 범위에 Bookmark Manager의 빈 폴더/빈 여백 우클릭 `Paste` context menu를 추가했다.
 - 영향: `BookmarkManager.tsx` 아이템 패널 context menu 동작과 북마크 수동 검증 체크리스트가 함께 바뀐다.
+
+### PLAN CHANGE (2026-03-08)
+- 왜: 사용자가 News Feed row 우클릭 메뉴에서 북마크 저장 외에 해당 뉴스의 id도 바로 복사할 수 있게 해 달라고 요청했다.
+- 무엇이 바뀌었나: Step 2의 row context menu 범위를 `Add bookmark` 전용에서 `Copy ID` + `Add bookmark` 복합 메뉴로 확장했다.
+- 영향: `FinnhubNewsWindow.tsx` row context menu 높이/액션 구성과 프론트 수동 검증 체크리스트가 함께 바뀐다.
 
 ### PLAN CHANGE (2026-03-07)
 - 왜: market news에서 publisher가 제대로 표시/기능되지 않는 버그 리포트.
@@ -395,7 +400,7 @@ Step N — <제목>
 
 9. 북마크 contract 확인
    - 북마크 폴더와 북마크 아이템의 canonical 저장소를 별도 테이블로 둘지 확정하는지
-   - 뉴스 row 우클릭 시 `Add bookmark` 메뉴가 뜨고, 폴더 선택 다이얼로그 또는 서브메뉴 흐름을 어떤 방식으로 둘지 고정하는지
+   - 뉴스 row 우클릭 시 `Copy ID`와 `Add bookmark` 메뉴가 뜨고, id 복사 액션과 폴더 선택 흐름을 어떤 방식으로 둘지 고정하는지
    - `Bookmark view`에서 폴더 선택 시 해당 폴더에 속한 뉴스 row 집합만 보여주는지 확인하는지
    - 같은 news_id를 같은 폴더에 중복 저장할 때의 정책을 정하는지
 
@@ -623,7 +628,7 @@ node test_check_news_db.mjs
 | 2-7 | 검색 결과를 최초 500개 로드 후 하단 스크롤 시 자동으로 `nextCursor` 500개 append 하고, 동시에 하단 `Load more` 버튼으로도 같은 추가 로드를 가능하게 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 자동 로드/버튼 로드 확인 | ✅ |
 | 2-8 | 검색창 영역에 날짜 From/To 입력을 추가하고 비어 있으면 전체 검색, 값이 있으면 기간 검색으로 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 날짜 조건 검색 확인 | ✅ |
 | 2-9 | 검색창 근처에 `Bookmark view` UI와 북마크 폴더 선택 메뉴 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 폴더 선택 UI 확인 | ✅ |
-| 2-10 | News row 우클릭 메뉴에 `Add bookmark`와 폴더 선택 흐름 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 우클릭 북마크 저장 확인 | ✅ |
+| 2-10 | News row 우클릭 메뉴에 `Copy ID`, `Add bookmark`, 폴더 선택 흐름 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 우클릭 id 복사/북마크 저장 확인 | ✅ |
 | 2-11 | 선택한 북마크 폴더 안의 뉴스만 리스트에 표시하는 bookmark mode 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 북마크 폴더별 결과 확인 | ✅ |
 | 2-12 | `Bookmark view` 폴더 항목 우클릭 context menu에 `Rename`을 추가하고 인라인 이름 수정으로 연결 | `FinnhubNewsWindow.tsx`, `BookmarkManager.tsx` | 우클릭 rename 확인 | ✅ |
 | 2-13 | Bookmark Manager 사이드바에 `+` 버튼을 추가하고 인라인 폴더 생성으로 연결 | `BookmarkManager.tsx` | 매니저 내 폴더 생성 확인 | ✅ |
@@ -685,11 +690,11 @@ node test_check_news_db.mjs
 2-9 사람 검증(비개발자): 폴더를 몇 개 만들어 두면 메뉴에서 각 폴더 이름을 직접 고를 수 있다.
 2-9 흔한 문제/주의: 폴더가 많아질 때 단순 평면 리스트만 보여주면 크롬 북마크 같은 구조라는 요구와 어긋날 수 있다.
 
-2-10 목적: 뉴스 리스트에서 곧바로 북마크할 수 있게 한다.
-2-10 설명: row 우클릭 시 `Add bookmark`를 띄우고, 클릭하면 기존 북마크 폴더 목록 중 어디에 저장할지 선택하게 한다.
-2-10 완료 조건(눈으로 확인): 뉴스 row 우클릭 메뉴에 `Add bookmark`가 보이고, 폴더 선택 뒤 저장된다.
-2-10 사람 검증(비개발자): 뉴스 하나를 우클릭해 폴더를 고르면 그 뉴스가 북마크 폴더에 들어간다.
-2-10 흔한 문제/주의: 현재 URL 복사 메뉴와 북마크 메뉴가 충돌하지 않도록 row 기준 메뉴와 source/url cell 기준 메뉴를 분리할 필요가 있다.
+2-10 목적: 뉴스 리스트에서 곧바로 news id 복사와 북마크 저장을 모두 처리할 수 있게 한다.
+2-10 설명: row 우클릭 시 `Copy ID`와 `Add bookmark`를 함께 띄우고, `Copy ID`는 현재 row의 `news_id`를 clipboard에 복사하며, 북마크 영역에서는 기존 폴더 목록 중 저장 대상을 바로 고르게 한다.
+2-10 완료 조건(눈으로 확인): 뉴스 row 우클릭 메뉴에 `Copy ID`와 `Add bookmark`가 보이고, id 복사와 폴더 선택 저장이 모두 동작한다.
+2-10 사람 검증(비개발자): 뉴스 하나를 우클릭해 `Copy ID`를 누른 뒤 메모장에 붙여넣으면 id가 들어가고, 이어서 폴더를 고르면 그 뉴스가 북마크 폴더에 들어간다.
+2-10 흔한 문제/주의: 현재 URL 복사 메뉴와 row 메뉴가 충돌하지 않도록 row 기준 메뉴와 source/url cell 기준 메뉴를 분리해야 하고, 메뉴 높이 계산이 작으면 화면 아래에서 잘릴 수 있다.
 
 2-11 목적: 선택한 북마크 폴더를 뉴스 뷰 자체로 볼 수 있게 한다.
 2-11 설명: `Bookmark view`에서 폴더를 선택하면 일반 검색 결과 대신 해당 폴더에 저장된 뉴스 데이터 집합을 같은 리스트 UI에 렌더한다.
@@ -747,6 +752,7 @@ npm run build
 - `Bookmark view` 폴더 항목 우클릭 시 `Rename` 메뉴가 뜨고 이름 변경이 저장되는지 확인
 - Bookmark Manager 안의 `+` 버튼으로 새 폴더를 만들 수 있고 생성 직후 목록에 보이는지 확인
 - Copy 또는 Cut 후 빈 폴더의 빈 영역을 우클릭했을 때 `Paste`가 뜨고 정상 붙여넣기 되는지 확인
+- 뉴스 row 우클릭 시 `Copy ID`가 보이고 클릭 후 news id가 clipboard에 복사되는지 확인
 - 뉴스 row 우클릭 시 `Add bookmark`가 보이고, 폴더 선택 후 북마크 저장이 되는지 확인
 - 특정 북마크 폴더 선택 시 그 폴더 안 뉴스만 표시되는지 확인
 - Data Control `Updates`에 company description update 버튼이 보이는지 확인
@@ -881,11 +887,12 @@ E2E 수동 검증 체크리스트 (1회 실행 순서):
 
 [북마크]
 □ 11. Bookmark view 메뉴 열기 → "All news" 표시 확인
-□ 12. 뉴스 row 우클릭 → "Add bookmark" → 폴더가 없으면 빈 목록
-□ 13. (API direct) POST /api/bookmarks/folders {"name":"Test"} → 폴더 생성
-□ 14. 뉴스 row 우클릭 → "Add bookmark" → 생성한 폴더 선택 → 저장
-□ 15. Bookmark view → 해당 폴더 선택 → 북마크된 뉴스만 표시
-□ 16. "All news" 선택 → 전체 뉴스 복귀
+□ 12. 뉴스 row 우클릭 → `Copy ID` → 붙여넣기 시 news id 문자열 확인
+□ 13. 뉴스 row 우클릭 → "Add bookmark" → 폴더가 없으면 빈 목록
+□ 14. (API direct) POST /api/bookmarks/folders {"name":"Test"} → 폴더 생성
+□ 15. 뉴스 row 우클릭 → "Add bookmark" → 생성한 폴더 선택 → 저장
+□ 16. Bookmark view → 해당 폴더 선택 → 북마크된 뉴스만 표시
+□ 17. "All news" 선택 → 전체 뉴스 복귀
 
 [Workspace persistence]
 □ 17. 탭 2개 생성, 각 탭 창 위치/크기 다르게 배치
@@ -1294,7 +1301,7 @@ Legend
    +--> ✅ 2-7 500개 cursor 자동 append + Load more 버튼
    +--> ✅ 2-8 날짜 기간 검색 UI + from/to query 연결
    +--> ✅ 2-9 Bookmark view 폴더 선택 UI
-   +--> ✅ 2-10 row 우클릭 Add bookmark
+   +--> ✅ 2-10 row 우클릭 Copy ID + Add bookmark
    +--> ✅ 2-11 폴더별 bookmark mode 결과 표시
    +--> ✅ 2-15 company description update 액션
    +--> ✅ 2-4 Data Control Settings 탭 추가
@@ -1618,7 +1625,7 @@ Track H도 완료되었다 (Step 9). calendar backend mode 계약 (backfill/refr
 ### 결정 #8 — News Bookmark Folder/View 정책(상세)
 사용자 요구 기준:
 - 크롬 북마크처럼 북마크와 북마크 폴더를 만들 수 있어야 한다.
-- 뉴스 data를 우클릭하면 `Add bookmark`가 떠야 하고, 이미 만든 폴더 중 어디에 저장할지 선택할 수 있어야 한다.
+- 뉴스 data를 우클릭하면 `Copy ID`와 `Add bookmark`가 떠야 하고, id 복사 또는 이미 만든 폴더 저장을 선택할 수 있어야 한다.
 - 검색창 근처의 `Bookmark view`에서 폴더를 선택하면 그 폴더에 북마크된 뉴스만 UI에 보여야 한다.
 
 권장 기준:
@@ -1629,13 +1636,14 @@ Track H도 완료되었다 (Step 9). calendar backend mode 계약 (backfill/refr
 - 북마크 폴더 선택 UI는 검색창 근처에서 바로 접근 가능해야 하고, row 우클릭 메뉴와 충돌하지 않아야 한다.
 
 운영적 정의:
-- 예시 1: 사용자가 `Earnings` 폴더를 만들고 뉴스 A를 우클릭해 `Add bookmark` → `Earnings`를 고르면, 이후 `Bookmark view`에서 `Earnings` 선택 시 뉴스 A가 리스트에 보여야 한다.
-- 예시 2: `Macro` 폴더와 `Semis` 폴더에 서로 다른 뉴스를 넣어 두면, 각 폴더 선택 시 자기 폴더 뉴스만 보여야 한다.
-- 예시 3: 같은 뉴스를 같은 폴더에 두 번 `Add bookmark`해도 중복 행이 두 번 보이면 안 된다.
+- 예시 1: 사용자가 뉴스 A를 우클릭해 `Copy ID`를 누르고 붙여넣으면 A의 `news_id` 문자열이 그대로 들어가야 한다.
+- 예시 2: 사용자가 `Earnings` 폴더를 만들고 뉴스 A를 우클릭해 `Add bookmark` → `Earnings`를 고르면, 이후 `Bookmark view`에서 `Earnings` 선택 시 뉴스 A가 리스트에 보여야 한다.
+- 예시 3: `Macro` 폴더와 `Semis` 폴더에 서로 다른 뉴스를 넣어 두면, 각 폴더 선택 시 자기 폴더 뉴스만 보여야 한다.
+- 예시 4: 같은 뉴스를 같은 폴더에 두 번 `Add bookmark`해도 중복 행이 두 번 보이면 안 된다.
 
 사람 확인 체크 항목:
 - 북마크 폴더를 직접 만들 수 있다.
-- 뉴스 row 우클릭 시 `Add bookmark`가 보인다.
+- 뉴스 row 우클릭 시 `Copy ID`와 `Add bookmark`가 함께 보인다.
 - 폴더 선택 후 해당 뉴스가 그 폴더의 `Bookmark view`에서만 보인다.
 - saved view와 bookmark가 UI에서 서로 다른 개념으로 보인다.
 

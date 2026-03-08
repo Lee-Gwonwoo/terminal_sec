@@ -327,7 +327,8 @@ API:
 
 #### Row 우클릭 북마크
 
-- 뉴스 row를 우클릭하면 컨텍스트 메뉴가 뜨고 `Add bookmark` 선택지가 보인다.
+- 뉴스 row를 우클릭하면 컨텍스트 메뉴가 뜨고 `Copy ID`와 `Add bookmark` 선택지가 보인다.
+- `Copy ID`를 누르면 해당 뉴스의 `news_id` 문자열이 clipboard로 복사된다.
 - 폴더를 선택하면 `POST /api/bookmarks/items`로 해당 뉴스를 폴더에 저장한다.
 
 관련 API:

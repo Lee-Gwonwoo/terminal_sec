@@ -75,6 +75,9 @@ app.use(express.json({ limit: "1mb" }));
 
 const DEMO_USER_ID = "11111111-1111-1111-1111-111111111111";
 
+// Adaptive batch concurrency levels for ticker fetching: 30 → 15 → 7 → 1
+const BATCH_LEVELS = [30, 15, 7, 1] as const;
+
 function parseList(input: unknown): string[] | undefined {
   if (typeof input !== "string" || input.trim() === "") {
     return undefined;
@@ -437,9 +440,10 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
       };
 
       try {
-        for (let i = 0; i < tickerList.length; i++) {
-          const ticker = tickerList[i];
-          appendLog(jobId, `[${i + 1}/${tickerList.length}] Processing ${ticker}...`);
+        // ── Per-ticker processor: throws on rate-limit to signal adaptive batch runner ──
+        const processOneTicker = async (ticker: string): Promise<void> => {
+          const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+          let hadRateLimitError = false;
 
           // Company news
           if (pullCompany) {
@@ -455,7 +459,6 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
 
                   // Check confirmed-empty range — skip if the entire range is already confirmed empty (before today)
                   const emptyRange = await getConfirmedEmptyRange(ticker, "company_news");
-                  const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
                   if (emptyRange && tickerFrom >= emptyRange.rangeFrom && yesterday <= emptyRange.rangeTo) {
                     appendLog(jobId, `  company_news ${ticker}: confirmed-empty skip (${emptyRange.rangeFrom}~${emptyRange.rangeTo})`);
                     items = [];
@@ -472,11 +475,12 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
               }
               await insertFetchedItems(items, detailsPerType.company_news, newItems, counters);
               if (items.length > 0) {
-                appendLog(jobId, `  company_news: ${items.length} fetched, ${detailsPerType.company_news.inserted} inserted so far`);
+                appendLog(jobId, `  company_news ${ticker}: ${items.length} fetched`);
               }
             } catch (err: any) {
               console.error(`[pull-finhub] company_news ${ticker}: ${err.message}`);
               appendLog(jobId, `  ⚠ company_news ${ticker}: ${err.message}`);
+              if (/429|rate.?limit/i.test(err.message ?? "")) hadRateLimitError = true;
             }
           }
 
@@ -494,7 +498,6 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
 
                   // Check confirmed-empty range
                   const emptyRange = await getConfirmedEmptyRange(ticker, "press_release");
-                  const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
                   if (emptyRange && tickerFrom >= emptyRange.rangeFrom && yesterday <= emptyRange.rangeTo) {
                     appendLog(jobId, `  press_release ${ticker}: confirmed-empty skip (${emptyRange.rangeFrom}~${emptyRange.rangeTo})`);
                     items = [];
@@ -510,19 +513,58 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
               }
               await insertFetchedItems(items, detailsPerType.press_release, newItems, counters);
               if (items.length > 0) {
-                appendLog(jobId, `  press_release: ${items.length} fetched, ${detailsPerType.press_release.inserted} inserted so far`);
+                appendLog(jobId, `  press_release ${ticker}: ${items.length} fetched`);
               }
             } catch (err: any) {
               console.error(`[pull-finhub] press_release ${ticker}: ${err.message}`);
               appendLog(jobId, `  ⚠ press_release ${ticker}: ${err.message}`);
+              if (/429|rate.?limit/i.test(err.message ?? "")) hadRateLimitError = true;
             }
           }
 
-          // Update progress
-          updateProgress(jobId, i + 1);
+          // Re-throw on rate-limit so adaptive batch runner can reduce concurrency and retry
+          if (hadRateLimitError) throw new Error(`Rate limit hit for ${ticker}`);
+        };
 
-          // Small delay between tickers to respect rate limits
-          await new Promise((r) => setTimeout(r, 250));
+        // ── Adaptive concurrent batch: 30 → 15 → 7 → 1 ──
+        // Runs tickers in parallel chunks of batchSize.
+        // If any ticker hits a rate-limit error, it is collected and retried at the next smaller concurrency level.
+        let processedCount = 0;
+        let remainingTickers = [...tickerList];
+        for (const batchSize of BATCH_LEVELS) {
+          if (remainingTickers.length === 0) break;
+          appendLog(jobId, `[batch] concurrency=${batchSize}, remaining=${remainingTickers.length}`);
+          const failedTickers: string[] = [];
+
+          for (let i = 0; i < remainingTickers.length; i += batchSize) {
+            const chunk = remainingTickers.slice(i, i + batchSize);
+            const results = await Promise.allSettled(chunk.map((t) => processOneTicker(t)));
+            for (let j = 0; j < results.length; j++) {
+              if (results[j].status === "rejected") {
+                failedTickers.push(chunk[j]);
+              } else {
+                processedCount++;
+                updateProgress(jobId, processedCount);
+              }
+            }
+            // Brief inter-chunk pause to ease rate pressure
+            if (i + batchSize < remainingTickers.length) {
+              await new Promise((r) => setTimeout(r, 200));
+            }
+          }
+
+          if (failedTickers.length === 0) break;
+
+          if (batchSize === BATCH_LEVELS[BATCH_LEVELS.length - 1]) {
+            // Already at concurrency=1 — give up on remaining failed tickers
+            appendLog(jobId, `⚠ ${failedTickers.length} tickers still failed at concurrency=1: ${failedTickers.join(", ")}`);
+            processedCount += failedTickers.length;
+            updateProgress(jobId, processedCount);
+            break;
+          }
+
+          appendLog(jobId, `⚠ ${failedTickers.length} tickers hit rate limit — retrying at lower concurrency`);
+          remainingTickers = failedTickers;
         }
 
         if (pullMarket) {
