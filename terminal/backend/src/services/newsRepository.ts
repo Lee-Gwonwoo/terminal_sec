@@ -101,7 +101,7 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
   }
 
   if (query.to) {
-    values.push(query.to);
+    values.push(`${query.to}T23:59:59.999Z`);
     where.push(`ni.published_at <= ?`);
   }
 

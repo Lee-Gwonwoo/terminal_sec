@@ -35,8 +35,12 @@ export function matchesNewsFilters(item: NewsItem, filters: NewsQuery): boolean 
     return false;
   }
 
-  if (filters.to && new Date(item.published_at) > new Date(filters.to)) {
-    return false;
+  if (filters.to) {
+    const toEnd = new Date(filters.to);
+    toEnd.setUTCHours(23, 59, 59, 999);
+    if (new Date(item.published_at) > toEnd) {
+      return false;
+    }
   }
 
   return true;

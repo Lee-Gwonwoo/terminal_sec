@@ -1489,6 +1489,13 @@ Track H도 완료되었다 (Step 9). calendar backend mode 계약 (backfill/refr
 - **무엇이 바뀌었나**: 목표에 calendar update 이원화 요구를 추가했고, 현재 상태에 `pullIbkrCalendar()`가 아직 stub이며 News Feed에 calendar 버튼이 없다는 점을 명시했다. 또한 결정 #17, Step 2의 `2-16 Data Control calendar 두 버튼`, 새 `Step 9 — Calendar Update 버튼 이원화 + 초기 backfill / upcoming refresh 정책`, 실행 의존성 그래프 `Track H`를 추가했다.
 - **영향**: IBKR WSH 전체 이벤트형/날짜 범위형 요청을 backend contract로 구체화해야 하고, Data Control과 News Feed update 메뉴가 같은 calendar backfill/refresh 의미를 공유하도록 UI 라벨/결과 요약/검증 체크리스트가 함께 바뀐다.
 
+### PLAN CHANGE (2026-03-08) — `GET /api/news` 날짜 `to` 필터 end-of-day 보정
+
+- **왜**: 사용자가 News Feed에서 단일 날짜(`from=to`) 조회 시 해당 날짜 뉴스만 보이지 않고 더 늦은 날짜가 섞여 보이는 문제를 보고했다.
+- **근본 원인**: backend `newsRepository.ts`가 `published_at` ISO timestamp(`YYYY-MM-DDTHH:mm:ss.sssZ`)에 대해 `to='YYYY-MM-DD'`를 그대로 비교하고 있었다. 이 비교는 문자열 기준으로 당일 timestamp를 모두 제외해 날짜 범위 계약을 깨뜨렸다.
+- **무엇이 바뀌었나**: `GET /api/news` 조회 쿼리의 `to` 조건을 `T23:59:59.999Z`까지 포함하도록 보정했고, SSE 필터 경로(`newsFilterMatcher.ts`)도 같은 end-of-day 규칙으로 맞췄다.
+- **영향**: `from=2026-03-01&to=2026-03-01` 같은 단일 날짜 조회가 이제 해당 일자의 뉴스만 반환해야 한다. 날짜 기간 검색 UI(2-8)와 backend 계약(1-9)이 다시 일치한다.
+
 ### 결정 #4 — persistence 저장 범위(확정)
 사용자 확인 결과: **권장범위까지 저장**으로 확정.
 
@@ -1678,3 +1685,9 @@ Track H도 완료되었다 (Step 9). calendar backend mode 계약 (backfill/refr
 - 왜: 사용자가 News Feed의 일반 update 버튼을 눌렀을 때 sentiment까지 같이 수집되지 않게 하고, 회색 날짜 row가 스크롤 상단에 고정되길 요청했다.
 - 무엇이 바뀌었나: Finnhub 일반 update는 뉴스/press/market pull만 수행하고 sentiment snapshot은 별도 `POST /api/news/sentiment/update` 경로로만 수집하도록 기준을 바꿨다. 또한 News Feed 날짜 group header는 가상 리스트 상단에 sticky overlay로 표시하는 방향으로 정리했다.
 - 영향: sentiment는 기존에 저장된 snapshot이 있을 때만 컬럼에 나타나며, 새 snapshot 갱신은 명시적인 sentiment update 실행이 필요하다. News Feed에서는 현재 보이는 날짜 그룹이 상단 회색 bar로 계속 유지된다.
+
+### PLAN CHANGE (2026-03-08 13:45) — market news 30페이지 batch 반복 backfill
+
+- 왜: 사용자가 market news는 날짜 분할보다 30페이지 단위 batch를 반복해서 이어받는 방식이 더 맞다고 지적했고, 기존 구현은 30페이지에서 조용히 멈춰 넓은 기간 custom update가 불완전해질 수 있었다.
+- 무엇이 바뀌었나: market news pull은 내부적으로 30페이지를 한 batch로 보고, `minId`를 이어받아 다음 batch를 계속 수행하도록 기준을 바꿨다. 동시에 job log에 batch 번호, 누적 페이지 수, in-range item 수, oldest published 시각, 종료 사유를 남기도록 정리했다.
+- 영향: custom market news update는 넓은 기간에서도 30페이지 한 번으로 끝나지 않고 더 오래된 페이지를 연속 배치로 탐색한다. 다만 총 페이지 guardrail에 도달하면 warning 로그를 남기고 다음 continuation cursor(`nextMinId`)를 남겨 운영자가 미완료 여부를 판단할 수 있다.

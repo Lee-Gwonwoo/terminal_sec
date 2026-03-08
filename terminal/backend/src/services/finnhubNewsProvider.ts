@@ -6,7 +6,8 @@ const MAX_RETRIES = 10;
 const BASE_DELAY_MS = 500;
 const MARKET_NEWS_CATEGORY = "general";
 const MARKET_NEWS_PAGE_DELAY_MS = 250;
-const MARKET_NEWS_MAX_PAGES = 30;
+const MARKET_NEWS_PAGE_BATCH_SIZE = 30;
+const MARKET_NEWS_MAX_TOTAL_PAGES = 300;
 
 /**
  * Adaptive backfill cap threshold.
@@ -38,6 +39,32 @@ export type FinnhubMappedItem = {
   tags: string[];
   publisher?: string;
 };
+
+export interface MarketNewsBatchProgress {
+  batchNumber: number;
+  batchPagesFetched: number;
+  totalPagesFetched: number;
+  batchItemsInRange: number;
+  totalItemsInRange: number;
+  oldestPublishedAt?: string;
+  nextMinId?: string;
+  reason: "batch-complete" | "reached-from-date" | "source-exhausted" | "page-limit";
+}
+
+export interface MarketNewsPullResult {
+  items: FinnhubMappedItem[];
+  pagesFetched: number;
+  batchesFetched: number;
+  oldestPublishedAt?: string;
+  nextMinId?: string;
+  reachedFromDate: boolean;
+  hitTotalPageLimit: boolean;
+}
+
+interface MarketNewsPullOptions {
+  startMinId?: string;
+  onBatch?: (progress: MarketNewsBatchProgress) => void;
+}
 
 // ---------- Helpers ----------
 
@@ -249,16 +276,59 @@ export async function fetchMarketNewsPageRaw(
   };
 }
 
-async function pullMarketNewsPaged(from: string, to: string): Promise<FinnhubMappedItem[]> {
+async function pullMarketNewsPaged(
+  from: string,
+  to: string,
+  options: MarketNewsPullOptions = {},
+): Promise<MarketNewsPullResult> {
   const results: FinnhubMappedItem[] = [];
   const seenUrls = new Set<string>();
   const seenMinIds = new Set<string>();
-  let minId: string | undefined;
+  let minId = options.startMinId;
+  let pagesFetched = 0;
+  let batchesFetched = 0;
+  let batchPagesFetched = 0;
+  let batchItemsInRange = 0;
+  let totalItemsInRange = 0;
+  let oldestPublishedAt: string | undefined;
+  let reachedFromDate = false;
+  let nextMinId: string | undefined;
+  let hitTotalPageLimit = false;
 
-  for (let page = 0; page < MARKET_NEWS_MAX_PAGES; page++) {
+  const flushBatch = (
+    reason: MarketNewsBatchProgress["reason"],
+    overrideNextMinId?: string,
+  ) => {
+    if (batchPagesFetched === 0) {
+      return;
+    }
+    batchesFetched += 1;
+    options.onBatch?.({
+      batchNumber: batchesFetched,
+      batchPagesFetched,
+      totalPagesFetched: pagesFetched,
+      batchItemsInRange,
+      totalItemsInRange,
+      oldestPublishedAt,
+      nextMinId: overrideNextMinId ?? nextMinId,
+      reason,
+    });
+    batchPagesFetched = 0;
+    batchItemsInRange = 0;
+  };
+
+  while (pagesFetched < MARKET_NEWS_MAX_TOTAL_PAGES) {
     const pageResult = await fetchMarketNewsPageRaw(MARKET_NEWS_CATEGORY, minId);
     if (pageResult.items.length === 0) {
+      flushBatch("source-exhausted", undefined);
+      nextMinId = undefined;
       break;
+    }
+
+    pagesFetched += 1;
+    batchPagesFetched += 1;
+    if (pageResult.oldestPublishedAt && (!oldestPublishedAt || pageResult.oldestPublishedAt < oldestPublishedAt)) {
+      oldestPublishedAt = pageResult.oldestPublishedAt;
     }
 
     for (const item of pageResult.items) {
@@ -271,21 +341,47 @@ async function pullMarketNewsPaged(from: string, to: string): Promise<FinnhubMap
       }
       seenUrls.add(dedupeKey);
       results.push(item);
+      batchItemsInRange += 1;
+      totalItemsInRange += 1;
     }
 
     if (!pageResult.nextMinId || seenMinIds.has(pageResult.nextMinId)) {
+      nextMinId = undefined;
+      flushBatch("source-exhausted", undefined);
       break;
     }
     if (pageResult.oldestPublishedAt && pageResult.oldestPublishedAt < `${from}T00:00:00.000Z`) {
+      reachedFromDate = true;
+      nextMinId = undefined;
+      flushBatch("reached-from-date", undefined);
       break;
     }
 
     seenMinIds.add(pageResult.nextMinId);
     minId = pageResult.nextMinId;
+    nextMinId = pageResult.nextMinId;
+
+    if (batchPagesFetched >= MARKET_NEWS_PAGE_BATCH_SIZE) {
+      flushBatch("batch-complete", nextMinId);
+    }
+
     await sleep(MARKET_NEWS_PAGE_DELAY_MS);
   }
 
-  return results;
+  if (pagesFetched >= MARKET_NEWS_MAX_TOTAL_PAGES && !reachedFromDate && nextMinId) {
+    hitTotalPageLimit = true;
+    flushBatch("page-limit", nextMinId);
+  }
+
+  return {
+    items: results,
+    pagesFetched,
+    batchesFetched,
+    oldestPublishedAt,
+    nextMinId,
+    reachedFromDate,
+    hitTotalPageLimit,
+  };
 }
 
 // ---------- Adaptive date-splitting backfill ----------
@@ -392,14 +488,35 @@ export async function pullMarketNews(
   const lastPub = await getLastPublishedAt("market_news");
   const from = fromOverride ?? computeFromDate(lastPub, 7);
   const to = toOverride ?? formatDate(new Date());
-  return pullMarketNewsPaged(from, to);
+  const result = await pullMarketNewsPaged(from, to);
+  return result.items;
 }
 
 export async function pullMarketNewsBackfill(
   from: string,
   to: string,
 ): Promise<FinnhubMappedItem[]> {
-  return pullMarketNewsPaged(from, to);
+  const result = await pullMarketNewsPaged(from, to);
+  return result.items;
+}
+
+export async function pullMarketNewsWithMeta(
+  fromOverride?: string,
+  toOverride?: string,
+  options?: MarketNewsPullOptions,
+): Promise<MarketNewsPullResult> {
+  const lastPub = await getLastPublishedAt("market_news");
+  const from = fromOverride ?? computeFromDate(lastPub, 7);
+  const to = toOverride ?? formatDate(new Date());
+  return pullMarketNewsPaged(from, to, options);
+}
+
+export async function pullMarketNewsBackfillWithMeta(
+  from: string,
+  to: string,
+  options?: MarketNewsPullOptions,
+): Promise<MarketNewsPullResult> {
+  return pullMarketNewsPaged(from, to, options);
 }
 
 // ---------- Preflight / per-ticker anchor helpers ----------

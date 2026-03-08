@@ -27,8 +27,8 @@ import { readTickersFromCsv, appendTickerToCsv, readTickerRowsFromCsv, CsvServic
 import {
   fetchCompanyNewsRaw,
   fetchPressReleasesRaw,
-  pullMarketNews,
-  pullMarketNewsBackfill,
+  pullMarketNewsWithMeta,
+  pullMarketNewsBackfillWithMeta,
   pullCompanyNewsBackfill,
   pullPressReleasesBackfill,
   getTickersWithNews,
@@ -454,11 +454,29 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
         if (pullMarket) {
           appendLog(jobId, `[market] Processing market news...`);
           try {
-            const marketItems = isRecent
-              ? await pullMarketNews()
-              : await pullMarketNewsBackfill(effectiveFrom!, effectiveTo);
-            await insertFetchedItems(marketItems, detailsPerType.market_news, newItems, counters);
-            appendLog(jobId, `  market_news: ${marketItems.length} fetched, ${detailsPerType.market_news.inserted} inserted so far`);
+            const marketResult = isRecent
+              ? await pullMarketNewsWithMeta(undefined, undefined, {
+                  onBatch: (batch) => {
+                    appendLog(
+                      jobId,
+                      `  market batch ${batch.batchNumber}: pages=${batch.batchPagesFetched} total_pages=${batch.totalPagesFetched} in_range=${batch.batchItemsInRange} total_in_range=${batch.totalItemsInRange} oldest=${batch.oldestPublishedAt ?? "n/a"} reason=${batch.reason}`,
+                    );
+                  },
+                })
+              : await pullMarketNewsBackfillWithMeta(effectiveFrom!, effectiveTo, {
+                  onBatch: (batch) => {
+                    appendLog(
+                      jobId,
+                      `  market batch ${batch.batchNumber}: pages=${batch.batchPagesFetched} total_pages=${batch.totalPagesFetched} in_range=${batch.batchItemsInRange} total_in_range=${batch.totalItemsInRange} oldest=${batch.oldestPublishedAt ?? "n/a"} reason=${batch.reason}`,
+                    );
+                  },
+                });
+            await insertFetchedItems(marketResult.items, detailsPerType.market_news, newItems, counters);
+            appendLog(jobId, `  market_news: ${marketResult.items.length} fetched, ${detailsPerType.market_news.inserted} inserted so far`);
+            appendLog(jobId, `  market_news meta: pages=${marketResult.pagesFetched}, batches=${marketResult.batchesFetched}, oldest=${marketResult.oldestPublishedAt ?? "n/a"}, reached_from=${marketResult.reachedFromDate ? "yes" : "no"}`);
+            if (marketResult.hitTotalPageLimit) {
+              appendLog(jobId, `  ⚠ market_news page guard hit before reaching requested from=${effectiveFrom}; continue from nextMinId=${marketResult.nextMinId ?? "n/a"}`);
+            }
           } catch (err: any) {
             console.error(`[pull-finhub] market_news: ${err.message}`);
             appendLog(jobId, `  ⚠ market_news: ${err.message}`);

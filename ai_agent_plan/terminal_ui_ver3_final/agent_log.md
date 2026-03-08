@@ -259,6 +259,276 @@
 3. tooltip에 아래 정책 설명을 노출하도록 했다.
    - automatic recent retry confirmed-empty 과거 구간 영구 스킵
 
+---
+
+### Finnhub News Recent Update tooltip 렌더 방식 수정
+
+**작성 시각:** 2026-03-06 21:25 (local)
+
+**상태:** 확인 대기
+
+#### 수행 내용
+
+1. 사용자가 3초 hover tooltip이 실제로 뜨지 않는다고 보고했다.
+2. 원인을 메뉴 내부 absolute tooltip이 dropdown scroll/overflow에 영향을 받는 구조로 판단했다.
+3. `FinnhubNewsWindow.tsx`에서 수동 hover timer 상태를 제거하고, 포털 기반 `Tooltip` 컴포넌트로 교체했다.
+4. delay는 기존 요구대로 3초(`delayDuration=3000`)를 유지했다.
+
+#### 생성/수정 파일
+
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. Finnhub News 창에서 Update 드롭다운을 연다.
+2. `Recent Update` 제목 옆 info 아이콘에 마우스를 3초 이상 올린다.
+3. dropdown 바깥쪽으로 잘리지 않고 tooltip이 떠야 한다.
+4. `npm run build`가 통과하는지 확인한다.
+
+#### 문제점 / 리스크
+
+1. tooltip 위치가 화면 오른쪽 가장자리에서는 좁아질 수 있다.
+   - 완화 방안 1: 필요 시 side를 bottom으로 자동 전환
+   - 완화 방안 2: tooltip 폭을 더 줄여 모바일 대응
+
+#### 비고
+
+- 이 항목은 기존 tooltip 구현의 표시 버그 수정이다.
+- 사용자 확인 전까지 상태는 `확인 대기`로 유지한다.
+
+### Finnhub News Recent Update 정책 설명 방식 변경
+
+**작성 시각:** 2026-03-06 21:40 (local)
+
+**상태:** 확인 대기
+
+#### 수행 내용
+
+1. 사용자가 hover 기반 tooltip 대신 메뉴 안에 바로 보이는 설명 문구가 더 낫다고 요청했다.
+2. `FinnhubNewsWindow.tsx`에서 Recent Update 제목 옆 info 아이콘과 tooltip 의존 코드를 제거했다.
+3. 같은 섹션 바로 아래에 automatic recent retry 정책을 항상 보이는 작은 안내 문구로 추가했다.
+4. `figma_frontend_prompt.md`와 `plan.md`를 현재 동작 기준으로 함께 수정했다.
+
+#### 생성/수정 파일
+
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+- `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. Finnhub News 창에서 Update 드롭다운을 연다.
+2. `Recent Update` 섹션 제목 바로 아래에 정책 설명 문구가 항상 보이는지 확인한다.
+3. `Recent Update (All)` 등 메뉴 항목 클릭 동작이 그대로 유지되는지 확인한다.
+4. `npm run build`가 통과하는지 확인한다.
+
+#### 문제점 / 리스크
+
+1. 안내 문구가 길면 작은 화면에서 메뉴 높이를 더 차지할 수 있다.
+   - 완화 방안 1: 필요 시 문장을 2줄 이내로 더 압축
+   - 완화 방안 2: source별 설명은 유지하되 문구 폭을 더 줄임
+
+#### 비고
+
+- hover 실패를 피하기 위해 상시 노출형 보조 문구로 전환했다.
+- 사용자 확인 전까지 상태는 `확인 대기`로 유지한다.
+
+### Plan 상태 표기 동기화 수정
+
+**작성 시각:** 2026-03-06 21:48 (local)
+
+**상태:** 확인 대기
+
+#### 수행 내용
+
+1. 사용자가 plan에 지금까지 구현한 내용이 제대로 반영되지 않았다고 지적했다.
+2. 원인을 Step 2/3의 세부 단계 표와 Step 제목, 실행 의존성 그래프의 상태 이모지가 서로 어긋난 것으로 확인했다.
+3. 사용자 확인이 아직 없으므로 Step 2/3 관련 구현 항목을 `✅`가 아니라 `⏳`로 정정했다.
+4. Recent Update 정책 설명 방식이 tooltip이 아니라 상시 보조 문구로 바뀐 PLAN CHANGE도 plan에 추가했다.
+
+#### 생성/수정 파일
+
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. `plan.md`에서 `Step 2`, `Step 3` 제목이 `⏳`로 표시되는지 확인한다.
+2. 같은 섹션의 세부 단계 표 상태가 모두 `⏳`로 일치하는지 확인한다.
+3. 실행 의존성 그래프의 Track B/C 상태도 동일하게 `⏳`로 반영됐는지 확인한다.
+4. PLAN CHANGE 섹션에 Recent Update 설명 방식 변경 항목이 추가됐는지 확인한다.
+
+#### 문제점 / 리스크
+
+1. plan 상태를 구현 완료와 사용자 확인 완료로 구분하지 않으면 다시 드리프트가 생길 수 있다.
+   - 완화 방안 1: 이후에도 `✅`는 사용자 명시 확인 후에만 사용
+   - 완화 방안 2: Step 제목, 표, 그래프 3곳을 한 번에 갱신
+
+#### 비고
+
+- 이번 수정은 구현 상태 표현을 실제 진행 상태에 맞게 정정한 문서 동기화 작업이다.
+- 사용자 확인 전까지 상태는 `확인 대기`로 유지한다.
+
+### Market News publisher 표시 버그 수정
+
+**작성 시각:** 2026-03-07 10:50 (local)
+
+**상태:** 확인 대기(awaiting user confirmation)
+
+#### 수행 내용
+
+market news에서 publisher가 표시되지 않는 버그를 수정했다.
+
+**원인 분석:**
+1. `FinnhubMappedItem` type에 `publisher` 필드가 없었다.
+2. Finnhub API의 `item.source`(publisher명: "Yahoo", "CNBC" 등)를 버리고 `source: "FINNHUB"`로 하드코딩했다.
+3. `insertNewsItem` INSERT SQL에 `publisher` 컬럼이 포함되지 않아 항상 NULL로 삽입되었다.
+4. `backfillPublisher()`가 서버 시작 시에만 실행되어, 런타임 중 새 뉴스는 다음 재시작까지 publisher가 NULL이었다.
+
+**수정 내용:**
+1. `FinnhubMappedItem` type에 `publisher?: string` 필드 추가
+2. `fetchMarketNewsPageRaw` — Finnhub `item.source`를 publisher로 사용 (fallback: `derivePublisher(url)`)
+3. `fetchCompanyNewsRaw` — Finnhub `item.source`를 publisher로 사용 (fallback: `derivePublisher(url)`)
+4. `fetchPressReleasesRaw` — URL 기반 `derivePublisher()` 사용
+5. `insertNewsItem` params/SQL에 publisher 추가 (10번째 VALUES 파라미터), 반환값에도 publisher 포함
+6. `insertFetchedItems`에서 `rawItem.publisher` 전달
+
+#### 생성/수정 파일
+
+- `terminal/backend/src/services/finnhubNewsProvider.ts` — FinnhubMappedItem type 확장, fetch 3개 함수에 publisher 매핑 추가
+- `terminal/backend/src/services/newsRepository.ts` — insertNewsItem params/SQL/반환값에 publisher 추가
+- `terminal/backend/src/server.ts` — insertFetchedItems에서 publisher 전달
+
+#### 검증 방법
+
+- `npm run test` → 48/48 테스트 통과
+- `npx tsc --noEmit` → type error 0개
+- `npm run build` (frontend) → 빌드 성공
+- 사용자 확인: 백엔드 재시작 후 market news pull 실행 → publisher 컬럼에 값이 표시되는지 확인
+
+---
+
+### Plan 리비전 — Canonical ticker master model 추가
+
+**작성 시각:** 2026-03-07 12:19 (local)
+
+**상태:** 확인 대기
+
+#### 수행 내용
+
+1. 사용자가 company description, default ticker, watchlist를 뉴스가 아니라 종목 엔터티에 일관되게 연결해야 한다고 요청했다.
+2. `plan.md` 목표에 `securities.id` 중심 canonical 종목 모델 도입 항목을 추가했다.
+3. `현재 레포 상태`에 아래 현황을 명시했다.
+   - default ticker source는 `watch lists2_2026-02-22.csv` 하드코딩 CSV 기반
+   - `watchlist_items`는 아직 `ticker TEXT` 기반
+   - `securities`, `company_profiles`, universe 테이블은 아직 없음
+4. `제약 / 비범위`와 `결정/선행조건`에 아래 방향을 반영했다.
+   - company description은 `news_id`가 아니라 종목 엔터티 기준으로 저장
+   - 정식 구조는 `company_profiles.security_id`
+   - default ticker는 CSV를 원본으로 남기되 runtime canonical 목록은 `app.db`로 승격
+   - watchlist는 장기적으로 `security_id`로 이전
+5. 후속 구조 정리 phase로 `Step 5 — Canonical ticker master model`을 추가했다.
+   - `securities`, `company_profiles`, `ticker_universes`, `ticker_universe_items` schema
+   - default ticker CSV import
+   - FMP company description upsert
+   - `watchlist_items.security_id` migration/backfill
+   - watchlist API의 ticker 친화적 외부 계약 유지
+
+#### 생성/수정 파일
+
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. `plan.md`에서 목표 20번에 `securities.id` 중심 canonical 종목 모델 항목이 추가됐는지 확인한다.
+2. `결정/선행조건`에 아래 항목이 있는지 확인한다.
+   - `종목 canonical identity 모델`
+   - `Default ticker canonical 저장 방식`
+3. `단계별 계획`에 `Step 5 — Canonical ticker master model`이 추가됐는지 확인한다.
+4. `실행 의존성 그래프`에 `Track E`가 추가됐는지 확인한다.
+
+#### 문제점 / 리스크
+
+1. 기존 ticker 문자열 기반 경로와 새 `security_id` 경로가 한동안 공존하므로 migration 순서를 잘못 잡으면 join 불일치가 날 수 있다.
+   - 완화 방안 1: 외부 API 응답은 ticker 친화적으로 유지하고 내부만 단계적으로 이전
+   - 완화 방안 2: join 포인트 점검 체크리스트를 Step 5 완료 조건에 포함
+2. default ticker CSV를 너무 빨리 제거하면 운영자가 source of truth를 잃을 수 있다.
+   - 완화 방안 1: CSV는 원본 source로 유지하고 DB는 runtime canonical cache로 승격
+   - 완화 방안 2: `ticker_universes/default` 식별자와 source_path를 같이 노출
+
+#### 비고
+
+- 이번 작업은 plan/log 문서 업데이트만 수행했고, 코드 구현은 아직 시작하지 않았다.
+- 사용자 확인 전까지 상태는 `확인 대기`로 유지한다.
+
+---
+
+### Step 5 — Canonical ticker master model 구현
+
+**작성 시각:** 2026-03-07 13:41 (local)
+
+**상태:** 확인 대기(awaiting user confirmation)
+
+#### 수행 내용
+
+Step 5 전체(5-1 ~ 5-6)를 구현했다. 종목을 뉴스/watchlist와 분리된 독립 엔터티로 도입.
+
+**5-1: DB 스키마 추가**
+- `securities`, `company_profiles`, `ticker_universes`, `ticker_universe_items` 테이블 생성
+- 파일: `terminal/backend/src/db.ts`
+
+**5-2: CSV → canonical universe import**
+- `readTickerRowsFromCsv()` 추가 (quoted fields 지원 CSV 파서)
+- `tickerUniverseRepository.ts` 신규 생성 (securities/universe CRUD)
+- 서버 startup 시 default CSV (watch lists2_2026-02-22.csv) → 1191개 종목 자동 import
+- API: `GET /api/securities`, `GET /api/securities/search`, `GET /api/universes`, `GET /api/universes/:id/items`
+- 파일: `tickerCsvService.ts`, `tickerUniverseRepository.ts`, `server.ts`
+
+**5-3: FMP company profile 저장**
+- `fmpCompanyProfileProvider.ts` 신규: FMP stable endpoint (`/stable/profile?symbol=...`)
+- `companyProfileRepository.ts` 신규: `company_profiles` upsert/조회
+- `config.ts`에 FMP API key 로드 추가
+- API: `GET /api/company-profiles/:ticker`, `POST /api/company-profiles/pull-fmp`
+- 검증: AAPL description/CEO/employees 정상 저장 확인
+
+**5-4: watchlist_items security_id**
+- `watchlist_items`에 `security_id` 컬럼 추가 (ALTER TABLE)
+- `backfillWatchlistSecurityIds()` 추가 — 기존 ticker → security_id 매핑
+- `createWatchlist()` — 새 항목 추가 시 security_id 자동 연결
+- startup 시 자동 backfill 실행
+
+**5-5: watchlist API 내부 전환**
+- `listWatchlists()` — 응답에 `security_ids` 배열 추가
+- 외부 API 계약 (tickers 배열)은 호환 유지
+
+**5-6: join 포인트 점검**
+- 24개 ticker 기반 join/필터 위치 분석 완료
+- HIGH: `newsRepository.ts` (CSV LIKE + sentiment subquery)
+- MEDIUM: `calendarRepository.ts`, `confirmed_empty_ranges`
+- LOW: OHLC Symbol (외부 스키마, 유지)
+- plan.md에 후속 migration 체크리스트 추가
+
+#### 검증
+- `npx tsc --noEmit` → 에러 0
+- `npm run test` → 48 tests, 6 suites 전부 pass
+- 서버 시작 → securities 1191개, default universe 생성 확인
+- `GET /api/securities/search?q=TXN` → sector/industry 정상
+- `POST /api/company-profiles/pull-fmp` (AAPL) → description/CEO/ipo_date 저장 확인
+
+#### 검증 방법 (사용자)
+```bash
+cd terminal/backend
+npm run test
+npx tsc --noEmit
+# 서버 시작 후:
+curl http://localhost:8080/api/universes
+curl http://localhost:8080/api/securities/search?q=AAPL
+curl http://localhost:8080/api/company-profiles/AAPL
+```
+
 ### Plan 리비전 — `ticker_universes/default` 기준 전환 + Data Control app DB 구조 탭
 
 **작성 시각:** 2026-03-07 17:21 (local)
@@ -386,95 +656,6 @@
 2. 같은 섹션에서 company profile 기본 pull 대상 설명이 `ticker_universes/default` 우선 조회로 적혀 있는지 확인.
 3. `plan.md`의 `Step 1`, `Step 5` 헤더가 각각 `✅`로 표시되는지 확인.
 4. `plan.md` 말미에 `PLAN CHANGE (2026-03-07 17:38) — plan 상태 문구 동기화`가 추가됐는지 확인.
-
-
-
-**작성 시각:** 2026-03-07 12:19 (local)
-
-**상태:** 확인 대기
-
-#### 수행 내용
-
-1. 사용자가 company description, default ticker, watchlist를 뉴스가 아니라 종목 엔터티에 일관되게 연결해야 한다고 요청했다.
-2. `plan.md` 목표에 `securities.id` 중심 canonical 종목 모델 도입 항목을 추가했다.
-3. `현재 레포 상태`에 아래 현황을 명시했다.
-   - default ticker source는 `watch lists2_2026-02-22.csv` 하드코딩 CSV 기반
-   - `watchlist_items`는 아직 `ticker TEXT` 기반
-   - `securities`, `company_profiles`, universe 테이블은 아직 없음
-4. `제약 / 비범위`와 `결정/선행조건`에 아래 방향을 반영했다.
-   - company description은 `news_id`가 아니라 종목 엔터티 기준으로 저장
-   - 정식 구조는 `company_profiles.security_id`
-   - default ticker는 CSV를 원본으로 남기되 runtime canonical 목록은 `app.db`로 승격
-   - watchlist는 장기적으로 `security_id`로 이전
-5. 후속 구조 정리 phase로 `Step 5 — Canonical ticker master model`을 추가했다.
-   - `securities`, `company_profiles`, `ticker_universes`, `ticker_universe_items` schema
-   - default ticker CSV import
-   - FMP company description upsert
-   - `watchlist_items.security_id` migration/backfill
-   - watchlist API의 ticker 친화적 외부 계약 유지
-
-#### 생성/수정 파일
-
-- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
-- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
-
-#### 검증 방법
-
-1. `plan.md`에서 목표 20번에 `securities.id` 중심 canonical 종목 모델 항목이 추가됐는지 확인한다.
-2. `결정/선행조건`에 아래 항목이 있는지 확인한다.
-   - `종목 canonical identity 모델`
-   - `Default ticker canonical 저장 방식`
-3. `단계별 계획`에 `Step 5 — Canonical ticker master model`이 추가됐는지 확인한다.
-4. `실행 의존성 그래프`에 `Track E`가 추가됐는지 확인한다.
-
-#### 문제점 / 리스크
-
-1. `ticker` 기반 구조를 한 번에 제거하면 기존 프론트/API 영향이 크다.
-   - 완화 방안 1: 1차는 `securities`/`company_profiles`/universe만 도입
-   - 완화 방안 2: watchlist는 dual-read 또는 backfill 후 단계적으로 전환
-2. ticker 정규화가 불충분하면 `security_id` backfill 누락이 생길 수 있다.
-   - 완화 방안 1: ticker normalize 규칙을 먼저 고정
-   - 완화 방안 2: backfill 후 null row 검사 쿼리를 필수 검증으로 둔다
-3. default CSV와 DB canonical universe가 동시에 존재하면 source of truth 혼선이 생길 수 있다.
-   - 완화 방안 1: CSV는 import source, DB는 runtime canonical이라는 역할을 문서에 분리 명시
-   - 완화 방안 2: import 시각/원본 경로를 universe 메타에 저장한다
-
-#### 비고
-
-- 이번 작업은 plan/log 문서 리비전만 수행했다.
-- 구현 코드(`.ts`, `.tsx`, `.py`)는 수정하지 않았다.
-- 사용자 확인 전까지 이 리비전 상태는 `확인 대기`로 유지한다.
-   - HTTP 200 + 빈 배열일 때만 confirmed-empty 기록
-   - `company_news`, `press_release` 분리 기록
-   - 당일 제외
-   - 강제 재조회는 `Custom Update` 사용
-4. `figma_frontend_prompt.md`와 `plan.md`에 tooltip 동작을 현재 구현 기준으로 반영했다.
-
-#### 생성/수정 파일
-
-- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
-- `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
-- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
-- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
-
-#### 검증 방법
-
-1. Finnhub News 창에서 Update 드롭다운을 연다.
-2. `Recent Update` 제목 옆 info 아이콘에 마우스를 3초 이상 올린다.
-3. 정책 설명 tooltip이 열리는지 확인한다.
-4. 마우스를 떼면 tooltip이 닫히는지 확인한다.
-5. `npm run build`로 프론트 빌드가 통과하는지 확인한다.
-
-#### 문제점 / 리스크
-
-1. hover 3초는 사용자에 따라 길게 느껴질 수 있다.
-   - 완화 방안 1: 필요 시 2초 또는 클릭형 help로 조정
-   - 완화 방안 2: 추후 설정값으로 분리 검토
-2. tooltip 문구가 길어 작은 화면에서 가려질 수 있다.
-   - 완화 방안 1: 폭을 제한하고 줄바꿈 유지
-   - 완화 방안 2: 필요 시 모달형 help로 승격
-3. 현재 tooltip은 메뉴 열림 상태에서만 접근 가능하다.
-   - 완화 방안 1: main Update 버튼 주변 도움말 재노출 검토
 
 ### Step 3 Workspace Persistence 구현 완료
 
@@ -697,303 +878,6 @@ Step 1 전체 (1-1 ~ 1-13)를 구현하고 빌드/테스트를 통과시켰다.
 
 ---
 
-### Market News publisher 표시 버그 수정
-
-**작성 시각:** 2026-03-07 10:50 (local)
-
-**상태:** 확인 대기(awaiting user confirmation)
-
-#### 수행 내용
-
-market news에서 publisher가 표시되지 않는 버그를 수정했다.
-
----
-
-### Step 5 — Canonical ticker master model 구현
-
-**작성 시각:** 2026-03-07 13:41 (local)
-
-**상태:** 확인 대기(awaiting user confirmation)
-
-#### 수행 내용
-
-Step 5 전체(5-1 ~ 5-6)를 구현했다. 종목을 뉴스/watchlist와 분리된 독립 엔터티로 도입.
-
-**5-1: DB 스키마 추가**
-- `securities`, `company_profiles`, `ticker_universes`, `ticker_universe_items` 테이블 생성
-- 파일: `terminal/backend/src/db.ts`
-
-**5-2: CSV → canonical universe import**
-- `readTickerRowsFromCsv()` 추가 (quoted fields 지원 CSV 파서)
-- `tickerUniverseRepository.ts` 신규 생성 (securities/universe CRUD)
-- 서버 startup 시 default CSV (watch lists2_2026-02-22.csv) → 1191개 종목 자동 import
-- API: `GET /api/securities`, `GET /api/securities/search`, `GET /api/universes`, `GET /api/universes/:id/items`
-- 파일: `tickerCsvService.ts`, `tickerUniverseRepository.ts`, `server.ts`
-
-**5-3: FMP company profile 저장**
-- `fmpCompanyProfileProvider.ts` 신규: FMP stable endpoint (`/stable/profile?symbol=...`)
-- `companyProfileRepository.ts` 신규: `company_profiles` upsert/조회
-- `config.ts`에 FMP API key 로드 추가
-- API: `GET /api/company-profiles/:ticker`, `POST /api/company-profiles/pull-fmp`
-- 검증: AAPL description/CEO/employees 정상 저장 확인
-
-**5-4: watchlist_items security_id**
-- `watchlist_items`에 `security_id` 컬럼 추가 (ALTER TABLE)
-- `backfillWatchlistSecurityIds()` 추가 — 기존 ticker → security_id 매핑
-- `createWatchlist()` — 새 항목 추가 시 security_id 자동 연결
-- startup 시 자동 backfill 실행
-
-**5-5: watchlist API 내부 전환**
-- `listWatchlists()` — 응답에 `security_ids` 배열 추가
-- 외부 API 계약 (tickers 배열)은 호환 유지
-
-**5-6: join 포인트 점검**
-- 24개 ticker 기반 join/필터 위치 분석 완료
-- HIGH: `newsRepository.ts` (CSV LIKE + sentiment subquery)
-- MEDIUM: `calendarRepository.ts`, `confirmed_empty_ranges`
-- LOW: OHLC Symbol (외부 스키마, 유지)
-- plan.md에 후속 migration 체크리스트 추가
-
-#### 검증
-- `npx tsc --noEmit` → 에러 0
-- `npm run test` → 48 tests, 6 suites 전부 pass
-- 서버 시작 → securities 1191개, default universe 생성 확인
-- `GET /api/securities/search?q=TXN` → sector/industry 정상
-- `POST /api/company-profiles/pull-fmp` (AAPL) → description/CEO/ipo_date 저장 확인
-
-#### 검증 방법 (사용자)
-```bash
-cd terminal/backend
-npm run test
-npx tsc --noEmit
-# 서버 시작 후:
-curl http://localhost:8080/api/universes
-curl http://localhost:8080/api/securities/search?q=AAPL
-curl http://localhost:8080/api/company-profiles/AAPL
-```
-
-**원인 분석:**
-1. `FinnhubMappedItem` type에 `publisher` 필드가 없었다.
-2. Finnhub API의 `item.source`(publisher명: "Yahoo", "CNBC" 등)를 버리고 `source: "FINNHUB"`로 하드코딩했다.
-3. `insertNewsItem` INSERT SQL에 `publisher` 컬럼이 포함되지 않아 항상 NULL로 삽입되었다.
-4. `backfillPublisher()`가 서버 시작 시에만 실행되어, 런타임 중 새 뉴스는 다음 재시작까지 publisher가 NULL이었다.
-
----
-
-### Finnhub update에서 sentiment 분리 + News date sticky header
-
-**작성 시각:** 2026-03-08 13:21 (local)
-
-**상태:** 확인 대기(awaiting user confirmation)
-
-#### 수행 내용
-
-1. `POST /api/news/pull-finhub` 배경 작업에서 ticker별 `upsertSentimentSnapshot()` 호출을 제거했다. 이제 News Feed의 일반 update 버튼은 뉴스 pull만 수행한다.
-2. 별도 sentiment batch 경로 `POST /api/news/sentiment/update`는 유지해서, sentiment snapshot은 명시적으로 돌릴 때만 갱신되게 했다.
-3. `FinnhubNewsWindow.tsx`에 현재 스크롤 위치 기준 날짜를 계산하는 `stickyDate` 상태를 추가했다.
-4. 가상 리스트 내부 header row의 `sticky` 의존을 제거하고, 리스트 상단에 별도 회색 overlay header를 띄워 현재 날짜 그룹이 항상 보이게 바꿨다.
-5. `plan.md` 목표/현재 상태/PLAN CHANGE를 이번 동작 기준으로 동기화했다.
-
-#### 생성/수정 파일
-
-- `terminal/backend/src/server.ts`
-- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
-- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
-- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
-
-#### 검증 방법
-
-1. News Feed에서 일반 `Update`를 실행한 뒤, backend 로그 또는 DB를 확인해 sentiment snapshot row count가 자동 증가하지 않는지 본다.
-2. 필요 시 별도 sentiment update 경로를 직접 호출해 snapshot이 갱신되는지 확인한다.
-3. News Feed 리스트를 아래로 스크롤해도 회색 날짜 bar가 상단에 남고, 날짜 그룹이 바뀌면 상단 표시도 함께 바뀌는지 확인한다.
-
-```bash
-cd terminal/backend
-npm run build
-
-cd ..\..\termina_web\figma_code\terminal_ui_ver2_finhub
-npm run build
-```
-
-#### 문제점 / 리스크
-
-1. 일반 news update 뒤에는 sentiment가 자동으로 최신화되지 않는다.
-   - 완화 방안 1: 필요 시 `POST /api/news/sentiment/update`를 별도로 실행
-   - 완화 방안 2: 추후 UI에 sentiment 전용 update 버튼을 추가 검토
-2. sticky overlay와 실제 날짜 header row가 화면 상단 근처에서 잠깐 중복되어 보일 수 있다.
-   - 완화 방안 1: 사용성 문제가 크면 header row push-off 애니메이션을 추가
-   - 완화 방안 2: 또는 top 영역에서 첫 header row를 숨기는 후속 조정 검토
-3. 가상 리스트의 visibleStartIndex 계산 타이밍에 따라 빠른 스크롤 중 날짜 전환이 한 프레임 늦을 수 있다.
-   - 완화 방안 1: 필요 시 overscan 조정
-   - 완화 방안 2: 또는 scroll offset 기반 계산으로 후속 개선
-
-**수정 내용:**
-1. `FinnhubMappedItem` type에 `publisher?: string` 필드 추가
-2. `fetchMarketNewsPageRaw` — Finnhub `item.source`를 publisher로 사용 (fallback: `derivePublisher(url)`)
-3. `fetchCompanyNewsRaw` — Finnhub `item.source`를 publisher로 사용 (fallback: `derivePublisher(url)`)
-4. `fetchPressReleasesRaw` — URL 기반 `derivePublisher()` 사용
-5. `insertNewsItem` params/SQL에 publisher 추가 (10번째 VALUES 파라미터), 반환값에도 publisher 포함
-6. `insertFetchedItems`에서 `rawItem.publisher` 전달
-
-#### 생성/수정 파일
-
-- `terminal/backend/src/services/finnhubNewsProvider.ts` — FinnhubMappedItem type 확장, fetch 3개 함수에 publisher 매핑 추가
-- `terminal/backend/src/services/newsRepository.ts` — insertNewsItem params/SQL/반환값에 publisher 추가
-- `terminal/backend/src/server.ts` — insertFetchedItems에서 publisher 전달
-
-#### 검증 방법
-
-- `npm run test` → 48/48 테스트 통과
-- `npx tsc --noEmit` → type error 0개
-- `npm run build` (frontend) → 빌드 성공
-- 사용자 확인: 백엔드 재시작 후 market news pull 실행 → publisher 컬럼에 값이 표시되는지 확인
-13. **1-13 북마크 폴더 뉴스 조회** — `newsRepository.ts`의 `getNews()`에 `bookmarkFolderId` INNER JOIN 지원
-
-#### 생성/수정 파일
-
-- `terminal/backend/src/db.ts` — 5개 테이블 추가
-- `terminal/backend/src/types.ts` — NewsQuery.bookmarkFolderId, NewsItem에 6개 필드 추가
-- `terminal/backend/src/services/newsRepository.ts` — JOIN, sentiment batch, mapNewsRow 확장, 500 limit
-- `terminal/backend/src/services/finnhubNewsProvider.ts` — sentiment fetch/upsert, confirmed-empty CRUD
-- `terminal/backend/src/services/aiAnalysisRepository.ts` — **신규 생성**
-- `terminal/backend/src/services/fulltextExtractors.ts` — htmlToPlainText, plain text 반환
-- `terminal/backend/src/services/fulltextUpdateService.ts` — runFulltextPlainTextBackfill 추가
-- `terminal/backend/src/server.ts` — 북마크 라우트, sentiment update, AI validation, backfill, confirmed-empty pull-finhub 통합, sentiment per-ticker fetch
-- `terminal/backend/tests/aiAnalysisRepository.test.ts` — **신규 생성**
-
-#### 검증 방법
-
-1. `cd terminal/backend && npm run build` — TypeScript 빌드 성공 확인 ✅
-2. `cd terminal/backend && npx vitest run` — 전체 48개 테스트 통과 ✅ (6 파일)
-3. 서버 시작 후 `SELECT name FROM sqlite_master WHERE type='table'`로 5개 새 테이블 확인
-4. `POST /api/news/fulltext/backfill-plaintext`로 기존 HTML row 정리 가능
-5. `GET /api/news/ai-analysis/validate`로 0-5 삭제/유실 감지 규칙 확인 가능
-
-#### 문제점 / 리스크
-
-1. 북마크 라우트에서 user_id는 현재 하드코딩 `DEMO_USER_ID` — 인증 도입 시 교체 필요
-   - 완화 방안: 상수를 한 곳에서 관리, 추후 auth 미들웨어로 대체
-2. sentiment API 호출이 pull-finhub 작업 시간을 늘릴 수 있다
-   - 완화 방안: fire-and-forget으로 에러 시 skip, 250ms 딜레이 내에서 처리
-3. htmlToPlainText가 cheerio.load를 매번 호출해 backfill 대량 처리 시 느릴 수 있다
-   - 완화 방안: 50건마다 progress 로그, 필요 시 batch 크기 조절
-   - 완화 방안 2: 추후 Data Control 문서/설정 화면에도 같은 정책 요약 추가
-
-#### 비고
-
-- 이 항목은 코드 변경을 포함한다.
-- 사용자 확인 전까지 상태는 `확인 대기`로 유지한다.
-
-### Finnhub News Recent Update tooltip 렌더 방식 수정
-
-**작성 시각:** 2026-03-06 21:25 (local)
-
-**상태:** 확인 대기
-
-#### 수행 내용
-
-1. 사용자가 3초 hover tooltip이 실제로 뜨지 않는다고 보고했다.
-2. 원인을 메뉴 내부 absolute tooltip이 dropdown scroll/overflow에 영향을 받는 구조로 판단했다.
-3. `FinnhubNewsWindow.tsx`에서 수동 hover timer 상태를 제거하고, 포털 기반 `Tooltip` 컴포넌트로 교체했다.
-4. delay는 기존 요구대로 3초(`delayDuration=3000`)를 유지했다.
-
-#### 생성/수정 파일
-
-- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
-- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
-
-#### 검증 방법
-
-1. Finnhub News 창에서 Update 드롭다운을 연다.
-2. `Recent Update` 제목 옆 info 아이콘에 마우스를 3초 이상 올린다.
-3. dropdown 바깥쪽으로 잘리지 않고 tooltip이 떠야 한다.
-4. `npm run build`가 통과하는지 확인한다.
-
-#### 문제점 / 리스크
-
-1. tooltip 위치가 화면 오른쪽 가장자리에서는 좁아질 수 있다.
-   - 완화 방안 1: 필요 시 side를 bottom으로 자동 전환
-   - 완화 방안 2: tooltip 폭을 더 줄여 모바일 대응
-
-#### 비고
-
-- 이 항목은 기존 tooltip 구현의 표시 버그 수정이다.
-- 사용자 확인 전까지 상태는 `확인 대기`로 유지한다.
-
-### Finnhub News Recent Update 정책 설명 방식 변경
-
-**작성 시각:** 2026-03-06 21:40 (local)
-
-**상태:** 확인 대기
-
-#### 수행 내용
-
-1. 사용자가 hover 기반 tooltip 대신 메뉴 안에 바로 보이는 설명 문구가 더 낫다고 요청했다.
-2. `FinnhubNewsWindow.tsx`에서 Recent Update 제목 옆 info 아이콘과 tooltip 의존 코드를 제거했다.
-3. 같은 섹션 바로 아래에 automatic recent retry 정책을 항상 보이는 작은 안내 문구로 추가했다.
-4. `figma_frontend_prompt.md`와 `plan.md`를 현재 동작 기준으로 함께 수정했다.
-
-#### 생성/수정 파일
-
-- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
-- `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
-- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
-- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
-
-#### 검증 방법
-
-1. Finnhub News 창에서 Update 드롭다운을 연다.
-2. `Recent Update` 섹션 제목 바로 아래에 정책 설명 문구가 항상 보이는지 확인한다.
-3. `Recent Update (All)` 등 메뉴 항목 클릭 동작이 그대로 유지되는지 확인한다.
-4. `npm run build`가 통과하는지 확인한다.
-
-#### 문제점 / 리스크
-
-1. 안내 문구가 길면 작은 화면에서 메뉴 높이를 더 차지할 수 있다.
-   - 완화 방안 1: 필요 시 문장을 2줄 이내로 더 압축
-   - 완화 방안 2: source별 설명은 유지하되 문구 폭을 더 줄임
-
-#### 비고
-
-- hover 실패를 피하기 위해 상시 노출형 보조 문구로 전환했다.
-- 사용자 확인 전까지 상태는 `확인 대기`로 유지한다.
-
-### Plan 상태 표기 동기화 수정
-
-**작성 시각:** 2026-03-06 21:48 (local)
-
-**상태:** 확인 대기
-
-#### 수행 내용
-
-1. 사용자가 plan에 지금까지 구현한 내용이 제대로 반영되지 않았다고 지적했다.
-2. 원인을 Step 2/3의 세부 단계 표와 Step 제목, 실행 의존성 그래프의 상태 이모지가 서로 어긋난 것으로 확인했다.
-3. 사용자 확인이 아직 없으므로 Step 2/3 관련 구현 항목을 `✅`가 아니라 `⏳`로 정정했다.
-4. Recent Update 정책 설명 방식이 tooltip이 아니라 상시 보조 문구로 바뀐 PLAN CHANGE도 plan에 추가했다.
-
-#### 생성/수정 파일
-
-- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
-- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
-
-#### 검증 방법
-
-1. `plan.md`에서 `Step 2`, `Step 3` 제목이 `⏳`로 표시되는지 확인한다.
-2. 같은 섹션의 세부 단계 표 상태가 모두 `⏳`로 일치하는지 확인한다.
-3. 실행 의존성 그래프의 Track B/C 상태도 동일하게 `⏳`로 반영됐는지 확인한다.
-4. PLAN CHANGE 섹션에 Recent Update 설명 방식 변경 항목이 추가됐는지 확인한다.
-
-#### 문제점 / 리스크
-
-1. plan 상태를 구현 완료와 사용자 확인 완료로 구분하지 않으면 다시 드리프트가 생길 수 있다.
-   - 완화 방안 1: 이후에도 `✅`는 사용자 명시 확인 후에만 사용
-   - 완화 방안 2: Step 제목, 표, 그래프 3곳을 한 번에 갱신
-
-#### 비고
-
-- 이번 수정은 구현 상태 표현을 실제 진행 상태에 맞게 정정한 문서 동기화 작업이다.
-- 사용자 확인 전까지 상태는 `확인 대기`로 유지한다.
-
 ### Step 4 통합 검증 / 문서 동기화 / 운영 가드레일 완료
 
 **작성 시각:** 2026-03-07 (local)
@@ -1001,66 +885,6 @@ npm run build
 **상태:** 확인 대기(awaiting user confirmation)
 
 #### Step 4 수행 내용
-
-(Step 4 통합 검증 내용은 이전 세션에서 기록됨)
-
----
-
-### Step 7 — Finnhub peers 수집/저장/UI 노출 완료
-
-**작성 시각:** 2026-03-08 (local)
-
-**상태:** 확인 대기(awaiting user confirmation)
-
-#### Step 7 수행 내용
-
-**7-1 (peers_json column + repository)**
-- `db.ts`: `company_profiles` CREATE TABLE에 `peers_json TEXT` 컬럼 추가 + ALTER TABLE migration
-- `companyProfileRepository.ts`: `CompanyProfileRow`에 `peers_json` 추가, `upsertPeers()`, `getPeersByTicker()` 함수 구현
-
-**7-2 (Finnhub peers provider + endpoint)**
-- `finnhubPeersProvider.ts` 신규 파일: `fetchFinnhubPeers()`, `fetchFinnhubPeersBatch()` (120ms rate limit 간격)
-- `server.ts`: `POST /api/company-profiles/pull-peers` 엔드포인트 추가, `TABLE_UI_USAGE` 업데이트
-
-**7-3 (DataControl peers pull button)**
-- `DataControlWindow.tsx`: `SectionKey`에 `'peersPull'` 추가, 모든 state Records 업데이트, switch case 추가, sections 배열에 'Company Data' 그룹 내 항목 추가
-
-**7-4 (News Feed peers column)**
-- `types.ts`: `NewsItem`에 `peers?: string[]` 추가
-- `newsRepository.ts`: `getNews()`에서 batch peers lookup 추가 (sentiment과 동일 패턴), `mapNewsRow()`에 peersMap 파라미터 및 peers 필드 추가
-- `FinnhubNewsWindow.tsx`: `ColumnId`에 `'peers'` 추가, `BackendNewsItem`/`DisplayItem`에 peers 추가, `mapBackendItem`에 peers 매핑, `renderCell`에 peers 렌더링 (보라색 badge, 클릭 시 필터), `getSortValue`에 peers case 추가
-
-**7-5 (Peers default hidden)**
-- `FinnhubNewsWindow.tsx`: `HIDDEN_BY_DEFAULT` 배열에 `'peers'` 추가
-
-**7-6 (App DB peers visibility)**
-- `DataControlWindow.tsx`: App DB 탭에 `<details>` 기반 Sample Rows 테이블 추가 (모든 테이블에). `company_profiles.peers_json`이 sample row에서 자연스럽게 노출됨.
-
-**7-7 (Tests + docs sync)**
-- `backend_prompt.md`: `company_profiles` 테이블 문서 추가, `peers` 필드 news API 응답에 추가, `POST /api/company-profiles/pull-peers` API 문서 추가
-- `plan.md`: Step 7 전체 ✅, 2-12/2-13/2-14 상태 ✅
-
-**2-12 BookmarkManager 폴더 우클릭 (이전 세션)**
-- `BookmarkManager.tsx`: `CtxMenu`에 `target: 'item' | 'folder' | 'area'` 추가, 폴더 우클릭 시 Rename/Delete 메뉴, 빈 영역 우클릭 시 Paste 메뉴
-- 2-13/2-14는 이미 구현 확인됨
-
-#### 자체 검증 결과
-
-| Layer | 결과 |
-|-------|------|
-| 정적 분석 | TypeScript build 오류 없음 |
-| 빌드 | backend `npm run build` ✅, frontend `npm run build` ✅ |
-| 자동 테스트 | backend vitest 48/48 ✅ |
-| 런타임 통합 | `POST /api/company-profiles/pull-peers` → 200 OK, `GET /api/news?tickers=AAPL` → peers 배열 포함 확인, `GET /api/db/inspect` → company_profiles.peers_json 확인 |
-
-#### 문제점 / 리스크
-
-1. peers pull은 Finnhub rate limit(120ms)이 있어 50 tickers 기준 ~6초 소요.
-   - 완화: `maxTickers` 파라미터로 조절 가능, progress callback 지원
-2. 동일 ticker에 대해 fmp/finnhub 2개의 company_profiles row가 생긴다.
-   - 완화: peers lookup은 `peers_json IS NOT NULL` 조건으로 정확히 finnhub row를 찾고, description은 fmp row에서 찾음. 출처별 분리 저장이 canonical 설계.
-3. App DB Sample Rows는 최대 5건만 표시.
-   - 완화: DESC 정렬이라 최근 pull 결과가 먼저 보임
 
 Step 4 전체 (4-1 ~ 4-4)를 완료했다.
 
@@ -1101,11 +925,7 @@ Step 4 전체 (4-1 ~ 4-4)를 완료했다.
 2. E2E 체크리스트 26개 항목은 수동 검증이므로 시간이 걸린다.
    - 완화 방안: 가장 핵심적인 항목(1, 4-7, 11-16, 17-22)부터 우선 실행
 
-#### 비고
-
-- 이번 Step은 코드 변경 없이 문서 동기화와 검증 정리만 수행했다.
-- 전체 plan (Step 0 ~ Step 4) 구현이 완료되었다.
-- 사용자 확인 전까지 상태는 `확인 대기`로 유지한다.
+---
 
 ### Plan 리비전 — Finnhub peers 컬럼/수집/저장 계획 추가
 
@@ -1532,3 +1352,205 @@ Step 4 전체 (4-1 ~ 4-4)를 완료했다.
 - `App.tsx`의 `terminal-workspace-v1` persistence 구조를 유지한다.
 - backend schema/API 추가 작업은 하지 않는다.
 - plan.md의 미확정 사항에서 font size 저장 위치를 제거했다.
+
+---
+
+### Step 7 — Finnhub peers 수집/저장/UI 노출 완료
+
+**작성 시각:** 2026-03-08 (local)
+
+**상태:** 확인 대기(awaiting user confirmation)
+
+#### Step 7 수행 내용
+
+**7-1 (peers_json column + repository)**
+- `db.ts`: `company_profiles` CREATE TABLE에 `peers_json TEXT` 컬럼 추가 + ALTER TABLE migration
+- `companyProfileRepository.ts`: `CompanyProfileRow`에 `peers_json` 추가, `upsertPeers()`, `getPeersByTicker()` 함수 구현
+
+**7-2 (Finnhub peers provider + endpoint)**
+- `finnhubPeersProvider.ts` 신규 파일: `fetchFinnhubPeers()`, `fetchFinnhubPeersBatch()` (120ms rate limit 간격)
+- `server.ts`: `POST /api/company-profiles/pull-peers` 엔드포인트 추가, `TABLE_UI_USAGE` 업데이트
+
+**7-3 (DataControl peers pull button)**
+- `DataControlWindow.tsx`: `SectionKey`에 `'peersPull'` 추가, 모든 state Records 업데이트, switch case 추가, sections 배열에 'Company Data' 그룹 내 항목 추가
+
+**7-4 (News Feed peers column)**
+- `types.ts`: `NewsItem`에 `peers?: string[]` 추가
+- `newsRepository.ts`: `getNews()`에서 batch peers lookup 추가 (sentiment과 동일 패턴), `mapNewsRow()`에 peersMap 파라미터 및 peers 필드 추가
+- `FinnhubNewsWindow.tsx`: `ColumnId`에 `'peers'` 추가, `BackendNewsItem`/`DisplayItem`에 peers 추가, `mapBackendItem`에 peers 매핑, `renderCell`에 peers 렌더링 (보라색 badge, 클릭 시 필터), `getSortValue`에 peers case 추가
+
+**7-5 (Peers default hidden)**
+- `FinnhubNewsWindow.tsx`: `HIDDEN_BY_DEFAULT` 배열에 `'peers'` 추가
+
+**7-6 (App DB peers visibility)**
+- `DataControlWindow.tsx`: App DB 탭에 `<details>` 기반 Sample Rows 테이블 추가 (모든 테이블에). `company_profiles.peers_json`이 sample row에서 자연스럽게 노출됨.
+
+**7-7 (Tests + docs sync)**
+- `backend_prompt.md`: `company_profiles` 테이블 문서 추가, `peers` 필드 news API 응답에 추가, `POST /api/company-profiles/pull-peers` API 문서 추가
+- `plan.md`: Step 7 전체 ✅, 2-12/2-13/2-14 상태 ✅
+
+**2-12 BookmarkManager 폴더 우클릭 (이전 세션)**
+- `BookmarkManager.tsx`: `CtxMenu`에 `target: 'item' | 'folder' | 'area'` 추가, 폴더 우클릭 시 Rename/Delete 메뉴, 빈 영역 우클릭 시 Paste 메뉴
+- 2-13/2-14는 이미 구현 확인됨
+
+#### 자체 검증 결과
+
+| Layer | 결과 |
+|-------|------|
+| 정적 분석 | TypeScript build 오류 없음 |
+| 빌드 | backend `npm run build` ✅, frontend `npm run build` ✅ |
+| 자동 테스트 | backend vitest 48/48 ✅ |
+| 런타임 통합 | `POST /api/company-profiles/pull-peers` → 200 OK, `GET /api/news?tickers=AAPL` → peers 배열 포함 확인, `GET /api/db/inspect` → company_profiles.peers_json 확인 |
+
+#### 문제점 / 리스크
+
+1. peers pull은 Finnhub rate limit(120ms)이 있어 50 tickers 기준 ~6초 소요.
+   - 완화: `maxTickers` 파라미터로 조절 가능, progress callback 지원
+2. 동일 ticker에 대해 fmp/finnhub 2개의 company_profiles row가 생긴다.
+   - 완화: peers lookup은 `peers_json IS NOT NULL` 조건으로 정확히 finnhub row를 찾고, description은 fmp row에서 찾음. 출처별 분리 저장이 canonical 설계.
+3. App DB Sample Rows는 최대 5건만 표시.
+   - 완화: DESC 정렬이라 최근 pull 결과가 먼저 보임
+
+---
+
+### Finnhub update에서 sentiment 분리 + News date sticky header
+
+**작성 시각:** 2026-03-08 13:21 (local)
+
+**상태:** 확인 대기(awaiting user confirmation)
+
+#### 수행 내용
+
+1. `POST /api/news/pull-finhub` 배경 작업에서 ticker별 `upsertSentimentSnapshot()` 호출을 제거했다. 이제 News Feed의 일반 update 버튼은 뉴스 pull만 수행한다.
+2. 별도 sentiment batch 경로 `POST /api/news/sentiment/update`는 유지해서, sentiment snapshot은 명시적으로 돌릴 때만 갱신되게 했다.
+3. `FinnhubNewsWindow.tsx`에 현재 스크롤 위치 기준 날짜를 계산하는 `stickyDate` 상태를 추가했다.
+4. 가상 리스트 내부 header row의 `sticky` 의존을 제거하고, 리스트 상단에 별도 회색 overlay header를 띄워 현재 날짜 그룹이 항상 보이게 바꿨다.
+5. `plan.md` 목표/현재 상태/PLAN CHANGE를 이번 동작 기준으로 동기화했다.
+
+#### 생성/수정 파일
+
+- `terminal/backend/src/server.ts`
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. News Feed에서 일반 `Update`를 실행한 뒤, backend 로그 또는 DB를 확인해 sentiment snapshot row count가 자동 증가하지 않는지 본다.
+2. 필요 시 별도 sentiment update 경로를 직접 호출해 snapshot이 갱신되는지 확인한다.
+3. News Feed 리스트를 아래로 스크롤해도 회색 날짜 bar가 상단에 남고, 날짜 그룹이 바뀌면 상단 표시도 함께 바뀌는지 확인한다.
+
+```bash
+cd terminal/backend
+npm run build
+
+cd ..\..\termina_web\figma_code\terminal_ui_ver2_finhub
+npm run build
+```
+
+#### 문제점 / 리스크
+
+1. 일반 news update 뒤에는 sentiment가 자동으로 최신화되지 않는다.
+   - 완화 방안 1: 필요 시 `POST /api/news/sentiment/update`를 별도로 실행
+   - 완화 방안 2: 추후 UI에 sentiment 전용 update 버튼을 추가 검토
+2. sticky overlay와 실제 날짜 header row가 화면 상단 근처에서 잠깐 중복되어 보일 수 있다.
+   - 완화 방안 1: 사용성 문제가 크면 header row push-off 애니메이션을 추가
+   - 완화 방안 2: 또는 top 영역에서 첫 header row를 숨기는 후속 조정 검토
+3. 가상 리스트의 visibleStartIndex 계산 타이밍에 따라 빠른 스크롤 중 날짜 전환이 한 프레임 늦을 수 있다.
+   - 완화 방안 1: 필요 시 overscan 조정
+   - 완화 방안 2: 또는 scroll offset 기반 계산으로 후속 개선
+
+---
+
+### market news 30페이지 batch 반복 backfill + 로그 강화
+
+**작성 시각:** 2026-03-08 13:45 (local)
+
+**상태:** 확인 대기(awaiting user confirmation)
+
+#### 수행 내용
+
+1. `finnhubNewsProvider.ts`의 market news pull을 30페이지 한 번으로 끝내지 않고, `minId`를 이어받아 다음 30페이지 batch를 반복 수행하는 구조로 바꿨다.
+2. batch 진행 상태를 외부에서 받을 수 있도록 market news meta/result 타입과 batch callback을 추가했다.
+3. `server.ts`의 `POST /api/news/pull-finhub` market news 구간에서 batch 로그를 남기도록 연결했다.
+4. job log에 batch 번호, batch 페이지 수, 누적 페이지 수, in-range item 수, oldest published 시각, 종료 사유를 남기게 했다.
+5. 총 페이지 guardrail에 도달했는데도 요청 시작일에 도달하지 못하면 warning 로그를 남기고 continuation cursor(`nextMinId`)를 표시하게 했다.
+6. `plan.md`에 이번 market news batching 기준을 `PLAN CHANGE`로 동기화했다.
+
+#### 생성/수정 파일
+
+- `terminal/backend/src/services/finnhubNewsProvider.ts`
+- `terminal/backend/src/server.ts`
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+```bash
+cd terminal/backend
+npm run build
+```
+
+1. Market news custom update를 넓은 기간으로 실행한다.
+2. Update Log에서 `market batch 1`, `market batch 2`처럼 30페이지 단위 batch 로그가 이어지는지 확인한다.
+3. 완료 후 `market_news meta:` 라인에서 `pages`, `batches`, `oldest`, `reached_from`가 출력되는지 확인한다.
+4. guardrail에 걸린 경우 `⚠ market_news page guard hit...` 경고와 `nextMinId`가 함께 남는지 확인한다.
+
+#### 문제점 / 리스크
+
+1. 넓은 기간 market news backfill은 이전보다 오래 걸릴 수 있다.
+   - 완화 방안 1: batch 로그로 진행 상황을 노출
+   - 완화 방안 2: 필요 시 추후 UI에 continue/backfill 전용 액션 분리
+2. 총 페이지 guardrail을 넘는 극단적 기간은 여전히 한 번에 완전 수집을 보장하지 않는다.
+   - 완화 방안 1: warning 로그와 `nextMinId`를 남겨 운영자가 이어서 진행 가능하게 함
+   - 완화 방안 2: 추후 explicit continuation API 추가 검토
+3. `insertNewsItem` dedupe에 기대고 있으므로 batch 간 일부 중복 페이지가 있어도 job fetched 수와 inserted 수가 다를 수 있다.
+   - 완화 방안 1: log에 fetched와 inserted를 둘 다 남김
+   - 완화 방안 2: 필요 시 후속으로 cursor 정확도 추가 점검
+
+---
+
+### GET /api/news `to` 날짜 필터 버그 수정
+
+**작성 시각:** 2026-03-08 (local)
+
+**상태:** 확인 대기(awaiting user confirmation)
+
+#### 수행 내용
+
+1. **근본 원인 발견**: `newsRepository.ts`의 SQL 조건 `ni.published_at <= ?`에 bare date 'YYYY-MM-DD'를 그대로 전달하고 있었다. DB의 `published_at`은 ISO timestamp ('2026-03-01T09:38:00.000Z')을 저장하므로, string comparison에서 항상 FALSE가 되어 `to` 필터가 완전히 무시되고 있었다.
+2. **newsRepository.ts 수정**: `query.to` 값에 `T23:59:59.999Z`를 append해서 해당 날짜 끝까지 포함하게 변경.
+3. **newsFilterMatcher.ts 수정**: SSE stream 필터에서도 같은 문제가 있었음 (`new Date('2026-03-01')` = 자정 UTC이므로 당일 아이템 전부 제외). `to` 비교를 end-of-day (23:59:59.999Z)로 보정.
+4. **newsChangeMerger.ts 확인**: 이미 `${to}T23:59:59.999Z`를 사용하고 있어 수정 불필요.
+5. **finnhubNewsProvider.ts 확인**: `isWithinDateRange` 함수도 이미 `${to}T23:59:59.999Z`을 사용하고 있어 수정 불필요.
+
+#### 영향 범위
+
+- `GET /api/news?from=2026-03-01&to=2026-03-01` 처럼 날짜 범위 조회 시, `to` 날짜 당일의 뉴스가 정상적으로 포함됨
+- SSE stream 필터에서도 `to` 날짜 당일 뉴스가 올바르게 통과됨
+
+#### 생성/수정 파일
+
+- `terminal/backend/src/services/newsRepository.ts` — `to` 날짜 필터에 `T23:59:59.999Z` append
+- `terminal/backend/src/services/newsFilterMatcher.ts` — `to` 비교를 end-of-day로 보정
+
+#### 검증 방법
+
+```bash
+cd terminal/backend
+npm run build
+```
+
+1. backend 재시작 후 News Feed에서 from=to='2026-03-01'로 조회 → 3월 1일 뉴스만 표시되는지 확인
+2. 넓은 범위 (예: from='2026-03-01', to='2026-03-04') 조회 → 해당 기간 뉴스만 표시되는지 확인
+
+#### 문제점 / 리스크
+
+1. 이 버그로 인해 기존 UI에서 `to` 날짜 필터가 완전히 무시됐었다 — 사실상 `from` 이후 전체 뉴스가 표시되던 상태.
+   - 완화 방안: 수정 반영 후 사용자가 날짜 범위 조회를 재시도하여 정상 동작 확인
+
+#### 비고
+
+- 이번 Step은 코드 변경 없이 문서 동기화와 검증 정리만 수행했다.
+- 전체 plan (Step 0 ~ Step 4) 구현이 완료되었다.
+- 사용자 확인 전까지 상태는 `확인 대기`로 유지한다.
