@@ -1,6 +1,641 @@
 # Backend Prompt
 
 ## 목적
+이 문서는 `terminal/backend/` 현재 구현 기준의 백엔드 스펙이다. 어떤 데이터가 어디에 저장되고, 어떤 API가 열려 있으며, 현재 런타임 제약이 무엇인지 이 문서만 읽고 바로 파악할 수 있어야 한다.
+
+현재 백엔드의 핵심 역할은 아래와 같다.
+
+1. Finnhub, EODHD, IBKR, FMP 데이터를 SQLite와 OHLC DB에 적재한다.
+2. `GET /api/news`로 뉴스 통합 조회 API를 제공한다.
+3. 장시간 작업을 background job으로 실행하고 `GET /api/jobs/:jobId`로 상태/로그를 반환한다.
+4. full text, 뉴스 후행 변화율, sentiment, company profile/peers 같은 보강 데이터를 저장한다.
+5. ticker CSV, universe, bookmarks, alerts, calendar, DB inspect API를 제공한다.
+
+## 현재 구현 상태 요약
+
+- 런타임 뉴스 DB는 `terminal/backend/backend/data/app.db` 이다.
+- Finnhub API 키는 서버 시작 시 필수다. 없으면 서버가 시작되지 않는다.
+- FMP API 키는 선택 사항이다. 없으면 company profile FMP pull만 제한된다.
+- EODHD 토큰은 `POST /api/news/pull-eodhd` 호출 시 파일에서 읽는다.
+- `GET /api/news`는 `news_items` 단독 조회가 아니라 `news_change_metrics`, `news_fulltext`, `news_ai_analysis`, sentiment snapshot, peers, company description을 join/병합해서 내려준다.
+- `news_change_metrics`는 서버 시작 시 항상 재생성된다. 즉 영구 캐시가 아니라 재계산 가능한 파생 테이블이다.
+- background job 상태와 로그는 메모리 기반이라 서버 재시작 시 유지되지 않는다.
+- default ticker universe는 서버 시작 시 CSV에서 `securities`, `ticker_universes`, `ticker_universe_items`로 import를 시도한다.
+- `GET /api/news/stream` SSE endpoint가 존재하며 새 뉴스 insert 시 필터를 만족하는 클라이언트에 push 한다.
+
+## 실행과 환경
+
+`terminal/backend/`에서 실행한다.
+
+```bash
+npm install
+npm run dev
+```
+
+검증/배포용 명령:
+
+```bash
+npm run build
+npm run test
+```
+
+기본 환경값:
+
+- 포트: `8080` (`PORT`)
+- 앱 DB 경로: `./backend/data/app.db` (`SQLITE_PATH`)
+- 허용 프런트 origin: `http://localhost:5174` (`FRONTEND_ORIGIN`)
+
+환경 변수 로딩 순서:
+
+1. `dotenv.config({ path: "../.env" })`
+2. `dotenv.config()`
+
+### Finnhub API 키
+
+조회 순서:
+
+1. 환경 변수 `FINNHUB_API_KEY`
+2. `finhub/finhub_api_key/finhub_api_key`
+
+없으면 서버는 아래 오류로 시작 실패한다.
+
+```text
+FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/finhub_api_key/finhub_api_key
+```
+
+### FMP API 키
+
+조회 순서:
+
+1. 환경 변수 `FMP_API_KEY`
+2. `ai_agent_plan/fmp_api_key/fmp_api_key`
+
+없어도 서버는 시작된다.
+
+### EODHD 토큰
+
+`POST /api/news/pull-eodhd`는 레포 루트의 `EODHD/API TOKEN` 파일을 읽는다.
+
+## 저장 구조
+
+### 앱 DB
+
+경로: `terminal/backend/backend/data/app.db`
+
+#### `news_items`
+
+컬럼:
+
+- `[][][]id[][][]`
+- `[][][]published_at[][][]`
+- `[][][]source[][][]`
+- `[][][]publisher[][][]`
+- `[][][]source_type[][][]`
+- `[][][]title[][][]`
+- `[][][]body[][][]`
+- `[][][]url[][][]`
+- `[][][]tickers_csv[][][]`
+- `[][][]tags_csv[][][]`
+- `[][][]created_at[][][]`
+- `[][][]ohlc_ticker[][][]`
+- `[][][]ohlc_date[][][]`
+- `[][][]change_1d_pct[][][]`
+- `[][][]change_from_open_pct[][][]`
+- `[][][]change_7d_pct[][][]`
+- `[][][]change_14d_pct[][][]`
+- `[][][]change_30d_pct[][][]`
+- `[][][]change_computed_at[][][]`
+
+제약:
+
+- `UNIQUE (source, url)`
+- 인덱스 `(published_at DESC, id DESC)`
+
+주의:
+
+- change 관련 컬럼은 legacy 호환용으로 남아 있지만, 실제 조회는 `news_change_metrics` join 값을 우선 사용한다.
+
+#### `news_change_metrics`
+
+컬럼:
+
+- `[][][]news_id[][][]`
+- `[][][]metric_key[][][]`
+- `[][][]value_pct[][][]`
+- `[][][]ohlc_ticker[][][]`
+- `[][][]reference_date[][][]`
+- `[][][]target_date[][][]`
+- `[][][]forward_trading_days[][][]`
+- `[][][]calc_version[][][]`
+- `[][][]computed_at[][][]`
+
+기본키: `(news_id, metric_key)`
+
+표준 metric key:
+
+- `[][][]change_from_open_pct[][][]`
+- `[][][]change_1d_pct[][][]`
+- `[][][]change_7d_pct[][][]`
+- `[][][]change_14d_pct[][][]`
+- `[][][]change_30d_pct[][][]`
+
+운영적 정의:
+
+- `change_from_open_pct`: 뉴스 기준일 시가 -> 기준일 종가
+- `change_1d_pct`: 기준일 종가 -> 1거래일 후 종가
+- `change_7d_pct`: 기준일 종가 -> 5거래일 후 종가
+- `change_14d_pct`: 기준일 종가 -> 10거래일 후 종가
+- `change_30d_pct`: 기준일 종가 -> 22거래일 후 종가
+
+주의:
+
+- 서버 시작 시 항상 재생성된다.
+
+#### `news_fulltext`
+
+컬럼:
+
+- `[][][]news_id[][][]`
+- `[][][]full_text[][][]`
+- `[][][]extraction_status[][][]`
+- `[][][]extraction_note[][][]`
+- `[][][]word_count[][][]`
+- `[][][]extracted_at[][][]`
+- `[][][]keywords_json[][][]`
+- `[][][]keywords_status[][][]`
+- `[][][]keywords_updated_at[][][]`
+
+주의:
+
+- `getUnextractedNewsIds()`는 `news_fulltext` row가 없는 뉴스만 대상으로 삼는다. 한 번 `failed` 또는 `skipped` row가 생기면 자동 재시도 대상에서 빠질 수 있다.
+
+#### `news_sentiment_snapshots`
+
+컬럼:
+
+- `[][][]id[][][]`
+- `[][][]ticker[][][]`
+- `[][][]asof_date[][][]`
+- `[][][]buzz_articles_in_last_week[][][]`
+- `[][][]buzz_weekly_average[][][]`
+- `[][][]buzz[][][]`
+- `[][][]company_news_score[][][]`
+- `[][][]sector_avg_bullish_pct[][][]`
+- `[][][]sector_avg_news_score[][][]`
+- `[][][]sentiment_bullish_pct[][][]`
+- `[][][]sentiment_bearish_pct[][][]`
+- `[][][]fetched_at[][][]`
+
+의미:
+
+- Finnhub `news-sentiment` 결과를 ticker/date 기준으로 저장하는 symbol-level snapshot이다.
+
+#### `news_ai_analysis`
+
+컬럼:
+
+- `[][][]news_id[][][]`
+- `[][][]score[][][]`
+- `[][][]score_evidence[][][]`
+- `[][][]keywords_json[][][]`
+- `[][][]analysis_status[][][]`
+- `[][][]analyzed_at[][][]`
+- `[][][]created_at[][][]`
+
+#### `calendar_events`
+
+컬럼:
+
+- `[][][]id[][][]`
+- `[][][]event_type[][][]`
+- `[][][]ticker[][][]`
+- `[][][]title[][][]`
+- `[][][]event_at[][][]`
+- `[][][]meta_json[][][]`
+- `[][][]source[][][]`
+- `[][][]unique_key[][][]`
+- `[][][]created_at[][][]`
+
+제약: `UNIQUE (event_type, unique_key)`
+
+#### `company_profiles`
+
+컬럼:
+
+- `[][][]id[][][]`
+- `[][][]security_id[][][]`
+- `[][][]source[][][]`
+- `[][][]description[][][]`
+- `[][][]ceo[][][]`
+- `[][][]employees[][][]`
+- `[][][]website[][][]`
+- `[][][]ipo_date[][][]`
+- `[][][]market_cap[][][]`
+- `[][][]raw_json[][][]`
+- `[][][]peers_json[][][]`
+- `[][][]fetched_at[][][]`
+
+#### `securities`
+
+컬럼:
+
+- `[][][]id[][][]`
+- `[][][]ticker[][][]`
+- `[][][]exchange[][][]`
+- `[][][]name[][][]`
+- `[][][]sector[][][]`
+- `[][][]industry[][][]`
+- `[][][]created_at[][][]`
+
+#### `ticker_universes`
+
+컬럼:
+
+- `[][][]id[][][]`
+- `[][][]name[][][]`
+- `[][][]description[][][]`
+- `[][][]source_path[][][]`
+- `[][][]created_at[][][]`
+
+#### `ticker_universe_items`
+
+컬럼:
+
+- `[][][]universe_id[][][]`
+- `[][][]security_id[][][]`
+- `[][][]sort_order[][][]`
+- `[][][]created_at[][][]`
+
+#### `bookmark_folders`
+
+컬럼:
+
+- `[][][]id[][][]`
+- `[][][]user_id[][][]`
+- `[][][]name[][][]`
+- `[][][]parent_id[][][]`
+- `[][][]sort_order[][][]`
+- `[][][]created_at[][][]`
+
+#### `bookmark_items`
+
+컬럼:
+
+- `[][][]folder_id[][][]`
+- `[][][]news_id[][][]`
+- `[][][]created_at[][][]`
+
+#### `confirmed_empty_ranges`
+
+컬럼:
+
+- `[][][]ticker[][][]`
+- `[][][]source_type[][][]`
+- `[][][]range_from[][][]`
+- `[][][]range_to[][][]`
+- `[][][]confirmed_at[][][]`
+
+#### 기타 테이블
+
+- `news_saved_views`
+- `watchlists`
+- `watchlist_items`
+- `alert_rules`
+- `users`
+- `update_status`
+
+### OHLC DB
+
+경로: `OHLC_data/ohlc_1d_watchlist.sqlite`
+
+대표 테이블:
+
+- `[][][]ohlc_1d[][][]`
+  - 기본 컬럼: `Symbol`, `Datetime`, `Open`, `High`, `Low`, `Close`, `Volume`
+
+## API 그룹
+
+### 공통/상태
+
+- `GET /healthz`
+- `GET /api/config`
+- `GET /api/updates/status`
+- `GET /api/jobs/:jobId`
+
+### ticker / universe / security
+
+- `GET /api/tickers`
+- `POST /api/tickers/add`
+- `GET /api/securities`
+- `GET /api/securities/search`
+- `GET /api/universes`
+- `GET /api/universes/:id/items`
+
+### 뉴스 조회 / 스트림
+
+- `GET /api/news`
+- `GET /api/news/:id`
+- `GET /api/news/stream`
+- `GET /api/news/fulltext/:newsId`
+- `GET /api/news/ai-analysis/validate`
+
+### 뉴스 적재 / 후처리
+
+- `GET /api/news/pull-finhub/preflight`
+- `POST /api/news/pull-finhub`
+- `POST /api/news/pull-eodhd`
+- `POST /api/news/fulltext/update`
+- `POST /api/news/fulltext/backfill-plaintext`
+- `POST /api/news/change/update-recent`
+- `POST /api/news/change/update-custom`
+- `POST /api/news/sentiment/update`
+
+### 저장 뷰 / watchlist / alerts / bookmarks
+
+- `POST /api/news/saved-views`
+- `GET /api/news/saved-views`
+- `DELETE /api/news/saved-views/:id`
+- `GET /api/watchlists`
+- `POST /api/watchlists`
+- `DELETE /api/watchlists/:id`
+- `GET /api/settings/alerts`
+- `POST /api/settings/alerts`
+- `GET /api/bookmarks/folders`
+- `POST /api/bookmarks/folders`
+- `PUT /api/bookmarks/folders/:id`
+- `DELETE /api/bookmarks/folders/:id`
+- `POST /api/bookmarks/items`
+- `DELETE /api/bookmarks/items`
+- `GET /api/bookmarks/folders/:folderId/items`
+- `PATCH /api/bookmarks/items/move`
+
+### calendar / OHLC / company profile / inspect
+
+- `GET /api/calendar/types`
+- `GET /api/calendar/events`
+- `GET /api/calendar/events/export.csv`
+- `GET /api/calendar/events/:id`
+- `POST /api/ibkr/calendar/update`
+- `GET /api/ibkr/ohlc1d/status`
+- `POST /api/ibkr/ohlc1d/update`
+- `GET /api/company-profiles/:ticker`
+- `POST /api/company-profiles/pull-fmp`
+- `POST /api/company-profiles/pull-peers`
+- `GET /api/db/inspect`
+
+## 핵심 API 상세
+
+### `GET /api/news`
+
+지원 query:
+
+- `keyword`
+- `tickers=TSLA,NVDA`
+- `sources=company_news,press_release`
+- `source_type=company_news,press_release`
+- `source_names=FINNHUB,EODHD`
+- `tags=earnings,macro`
+- `from`
+- `to`
+- `limit`
+- `cursor`
+- `bookmarkFolderId`
+
+응답 item 출력 컬럼:
+
+- `[][][]id[][][]`
+- `[][][]published_at[][][]`
+- `[][][]source[][][]`
+- `[][][]publisher[][][]`
+- `[][][]source_type[][][]`
+- `[][][]title[][][]`
+- `[][][]body[][][]`
+- `[][][]url[][][]`
+- `[][][]tickers[][][]`
+- `[][][]tags[][][]`
+- `[][][]created_at[][][]`
+- `[][][]ohlc_ticker[][][]`
+- `[][][]ohlc_date[][][]`
+- `[][][]change_1d_pct[][][]`
+- `[][][]change_from_open_pct[][][]`
+- `[][][]change_7d_pct[][][]`
+- `[][][]change_14d_pct[][][]`
+- `[][][]change_30d_pct[][][]`
+- `[][][]change_computed_at[][][]`
+- `[][][]hasFullText[][][]`
+- `[][][]keywords[][][]`
+- `[][][]keywordsStatus[][][]`
+- `[][][]industry[][][]`
+- `[][][]score[][][]`
+- `[][][]scoreEvidence[][][]`
+- `[][][]analysisStatus[][][]`
+- `[][][]sentimentBullishPct[][][]`
+- `[][][]sentimentBearishPct[][][]`
+- `[][][]companyNewsScore[][][]`
+- `[][][]peers[][][]`
+- `[][][]companyDescription[][][]`
+
+추가 규칙:
+
+- `keywords`는 AI analysis가 완료된 경우 `news_ai_analysis.keywords_json`을 우선 사용한다.
+- sentiment 3개 필드는 대표 ticker의 최신 snapshot 기준이다.
+- peers/companyDescription도 대표 ticker 기준 최근 company profile row를 사용한다.
+
+### `GET /api/news/stream`
+
+- `GET /api/news`와 같은 query parser 사용
+- 20초 heartbeat
+- 새 뉴스 insert 시 filter를 만족하는 클라이언트에만 push
+
+### `POST /api/news/pull-finhub`
+
+요청 body:
+
+```json
+{
+  "csvPath": "tradigview_screener/original_data/watch lists2_2026-02-22.csv",
+  "maxTickers": 0,
+  "mode": "7d",
+  "sourceType": "all",
+  "from": "2026-03-01",
+  "to": "2026-03-06"
+}
+```
+
+설명:
+
+- `mode`: `7d | recent | custom`
+- `sourceType`: `all | company_news | press_release | market_news`
+- `custom`일 때만 `from/to` 사용
+- 즉시 `jobId`를 반환하고 background에서 적재한다.
+
+응답 컬럼:
+
+- `[][][]jobId[][][]`
+
+### `GET /api/news/pull-finhub/preflight`
+
+응답 컬럼:
+
+- `[][][]totalTickers[][][]`
+- `[][][]fallbackCount[][][]`
+- `[][][]fallbackTickers[][][]`
+
+### `POST /api/news/pull-eodhd`
+
+날짜 단일 모드 또는 날짜 범위 모드 중 하나만 허용한다.
+
+응답 컬럼:
+
+- `[][][]symbol[][][]`
+- `[][][]from[][][]`
+- `[][][]to[][][]`
+- `[][][]offset[][][]`
+- `[][][]nextOffset[][][]`
+- `[][][]done[][][]`
+- `[][][]fetched[][][]`
+- `[][][]inserted[][][]`
+- `[][][]truncated[][][]`
+
+### `POST /api/news/fulltext/update`
+
+응답 컬럼:
+
+- `[][][]jobId[][][]`
+- `[][][]total[][][]`
+
+### `GET /api/news/fulltext/:newsId`
+
+응답 컬럼:
+
+- `[][][]newsId[][][]`
+- `[][][]fullText[][][]`
+- `[][][]extractionStatus[][][]`
+- `[][][]extractionNote[][][]`
+- `[][][]wordCount[][][]`
+- `[][][]extractedAt[][][]`
+- `[][][]keywords[][][]`
+- `[][][]keywordsStatus[][][]`
+
+### `POST /api/news/change/update-recent`
+
+- 응답 컬럼: `[][][]jobId[][][]`
+
+### `POST /api/news/change/update-custom`
+
+- 요청 body: `{ "from": "YYYY-MM-DD", "to": "YYYY-MM-DD" }`
+- 응답 컬럼: `[][][]jobId[][][]`
+
+### `GET /api/calendar/events`
+
+지원 query:
+
+- `type`
+- `tickers`
+- `watchlist_id`
+- `from`
+- `to`
+- `time_of_day`
+- `region`
+- `sort`
+- `cursor`
+- `limit`
+
+### `POST /api/ibkr/calendar/update`
+
+- 요청 body의 `mode`는 `backfill | refresh`
+
+응답 컬럼:
+
+- `[][][]mode[][][]`
+- `[][][]dateRange[][][]`
+- `[][][]upserted[][][]`
+- `[][][]deletedMockRows[][][]`
+- `[][][]source[][][]`
+
+### `GET /api/ibkr/ohlc1d/status`
+
+응답 컬럼:
+
+- `[][][]dbPath[][][]`
+- `[][][]overallMaxDate[][][]`
+- `[][][]lastSuccessAt[][][]`
+
+### `POST /api/ibkr/ohlc1d/update`
+
+- 기본 CSV 또는 body의 `csvPath`에서 ticker를 읽는다.
+- 응답 컬럼: `[][][]jobId[][][]`
+
+### `POST /api/company-profiles/pull-fmp`
+
+응답 컬럼:
+
+- `[][][]requested[][][]`
+- `[][][]fetched[][][]`
+- `[][][]upserted[][][]`
+- `[][][]totalProfiles[][][]`
+
+### `POST /api/company-profiles/pull-peers`
+
+응답 컬럼:
+
+- `[][][]requested[][][]`
+- `[][][]fetched[][][]`
+- `[][][]upserted[][][]`
+- `[][][]errors[][][]`
+- `[][][]errorDetails[][][]`
+
+### `GET /api/db/inspect`
+
+테이블 객체 출력 컬럼:
+
+- `[][][]name[][][]`
+- `[][][]columns[][][]`
+- `[][][]foreignKeys[][][]`
+- `[][][]rowCount[][][]`
+- `[][][]sampleRows[][][]`
+- `[][][]uiUsage[][][]`
+- `[][][]resources[][][]`
+
+## 현재 프런트와의 연결 포인트
+
+- `NewsWindow`는 `GET /api/news`와 `POST /api/news/pull-eodhd`를 사용한다.
+- `FinnhubNewsWindow`는 뉴스 조회, Finnhub 적재, fulltext, change update, bookmarks, job polling을 사용한다.
+- `DefaultTickerWindow`는 `GET /api/tickers`, `POST /api/tickers/add`를 사용한다.
+- `DataControlWindow`는 updates status, jobs, OHLC status/update, company profile pull, change update, DB inspect를 사용한다.
+- 현재 `WatchlistWindow`, `CalendarWindow`는 백엔드 API를 직접 사용하지 않는다.
+
+## 제약과 주의사항
+
+- Finnhub key가 없으면 서버 전체가 시작되지 않는다.
+- FMP key가 없으면 FMP 회사 설명 pull만 제한된다.
+- `news_change_metrics`는 영구 보존 테이블이 아니다.
+- background job 상태는 메모리 기반이라 재시작 시 유실된다.
+- fulltext 자동 재시도 기준은 `news_fulltext` row 존재 여부다.
+- default ticker source는 현재 CSV + startup import 구조라, 기본 경로를 바꾸면 front/backend 기본값을 함께 맞춰야 한다.# Backend Prompt
+
+## 목적
+이 문서는 `terminal/backend/`의 현재 구현을 기준으로 한 작업용 프롬프트/스펙이다. plan 문서나 별도 설명 없이 이 문서만 읽어도, 백엔드가 지금 무엇을 저장하고 어떤 API를 노출하며 어떤 제약을 가지는지 바로 파악할 수 있어야 한다.
+
+현재 백엔드의 중심 역할은 아래 5가지다.
+
+1. Finnhub, EODHD, IBKR에서 가져온 데이터를 SQLite와 OHLC DB에 저장한다.
+2. 저장된 뉴스를 `GET /api/news`로 조회 가능하게 만든다.
+3. 장시간 작업은 background job으로 실행하고 `GET /api/jobs/:jobId`로 진행 상황과 로그를 반환한다.
+4. 뉴스 full text와 뉴스 이후 가격 변화율(change metrics)을 후처리로 계산해 다시 저장한다.
+5. CSV 티커 목록, watchlist, saved view, alerts, calendar 데이터를 API로 관리한다.
+
+## 현재 구현 상태 요약
+
+- 뉴스 주 저장소는 `terminal/backend/backend/data/app.db` 이다.
+- Finnhub API 키는 서버 시작 시 필수다. 키가 없으면 서버가 기동되지 않는다.
+- EODHD 토큰은 `POST /api/news/pull-eodhd` 호출 시에만 필요하다.
+- Finnhub 뉴스 pull, full text 추출, OHLC 업데이트, 뉴스 change 재계산은 모두 background job으로 실행된다.
+- `GET /api/news`는 `news_items` 본문만 읽는 것이 아니라 `news_change_metrics`, `news_fulltext`, industry lookup 결과를 join/병합해서 내려준다.
+- industry 값은 DB 컬럼이 아니라, 가장 최근 `tradigview_screener/original_data/watch lists2*.csv`에서 읽어온 ticker → industry 매핑을 응답 시점에 붙인다.
+# Backend Prompt
+
+## 목적
 이 문서는 `terminal/backend/`의 현재 구현을 기준으로 한 작업용 프롬프트/스펙이다. plan 문서나 별도 설명 없이 이 문서만 읽어도, 백엔드가 지금 무엇을 저장하고 어떤 API를 노출하며 어떤 제약을 가지는지 바로 파악할 수 있어야 한다.
 
 현재 백엔드의 중심 역할은 아래 5가지다.

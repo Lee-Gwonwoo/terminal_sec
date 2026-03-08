@@ -23,7 +23,7 @@ import type { CalendarUpdateMode } from "./services/calendarIngestion.js";
 import { pullEodhdNews, pullEodhdNewsAll } from "./services/eodhdNewsProvider.js";
 import { insertNewsItem } from "./services/newsRepository.js";
 import { listUpdateStatuses, setLastSuccess } from "./services/updateStatusRepository.js";
-import { readTickersFromCsv, appendTickerToCsv, readTickerRowsFromCsv, CsvServiceError } from "./services/tickerCsvService.js";
+import { readTickersFromCsv, appendTickerToCsv, removeTickerFromCsv, readTickerRowsFromCsv, CsvServiceError } from "./services/tickerCsvService.js";
 import {
   fetchCompanyNewsRaw,
   fetchPressReleasesRaw,
@@ -53,6 +53,7 @@ import {
   countSecurities,
   countUniverseItems,
   getSecurityByTicker,
+  removeUniverseItemByTicker,
 } from "./services/tickerUniverseRepository.js";
 import { getDb } from "./db.js";
 import {
@@ -127,15 +128,21 @@ app.get("/api/updates/status", async (_req, res, next) => {
 });
 
 // ── Ticker CSV endpoints ───────────────────────────────────
-app.get("/api/tickers", (req, res, next) => {
+app.get("/api/tickers", async (req, res, next) => {
   try {
     const csvPath = typeof req.query.csvPath === "string" ? req.query.csvPath : "";
-    if (!csvPath) {
-      res.status(400).json({ error: "csvPath query parameter is required" });
+    const effectivePath = csvPath || DEFAULT_TICKERS_CSV;
+
+    if (!csvPath || csvPath === DEFAULT_TICKERS_CSV) {
+      // DB-primary: canonical universe first, CSV fallback handled inside helper
+      const tickers = await getDefaultUniverseTickers();
+      res.json({ csvPath: effectivePath, tickers, source: "db" });
       return;
     }
+
+    // Custom CSV path: direct CSV read
     const result = readTickersFromCsv(csvPath);
-    res.json({ csvPath, tickers: result.tickers });
+    res.json({ csvPath, tickers: result.tickers, source: "csv" });
   } catch (error) {
     if (error instanceof CsvServiceError) {
       res.status(400).json({ error: error.message });
@@ -148,21 +155,88 @@ app.get("/api/tickers", (req, res, next) => {
 app.post("/api/tickers/add", async (req, res, next) => {
   try {
     const { csvPath, ticker } = req.body ?? {};
-    if (typeof csvPath !== "string" || !csvPath) {
-      res.status(400).json({ error: "csvPath is required" });
-      return;
-    }
     if (typeof ticker !== "string" || !ticker.trim()) {
       res.status(400).json({ error: "ticker is required" });
       return;
     }
-    const result = await appendTickerToCsv(csvPath, ticker);
-    await setLastSuccess("tickers_csv", new Date().toISOString(), {
-      csvPath,
-      tickerAdded: result.tickerAdded,
-      count: result.tickers.length
-    });
-    res.json({ csvPath, tickerAdded: result.tickerAdded, tickers: result.tickers });
+    const normalizedTicker = ticker.trim().toUpperCase();
+    const effectiveCsvPath = typeof csvPath === "string" && csvPath ? csvPath : DEFAULT_TICKERS_CSV;
+
+    if (effectiveCsvPath === DEFAULT_TICKERS_CSV) {
+      // DB-primary path
+      const secId = await upsertSecurity(normalizedTicker, null, null, null, null);
+      const universes = await listUniverses();
+      const def = universes.find((u) => u.name === "default");
+      if (!def) {
+        res.status(500).json({ error: "Default universe not found in DB" });
+        return;
+      }
+      const currentCount = await countUniverseItems(def.id);
+      await addUniverseItem(def.id, secId, currentCount + 1);
+      // Best-effort CSV backup (ignore if already exists)
+      try { await appendTickerToCsv(effectiveCsvPath, normalizedTicker); } catch { /* already in CSV or file locked */ }
+      const tickers = await getDefaultUniverseTickers();
+      await setLastSuccess("tickers_csv", new Date().toISOString(), {
+        csvPath: effectiveCsvPath, tickerAdded: normalizedTicker, count: tickers.length, source: "db",
+      });
+      res.json({ csvPath: effectiveCsvPath, tickerAdded: normalizedTicker, tickers });
+    } else {
+      // Custom CSV path: CSV-only (existing behaviour)
+      if (typeof csvPath !== "string" || !csvPath) {
+        res.status(400).json({ error: "csvPath is required" });
+        return;
+      }
+      const result = await appendTickerToCsv(csvPath, normalizedTicker);
+      await setLastSuccess("tickers_csv", new Date().toISOString(), {
+        csvPath, tickerAdded: result.tickerAdded, count: result.tickers.length,
+      });
+      res.json({ csvPath, tickerAdded: result.tickerAdded, tickers: result.tickers });
+    }
+  } catch (error) {
+    if (error instanceof CsvServiceError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    next(error);
+  }
+});
+
+app.delete("/api/tickers/remove", async (req, res, next) => {
+  try {
+    const { csvPath, ticker } = req.body ?? {};
+    if (typeof ticker !== "string" || !ticker.trim()) {
+      res.status(400).json({ error: "ticker is required" });
+      return;
+    }
+    const normalizedTicker = ticker.trim().toUpperCase();
+    const effectiveCsvPath = typeof csvPath === "string" && csvPath ? csvPath : DEFAULT_TICKERS_CSV;
+
+    if (effectiveCsvPath === DEFAULT_TICKERS_CSV) {
+      // DB-primary: remove from default universe
+      const universes = await listUniverses();
+      const def = universes.find((u) => u.name === "default");
+      if (!def) {
+        res.status(500).json({ error: "Default universe not found in DB" });
+        return;
+      }
+      const removed = await removeUniverseItemByTicker(def.id, normalizedTicker);
+      if (!removed) {
+        res.status(404).json({ error: `Ticker "${normalizedTicker}" not found in default universe` });
+        return;
+      }
+      // Best-effort CSV backup sync (ignore if not in CSV)
+      try { await removeTickerFromCsv(effectiveCsvPath, normalizedTicker); } catch { /* not in CSV or file locked */ }
+      const tickers = await getDefaultUniverseTickers();
+      res.json({ csvPath: effectiveCsvPath, tickerRemoved: normalizedTicker, tickers });
+    } else {
+      // Custom CSV path: CSV-only
+      if (typeof csvPath !== "string" || !csvPath) {
+        res.status(400).json({ error: "csvPath is required" });
+        return;
+      }
+      const result = await removeTickerFromCsv(csvPath, normalizedTicker);
+      res.json({ csvPath, tickerRemoved: result.tickerRemoved, tickers: result.tickers });
+    }
   } catch (error) {
     if (error instanceof CsvServiceError) {
       res.status(400).json({ error: error.message });

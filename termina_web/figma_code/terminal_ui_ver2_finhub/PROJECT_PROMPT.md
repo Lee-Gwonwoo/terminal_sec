@@ -1,3 +1,520 @@
+# Frontend Project Prompt
+
+## 목적
+이 문서는 `termina_web/figma_code/terminal_ui_ver2_finhub/` 현재 구현을 기준으로 한 프런트엔드 스펙이다. 어떤 창이 실제로 열리는지, 어떤 창이 백엔드 실데이터를 쓰는지, 어떤 UI 상태가 `localStorage`에 저장되는지 이 문서만 읽고 바로 파악할 수 있어야 한다.
+
+이 프런트는 React + TypeScript + Tailwind 기반의 다중 탭, 다중 창 terminal 스타일 UI다. 핵심은 아래와 같다.
+
+1. 탭마다 여러 창을 동시에 열고 드래그/리사이즈/최대화할 수 있다.
+2. 일부 창은 백엔드 API와 직접 연결되고, 일부 창은 아직 mock/local state 기반이다.
+3. 같은 `linkId`를 공유하는 창끼리는 ticker 클릭을 통해 검색 대상을 연결할 수 있다.
+4. workspace 레이아웃, 다크 모드, 폰트 설정 등 일부 UI 상태를 `localStorage`에 저장하고 복원한다.
+
+## 현재 구현 상태 요약
+
+- 실제 Add Tab에서 선택 가능한 창은 총 6개다.
+  - `news`
+  - `calendar`
+  - `watchlist`
+  - `finhub-news`
+  - `default-ticker`
+  - `data-control`
+- `BraveNewsWindow.tsx` 파일은 남아 있지만 현재 `AddTabModal`과 `DraggableWindow`에서는 사용하지 않는다.
+- 앱 전체 workspace는 `terminal-workspace-v1` 키로 `localStorage`에 저장된다.
+- `isDarkMode`, `fontScale`, `newsTitleFontSize`, `newsSummaryFontSize`, `linkedTicker`, 탭/창 레이아웃이 함께 저장된다.
+- `NewsWindow`는 EODHD 기반 경량 뉴스 피드다.
+- `FinnhubNewsWindow`는 현재 실질적인 메인 뉴스 창이며, 북마크/컬럼 설정/fulltext/변화율/sentiment/company data까지 보여준다.
+- `CalendarWindow`, `WatchlistWindow`는 아직 mock/local state 기반이다.
+- `DefaultTickerWindow`, `DataControlWindow`는 백엔드 API를 직접 사용한다.
+
+## 기술 스택
+
+- React 18
+- TypeScript
+- Vite
+- Tailwind CSS v4
+- `re-resizable`
+- `react-window`
+- `react-datepicker`
+- `lucide-react`
+
+## 실행 방법
+
+프런트 폴더에서 실행한다.
+
+```bash
+npm install
+npm run dev
+```
+
+빌드:
+
+```bash
+npm run build
+```
+
+사전조건:
+
+- 백엔드가 `http://localhost:8080`에서 실행 중이어야 한다.
+- Vite proxy를 통해 `/api/*`, `/healthz`가 백엔드로 전달된다.
+
+## 앱 구조
+
+### 탭과 workspace 복원
+
+파일: `src/app/App.tsx`
+
+동작:
+
+- `tabs: TabData[]`를 루트 상태로 관리한다.
+- 기본 탭은 `Tab 1` 하나이며 초기에는 창이 비어 있다.
+- Add Tab으로 새 탭을 만들면 선택한 window type 조합으로 새 탭이 생성된다.
+- 탭은 우클릭으로 이름 수정, 드래그로 순서 변경, 닫기가 가능하다.
+- 마지막 탭 하나는 닫지 못한다.
+
+`localStorage` 복원 키:
+
+- `terminal-workspace-v1`
+
+저장되는 값:
+
+- `[][][]version[][][]`
+- `[][][]activeTabId[][][]`
+- `[][][]isDarkMode[][][]`
+- `[][][]fontScale[][][]`
+- `[][][]newsTitleFontSize[][][]`
+- `[][][]newsSummaryFontSize[][][]`
+- `[][][]linkedTicker[][][]`
+- `[][][]tabs[][][]`
+
+### 창 공통 래퍼
+
+파일: `src/app/components/DraggableWindow.tsx`
+
+기능:
+
+- 드래그 이동
+- 8방향 리사이즈
+- 최대화/복원
+- 닫기
+- viewport 바깥으로 복원되는 창 위치 clamp
+
+렌더 매핑:
+
+- `news` -> `NewsWindow`
+- `watchlist` -> `WatchlistWindow`
+- `calendar` -> `CalendarWindow`
+- `finhub-news` -> `FinnhubNewsWindow`
+- `default-ticker` -> `DefaultTickerWindow`
+- `data-control` -> `DataControlWindow`
+
+### ticker link 동작
+
+파일: `src/app/App.tsx`
+
+개념:
+
+- 모든 창 인스턴스는 기본적으로 `linkId: 1`을 가진다.
+- 어떤 창에서 ticker를 클릭하면 상위 `App`이 `linkedTicker[linkId] = ticker`를 저장한다.
+- 연결된 창은 `initialTicker` prop으로 이 값을 받아 검색창 초기값 등으로 사용한다.
+
+### 다크 모드와 폰트 스케일
+
+파일: `src/app/App.tsx`, `src/app/components/DataControlWindow.tsx`
+
+- 다크 모드는 `document.documentElement.classList`에 `dark` 클래스를 토글한다.
+- 전체 폰트 스케일은 `document.documentElement.style.fontSize`로 반영한다.
+- 뉴스 제목/요약 폰트 크기는 `FinnhubNewsWindow`에 prop으로 전달된다.
+
+## 창별 현재 상태
+
+### 1. `NewsWindow`
+
+파일: `src/app/components/NewsWindow.tsx`
+
+역할:
+
+- EODHD 중심의 경량 뉴스 피드
+- 날짜 범위 선택 시 EODHD -> SQLite 적재를 점진적으로 트리거
+- 렌더링은 항상 backend SQLite 결과만 사용
+
+사용 API:
+
+- `POST /api/news/pull-eodhd`
+- `GET /api/news`
+
+핵심 동작:
+
+1. mount 시 오늘 날짜 기준 `POST /api/news/pull-eodhd`를 가볍게 한 번 시도한다.
+2. 실제 리스트는 `GET /api/news?source_names=EODHD` 결과만 사용한다.
+3. 날짜 범위를 선택하면 `offset` 기반 chunk pull을 background로 진행한다.
+4. 결과 렌더링은 `react-window` 가상화 + 커서 기반 무한 스크롤을 사용한다.
+
+UI 상태:
+
+- `[][][]searchQuery[][][]`
+- `[][][]filters.dateFrom[][][]`
+- `[][][]filters.dateTo[][][]`
+- `[][][]filters.marketCap[][][]`
+- `[][][]filters.source[][][]`
+- `[][][]filters.sector[][][]`
+- `[][][]newsPages[][][]`
+- `[][][]nextCursor[][][]`
+- `[][][]pullOffset[][][]`
+- `[][][]pullDone[][][]`
+- `[][][]savedSearches[][][]`
+- `[][][]expandedNewsId[][][]`
+
+컬럼:
+
+- `[][][]time[][][]`
+- `[][][]ticker[][][]`
+- `[][][]title[][][]`
+- `[][][]source[][][]`
+
+주의:
+
+- `marketCap`, `sector` 필터는 UI만 있고 실제 데이터 필터에 반영되지 않는다.
+- 저장된 검색은 component state 전용이라 새로고침 후 유지되지 않는다.
+- 표시 대상 source는 고정적으로 EODHD다.
+
+### 2. `FinnhubNewsWindow`
+
+파일: `src/app/components/FinnhubNewsWindow.tsx`
+
+역할:
+
+- 현재 앱의 메인 뉴스 terminal 창
+- Finnhub/EODHD가 적재된 뉴스 DB를 넓은 컬럼 집합으로 조회
+- 북마크, fulltext, 회사 설명, peers, sentiment, score/evidence, 변화율, source type filter를 제공
+
+사용 API:
+
+- `GET /api/news`
+- `POST /api/news/pull-finhub`
+- `GET /api/news/pull-finhub/preflight`
+- `GET /api/jobs/:jobId`
+- `POST /api/news/fulltext/update`
+- `GET /api/news/fulltext/:newsId`
+- `POST /api/news/change/update-recent`
+- `POST /api/news/change/update-custom`
+- `GET /api/bookmarks/folders`
+- `POST /api/bookmarks/folders`
+- `PUT /api/bookmarks/folders/:id`
+- `DELETE /api/bookmarks/folders/:id`
+- `POST /api/bookmarks/items`
+- `DELETE /api/bookmarks/items`
+- `PATCH /api/bookmarks/items/move`
+- `GET /api/bookmarks/folders/:folderId/items`
+
+`localStorage` 키:
+
+- `finhub-news-ui-state`
+- `finnhub-last-update-config`
+
+저장되는 대표 값:
+
+- `[][][]searchQuery[][][]`
+- `[][][]tickerQuery[][][]`
+- `[][][]fromDate[][][]`
+- `[][][]toDate[][][]`
+- `[][][]selectedBookmarkFolderId[][][]`
+- `[][][]displayMode[][][]`
+- `[][][]visibleCols[][][]`
+- `[][][]sourceTypeFilter[][][]`
+- 최근 업데이트 설정 `[][][]mode[][][]`, `[][][]sourceType[][][]`
+
+주요 UI 기능:
+
+- full text 팝업
+- bookmark folder 트리/이동
+- source cell 우클릭 메뉴
+- row context menu
+- column reorder / resize / visibility toggle
+- title-only / title-abstract 표시 모드
+- source type filter (`all`, `company_news`, `press_release`, `market_news`)
+- background job log panel
+
+기본 컬럼:
+
+- `[][][]date[][][]`
+- `[][][]ticker[][][]`
+- `[][][]time[][][]`
+- `[][][]title[][][]`
+- `[][][]publisher[][][]`
+- `[][][]industry[][][]`
+- `[][][]source[][][]`
+- `[][][]fulltext[][][]`
+- `[][][]changes[][][]`
+- `[][][]keywords[][][]`
+- `[][][]score[][][]`
+- `[][][]scoreEvidence[][][]`
+- `[][][]sentiment[][][]`
+- `[][][]peers[][][]`
+- `[][][]companyDesc[][][]`
+
+기본 숨김 컬럼:
+
+- `[][][]source[][][]`
+- `[][][]keywords[][][]`
+- `[][][]score[][][]`
+- `[][][]scoreEvidence[][][]`
+- `[][][]sentiment[][][]`
+- `[][][]peers[][][]`
+- `[][][]companyDesc[][][]`
+
+주의:
+
+- 이름은 `FinnhubNewsWindow`지만 렌더링 데이터는 `/api/news` 통합 결과다.
+- `NewsWindow`와는 완전히 별도 상태를 가진다.
+- bookmark는 backend persistent, save/load/filter 일부는 localStorage persistent다.
+
+### 3. `DefaultTickerWindow`
+
+파일: `src/app/components/DefaultTickerWindow.tsx`
+
+역할:
+
+- 기본 CSV ticker 목록 조회/추가
+- 다른 창에 ticker를 빠르게 전달하는 picker 역할
+
+사용 API:
+
+- `GET /api/tickers`
+- `POST /api/tickers/add`
+
+기본 CSV 경로:
+
+- `tradigview_screener/original_data/watch lists2_2026-02-22.csv`
+
+UI 상태:
+
+- `[][][]csvPath[][][]`
+- `[][][]tickers[][][]`
+- `[][][]newTicker[][][]`
+- `[][][]filterText[][][]`
+- `[][][]loading[][][]`
+- `[][][]adding[][][]`
+- `[][][]error[][][]`
+
+### 4. `DataControlWindow`
+
+파일: `src/app/components/DataControlWindow.tsx`
+
+역할:
+
+- 백엔드 데이터 작업의 운영 콘솔
+- update status, background job polling, App DB inspect, 폰트 설정 조절
+
+사용 API:
+
+- `GET /api/updates/status`
+- `GET /api/ibkr/ohlc1d/status`
+- `POST /api/ibkr/ohlc1d/update`
+- `POST /api/ibkr/calendar/update`
+- `POST /api/company-profiles/pull-fmp`
+- `POST /api/company-profiles/pull-peers`
+- `POST /api/news/change/update-recent`
+- `POST /api/news/change/update-custom`
+- `GET /api/jobs/:jobId`
+- `GET /api/db/inspect`
+
+탭:
+
+- `updates`
+- `settings`
+- `appdb`
+
+`localStorage` 키:
+
+- `data-control-active-tab`
+
+Updates 탭 섹션:
+
+- `price`
+- `calendarBackfill`
+- `calendarRefresh`
+- `companyDesc`
+- `peersPull`
+- `recent`
+- `custom`
+
+Settings 탭 값:
+
+- `[][][]fontScale[][][]`
+- `[][][]newsTitleFontSize[][][]`
+- `[][][]newsSummaryFontSize[][][]`
+
+### 5. `WatchlistWindow`
+
+파일: `src/app/components/WatchlistWindow.tsx`
+
+역할:
+
+- 로컬 mock 기반 watchlist 편집기
+- ticker add/delete, select mode, watchlist preset 관리
+
+데이터 소스:
+
+- `src/app/mockData.ts`의 `mockWatchlistData`
+- 파일 내부 `TICKER_DB` fallback lookup
+
+특징:
+
+- backend watchlist API를 사용하지 않는다.
+- watchlist create/rename/switch는 component state 안에서만 동작한다.
+- row 클릭 시 `onTickerClick`으로 linked ticker 전달 가능
+
+컬럼:
+
+- `[][][]ticker[][][]`
+- `[][][]name[][][]`
+- `[][][]mktcap[][][]`
+- `[][][]industry[][][]`
+- `[][][]price[][][]`
+- `[][][]change[][][]`
+- `[][][]percent[][][]`
+
+### 6. `CalendarWindow`
+
+파일: `src/app/components/CalendarWindow.tsx`
+
+역할:
+
+- mock calendar 이벤트 탐색 창
+- type별 탭과 컬럼 구성이 분리된 테이블 UI
+
+데이터 소스:
+
+- `src/app/mockData.ts`의 `mockCalendarData`
+
+주의:
+
+- backend calendar API를 직접 사용하지 않는다.
+- DataControlWindow에서 IBKR calendar를 적재할 수 있지만, 현재 이 창은 그 DB 결과를 읽지 않는다.
+
+탭:
+
+- `earnings`
+- `conference`
+- `dividend`
+- `analyst_rating`
+
+## 파일 맵
+
+- `src/app/App.tsx`: 탭, workspace 복원, dark mode, linked ticker, 탭 reorder
+- `src/app/types.ts`: `WindowType`, `TabData`, `WindowInstance`, `NewsItem`, `CalendarEvent`, `WatchlistItem`
+- `src/app/components/AddTabModal.tsx`: 새 탭에서 창 선택
+- `src/app/components/DraggableWindow.tsx`: 창 공통 shell
+- `src/app/components/NewsWindow.tsx`: EODHD 전용 경량 뉴스 피드
+- `src/app/components/FinnhubNewsWindow.tsx`: 메인 뉴스 terminal
+- `src/app/components/DefaultTickerWindow.tsx`: CSV ticker 관리자
+- `src/app/components/DataControlWindow.tsx`: 운영 콘솔
+- `src/app/components/WatchlistWindow.tsx`: mock watchlist
+- `src/app/components/CalendarWindow.tsx`: mock calendar
+- `src/app/components/BookmarkManager.tsx`: bookmark folder/item 관리 보조 UI
+- `src/app/mockData.ts`: watchlist/calendar용 mock data 및 helper 함수
+- `vite.config.ts`: `/api`, `/healthz` 프록시 설정
+
+## 타입 요약
+
+파일: `src/app/types.ts`
+
+현재 `WindowType`:
+
+- `[][][]news[][][]`
+- `[][][]watchlist[][][]`
+- `[][][]calendar[][][]`
+- `[][][]finhub-news[][][]`
+- `[][][]default-ticker[][][]`
+- `[][][]data-control[][][]`
+
+주의:
+
+- 예전 `brave-news`는 현재 공식 window type이 아니다.
+
+## 현재 프런트-백 연결 요약
+
+백엔드 사용 창:
+
+- `NewsWindow`
+- `FinnhubNewsWindow`
+- `DefaultTickerWindow`
+- `DataControlWindow`
+
+mock/local 창:
+
+- `WatchlistWindow`
+- `CalendarWindow`
+
+미사용 legacy 파일:
+
+- `BraveNewsWindow.tsx`
+
+## 작업 시 주의사항
+
+- `NewsWindow`와 `FinnhubNewsWindow`는 목적과 상태 저장 방식이 다르므로 혼동하면 안 된다.
+- backend calendar/watchlist API가 존재해도 현재 `CalendarWindow`, `WatchlistWindow`는 그 API를 쓰지 않는다.
+- workspace 복원 로직이 있으므로 창 타입 이름, `WindowInstance` 구조, position shape를 바꿀 때는 이전 `localStorage`와의 호환을 고려해야 한다.
+- DataControlWindow는 운영성 기능이 많아 UI 변경 시 어떤 endpoint를 치는지 함께 점검해야 한다.# Frontend Project Prompt
+
+## 목적
+이 문서는 `termina_web/figma_code/terminal_ui_ver2_finhub/` 현재 구현을 기준으로 한 프런트엔드 작업용 스펙이다. 현재 앱이 어떤 창(window)으로 구성되어 있고, 어떤 창이 백엔드 실데이터를 쓰며, 어떤 상태를 `localStorage`에 저장하는지 바로 파악할 수 있어야 한다.
+
+이 프런트는 React + TypeScript + Tailwind 기반의 다중 탭, 다중 창 terminal 스타일 UI다. 핵심은 아래 4가지다.
+
+1. 탭마다 여러 창을 동시에 열고 드래그/리사이즈/최대화할 수 있다.
+2. 일부 창은 백엔드 API와 직접 연결되고, 일부 창은 아직 mock/local state 기반이다.
+3. 같은 `linkId`를 공유하는 창끼리는 ticker 클릭을 통해 검색 대상을 연결할 수 있다.
+4. workspace 레이아웃, 다크 모드, 폰트 설정 등 일부 UI 상태를 `localStorage`에 복원/저장한다.
+
+## 현재 구현 상태 요약
+
+- 실제 Add Tab에서 선택 가능한 창은 총 6개다.
+  - `news`
+  - `calendar`
+  - `watchlist`
+  - `finhub-news`
+  - `default-ticker`
+  - `data-control`
+- `BraveNewsWindow.tsx` 파일은 코드베이스에 남아 있지만 현재 `AddTabModal`과 `DraggableWindow`에서는 사용하지 않는다.
+- 앱 전체 workspace는 `terminal-workspace-v1` 키로 `localStorage`에 저장된다.
+- `isDarkMode`, `fontScale`, `newsTitleFontSize`, `newsSummaryFontSize`, `linkedTicker`, 탭/창 레이아웃이 함께 저장된다.
+- `NewsWindow`는 EODHD 기반 뉴스만 보여주는 가벼운 피드다.
+- `FinnhubNewsWindow`는 현재 실질적인 메인 뉴스 창이며, 북마크/컬럼 설정/fulltext/변화율/sentiment/company data까지 보여준다.
+- `CalendarWindow`, `WatchlistWindow`는 아직 mock/local state 기반이다.
+- `DefaultTickerWindow`, `DataControlWindow`는 백엔드 API를 직접 사용한다.
+
+## 기술 스택
+
+- React 18
+- TypeScript
+- Vite
+- Tailwind CSS v4
+- `re-resizable`
+- `react-window`
+- `react-datepicker`
+- `lucide-react`
+
+## 실행 방법
+
+프런트 폴더에서 실행한다.
+
+```bash
+npm install
+npm run dev
+```
+
+빌드:
+
+```bash
+npm run build
+```
+
+사전조건:
+
+- 백엔드가 `http://localhost:8080`에서 실행 중이어야 한다.
+- Vite proxy를 통해 `/api/*`, `/healthz`가 백엔드로 전달된다.
 # Figma Frontend Prompt (Stock News Platform)
 
 ## EN

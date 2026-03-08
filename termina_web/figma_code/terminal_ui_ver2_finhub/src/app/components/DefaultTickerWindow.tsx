@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { RefreshCw, Plus, Search, AlertCircle } from "lucide-react";
+import { RefreshCw, Plus, Search, AlertCircle, X } from "lucide-react";
 
 const API_BASE = "";
 const DEFAULT_CSV_PATH = "tradigview_screener/original_data/watch lists2_2026-02-22.csv";
@@ -15,7 +15,9 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
   const [error, setError] = useState<string | null>(null);
   const [newTicker, setNewTicker] = useState("");
   const [adding, setAdding] = useState(false);
+  const [removing, setRemoving] = useState<string | null>(null);
   const [filterText, setFilterText] = useState("");
+  const [dataSource, setDataSource] = useState<"db" | "csv" | null>(null);
 
   const loadTickers = useCallback(async () => {
     setLoading(true);
@@ -29,6 +31,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
         return;
       }
       setTickers(data.tickers ?? []);
+      setDataSource(data.source ?? null);
     } catch (err: any) {
       setError(err.message || "Failed to load tickers");
     } finally {
@@ -65,6 +68,28 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
     }
   };
 
+  const handleRemove = async (ticker: string) => {
+    setRemoving(ticker);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/tickers/remove`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csvPath, ticker }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || `HTTP ${res.status}`);
+        return;
+      }
+      setTickers(data.tickers ?? []);
+    } catch (err: any) {
+      setError(err.message || "Failed to remove ticker");
+    } finally {
+      setRemoving(null);
+    }
+  };
+
   const filteredTickers = filterText
     ? tickers.filter((t) => t.includes(filterText.toUpperCase()))
     : tickers;
@@ -72,14 +97,15 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
   return (
     <div className="h-full flex flex-col p-3 text-sm">
       {/* CSV Path Input */}
-      <div className="flex items-center gap-2 mb-3">
+      <div className="flex items-center gap-2 mb-1">
         <label className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">CSV Path:</label>
         <input
           type="text"
           value={csvPath}
           onChange={(e) => setCsvPath(e.target.value)}
-          className="flex-1 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="flex-1 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-400 dark:text-gray-500"
           placeholder="tradigview_screener/original_data/..."
+          title="기본값: 진리는 DB(ticker_universes/default) 우선. CSV는 backup sync 대상"
         />
         <button
           onClick={loadTickers}
@@ -89,6 +115,23 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
           <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />
           Reload
         </button>
+      </div>
+
+      {/* DB Path badge */}
+      <div className="flex items-center gap-2 mb-3">
+        <label className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">DB Path:</label>
+        <span className="flex-1 px-2 py-0.5 text-xs font-mono text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700 rounded truncate">
+          app.db › ticker_universes/default › ticker_universe_items
+        </span>
+        {dataSource && (
+          <span className={`px-1.5 py-0.5 text-[10px] font-semibold rounded ${
+            dataSource === "db"
+              ? "bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400"
+              : "bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-400"
+          }`}>
+            {dataSource === "db" ? "DB" : "CSV"}
+          </span>
+        )}
       </div>
 
       {/* Error Message */}
@@ -147,14 +190,26 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
         ) : (
           <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-0.5 p-1">
             {filteredTickers.map((ticker) => (
-              <button
-                key={ticker}
-                onClick={() => onTickerClick?.(ticker)}
-                className="px-1.5 py-1 text-xs font-mono text-center rounded hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:text-blue-600 dark:hover:text-blue-400 transition-colors truncate"
-                title={ticker}
-              >
-                {ticker}
-              </button>
+              <div key={ticker} className="relative group">
+                <button
+                  onClick={() => onTickerClick?.(ticker)}
+                  className={`w-full px-1.5 py-1 text-xs font-mono text-center rounded hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:text-blue-600 dark:hover:text-blue-400 transition-colors truncate pr-3 ${
+                    removing === ticker ? "opacity-40" : ""
+                  }`}
+                  title={ticker}
+                  disabled={removing === ticker}
+                >
+                  {ticker}
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleRemove(ticker); }}
+                  disabled={removing !== null}
+                  className="absolute top-0.5 right-0.5 hidden group-hover:flex w-3.5 h-3.5 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-700 hover:bg-red-100 dark:hover:bg-red-900/40 hover:text-red-500 text-gray-400 text-[9px] leading-none"
+                  title={`Remove ${ticker} from default universe`}
+                >
+                  <X className="w-2 h-2" />
+                </button>
+              </div>
             ))}
           </div>
         )}

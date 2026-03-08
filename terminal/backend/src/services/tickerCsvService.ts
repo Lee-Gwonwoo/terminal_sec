@@ -190,6 +190,68 @@ export async function appendTickerToCsv(
   return { tickers: result.tickers, tickerAdded: normalizedTicker, resolvedPath: result.resolvedPath };
 }
 
+export async function removeTickerFromCsv(
+  csvPath: string,
+  ticker: string,
+): Promise<{ tickers: string[]; tickerRemoved: string; resolvedPath: string }> {
+  const resolved = validateCsvPath(csvPath);
+  const normalizedTicker = normalizeTicker(ticker);
+
+  if (!fs.existsSync(resolved)) {
+    throw new CsvServiceError(`CSV file not found: ${csvPath}`);
+  }
+
+  const content = fs.readFileSync(resolved, "utf8");
+  const lines = content.split(/\r?\n/);
+
+  if (lines.length === 0 || lines[0].trim() === "") {
+    throw new CsvServiceError("CSV file is empty or has no header");
+  }
+
+  const headerRow = lines[0];
+  const tickerCol = detectTickerColumn(headerRow);
+  const headers = headerRow.split(",").map((h) => h.trim());
+  const colIndex = headers.indexOf(tickerCol);
+
+  let found = false;
+  const newLines = lines.filter((line, i) => {
+    if (i === 0) return true;
+    if (line.trim() === "") return false;
+    const cols = line.split(",");
+    const raw = cols[colIndex]?.trim() ?? "";
+    if (raw.toUpperCase() === normalizedTicker) {
+      found = true;
+      return false;
+    }
+    return true;
+  });
+
+  if (!found) {
+    throw new CsvServiceError(`Ticker "${normalizedTicker}" not found in ${csvPath}`);
+  }
+
+  const newContent = newLines.join("\n") + "\n";
+  const tmpPath = resolved + `.tmp_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      fs.writeFileSync(tmpPath, newContent, "utf8");
+      fs.renameSync(tmpPath, resolved);
+      break;
+    } catch (err: any) {
+      try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+      const isTransient = err.code === "EBUSY" || err.code === "EPERM" || err.code === "EACCES";
+      if (!isTransient || attempt === MAX_RETRIES) {
+        throw new CsvServiceError(`Failed to write CSV after ${attempt} attempts: ${err.message}`);
+      }
+      await sleep(BASE_DELAY_MS * attempt);
+    }
+  }
+
+  const result = readTickersFromCsv(csvPath);
+  return { tickers: result.tickers, tickerRemoved: normalizedTicker, resolvedPath: result.resolvedPath };
+}
+
 // ---------- Rich Read (full row data) ----------
 
 export interface CsvTickerRow {

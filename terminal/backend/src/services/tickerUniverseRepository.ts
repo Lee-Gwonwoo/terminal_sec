@@ -142,3 +142,17 @@ export async function countUniverseItems(universeId: number): Promise<number> {
   );
   return row?.cnt ?? 0;
 }
+
+export async function removeUniverseItemByTicker(universeId: number, ticker: string): Promise<boolean> {
+  const db = getDb();
+  const sec = await db.get<{ id: number }>(
+    `SELECT id FROM securities WHERE ticker = ?`,
+    [ticker.toUpperCase()],
+  );
+  if (!sec) return false;
+  const result = await db.run(
+    `DELETE FROM ticker_universe_items WHERE universe_id = ? AND security_id = ?`,
+    [universeId, sec.id],
+  );
+  return (result.changes ?? 0) > 0;
+}
