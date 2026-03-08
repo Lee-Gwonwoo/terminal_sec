@@ -11,7 +11,7 @@
 2. News Feed Window에 `Score Evidence` 컬럼을 추가한다.
 3. News Feed Window에 `Keywords` 컬럼을 실제 표시 가능한 컬럼으로 추가한다.
 4. News feed 데이터를 runtime DB에 canonical 형태로 저장한다.
-5. News feed 다운로드 시 Finnhub `news-sentiment`도 함께 수집하고, sentiment 결과를 컬럼 선택 목록에 추가한다.
+5. Finnhub `news-sentiment`는 별도 update 경로로 수집하고, sentiment 결과를 컬럼 선택 목록에 추가한다.
 6. `ai-news-analysis` 기준으로 `Score`, `Score Evidence`, `Keywords`를 생성/저장한다.
 7. Terminal UI를 껐다 켜도 마지막 작업 상태(탭, 창, 배치, 선택 상태, 테마, 설정)를 복원한다.
 8. 다른 탭으로 갔다가 다시 돌아와도 탭별 상태가 유지되게 한다.
@@ -60,7 +60,8 @@
 - 현재 Finnhub recent pull은 ticker별 기존 뉴스 anchor가 없으면 7일 fallback으로 다시 조회한다.
 - 현재는 “이미 조회했지만 뉴스가 없었다”는 confirmed-empty 기록 저장소가 없어서, 뉴스가 한 번도 없던 ticker는 recent update 때 같은 구간을 반복 조회할 수 있다.
 - `FinnhubNewsWindow.tsx`의 Recent Update 메뉴는 automatic recent retry 정책을 작은 보조 설명 문구로 항상 표시한다.
-- Finnhub comprehensive probe 기록상 `news-sentiment` 엔드포인트는 접근 가능하다. 다만 현재 backend 수집/저장 흐름에는 아직 연결되어 있지 않다.
+- Finnhub comprehensive probe 기록상 `news-sentiment` 엔드포인트는 접근 가능하다.
+- backend에는 별도 `POST /api/news/sentiment/update` 경로가 있고, News Feed의 일반 Finnhub update(`POST /api/news/pull-finhub`)는 sentiment snapshot을 함께 수집하지 않는다.
 - 2026-03-07 실제 probe 결과 `news-sentiment?symbol=AAPL` 응답은 `buzz`, `companyNewsScore`, `sectorAverageBullishPercent`, `sectorAverageNewsScore`, `sentiment`, `symbol` top-level object이며, 기사 `id` 배열이나 기사별 sentiment row를 반환하지 않는다.
 - AI 뉴스 분석 skills 지침 명칭은 `ai-news-analysis`로 고정한다.
 - 현재 프론트 문서 기준으로 `Finnhub News`, `Default Ticker`, `Data Control`은 실제 API 연동이 있고, `Watchlist`, `Calendar`는 일부 mock/stub 흔적이 남아 있다.
@@ -1671,3 +1672,9 @@ Track H도 완료되었다 (Step 9). calendar backend mode 계약 (backfill/refr
 - 분석 완료 뉴스에서 점수나 근거를 일부러 지우면 테스트가 실패해야 한다.
 - 아직 분석하지 않은 뉴스가 비어 있는 것은 테스트 실패가 아니어야 한다.
 - `keywords=[]`는 조용히 통과하지 않고 최소 warning 이상으로 남아야 한다.
+
+### PLAN CHANGE (2026-03-08 13:21) — Finnhub news update와 sentiment update 분리 + News date sticky header
+
+- 왜: 사용자가 News Feed의 일반 update 버튼을 눌렀을 때 sentiment까지 같이 수집되지 않게 하고, 회색 날짜 row가 스크롤 상단에 고정되길 요청했다.
+- 무엇이 바뀌었나: Finnhub 일반 update는 뉴스/press/market pull만 수행하고 sentiment snapshot은 별도 `POST /api/news/sentiment/update` 경로로만 수집하도록 기준을 바꿨다. 또한 News Feed 날짜 group header는 가상 리스트 상단에 sticky overlay로 표시하는 방향으로 정리했다.
+- 영향: sentiment는 기존에 저장된 snapshot이 있을 때만 컬럼에 나타나며, 새 snapshot 갱신은 명시적인 sentiment update 실행이 필요하다. News Feed에서는 현재 보이는 날짜 그룹이 상단 회색 bar로 계속 유지된다.

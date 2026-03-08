@@ -778,6 +778,55 @@ curl http://localhost:8080/api/company-profiles/AAPL
 3. `insertNewsItem` INSERT SQL에 `publisher` 컬럼이 포함되지 않아 항상 NULL로 삽입되었다.
 4. `backfillPublisher()`가 서버 시작 시에만 실행되어, 런타임 중 새 뉴스는 다음 재시작까지 publisher가 NULL이었다.
 
+---
+
+### Finnhub update에서 sentiment 분리 + News date sticky header
+
+**작성 시각:** 2026-03-08 13:21 (local)
+
+**상태:** 확인 대기(awaiting user confirmation)
+
+#### 수행 내용
+
+1. `POST /api/news/pull-finhub` 배경 작업에서 ticker별 `upsertSentimentSnapshot()` 호출을 제거했다. 이제 News Feed의 일반 update 버튼은 뉴스 pull만 수행한다.
+2. 별도 sentiment batch 경로 `POST /api/news/sentiment/update`는 유지해서, sentiment snapshot은 명시적으로 돌릴 때만 갱신되게 했다.
+3. `FinnhubNewsWindow.tsx`에 현재 스크롤 위치 기준 날짜를 계산하는 `stickyDate` 상태를 추가했다.
+4. 가상 리스트 내부 header row의 `sticky` 의존을 제거하고, 리스트 상단에 별도 회색 overlay header를 띄워 현재 날짜 그룹이 항상 보이게 바꿨다.
+5. `plan.md` 목표/현재 상태/PLAN CHANGE를 이번 동작 기준으로 동기화했다.
+
+#### 생성/수정 파일
+
+- `terminal/backend/src/server.ts`
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. News Feed에서 일반 `Update`를 실행한 뒤, backend 로그 또는 DB를 확인해 sentiment snapshot row count가 자동 증가하지 않는지 본다.
+2. 필요 시 별도 sentiment update 경로를 직접 호출해 snapshot이 갱신되는지 확인한다.
+3. News Feed 리스트를 아래로 스크롤해도 회색 날짜 bar가 상단에 남고, 날짜 그룹이 바뀌면 상단 표시도 함께 바뀌는지 확인한다.
+
+```bash
+cd terminal/backend
+npm run build
+
+cd ..\..\termina_web\figma_code\terminal_ui_ver2_finhub
+npm run build
+```
+
+#### 문제점 / 리스크
+
+1. 일반 news update 뒤에는 sentiment가 자동으로 최신화되지 않는다.
+   - 완화 방안 1: 필요 시 `POST /api/news/sentiment/update`를 별도로 실행
+   - 완화 방안 2: 추후 UI에 sentiment 전용 update 버튼을 추가 검토
+2. sticky overlay와 실제 날짜 header row가 화면 상단 근처에서 잠깐 중복되어 보일 수 있다.
+   - 완화 방안 1: 사용성 문제가 크면 header row push-off 애니메이션을 추가
+   - 완화 방안 2: 또는 top 영역에서 첫 header row를 숨기는 후속 조정 검토
+3. 가상 리스트의 visibleStartIndex 계산 타이밍에 따라 빠른 스크롤 중 날짜 전환이 한 프레임 늦을 수 있다.
+   - 완화 방안 1: 필요 시 overscan 조정
+   - 완화 방안 2: 또는 scroll offset 기반 계산으로 후속 개선
+
 **수정 내용:**
 1. `FinnhubMappedItem` type에 `publisher?: string` 필드 추가
 2. `fetchMarketNewsPageRaw` — Finnhub `item.source`를 publisher로 사용 (fallback: `derivePublisher(url)`)

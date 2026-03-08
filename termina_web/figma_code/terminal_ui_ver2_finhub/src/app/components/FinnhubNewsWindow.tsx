@@ -266,6 +266,7 @@ export function FinnhubNewsWindow({
   const [showDisplayModeMenu, setShowDisplayModeMenu] = useState(false);
   const [selectedWatchlist, setSelectedWatchlist] = useState('All');
   const [listHeight, setListHeight] = useState(500);
+  const [stickyDate, setStickyDate] = useState('');
   const [saveName, setSaveName] = useState('');
 
   // Source cell context menu (Copy URL)
@@ -1007,10 +1008,24 @@ export function FinnhubNewsWindow({
     return result;
   }, [newsData, sort, getSortValue, nextCursor]);
 
+  const findStickyDateForIndex = useCallback((index: number) => {
+    for (let i = Math.min(index, groupedNews.length - 1); i >= 0; i--) {
+      const item = groupedNews[i];
+      if (item?.type === 'header') {
+        return item.date;
+      }
+    }
+    return groupedNews.length > 0 && groupedNews[0]?.type === 'header' ? groupedNews[0].date : '';
+  }, [groupedNews]);
+
   // Reset list on data/mode/expand changes
   useEffect(() => {
     listRef.current?.resetAfterIndex(0);
   }, [groupedNews, displayMode, expandedItems]);
+
+  useEffect(() => {
+    setStickyDate(findStickyDateForIndex(0));
+  }, [findStickyDateForIndex]);
 
   const getItemSize = useCallback((index: number) => {
     const item = groupedNews[index];
@@ -1299,7 +1314,7 @@ export function FinnhubNewsWindow({
     const item = groupedNews[index];
     if (item.type === 'header') {
       return (
-        <div style={style} className="sticky top-0 z-10 px-3 py-1.5 text-xs bg-gray-100 dark:bg-gray-800 border-b border-gray-300 dark:border-gray-700 flex items-center">
+        <div style={style} className="px-3 py-1.5 text-xs bg-gray-100 dark:bg-gray-800 border-b border-gray-300 dark:border-gray-700 flex items-center">
           <span className="font-semibold text-gray-700 dark:text-gray-300">{item.date}</span>
         </div>
       );
@@ -1938,28 +1953,43 @@ export function FinnhubNewsWindow({
       </div>
 
       {/* ─── News List ─── */}
-      <div className="flex-1 overflow-hidden" ref={listContainerRef}>
+      <div className="relative flex-1 overflow-hidden" ref={listContainerRef}>
         {newsData.length === 0 && !loading ? (
           <div className="h-full flex items-center justify-center text-gray-400 text-xs">
             No news items. Click "Update" to pull from Finnhub.
           </div>
         ) : (
-          <List
-            ref={listRef}
-            height={listHeight}
-            itemCount={groupedNews.length}
-            itemSize={getItemSize}
-            width="100%"
-            className="scrollbar-thin"
-            onItemsRendered={({ visibleStopIndex }) => {
-              // Auto-load when the load-more sentinel is visible
-              if (nextCursor && !loadingMore && visibleStopIndex >= groupedNews.length - 1) {
-                fetchMore();
-              }
-            }}
-          >
-            {Row}
-          </List>
+          <>
+            {stickyDate && (
+              <div
+                className="absolute top-0 left-0 right-0 z-20 px-3 py-1.5 text-xs bg-gray-100 dark:bg-gray-800 border-b border-gray-300 dark:border-gray-700 pointer-events-none"
+                style={{ height: STICKY_DATE_HEADER_HEIGHT }}
+              >
+                <span className="font-semibold text-gray-700 dark:text-gray-300">{stickyDate}</span>
+              </div>
+            )}
+            <List
+              ref={listRef}
+              height={listHeight}
+              itemCount={groupedNews.length}
+              itemSize={getItemSize}
+              width="100%"
+              className="scrollbar-thin"
+              onItemsRendered={({ visibleStartIndex, visibleStopIndex }) => {
+                const nextSticky = findStickyDateForIndex(visibleStartIndex);
+                if (nextSticky && nextSticky !== stickyDate) {
+                  setStickyDate(nextSticky);
+                }
+
+                // Auto-load when the load-more sentinel is visible
+                if (nextCursor && !loadingMore && visibleStopIndex >= groupedNews.length - 1) {
+                  fetchMore();
+                }
+              }}
+            >
+              {Row}
+            </List>
+          </>
         )}
       </div>
 

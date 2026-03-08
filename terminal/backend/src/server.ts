@@ -444,13 +444,6 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
             }
           }
 
-          // Sentiment snapshot — fire & forget per ticker
-          try {
-            await upsertSentimentSnapshot(ticker);
-          } catch (err: any) {
-            console.error(`[pull-finhub] sentiment ${ticker}: ${err.message}`);
-          }
-
           // Update progress
           updateProgress(jobId, i + 1);
 
