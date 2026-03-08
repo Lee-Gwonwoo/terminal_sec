@@ -292,6 +292,31 @@ export async function initDb(): Promise<void> {
 
   // Step 5-4: add security_id column to watchlist_items
   await ensureColumn("watchlist_items", "security_id", "INTEGER REFERENCES securities(id)");
+
+  // Step 10: Case Research — OneNote-style note-taking
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS research_tabs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL DEFAULT 'New Section',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS research_pages (
+      id TEXT PRIMARY KEY,
+      tab_id TEXT NOT NULL REFERENCES research_tabs(id) ON DELETE CASCADE,
+      title TEXT NOT NULL DEFAULT '',
+      body TEXT NOT NULL DEFAULT '',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+  await db.exec("CREATE INDEX IF NOT EXISTS idx_research_pages_tab ON research_pages(tab_id);");
+  await db.exec("CREATE INDEX IF NOT EXISTS idx_research_pages_fts ON research_pages(title, body);");
 }
 
 async function ensureColumn(tableName: string, columnName: string, definition: string): Promise<void> {

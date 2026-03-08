@@ -8,6 +8,7 @@ import { CalendarWindow } from './CalendarWindow';
 import { FinnhubNewsWindow } from './FinnhubNewsWindow';
 import { DefaultTickerWindow } from './DefaultTickerWindow';
 import { DataControlWindow } from './DataControlWindow';
+import { CaseResearchWindow } from './CaseResearchWindow';
 
 interface DraggableWindowProps {
   window: WindowInstance;
@@ -130,6 +131,8 @@ export function DraggableWindow({
             onNewsSummaryFontSizeChange={onNewsSummaryFontSizeChange}
           />
         );
+      case 'case-research':
+        return <CaseResearchWindow />;
       default:
         return <div>Unknown window type</div>;
     }

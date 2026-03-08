@@ -1554,3 +1554,58 @@ npm run build
 - 이번 Step은 코드 변경 없이 문서 동기화와 검증 정리만 수행했다.
 - 전체 plan (Step 0 ~ Step 4) 구현이 완료되었다.
 - 사용자 확인 전까지 상태는 `확인 대기`로 유지한다.
+
+---
+
+### Finnhub News row 우클릭 `Copy ID` 추가
+
+**작성 시각:** 2026-03-08 18:11 (local)
+
+**상태:** 확인 대기(awaiting user confirmation)
+
+#### 수행 내용
+
+1. 사용자가 News Feed window의 각 뉴스 row를 우클릭할 때 news id도 바로 복사할 수 있게 해 달라고 요청했다.
+2. `FinnhubNewsWindow.tsx`의 row context menu에 `Copy ID` 액션을 추가하고, 기존 clipboard helper를 재사용해 현재 row의 `news_id`를 그대로 복사하도록 연결했다.
+3. row menu 상단을 `Row actions` 영역으로 정리하고, 기존 `Add bookmark` 폴더 목록은 같은 메뉴 안에서 그대로 유지되게 배치했다.
+4. 메뉴 항목이 하나 늘어난 만큼 화면 하단에서 잘리지 않도록 row context menu의 높이 계산을 함께 조정했다.
+5. `figma_frontend_prompt.md`와 `plan.md`를 현재 동작 기준으로 동기화해 row 우클릭 메뉴가 `Copy ID` + `Add bookmark` 조합이라는 점을 반영했다.
+
+#### 생성/수정 파일
+
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+- `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. `termina_web/figma_code/terminal_ui_ver2_finhub`에서 `npm run build`를 실행해 프론트 빌드가 통과하는지 확인한다.
+2. backend `http://localhost:8080/healthz` 응답이 `{"ok":true}`인지 확인한다.
+3. 브라우저에서 `http://localhost:5173/`를 열고 News Feed row를 우클릭해 `Copy ID`와 `Add bookmark`가 함께 보이는지 확인한다.
+4. `Copy ID`를 누른 뒤 메모장 등에 붙여넣어 news id 문자열이 그대로 들어가는지 확인한다.
+5. 같은 메뉴에서 폴더를 선택했을 때 기존 북마크 저장 동작이 유지되는지 확인한다.
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `get_errors` 기준 변경 파일 0 errors |
+| 빌드 | ✅ | `termina_web/figma_code/terminal_ui_ver2_finhub`에서 `npm run build` 성공 |
+| 자동 테스트 | ✅ | 해당 프론트 package에 `test` script 없음. 추가 자동 테스트는 현재 미구성 |
+| 런타임 통합 | ✅ | `http://localhost:8080/healthz` 정상, `http://localhost:5173/` 오픈 확인, row menu 렌더 코드는 리뷰 완료. 브라우저 시각 확인은 사용자 위임 |
+
+#### 문제점 / 리스크
+
+1. 사용자가 source/url 셀을 우클릭한 경우에는 여전히 `Copy URL` 메뉴가 열리고, row 본문 우클릭과 다른 메뉴가 보인다.
+   - 완화 방안 1: 사용자 안내에서 row 우클릭과 source 셀 우클릭 위치를 분리 설명
+   - 완화 방안 2: 필요 시 후속 작업에서 메뉴 제목을 더 명확히 표시
+2. 일부 브라우저/보안 정책에서는 Clipboard API가 제한될 수 있다.
+   - 완화 방안 1: 현재 textarea fallback이 있으므로 우선 그 경로로 복사 시도
+   - 완화 방안 2: 사용자 검증 시 실제 붙여넣기까지 확인
+3. 북마크 폴더 수가 매우 많아지면 메뉴 높이 계산 오차가 다시 눈에 띌 수 있다.
+   - 완화 방안 1: 필요 시 menu item 수 기반 max-height + 내부 scroll 적용
+   - 완화 방안 2: 이후 북마크 수가 늘면 submenu 또는 modal 방식으로 확장 검토
+
+#### 비고
+
+- 이번 변경은 기존 북마크 메뉴를 제거하지 않고, 같은 row context menu 안에 `Copy ID`를 추가한 UI 확장이다.
+- 사용자 확인 전까지 상태는 `확인 대기(awaiting user confirmation)`로 유지한다.

@@ -1,6 +1,6 @@
 // Types for the stock news platform
 
-export type WindowType = 'news' | 'watchlist' | 'calendar' | 'finhub-news' | 'default-ticker' | 'data-control';
+export type WindowType = 'news' | 'watchlist' | 'calendar' | 'finhub-news' | 'default-ticker' | 'data-control' | 'case-research';
 
 export interface NewsItem {
   id: string;

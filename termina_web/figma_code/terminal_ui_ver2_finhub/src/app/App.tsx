@@ -140,6 +140,8 @@ export default function App() {
           title = 'Default Ticker';
         } else if (type === 'data-control') {
           title = 'Data Control';
+        } else if (type === 'case-research') {
+            title = 'AI Research Window';
         } else {
           title = type.charAt(0).toUpperCase() + type.slice(1) + ' Window';
         }

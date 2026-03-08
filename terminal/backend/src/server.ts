@@ -66,6 +66,19 @@ import {
 import { fetchOhlcBars } from "./services/ibkrOhlc1dProvider.js";
 import { computeDerivedForAffectedSymbols } from "./services/ohlcDerivedMetrics.js";
 import type { NewsQuery } from "./types.js";
+import {
+  listResearchTabs,
+  createResearchTab,
+  renameResearchTab,
+  deleteResearchTab,
+  listResearchPages,
+  getResearchPage,
+  createResearchPage,
+  updateResearchPage,
+  deleteResearchPage,
+  reorderResearchPages,
+  searchResearch,
+} from "./services/researchRepository.js";
 
 const app = express();
 const streamHub = new StreamHub();
@@ -1725,6 +1738,100 @@ app.get("/api/db/inspect", async (_req, res, next) => {
   } catch (err) {
     next(err);
   }
+});
+
+// ── Case Research: tabs ──
+
+app.get("/api/research/tabs", async (_req, res, next) => {
+  try {
+    const tabs = await listResearchTabs(DEMO_USER_ID);
+    res.json(tabs);
+  } catch (err) { next(err); }
+});
+
+app.post("/api/research/tabs", async (req, res, next) => {
+  try {
+    const tab = await createResearchTab(DEMO_USER_ID, req.body?.name);
+    res.status(201).json(tab);
+  } catch (err) { next(err); }
+});
+
+app.patch("/api/research/tabs/:id", async (req, res, next) => {
+  try {
+    const tab = await renameResearchTab(req.params.id, req.body.name);
+    if (!tab) { res.status(404).json({ error: "Tab not found" }); return; }
+    res.json(tab);
+  } catch (err) { next(err); }
+});
+
+app.delete("/api/research/tabs/:id", async (req, res, next) => {
+  try {
+    await deleteResearchTab(req.params.id);
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// ── Case Research: pages ──
+
+app.get("/api/research/tabs/:tabId/pages", async (req, res, next) => {
+  try {
+    const pages = await listResearchPages(req.params.tabId);
+    res.json(pages);
+  } catch (err) { next(err); }
+});
+
+app.post("/api/research/tabs/:tabId/pages", async (req, res, next) => {
+  try {
+    const page = await createResearchPage(req.params.tabId, req.body?.title);
+    res.status(201).json(page);
+  } catch (err) { next(err); }
+});
+
+app.post("/api/research/tabs/:tabId/pages/reorder", async (req, res, next) => {
+  try {
+    const pageIds = Array.isArray(req.body?.pageIds)
+      ? req.body.pageIds.filter((value: unknown): value is string => typeof value === "string")
+      : [];
+    const pages = await reorderResearchPages(req.params.tabId, pageIds);
+    res.json(pages);
+  } catch (err) { next(err); }
+});
+
+app.get("/api/research/pages/:id", async (req, res, next) => {
+  try {
+    const page = await getResearchPage(req.params.id);
+    if (!page) { res.status(404).json({ error: "Page not found" }); return; }
+    res.json(page);
+  } catch (err) { next(err); }
+});
+
+app.patch("/api/research/pages/:id", async (req, res, next) => {
+  try {
+    const page = await updateResearchPage(req.params.id, {
+      title: req.body.title,
+      body: req.body.body,
+    });
+    if (!page) { res.status(404).json({ error: "Page not found" }); return; }
+    res.json(page);
+  } catch (err) { next(err); }
+});
+
+app.delete("/api/research/pages/:id", async (req, res, next) => {
+  try {
+    await deleteResearchPage(req.params.id);
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// ── Case Research: search ──
+
+app.get("/api/research/search", async (req, res, next) => {
+  try {
+    const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    if (!q) { res.json([]); return; }
+    const results = await searchResearch(DEMO_USER_ID, q);
+    res.json(results);
+  } catch (err) { next(err); }
 });
 
 async function start(): Promise<void> {
