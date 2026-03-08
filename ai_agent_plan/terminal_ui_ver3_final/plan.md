@@ -279,42 +279,48 @@ Step N — <제목>
    - 선택지 B: backend DB에도 저장해 브라우저/기기 간 동기화까지 고려
    - 현재 권장: A. 이번 범위에서 가장 빠르고 리스크가 낮다.
 
-5. 탭 상태 기억 범위
+5. font size 저장 위치
+   - 선택지 A: global `localStorage`
+   - 선택지 B: tab scoped
+   - 선택지 C: backend saved settings / 별도 테이블
+   - 사용자 확정: A. font size는 현재 방식대로 global `localStorage`에 유지한다. 이번 범위에서는 backend DB나 별도 설정 테이블로 올리지 않는다.
+
+6. 탭 상태 기억 범위
    - 선택지 A: 창 배치와 활성 탭만 저장
    - 선택지 B: 창 내부 필터/컬럼/검색어까지 저장
    - 현재 권장: B. 사용자가 말한 “마지막 상태”에 더 가깝다.
 
-6. Finnhub recent no-news 재조회 정책
+7. Finnhub recent no-news 재조회 정책
    - 선택지 A: 기존처럼 anchor가 없는 ticker는 매번 7일 fallback 반복
    - 선택지 B: `source_type`별 confirmed-empty range를 저장하고 automatic recent retry에서는 영구 스킵
    - 현재 권장: B. 다만 당일은 제외하고, 수동 `custom range` 재조회는 계속 허용한다.
 
-7. News Feed 검색 입력 분리 방식
+8. News Feed 검색 입력 분리 방식
    - 선택지 A: 기존 단일 검색창을 유지하고 검색 문법(`ticker:ASTS`)으로만 분리
    - 선택지 B: 일반 검색창 + ticker 전용 검색창을 별도 입력으로 분리
    - 현재 권장: B. 사용자가 원하는 동작이 더 직접적이고, 일반 텍스트 검색과 ticker-only 검색의 의미를 UI에서 명확히 구분할 수 있다.
 
-8. News Feed 검색 결과 paging 방식
+9. News Feed 검색 결과 paging 방식
    - 선택지 A: 현재처럼 검색 시 최대 200개만 단건 반환
    - 선택지 B: 최초 500개 로드 후 `nextCursor` 기반으로 하단 스크롤 시 자동 append + 하단 `Load more` 버튼 병행
    - 현재 권장: B. 검색 대상은 DB 전체로 유지하되, 자동 로드가 실패하거나 사용자가 더 명시적으로 제어하고 싶을 때를 위해 버튼 fallback도 함께 제공한다.
 
-9. News Feed 날짜 기간 검색 방식
+10. News Feed 날짜 기간 검색 방식
    - 선택지 A: 날짜 필터 없이 항상 전체 기간 검색
    - 선택지 B: `from`/`to` 입력을 두되, 기본값은 비워 두고 비어 있으면 전체 검색, 값이 있으면 기간 검색
    - 현재 권장: B. 기본 사용성은 유지하면서 필요할 때만 기간을 좁힐 수 있어야 한다.
 
-10. 북마크 데이터 모델
+11. 북마크 데이터 모델
    - 선택지 A: 기존 `news_saved_views`를 북마크 용도로 확장
    - 선택지 B: 북마크 폴더/북마크 아이템을 별도 테이블로 분리
    - 사용자 확정: B. saved view는 검색 조건 저장으로 유지하고, 북마크는 `bookmark_folders` + `bookmark_items` 별도 구조로 분리한다.
 
-11. 북마크 폴더 계층 방식
+12. 북마크 폴더 계층 방식
    - 선택지 A: 1단계 폴더만 허용
    - 선택지 B: `parent_id` 기반 트리로 크롬 북마크처럼 중첩 허용
    - 현재 권장: B. 사용자가 “북마크 폴더 같은 것”을 원하므로 트리 구조를 먼저 열어 두는 편이 안전하다.
 
-12. Bookmark view 동작 방식
+13. Bookmark view 동작 방식
    - 선택지 A: 기존 검색 결과 위에 북마크 필터만 얹기
    - 선택지 B: 선택된 폴더 기준 북마크 전용 결과 모드로 전환
    - 현재 권장: B. 사용자가 “그 북마크 폴더 안에 북마크된 뉴스 데이터들이 보이게”를 원하므로 폴더 선택 시 명확한 북마크 전용 view가 맞다.
@@ -1242,10 +1248,8 @@ npm run build
 사용자 확인 필요: 예
 ```
 
-### 미확정 사항(명시 결정 필요)
-1. 결정 #5 — font size 저장 위치
-   - 선택지: global localStorage / tab별 저장 / backend saved settings
-   - 차단 대상 Step: 2, 3
+### 미확정 사항
+- 현재 없음. font size 저장 위치는 global `localStorage` 유지로 확정했다.
 
 ### 실행 의존성 그래프
 
@@ -1291,7 +1295,7 @@ Legend
    +--> ✅ 2-9 Bookmark view 폴더 선택 UI
    +--> ✅ 2-10 row 우클릭 Add bookmark
    +--> ✅ 2-11 폴더별 bookmark mode 결과 표시
-   +--> ⬜ 2-15 company description update 액션
+   +--> ✅ 2-15 company description update 액션
    +--> ✅ 2-4 Data Control Settings 탭 추가
    +--> ✅ 2-5 전체 글자 크기 조절 UI
 
@@ -1352,13 +1356,13 @@ Track E는 구조 정규화 phase이므로, default ticker import 정책과 `sec
 Track F는 완료되었다 (Step 7). canonical `company_profiles.security_id` 경로 재사용, peers 수집/저장/UI 노출 구현 완료.
 Track G도 완료되었다 (Step 8). News Feed company description 조회/표시 contract 확장 구현 완료.
 Track H도 완료되었다 (Step 9). calendar backend mode 계약 (backfill/refresh) + 양쪽 UI 버튼 + 문서 동기화 구현 완료. 단, 실제 수집은 IBKR TWS + Python bridge 구현 후 동작 (Step 6-3).
-남은 미확정 사항은 font size 저장 위치처럼 Track B/C 영역에 가깝다.
+남은 미확정 사항은 현재 없다. font size 저장 위치는 global `localStorage` 유지로 확정되었다.
 =========================================
 ```
 
 병렬 트랙 요약:
 - Track A의 핵심 결정(#1, #2, #3, #8, 0-5)은 확정되었으므로 Step 1 backend 작업 전체를 진행 가능하다.
-- Track B와 Track C는 서로 독립 작업이 많지만, font size 저장 위치와 app state schema는 공유한다.
+- Track B와 Track C는 서로 독립 작업이 많지만, font size 저장 위치는 global `localStorage`로 확정되었으므로 app state schema와 같은 축에서 유지하면 된다.
 - Track H는 Track B의 UI 작업이지만, 실제로는 calendar backend contract 분리(9-1, 9-2)가 먼저 정해져야 라벨과 설명이 거짓이 되지 않는다.
 - Track D는 A/B/C가 끝난 뒤 마감 단계로 수행한다.
 
@@ -1368,7 +1372,13 @@ Track H도 완료되었다 (Step 9). calendar backend mode 계약 (backfill/refr
 |------|-----------|--------|
 | 검색 paging 방식 | Step 1, Step 2 | 200 고정 / 500 cursor 자동 append + Load more 버튼 |
 | 검색 날짜 기간 방식 | Step 1, Step 2 | 날짜 없음 / 비워두면 전체 + 값 있으면 기간 검색 |
-| font size 저장 위치 | Step 2, Step 3 | global localStorage / tab scoped / backend |
+| font size 저장 위치 | Step 2, Step 3 | global localStorage (확정) |
+
+### PLAN CHANGE (2026-03-07) — font size 저장 위치 확정
+
+- 왜: 사용자가 font size를 backend DB나 별도 테이블로 올리지 않고 현재 방식 유지를 명시적으로 선택했다.
+- 무엇이 바뀌었나: font size 저장 위치를 global `localStorage`로 확정했고, `미확정 사항`에서 제거했다.
+- 영향: `App.tsx`의 현재 `terminal-workspace-v1` persistence를 유지한다. backend schema/API, 별도 settings table, sync 로직은 이번 범위에 추가하지 않는다.
 
 ### 결정 #1 — AI 뉴스 분석 출력 계약(상세, 사용자 확인 완료)
 권장 기준:

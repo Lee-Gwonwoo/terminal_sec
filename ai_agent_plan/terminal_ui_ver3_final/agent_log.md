@@ -1464,3 +1464,22 @@ Step 4 전체 (4-1 ~ 4-4)를 완료했다.
 1. `pullIbkrCalendar()`는 여전히 stub. IBKR TWS + Python bridge 구현 전까지 에러 반환이 정상.
    - 완화: 에러 메시지에 mode와 range가 포함되어 계약이 명확함
 2. `statusKey: 'ibkr_calendar'`가 backfill/refresh 모드를 공유. update_status payload에 mode 기록으로 구분 가능.
+
+---
+
+### 결정 확정 — font size 저장 위치 유지
+
+**작성 시각:** 2026-03-07 19:55 (local)
+**상태**: ✅ 완료 (사용자 확인 후 완료)
+
+#### 결정 내용
+
+- font size는 backend DB나 별도 settings table로 올리지 않는다.
+- 현재 구현대로 global `localStorage`에 유지한다.
+- 적용 범위: `fontScale`, `newsTitleFontSize`, `newsSummaryFontSize`
+
+#### 영향
+
+- `App.tsx`의 `terminal-workspace-v1` persistence 구조를 유지한다.
+- backend schema/API 추가 작업은 하지 않는다.
+- plan.md의 미확정 사항에서 font size 저장 위치를 제거했다.
