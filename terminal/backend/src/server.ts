@@ -18,7 +18,8 @@ import {
 import { listAlertRules, upsertAlertRule } from "./services/alertsRepository.js";
 import { StreamHub } from "./realtime/streamHub.js";
 import { ensureSeedData } from "./seed.js";
-import { pullIbkrCalendar } from "./services/calendarIngestion.js";
+import { pullIbkrCalendar, getCalendarDateRange } from "./services/calendarIngestion.js";
+import type { CalendarUpdateMode } from "./services/calendarIngestion.js";
 import { pullEodhdNews, pullEodhdNewsAll } from "./services/eodhdNewsProvider.js";
 import { insertNewsItem } from "./services/newsRepository.js";
 import { listUpdateStatuses, setLastSuccess } from "./services/updateStatusRepository.js";
@@ -889,11 +890,19 @@ app.get("/api/calendar/events/:id", async (req, res, next) => {
   }
 });
 
-// Step 6-4/6-5/6-6: IBKR 캘린더 업데이트 엔드포인트
-app.post("/api/ibkr/calendar/update", async (_req, res, next) => {
+// Step 6-4/6-5/6-6 + Step 9-1/9-2: IBKR 캘린더 업데이트 엔드포인트
+app.post("/api/ibkr/calendar/update", async (req, res, next) => {
   try {
+    // 9-1: mode 파라미터 읽기 (backfill | refresh, 기본 backfill)
+    const rawMode = req.body?.mode;
+    const mode: CalendarUpdateMode = rawMode === "refresh" ? "refresh" : "backfill";
+    const dateRange = getCalendarDateRange(mode);
+
+    // 9-2: 대상 종목 — default universe
+    const tickers = await getDefaultUniverseTickers();
+
     // 6-3: pullIbkrCalendar는 IBKR TWS 미연결 시 에러를 던짐 (Step 6-3 구현 전)
-    const result = await pullIbkrCalendar([]);
+    const result = await pullIbkrCalendar(tickers, mode);
 
     // 6-4: 이벤트 upsert
     let upserted = 0;
@@ -918,11 +927,13 @@ app.post("/api/ibkr/calendar/update", async (_req, res, next) => {
 
     // 6-6: update_status 갱신
     await setLastSuccess("ibkr_calendar", new Date().toISOString(), {
+      mode,
+      dateRange,
       upserted,
       deletedMockRows
     });
 
-    res.json({ upserted, deletedMockRows, source: "IBKR" });
+    res.json({ mode, dateRange, upserted, deletedMockRows, source: "IBKR" });
   } catch (error) {
     next(error);
   }
@@ -1384,7 +1395,8 @@ app.get("/api/universes/:id/items", async (req, res) => {
 // ── Step 5-3: company profile API ──
 
 import { fetchFmpProfile, fetchFmpProfilesBatch } from "./services/fmpCompanyProfileProvider.js";
-import { upsertCompanyProfile, getCompanyProfileByTicker, countCompanyProfiles } from "./services/companyProfileRepository.js";
+import { upsertCompanyProfile, getCompanyProfileByTicker, countCompanyProfiles, upsertPeers, getPeersByTicker } from "./services/companyProfileRepository.js";
+import { fetchFinnhubPeersBatch } from "./services/finnhubPeersProvider.js";
 
 app.get("/api/company-profiles/:ticker", async (req, res) => {
   try {
@@ -1444,6 +1456,38 @@ app.post("/api/company-profiles/pull-fmp", async (req, res) => {
   }
 });
 
+// ── Pull Finnhub Peers ─────────────────────────────────────────────────────
+app.post("/api/company-profiles/pull-peers", async (req, res) => {
+  try {
+    const body = req.body as { tickers?: string[]; maxTickers?: number };
+    let tickers = body.tickers;
+    if (!tickers || tickers.length === 0) {
+      tickers = await getDefaultUniverseTickers();
+    }
+    const max = body.maxTickers ?? 50;
+    const target = tickers.slice(0, max);
+
+    const { results, errors: fetchErrors } = await fetchFinnhubPeersBatch(target);
+
+    let upserted = 0;
+    for (const [ticker, peers] of results) {
+      const secId = await upsertSecurity(ticker, null, null, null, null);
+      await upsertPeers(secId, "finnhub", JSON.stringify(peers));
+      upserted++;
+    }
+
+    res.json({
+      requested: target.length,
+      fetched: results.size,
+      upserted,
+      errors: fetchErrors.size,
+      errorDetails: fetchErrors.size > 0 ? Object.fromEntries(fetchErrors) : undefined,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Unknown error" });
+  }
+});
+
 // ── App DB Inspection ────────────────────────────────────────────────────────
 const TABLE_UI_USAGE: Record<string, string[]> = {
   securities: [
@@ -1453,6 +1497,7 @@ const TABLE_UI_USAGE: Record<string, string[]> = {
   ],
   company_profiles: [
     "POST /api/company-profiles/pull-fmp (FMP 회사 설명 저장)",
+    "POST /api/company-profiles/pull-peers (Finnhub peers 수집)",
     "GET /api/company-profiles/:ticker",
   ],
   ticker_universes: [

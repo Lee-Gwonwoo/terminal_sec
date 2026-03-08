@@ -257,10 +257,18 @@ export async function initDb(): Promise<void> {
       ipo_date TEXT,
       market_cap REAL,
       raw_json TEXT,
+      peers_json TEXT,
       fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE (security_id, source)
     );
   `);
+
+  // Migration: add peers_json column to existing company_profiles tables
+  try {
+    await db.exec("ALTER TABLE company_profiles ADD COLUMN peers_json TEXT");
+  } catch {
+    // Column already exists — ignore
+  }
 
   await db.exec(`
     CREATE TABLE IF NOT EXISTS ticker_universes (

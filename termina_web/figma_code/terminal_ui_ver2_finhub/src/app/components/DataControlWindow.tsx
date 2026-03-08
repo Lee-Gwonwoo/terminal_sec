@@ -22,7 +22,7 @@ interface JobStatus {
   result?: Record<string, unknown>;
 }
 
-type SectionKey = 'price' | 'calendarBackfill' | 'calendarRefresh' | 'companyDesc' | 'recent' | 'custom';
+type SectionKey = 'price' | 'calendarBackfill' | 'calendarRefresh' | 'companyDesc' | 'peersPull' | 'recent' | 'custom';
 
 interface DataControlWindowProps {
   fontScale?: number;
@@ -53,19 +53,19 @@ export function DataControlWindow({
 
   // ─── Per-section job state ───
   const [jobIds, setJobIds] = useState<Record<SectionKey, string | null>>({
-    price: null, calendarBackfill: null, calendarRefresh: null, companyDesc: null, 'recent': null, custom: null,
+    price: null, calendarBackfill: null, calendarRefresh: null, companyDesc: null, peersPull: null, 'recent': null, custom: null,
   });
   const [updating, setUpdating] = useState<Record<SectionKey, boolean>>({
-    price: false, calendarBackfill: false, calendarRefresh: false, companyDesc: false, 'recent': false, custom: false,
+    price: false, calendarBackfill: false, calendarRefresh: false, companyDesc: false, peersPull: false, 'recent': false, custom: false,
   });
   const [errors, setErrors] = useState<Record<SectionKey, string | null>>({
-    price: null, calendarBackfill: null, calendarRefresh: null, companyDesc: null, 'recent': null, custom: null,
+    price: null, calendarBackfill: null, calendarRefresh: null, companyDesc: null, peersPull: null, 'recent': null, custom: null,
   });
 
   // ─── View Log state (only one section's log at a time) ───
   const [logSection, setLogSection] = useState<SectionKey | null>(null);
   const [jobStatuses, setJobStatuses] = useState<Record<SectionKey, JobStatus | null>>({
-    price: null, calendarBackfill: null, calendarRefresh: null, companyDesc: null, 'recent': null, custom: null,
+    price: null, calendarBackfill: null, calendarRefresh: null, companyDesc: null, peersPull: null, 'recent': null, custom: null,
   });
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -212,6 +212,9 @@ export function DataControlWindow({
         case 'companyDesc':
           url = `${API_BASE}/api/company-profiles/pull-fmp`;
           break;
+        case 'peersPull':
+          url = `${API_BASE}/api/company-profiles/pull-peers`;
+          break;
         case 'recent':
           url = `${API_BASE}/api/news/change/update-recent`;
           break;
@@ -288,14 +291,14 @@ export function DataControlWindow({
       label: 'Initial Calendar Backfill',
       statusKey: 'ibkr_calendar',
       group: 'Calendar Update',
-      description: '과거 1–2년 + 미래 90–180일 이벤트를 한번에 적재합니다. 초기 세팅 시 실행합니다.',
+      description: '과거 2년 + 미래 180일 이벤트를 한번에 적재합니다. 초기 세팅 시 실행합니다.',
     },
     {
       key: 'calendarRefresh',
       label: 'Refresh Upcoming Calendar',
       statusKey: 'ibkr_calendar',
       group: 'Calendar Update',
-      description: '최근 14–30일 overlap + 앞으로 90일만 갱신합니다. 과거 전체를 다시 받지 않습니다.',
+      description: '최근 30일 overlap + 앞으로 90일만 갱신합니다. 과거 전체를 다시 받지 않습니다.',
     },
     {
       key: 'companyDesc',
@@ -303,6 +306,13 @@ export function DataControlWindow({
       statusKey: 'company_profiles',
       group: 'Company Data',
       description: 'ticker_universes/default 기준으로 FMP 회사 설명을 일괄 수집합니다.',
+    },
+    {
+      key: 'peersPull',
+      label: 'Peers Data Update',
+      statusKey: 'company_profiles',
+      group: 'Company Data',
+      description: 'ticker_universes/default 기준으로 Finnhub 관련 종목(peers)을 수집합니다.',
     },
 
     {
@@ -559,6 +569,43 @@ export function DataControlWindow({
                   </div>
                 </div>
               ))}
+
+              {/* Sample Rows (collapsed by default) */}
+              {table.sampleRows.length > 0 && (
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">
+                    Sample rows ({table.sampleRows.length})
+                  </summary>
+                  <div className="mt-1.5 overflow-x-auto">
+                    <table className="text-[10px] font-mono border-collapse w-full">
+                      <thead>
+                        <tr>
+                          {table.columns.map(col => (
+                            <th key={col.name} className="px-1.5 py-0.5 text-left border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                              {col.name}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {table.sampleRows.map((row, ri) => (
+                          <tr key={ri}>
+                            {table.columns.map(col => {
+                              const val = row[col.name];
+                              const text = val === null || val === undefined ? '—' : String(val);
+                              return (
+                                <td key={col.name} className="px-1.5 py-0.5 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 max-w-[200px] truncate" title={text}>
+                                  {text.length > 80 ? text.slice(0, 80) + '…' : text}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
+              )}
             </div>
           ))}
         </div>

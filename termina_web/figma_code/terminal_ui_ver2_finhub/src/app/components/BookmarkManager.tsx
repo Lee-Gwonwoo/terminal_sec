@@ -21,6 +21,7 @@ interface CtxMenu {
   y: number;
   newsId: string | null;
   folderId: string;
+  target: 'item' | 'folder' | 'area';
 }
 
 interface ClipboardItem {
@@ -185,7 +186,13 @@ export function BookmarkManager({ open, onClose, folders, onFoldersChanged }: Pr
     if (!clipboard) return;
     e.preventDefault();
     e.stopPropagation();
-    setCtxMenu({ x: e.clientX, y: e.clientY, newsId: null, folderId });
+    setCtxMenu({ x: e.clientX, y: e.clientY, newsId: null, folderId, target: 'area' });
+  };
+
+  const openSidebarFolderMenu = (e: React.MouseEvent, folderId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setCtxMenu({ x: e.clientX, y: e.clientY, newsId: null, folderId, target: 'folder' });
   };
 
   // ── Drag & Drop ──
@@ -278,6 +285,7 @@ export function BookmarkManager({ open, onClose, folders, onFoldersChanged }: Pr
                     setSelectedFolderId(folder.id);
                     setEditingFolderId(null);
                   }}
+                  onContextMenu={(e) => openSidebarFolderMenu(e, folder.id)}
                   onDragOver={(e) => handleDragOver(e, folder.id)}
                   onDragLeave={() => setDragOverFolderId(null)}
                   onDrop={(e) => handleDrop(e, folder.id)}
@@ -362,7 +370,7 @@ export function BookmarkManager({ open, onClose, folders, onFoldersChanged }: Pr
                     onContextMenu={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
-                      setCtxMenu({ x: e.clientX, y: e.clientY, newsId: item.news_id, folderId: selectedFolderId });
+                      setCtxMenu({ x: e.clientX, y: e.clientY, newsId: item.news_id, folderId: selectedFolderId, target: 'item' });
                     }}
                     className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800 border-b border-gray-100 dark:border-gray-800 cursor-grab active:cursor-grabbing"
                   >
@@ -401,7 +409,7 @@ export function BookmarkManager({ open, onClose, folders, onFoldersChanged }: Pr
             top: Math.min(ctxMenu.y, (typeof window !== 'undefined' ? window.innerHeight - 200 : ctxMenu.y)),
           }}
         >
-          {ctxMenu.newsId && (
+          {ctxMenu.target === 'item' && ctxMenu.newsId && (
             <>
               <button
                 className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700"
@@ -417,7 +425,38 @@ export function BookmarkManager({ open, onClose, folders, onFoldersChanged }: Pr
               </button>
             </>
           )}
-          {clipboard && (
+          {ctxMenu.target === 'folder' && (
+            <>
+              <button
+                className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700"
+                onClick={() => {
+                  const folder = folders.find(f => f.id === ctxMenu.folderId);
+                  if (folder) { setEditingFolderId(folder.id); setEditingName(folder.name); }
+                  setCtxMenu(null);
+                }}
+              >
+                Rename
+              </button>
+              <button
+                className="w-full text-left px-3 py-2 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30"
+                onClick={() => { handleDeleteFolder(ctxMenu.folderId); setCtxMenu(null); }}
+              >
+                Delete folder
+              </button>
+            </>
+          )}
+          {clipboard && (ctxMenu.target === 'area' || ctxMenu.target === 'folder') && (
+            <>
+              {ctxMenu.target === 'folder' && <div className="border-t border-gray-200 dark:border-gray-700" />}
+              <button
+                className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700"
+                onClick={() => handlePaste(ctxMenu.folderId)}
+              >
+                Paste
+              </button>
+            </>
+          )}
+          {clipboard && ctxMenu.target === 'item' && (
             <button
               className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700"
               onClick={() => handlePaste(ctxMenu.folderId)}
@@ -425,7 +464,7 @@ export function BookmarkManager({ open, onClose, folders, onFoldersChanged }: Pr
               Paste
             </button>
           )}
-          {ctxMenu.newsId && (
+          {ctxMenu.target === 'item' && ctxMenu.newsId && (
             <>
               <div className="border-t border-gray-200 dark:border-gray-700" />
               <button

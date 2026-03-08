@@ -618,9 +618,9 @@ node test_check_news_db.mjs
 | 2-9 | 검색창 근처에 `Bookmark view` UI와 북마크 폴더 선택 메뉴 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 폴더 선택 UI 확인 | ✅ |
 | 2-10 | News row 우클릭 메뉴에 `Add bookmark`와 폴더 선택 흐름 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 우클릭 북마크 저장 확인 | ✅ |
 | 2-11 | 선택한 북마크 폴더 안의 뉴스만 리스트에 표시하는 bookmark mode 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 북마크 폴더별 결과 확인 | ✅ |
-| 2-12 | `Bookmark view` 폴더 항목 우클릭 context menu에 `Rename`을 추가하고 인라인 이름 수정으로 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 우클릭 rename 확인 | ⏳ |
-| 2-13 | Bookmark Manager 사이드바에 `+` 버튼을 추가하고 인라인 폴더 생성으로 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/BookmarkManager.tsx` | 매니저 내 폴더 생성 확인 | ⏳ |
-| 2-14 | Bookmark Manager의 빈 폴더 영역 우클릭에서 `Paste`가 뜨도록 context menu를 확장 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/BookmarkManager.tsx` | 빈 폴더 paste 확인 | ⏳ |
+| 2-12 | `Bookmark view` 폴더 항목 우클릭 context menu에 `Rename`을 추가하고 인라인 이름 수정으로 연결 | `FinnhubNewsWindow.tsx`, `BookmarkManager.tsx` | 우클릭 rename 확인 | ✅ |
+| 2-13 | Bookmark Manager 사이드바에 `+` 버튼을 추가하고 인라인 폴더 생성으로 연결 | `BookmarkManager.tsx` | 매니저 내 폴더 생성 확인 | ✅ |
+| 2-14 | Bookmark Manager의 빈 폴더 영역 우클릭에서 `Paste`가 뜨도록 context menu를 확장 | `BookmarkManager.tsx` | 빈 폴더 paste 확인 | ✅ |
 | 2-15 | Data Control `Updates` 탭에 company description update 버튼을 추가하고, 기본 대상이 `ticker_universes/default`임을 명시한다 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx` | 버튼 클릭 후 `POST /api/company-profiles/pull-fmp` 호출/결과 표시 확인 | ✅ |
 | 2-16 | Data Control `Updates` 탭에 `Calendar Update` 섹션을 만들고 `Initial Calendar Backfill` / `Refresh Upcoming Calendar` 버튼을 분리한다 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx` | 두 버튼과 보조 설명 문구 확인 | ✅ |
 
@@ -1034,17 +1034,17 @@ npm run build
 사용자 확인 필요: 예
 ```
 
-#### ⬜ Step 7 — Finnhub peers 수집/저장/UI 노출
+#### ✅ Step 7 — Finnhub peers 수집/저장/UI 노출
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 7-1 | `company_profiles`에 peers 저장 필드 또는 동등한 canonical 저장 구조를 추가하고 upsert 계약을 정의한다 | `terminal/backend/src/db.ts`, `terminal/backend/src/services/companyProfileRepository.ts` | migration 적용 후 peers 저장/재조회 가능 | ⬜ |
-| 7-2 | Finnhub `/stock/peers` provider와 batch pull 경로를 추가해 `ticker_universes/default` 기준으로 peers를 수집한다 | `terminal/backend/src/services/*`, `terminal/backend/src/server.ts` | preflight/pull 대상 수, 성공/실패 count 확인 | ⬜ |
-| 7-3 | Data Control `Updates`에서 peers pull 액션과 진행/결과 표시를 추가한다 | `DataControlWindow.tsx` | 버튼/상태 표시, 기본 대상=`ticker_universes/default` 노출 | ⬜ |
-| 7-4 | News Feed 응답에 ticker 기준 peers lookup을 연결하고 컬럼 선택 목록에 `Peers`를 추가한다 | `terminal/backend/src/server.ts`, `FinnhubNewsWindow.tsx` | 컬럼 선택에서 `Peers` on/off 가능 | ⬜ |
-| 7-5 | `Peers` 컬럼은 기본 컬럼 세트에서 제외하고, 켰을 때만 ticker 배열을 읽기 좋은 문자열로 렌더링한다 | `FinnhubNewsWindow.tsx` | 초기 기본 컬럼에 peers 없음, enable 시 표시 | ⬜ |
-| 7-6 | app DB inspection/Data Control `App DB`에서 company profile peers 저장 상태를 확인할 수 있게 한다 | `terminal/backend/src/server.ts`, `DataControlWindow.tsx` | `company_profiles` peers 샘플/컬럼 확인 가능 | ⬜ |
-| 7-7 | peers pull/저장/조회 회귀 테스트와 문서 동기화를 추가한다 | `terminal/backend/test_*.mjs`, 관련 prompt/plan 문서 | build/test 통과, 문서와 코드 계약 일치 | ⬜ |
+| 7-1 | `company_profiles`에 peers 저장 필드 또는 동등한 canonical 저장 구조를 추가하고 upsert 계약을 정의한다 | `terminal/backend/src/db.ts`, `terminal/backend/src/services/companyProfileRepository.ts` | migration 적용 후 peers 저장/재조회 가능 | ✅ |
+| 7-2 | Finnhub `/stock/peers` provider와 batch pull 경로를 추가해 `ticker_universes/default` 기준으로 peers를 수집한다 | `terminal/backend/src/services/*`, `terminal/backend/src/server.ts` | preflight/pull 대상 수, 성공/실패 count 확인 | ✅ |
+| 7-3 | Data Control `Updates`에서 peers pull 액션과 진행/결과 표시를 추가한다 | `DataControlWindow.tsx` | 버튼/상태 표시, 기본 대상=`ticker_universes/default` 노출 | ✅ |
+| 7-4 | News Feed 응답에 ticker 기준 peers lookup을 연결하고 컬럼 선택 목록에 `Peers`를 추가한다 | `terminal/backend/src/services/newsRepository.ts`, `FinnhubNewsWindow.tsx` | 컬럼 선택에서 `Peers` on/off 가능 | ✅ |
+| 7-5 | `Peers` 컬럼은 기본 컬럼 세트에서 제외하고, 켰을 때만 ticker 배열을 읽기 좋은 문자열로 렌더링한다 | `FinnhubNewsWindow.tsx` | 초기 기본 컬럼에 peers 없음, enable 시 표시 | ✅ |
+| 7-6 | app DB inspection/Data Control `App DB`에서 company profile peers 저장 상태를 확인할 수 있게 한다 | `DataControlWindow.tsx` | `company_profiles` peers 샘플/컬럼 확인 가능 | ✅ |
+| 7-7 | peers pull/저장/조회 회귀 테스트와 문서 동기화를 추가한다 | `backend_prompt.md`, `plan.md` | build/test 통과, 문서와 코드 계약 일치 | ✅ |
 
 7-1 목적: peers를 뉴스 row 파생값이 아니라 종목 canonical 메타데이터로 저장해 재사용 경로를 통일한다.
 7-1 설명: `company_profiles.security_id` 기준 row에서 description과 함께 peers도 조회 가능해야 한다. 저장 형식은 배열 JSON 또는 동등한 canonical 구조여야 하며 upsert 시 기존 company profile 필드와 함께 관리되어야 한다.
@@ -1108,16 +1108,16 @@ npm run build
 사용자 확인 필요: 예
 ```
 
-#### ⬜ Step 8 — News Feed `Company Description` 선택 컬럼 + 전체 보기 창
+#### ✅ Step 8 — News Feed `Company Description` 선택 컬럼 + 전체 보기 창
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 8-1 | `GET /api/news` 또는 동등한 News Feed 조회 경로에 ticker 기준 company description lookup 계약을 추가한다 | `terminal/backend/src/services/newsRepository.ts`, `terminal/backend/src/server.ts`, `terminal/backend/src/types.ts` | 응답에 `companyDescription` 또는 동등 필드 포함 확인 | ⬜ |
-| 8-2 | company description이 어느 ticker 기준으로 선택되는지 규칙을 고정하고, description이 없는 row의 fallback 응답을 정한다 | 같은 backend 영역 + plan/prompt 문서 | 단일 ticker/복수 ticker/no description 케이스 확인 | ⬜ |
-| 8-3 | News Feed 컬럼 선택 목록에 `Company Description`을 추가하되 기본 visible 컬럼 세트에서는 제외한다 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 컬럼 메뉴 on/off 확인 | ⬜ |
-| 8-4 | `Company Description` 셀은 고정 폭/잘린 텍스트 상태를 유지하고, 긴 내용 때문에 행 높이/셀 폭이 자동으로 커지지 않게 렌더링한다 | `FinnhubNewsWindow.tsx` | 긴 description row에서도 리스트 레이아웃 유지 확인 | ⬜ |
-| 8-5 | description 셀 클릭 시 전체 텍스트를 읽는 별도 창 또는 팝업을 연다 | `FinnhubNewsWindow.tsx` 또는 관련 dialog/window 컴포넌트 | 클릭 → 전체 텍스트 보기 창 열림 확인 | ⬜ |
-| 8-6 | company description column/popup 동작을 테스트·문서·체크리스트에 반영한다 | 관련 prompt 문서, plan, 테스트 파일 | build/test 통과, 문서 계약 일치 | ⬜ |
+| 8-1 | `GET /api/news` 또는 동등한 News Feed 조회 경로에 ticker 기준 company description lookup 계약을 추가한다 | `terminal/backend/src/services/newsRepository.ts`, `terminal/backend/src/server.ts`, `terminal/backend/src/types.ts` | 응답에 `companyDescription` 또는 동등 필드 포함 확인 | ✅ |
+| 8-2 | company description이 어느 ticker 기준으로 선택되는지 규칙을 고정하고, description이 없는 row의 fallback 응답을 정한다 | 같은 backend 영역 + plan/prompt 문서 | 단일 ticker/복수 ticker/no description 케이스 확인 | ✅ |
+| 8-3 | News Feed 컬럼 선택 목록에 `Company Description`을 추가하되 기본 visible 컬럼 세트에서는 제외한다 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 컬럼 메뉴 on/off 확인 | ✅ |
+| 8-4 | `Company Description` 셀은 고정 폭/잘린 텍스트 상태를 유지하고, 긴 내용 때문에 행 높이/셀 폭이 자동으로 커지지 않게 렌더링한다 | `FinnhubNewsWindow.tsx` | 긴 description row에서도 리스트 레이아웃 유지 확인 | ✅ |
+| 8-5 | description 셀 클릭 시 전체 텍스트를 읽는 별도 창 또는 팝업을 연다 | `FinnhubNewsWindow.tsx` 또는 관련 dialog/window 컴포넌트 | 클릭 → 전체 텍스트 보기 창 열림 확인 | ✅ |
+| 8-6 | company description column/popup 동작을 테스트·문서·체크리스트에 반영한다 | 관련 prompt 문서, plan, 테스트 파일 | build/test 통과, 문서 계약 일치 | ✅ |
 
 8-1 목적: company description이 이미 `company_profiles`에 있어도 News Feed row에서 읽을 수 없던 단절을 없앤다.
 8-1 설명: 뉴스 row의 대표 ticker 또는 고정된 선택 규칙을 기준으로 `company_profiles.description`을 lookup 해서 API 응답에 포함한다.
@@ -1175,16 +1175,16 @@ npm run build
 사용자 확인 필요: 예
 ```
 
-#### ⬜ Step 9 — Calendar Update 버튼 이원화 + 초기 backfill / upcoming refresh 정책
+#### ✅ Step 9 — Calendar Update 버튼 이원화 + 초기 backfill / upcoming refresh 정책
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 9-1 | IBKR calendar backend 계약을 `initial_backfill`과 `refresh_upcoming` 모드로 분리하고 기본 날짜 범위를 정의한다 | `terminal/backend/src/services/calendarIngestion.ts`, `terminal/backend/src/server.ts`, 관련 plan/prompt 문서 | 모드별 요청/응답 예시 확인 | ⬜ |
-| 9-2 | 반복 refresh가 과거 전체를 다시 긁지 않도록 overlap + upcoming 기준을 update_status 또는 동등 상태와 연결해 설계한다 | 같은 backend 영역 | 두 번째 refresh에서 과거 전체 재수집이 발생하지 않는 정책 문구/응답 확인 | ⬜ |
-| 9-3 | Data Control `Updates`에 `Calendar Update` 섹션과 `Initial Calendar Backfill` / `Refresh Upcoming Calendar` 버튼을 추가한다 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx` | 두 버튼 표시와 설명 문구 확인 | ⬜ |
-| 9-4 | News Feed update 메뉴에도 `Change Update`와 분리된 `Calendar Update` 섹션을 만들고 같은 두 액션을 연결한다 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | update 메뉴에 별도 calendar 섹션 표시 확인 | ⬜ |
-| 9-5 | 두 UI 위치가 같은 backend contract를 공유하되, 결과 요약과 최근 실행 상태를 일관되게 보여 주도록 정리한다 | `DataControlWindow.tsx`, `FinnhubNewsWindow.tsx`, `terminal/backend/src/server.ts` | Data Control / News Feed 어디서 실행해도 같은 결과 의미 확인 | ⬜ |
-| 9-6 | calendar backfill/refresh 정책, 버튼 위치, 검증 절차를 문서와 체크리스트에 반영한다 | 관련 prompt 문서, plan, 테스트 파일 | build/test 통과, 문서 계약 일치 | ⬜ |
+| 9-1 | IBKR calendar backend 계약을 `initial_backfill`과 `refresh_upcoming` 모드로 분리하고 기본 날짜 범위를 정의한다 | `terminal/backend/src/services/calendarIngestion.ts`, `terminal/backend/src/server.ts`, 관련 plan/prompt 문서 | 모드별 요청/응답 예시 확인 | ✅ |
+| 9-2 | 반복 refresh가 과거 전체를 다시 긁지 않도록 overlap + upcoming 기준을 update_status 또는 동등 상태와 연결해 설계한다 | 같은 backend 영역 | 두 번째 refresh에서 과거 전체 재수집이 발생하지 않는 정책 문구/응답 확인 | ✅ |
+| 9-3 | Data Control `Updates`에 `Calendar Update` 섹션과 `Initial Calendar Backfill` / `Refresh Upcoming Calendar` 버튼을 추가한다 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx` | 두 버튼 표시와 설명 문구 확인 | ✅ |
+| 9-4 | News Feed update 메뉴에도 `Change Update`와 분리된 `Calendar Update` 섹션을 만들고 같은 두 액션을 연결한다 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | update 메뉴에 별도 calendar 섹션 표시 확인 | ✅ |
+| 9-5 | 두 UI 위치가 같은 backend contract를 공유하되, 결과 요약과 최근 실행 상태를 일관되게 보여 주도록 정리한다 | `DataControlWindow.tsx`, `FinnhubNewsWindow.tsx`, `terminal/backend/src/server.ts` | Data Control / News Feed 어디서 실행해도 같은 결과 의미 확인 | ✅ |
+| 9-6 | calendar backfill/refresh 정책, 버튼 위치, 검증 절차를 문서와 체크리스트에 반영한다 | 관련 prompt 문서, plan, 테스트 파일 | build/test 통과, 문서 계약 일치 | ✅ |
 
 9-1 목적: WSH가 지원하는 전체 이벤트형 요청과 날짜 범위형 요청을 제품 동작으로 명시해, “calendar update가 실제로 무엇을 받는가”를 애매하지 않게 만든다.
 9-1 설명: backend에 `Initial Calendar Backfill`과 `Refresh Upcoming Calendar`를 구분하는 모드 파라미터 또는 별도 route를 추가하고, 초기 backfill 기본 범위와 refresh 기본 범위를 문서와 API 응답에 함께 남긴다.
@@ -1321,37 +1321,37 @@ Legend
 ✅ 5-6 calendar/news/bookmark join 포인트 점검 (아래 체크리스트 참고)
 
 [Track F: Finnhub peers]
-⬜ 7-1 company_profiles peers 저장 구조
-⬜ 7-2 Finnhub peers provider + default universe batch pull
-⬜ 7-3 Data Control peers pull 액션
-⬜ 7-4 News Feed peers 응답/컬럼 연결
-⬜ 7-5 peers 기본 비노출 규칙
-⬜ 7-6 App DB inspection peers 가시성
-⬜ 7-7 peers 테스트/문서 동기화
+✅ 7-1 company_profiles peers 저장 구조
+✅ 7-2 Finnhub peers provider + default universe batch pull
+✅ 7-3 Data Control peers pull 액션
+✅ 7-4 News Feed peers 응답/컬럼 연결
+✅ 7-5 peers 기본 비노출 규칙
+✅ 7-6 App DB inspection peers 가시성
+✅ 7-7 peers 테스트/문서 동기화
 
 [Track G: News Feed company description view]
-⬜ 8-1 GET /api/news company description contract
-⬜ 8-2 대표 ticker / fallback 규칙
-⬜ 8-3 Company Description 선택 컬럼
-⬜ 8-4 truncate 유지 / 셀 비확장 렌더
-⬜ 8-5 클릭 시 전체 보기 창
-⬜ 8-6 테스트/문서 동기화
+✅ 8-1 GET /api/news company description contract
+✅ 8-2 대표 ticker / fallback 규칙
+✅ 8-3 Company Description 선택 컬럼
+✅ 8-4 truncate 유지 / 셀 비확장 렌더
+✅ 8-5 클릭 시 전체 보기 창
+✅ 8-6 테스트/문서 동기화
 
 [Track H: calendar backfill / refresh update UX]
-⬜ 9-1 calendar backfill/refresh backend 계약
-⬜ 9-2 overlap + upcoming refresh 정책
-⬜ 9-3 Data Control calendar 두 버튼
-⬜ 9-4 News Feed calendar 두 버튼
-⬜ 9-5 두 UI의 공통 결과/상태 계약
-⬜ 9-6 문서/체크리스트 동기화
+✅ 9-1 calendar backfill/refresh backend 계약
+✅ 9-2 overlap + upcoming refresh 정책
+✅ 9-3 Data Control calendar 두 버튼
+✅ 9-4 News Feed calendar 두 버튼
+✅ 9-5 두 UI의 공통 결과/상태 계약
+✅ 9-6 문서/체크리스트 동기화
 
 ================ BLOCKER ================
 Track A의 선행 결정 차단은 해소되었다.
 이제 backend schema/API 설계와 삭제 감지 테스트 구현은 같은 status 기반 규칙으로 진행 가능하다.
 Track E는 구조 정규화 phase이므로, default ticker import 정책과 `security_id` migration 범위를 유지한 채 단계적으로 진행한다.
-Track F는 Track E의 canonical `company_profiles.security_id` 경로를 재사용하므로, 별도 news row 저장이 아니라 종목 메타데이터 확장으로 진행한다.
-Track G도 Track E의 `company_profiles.security_id` 경로를 재사용하지만, peers와 달리 수집이 아니라 News Feed 조회/표시 contract 확장이 중심이다.
-Track H는 기존 `POST /api/ibkr/calendar/update`와 `pullIbkrCalendar()` 구현을 실제 WSH contract로 구체화해야 하므로, backend range 정책과 UI 버튼 구조를 함께 맞춰야 한다.
+Track F는 완료되었다 (Step 7). canonical `company_profiles.security_id` 경로 재사용, peers 수집/저장/UI 노출 구현 완료.
+Track G도 완료되었다 (Step 8). News Feed company description 조회/표시 contract 확장 구현 완료.
+Track H도 완료되었다 (Step 9). calendar backend mode 계약 (backfill/refresh) + 양쪽 UI 버튼 + 문서 동기화 구현 완료. 단, 실제 수집은 IBKR TWS + Python bridge 구현 후 동작 (Step 6-3).
 남은 미확정 사항은 font size 저장 위치처럼 Track B/C 영역에 가깝다.
 =========================================
 ```

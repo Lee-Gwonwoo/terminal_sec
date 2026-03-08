@@ -951,7 +951,67 @@ curl http://localhost:8080/api/company-profiles/AAPL
 
 **상태:** 확인 대기(awaiting user confirmation)
 
-#### 수행 내용
+#### Step 4 수행 내용
+
+(Step 4 통합 검증 내용은 이전 세션에서 기록됨)
+
+---
+
+### Step 7 — Finnhub peers 수집/저장/UI 노출 완료
+
+**작성 시각:** 2026-03-08 (local)
+
+**상태:** 확인 대기(awaiting user confirmation)
+
+#### Step 7 수행 내용
+
+**7-1 (peers_json column + repository)**
+- `db.ts`: `company_profiles` CREATE TABLE에 `peers_json TEXT` 컬럼 추가 + ALTER TABLE migration
+- `companyProfileRepository.ts`: `CompanyProfileRow`에 `peers_json` 추가, `upsertPeers()`, `getPeersByTicker()` 함수 구현
+
+**7-2 (Finnhub peers provider + endpoint)**
+- `finnhubPeersProvider.ts` 신규 파일: `fetchFinnhubPeers()`, `fetchFinnhubPeersBatch()` (120ms rate limit 간격)
+- `server.ts`: `POST /api/company-profiles/pull-peers` 엔드포인트 추가, `TABLE_UI_USAGE` 업데이트
+
+**7-3 (DataControl peers pull button)**
+- `DataControlWindow.tsx`: `SectionKey`에 `'peersPull'` 추가, 모든 state Records 업데이트, switch case 추가, sections 배열에 'Company Data' 그룹 내 항목 추가
+
+**7-4 (News Feed peers column)**
+- `types.ts`: `NewsItem`에 `peers?: string[]` 추가
+- `newsRepository.ts`: `getNews()`에서 batch peers lookup 추가 (sentiment과 동일 패턴), `mapNewsRow()`에 peersMap 파라미터 및 peers 필드 추가
+- `FinnhubNewsWindow.tsx`: `ColumnId`에 `'peers'` 추가, `BackendNewsItem`/`DisplayItem`에 peers 추가, `mapBackendItem`에 peers 매핑, `renderCell`에 peers 렌더링 (보라색 badge, 클릭 시 필터), `getSortValue`에 peers case 추가
+
+**7-5 (Peers default hidden)**
+- `FinnhubNewsWindow.tsx`: `HIDDEN_BY_DEFAULT` 배열에 `'peers'` 추가
+
+**7-6 (App DB peers visibility)**
+- `DataControlWindow.tsx`: App DB 탭에 `<details>` 기반 Sample Rows 테이블 추가 (모든 테이블에). `company_profiles.peers_json`이 sample row에서 자연스럽게 노출됨.
+
+**7-7 (Tests + docs sync)**
+- `backend_prompt.md`: `company_profiles` 테이블 문서 추가, `peers` 필드 news API 응답에 추가, `POST /api/company-profiles/pull-peers` API 문서 추가
+- `plan.md`: Step 7 전체 ✅, 2-12/2-13/2-14 상태 ✅
+
+**2-12 BookmarkManager 폴더 우클릭 (이전 세션)**
+- `BookmarkManager.tsx`: `CtxMenu`에 `target: 'item' | 'folder' | 'area'` 추가, 폴더 우클릭 시 Rename/Delete 메뉴, 빈 영역 우클릭 시 Paste 메뉴
+- 2-13/2-14는 이미 구현 확인됨
+
+#### 자체 검증 결과
+
+| Layer | 결과 |
+|-------|------|
+| 정적 분석 | TypeScript build 오류 없음 |
+| 빌드 | backend `npm run build` ✅, frontend `npm run build` ✅ |
+| 자동 테스트 | backend vitest 48/48 ✅ |
+| 런타임 통합 | `POST /api/company-profiles/pull-peers` → 200 OK, `GET /api/news?tickers=AAPL` → peers 배열 포함 확인, `GET /api/db/inspect` → company_profiles.peers_json 확인 |
+
+#### 문제점 / 리스크
+
+1. peers pull은 Finnhub rate limit(120ms)이 있어 50 tickers 기준 ~6초 소요.
+   - 완화: `maxTickers` 파라미터로 조절 가능, progress callback 지원
+2. 동일 ticker에 대해 fmp/finnhub 2개의 company_profiles row가 생긴다.
+   - 완화: peers lookup은 `peers_json IS NOT NULL` 조건으로 정확히 finnhub row를 찾고, description은 fmp row에서 찾음. 출처별 분리 저장이 canonical 설계.
+3. App DB Sample Rows는 최대 5건만 표시.
+   - 완화: DESC 정렬이라 최근 pull 결과가 먼저 보임
 
 Step 4 전체 (4-1 ~ 4-4)를 완료했다.
 
@@ -1308,3 +1368,99 @@ Step 4 전체 (4-1 ~ 4-4)를 완료했다.
    - 완화: Step 9-1 구현 시 `mode` 분기 처리 추가 예정
 2. `companyDesc` statusKey가 `company_profiles`인데, 해당 키의 update_status row가 아직 없을 수 있다.
    - 완화: backend pull-fmp가 성공 시 자동으로 update_status를 upsert하도록 이미 구현돼 있음
+
+---
+
+### Step 8 완료 — News Feed `Company Description` 선택 컬럼 + 전체 보기 창
+
+**상태**: ✅ 완료 (확인 대기 — awaiting user confirmation)
+
+#### 구현 내용
+
+| 세부 단계 | 설명 | 상태 |
+|-----------|------|------|
+| 8-1 | `getNews()`에 batch description lookup 추가 (company_profiles.description, tickers 배열 첫 번째 기준) | ✅ |
+| 8-2 | 대표 ticker = tickers[0], description 없으면 `null` 반환. 규칙을 backend_prompt.md에 문서화 | ✅ |
+| 8-3 | `companyDesc` 컬럼을 ColumnId, DEFAULT_COLUMNS(200px), HIDDEN_BY_DEFAULT에 추가 | ✅ |
+| 8-4 | 셀은 truncated text (overflow-hidden, text-ellipsis), hover 시 밝은 배경 | ✅ |
+| 8-5 | 셀 클릭 시 descPopup 상태 → 전체 텍스트 팝업 모달 (overlay + card, 스크롤, Esc/close 지원) | ✅ |
+| 8-6 | backend_prompt.md에 companyDescription 필드/규칙 추가, plan.md ✅, agent_log.md 기록, 48/48 tests pass | ✅ |
+
+#### 검증 결과
+
+| 검증 항목 | 결과 |
+|-----------|------|
+| Backend build (`npm run build`) | ✅ tsc 성공 |
+| Backend tests (`npm test`) | ✅ 48/48 pass |
+| Frontend build (`npm run build`) | ✅ vite build 성공 |
+| `GET /api/news?tickers=AAPL&limit=1` → companyDescription 필드 | ✅ 1665자, "Apple Inc. designs, manufactures..." |
+| `GET /api/news?limit=3` (market_news, ticker 없음) → companyDescription | ✅ null (정상 — ticker 없는 뉴스) |
+| backend_prompt.md 문서 동기화 | ✅ JSON 예시 + 출력 컬럼 + 규칙 추가 |
+
+#### 생성/수정 파일
+
+- `terminal/backend/src/types.ts` — `NewsItem`에 `companyDescription?: string | null` 추가
+- `terminal/backend/src/services/newsRepository.ts` — batch description lookup + mapNewsRow descMap 파라미터
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` — companyDesc 컬럼 (ColumnId, DEFAULT_COLUMNS, HIDDEN_BY_DEFAULT, BackendNewsItem, DisplayItem, mapBackendItem, renderCell, getSortValue) + descPopup 상태 + 모달 JSX
+- `terminal/backend_prompt.md` — companyDescription 필드/규칙 문서화
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md` — Step 8 ✅
+
+#### 검증 방법
+
+1. `GET /api/news?tickers=AAPL&limit=1` 호출 → 응답에 `companyDescription` 문자열 확인
+2. News Feed에서 Columns 메뉴 → `Company Desc` 체크박스 토글 → 컬럼 표시/숨김 확인
+3. 기본 화면에서 `Company Desc` 컬럼이 보이지 않는지 확인 (HIDDEN_BY_DEFAULT)
+4. 컬럼 켠 후 description 셀이 한 줄 truncated인지 확인
+5. 셀 클릭 → 팝업에서 전체 description 스크롤 가능한지 확인
+6. description 없는 row는 빈 셀인지 확인
+
+---
+
+### Step 9 완료 — Calendar Update 버튼 이원화 + 초기 backfill / upcoming refresh 정책
+
+**작성 시각:** 2026-03-07 19:52 (local)
+**상태**: ✅ 완료 (확인 대기 — awaiting user confirmation)
+
+#### 구현 내용
+
+| 세부 단계 | 설명 | 상태 |
+|-----------|------|------|
+| 9-1 | `CalendarUpdateMode` 타입 + `getCalendarDateRange(mode)` 함수 추가. `pullIbkrCalendar()` 서명에 mode 파라미터 추가. 에러 메시지에 mode/range 포함 | ✅ |
+| 9-2 | backfill = 과거 2년 + 미래 180일, refresh = 최근 30일 overlap + 미래 90일. 정책을 코드와 문서에 고정 | ✅ |
+| 9-3 | DataControlWindow.tsx 기존 calendar 두 버튼 설명 문구를 정확한 범위로 업데이트 | ✅ |
+| 9-4 | FinnhubNewsWindow.tsx update 드롭다운에 Calendar Update 섹션 추가 | ✅ |
+| 9-5 | 양쪽 UI가 동일한 `POST /api/ibkr/calendar/update` + `{ mode }` body 사용 | ✅ |
+| 9-6 | backend_prompt.md calendar API 문서 업데이트, plan.md ✅, agent_log.md 기록 | ✅ |
+
+#### 검증 결과
+
+| 검증 항목 | 결과 |
+|-----------|------|
+| Backend build (`npm run build`) | ✅ tsc 성공 |
+| Backend tests (`npm test`) | ✅ 48/48 pass |
+| Frontend build (`npm run build`) | ✅ vite build 성공 |
+| `POST` `{mode:"backfill"}` | ✅ 에러: mode=backfill, range=2024-03-08~2026-09-03 |
+| `POST` `{mode:"refresh"}` | ✅ 에러: mode=refresh, range=2026-02-06~2026-06-05 |
+| `POST` `{}` (기본값) | ✅ 에러: mode=backfill (기본값 적용) |
+
+#### 생성/수정 파일
+
+- `terminal/backend/src/services/calendarIngestion.ts` — CalendarUpdateMode, getCalendarDateRange(), pullIbkrCalendar() mode 파라미터
+- `terminal/backend/src/server.ts` — route에서 req.body.mode 읽기 + tickers + 응답에 mode/dateRange
+- `DataControlWindow.tsx` — calendar 설명 문구 정확한 범위로 수정
+- `FinnhubNewsWindow.tsx` — handleCalendarUpdate() + Calendar Update 드롭다운 섹션
+- `terminal/backend_prompt.md` — calendar API mode/dateRange 계약 문서화
+- `plan.md` — Step 9 ✅, Track F/G/H ✅
+
+#### 검증 방법
+
+1. `POST /api/ibkr/calendar/update` + `{"mode":"backfill"}` → 에러에 mode=backfill + range 확인
+2. `POST /api/ibkr/calendar/update` + `{"mode":"refresh"}` → 에러에 mode=refresh + 짧은 range 확인
+3. Data Control → Updates → Calendar Update 그룹에 두 버튼 + 정확한 범위 설명 확인
+4. News Feed → update 드롭다운 → Calendar Update 섹션에 동일한 두 버튼 확인
+
+#### 문제점 / 리스크
+
+1. `pullIbkrCalendar()`는 여전히 stub. IBKR TWS + Python bridge 구현 전까지 에러 반환이 정상.
+   - 완화: 에러 메시지에 mode와 range가 포함되어 계약이 명확함
+2. `statusKey: 'ibkr_calendar'`가 backfill/refresh 모드를 공유. update_status payload에 mode 기록으로 구분 가능.

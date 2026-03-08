@@ -14,7 +14,7 @@ const ROW_HEIGHT_WITH_ABSTRACT = 140;
 type DisplayMode = 'title-only' | 'title-abstract';
 
 // ─── Column definition ───
-type ColumnId = 'date' | 'ticker' | 'time' | 'title' | 'publisher' | 'industry' | 'source' | 'changes' | 'fulltext' | 'keywords' | 'score' | 'scoreEvidence' | 'sentiment';
+type ColumnId = 'date' | 'ticker' | 'time' | 'title' | 'publisher' | 'industry' | 'source' | 'changes' | 'fulltext' | 'keywords' | 'score' | 'scoreEvidence' | 'sentiment' | 'peers' | 'companyDesc';
 
 interface ColumnDef {
   id: ColumnId;
@@ -38,10 +38,12 @@ const DEFAULT_COLUMNS: ColumnDef[] = [
   { id: 'score',        label: 'Score',      defaultWidth: 58,  minWidth: 40 },
   { id: 'scoreEvidence', label: 'Evidence',  defaultWidth: 200, minWidth: 80 },
   { id: 'sentiment',    label: 'Sentiment',  defaultWidth: 80,  minWidth: 50 },
+  { id: 'peers',        label: 'Peers',      defaultWidth: 160, minWidth: 80 },
+  { id: 'companyDesc',  label: 'Company Desc', defaultWidth: 200, minWidth: 100 },
 ];
 
 // Columns hidden by default — user can enable via Columns menu
-const HIDDEN_BY_DEFAULT: ColumnId[] = ['source', 'keywords', 'score', 'scoreEvidence', 'sentiment'];
+const HIDDEN_BY_DEFAULT: ColumnId[] = ['source', 'keywords', 'score', 'scoreEvidence', 'sentiment', 'peers', 'companyDesc'];
 const DEFAULT_VISIBLE: Set<ColumnId> = new Set(DEFAULT_COLUMNS.filter(c => !HIDDEN_BY_DEFAULT.includes(c.id)).map(c => c.id));
 
 // ─── Sort ───
@@ -96,6 +98,8 @@ interface BackendNewsItem {
   sentimentBullishPct?: number | null;
   sentimentBearishPct?: number | null;
   companyNewsScore?: number | null;
+  peers?: string[];
+  companyDescription?: string | null;
 }
 
 // ─── Display item ───
@@ -124,6 +128,8 @@ interface DisplayItem {
   scoreEvidence: string | null;
   sentiment: number | null;
   sentimentLabel: string | null;
+  peers: string[];
+  companyDesc: string | null;
 }
 
 interface BookmarkFolder {
@@ -161,6 +167,8 @@ function mapBackendItem(item: BackendNewsItem): DisplayItem {
     sentimentLabel: item.sentimentBullishPct != null
       ? (item.sentimentBullishPct > 0.6 ? 'Bullish' : item.sentimentBullishPct < 0.4 ? 'Bearish' : 'Neutral')
       : null,
+    peers: item.peers ?? [],
+    companyDesc: item.companyDescription ?? null,
   };
 }
 
@@ -274,6 +282,9 @@ export function FinnhubNewsWindow({
 
   // Full text extraction job
   const [ftUpdating, setFtUpdating] = useState(false);
+
+  // Company description popup
+  const [descPopup, setDescPopup] = useState<{ ticker: string; text: string } | null>(null);
 
   // Display mode
   const [displayMode, setDisplayMode] = useState<DisplayMode>(() => {
@@ -768,6 +779,27 @@ export function FinnhubNewsWindow({
     }
   };
 
+  // ─── Calendar Update: backfill or refresh ───
+  const handleCalendarUpdate = async (mode: 'backfill' | 'refresh') => {
+    setUpdating(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/ibkr/calendar/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || `HTTP ${res.status}`);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to start calendar update');
+    } finally {
+      setUpdating(false);
+    }
+  };
+
   // ─── Fetch full text for a single news item ───
   const fetchFulltext = useCallback(async (newsId: string, title: string) => {
     setFulltextLoading(true);
@@ -928,6 +960,8 @@ export function FinnhubNewsWindow({
       case 'score': return item.score ?? -Infinity;
       case 'scoreEvidence': return (item.scoreEvidence ?? '').toLowerCase();
       case 'sentiment': return item.sentiment ?? -Infinity;
+      case 'peers': return item.peers.length;
+      case 'companyDesc': return (item.companyDesc ?? '').toLowerCase();
     }
   }, []);
 
@@ -1228,8 +1262,37 @@ export function FinnhubNewsWindow({
         const sc = sv > 0 ? 'text-green-600 dark:text-green-400' : sv < 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-500';
         return <span className={sc} title={newsItem.sentimentLabel ?? undefined}>{sv.toFixed(2)}</span>;
       }
+      case 'peers':
+        return newsItem.peers.length > 0 ? (
+          <div className="flex flex-wrap gap-0.5 overflow-hidden" title={newsItem.peers.join(', ')}>
+            {newsItem.peers.slice(0, 4).map((p, i) => (
+              <span key={i} className="inline-block px-1 py-0 text-[9px] bg-purple-50 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400 rounded truncate max-w-[60px]"
+                    onClick={(e) => { e.stopPropagation(); setSearchQuery(p); onTickerClick?.(p); }}
+                    style={{ cursor: 'pointer' }}>
+                {p}
+              </span>
+            ))}
+            {newsItem.peers.length > 4 && (
+              <span className="text-[9px] text-gray-400">+{newsItem.peers.length - 4}</span>
+            )}
+          </div>
+        ) : (
+          <span className="text-gray-300 dark:text-gray-600">—</span>
+        );
+      case 'companyDesc':
+        return newsItem.companyDesc ? (
+          <span
+            className="text-[10px] text-gray-600 dark:text-gray-400 truncate cursor-pointer hover:text-blue-600 dark:hover:text-blue-400"
+            title="Click to view full description"
+            onClick={(e) => { e.stopPropagation(); setDescPopup({ ticker: newsItem.ticker, text: newsItem.companyDesc! }); }}
+          >
+            {newsItem.companyDesc}
+          </span>
+        ) : (
+          <span className="text-gray-300 dark:text-gray-600">—</span>
+        );
     }
-  }, [displayMode, toggleExpand, onTickerClick, openExternalUrl, setSearchQuery, fetchFulltext, titleFontSize, summaryFontSize]);
+  }, [displayMode, toggleExpand, onTickerClick, openExternalUrl, setSearchQuery, fetchFulltext, titleFontSize, summaryFontSize, setDescPopup]);
 
   // ─── Row renderer ───
   const Row = useCallback(({ index, style }: { index: number; style: React.CSSProperties }) => {
@@ -1578,6 +1641,18 @@ export function FinnhubNewsWindow({
                       <button onClick={() => { setShowUpdateMenu(false); setChangeCustomFrom(''); setChangeCustomTo(new Date().toISOString().slice(0, 10)); setShowChangeCustomDateModal(true); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <TrendingUp className="w-3.5 h-3.5 shrink-0 text-indigo-500" />
                         <div><div className="font-medium">Custom Change% Update</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick date range · recalculate all change % for news in range</div></div>
+                      </button>
+
+                      {/* ── Calendar Update ── */}
+                      <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
+                      <div className="px-2 py-1 text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Calendar Update</div>
+                      <button onClick={() => { setShowUpdateMenu(false); handleCalendarUpdate('backfill'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <Calendar className="w-3.5 h-3.5 shrink-0 text-rose-500" />
+                        <div><div className="font-medium">Initial Calendar Backfill</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Past 2 years + future 180 days · run once for initial setup</div></div>
+                      </button>
+                      <button onClick={() => { setShowUpdateMenu(false); handleCalendarUpdate('refresh'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <RotateCw className="w-3.5 h-3.5 shrink-0 text-rose-400" />
+                        <div><div className="font-medium">Refresh Upcoming Calendar</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Last 30 days overlap + next 90 days · does not re-fetch full history</div></div>
                       </button>
                     </div>
                   </div>
@@ -2091,6 +2166,30 @@ export function FinnhubNewsWindow({
               ) : (
                 fulltextData?.text ?? ''
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Company description popup */}
+      {descPopup && (
+        <div
+          className="absolute inset-0 bg-black/30 flex items-center justify-center z-50"
+          onClick={() => setDescPopup(null)}
+          onKeyDown={(e) => { if (e.key === 'Escape') setDescPopup(null); }}
+        >
+          <div
+            className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-[90%] max-w-2xl max-h-[80%] flex flex-col border border-gray-200 dark:border-gray-700"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700 shrink-0">
+              <h3 className="text-sm font-semibold truncate">{descPopup.ticker} — Company Description</h3>
+              <button onClick={() => setDescPopup(null)} className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors shrink-0" title="Close (Esc)">
+                <X className="w-4 h-4 text-gray-500" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-4 py-3 text-xs leading-relaxed text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+              {descPopup.text}
             </div>
           </div>
         </div>

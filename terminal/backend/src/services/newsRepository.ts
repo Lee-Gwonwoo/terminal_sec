@@ -178,7 +178,47 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
     }
   }
 
-  const mapped = rows.map((row) => mapNewsRow(row, sentimentMap));
+  // Batch fetch peers from company_profiles for all tickers in this page
+  const peersMap = new Map<string, string[]>();
+  if (tickerSet.size > 0) {
+    const tickerArr = Array.from(tickerSet);
+    const placeholders = tickerArr.map(() => "?").join(",");
+    const peersRows = await getDb().all<any[]>(
+      `SELECT s.ticker, cp.peers_json
+       FROM company_profiles cp
+       JOIN securities s ON s.id = cp.security_id
+       WHERE s.ticker IN (${placeholders}) AND cp.peers_json IS NOT NULL
+       ORDER BY cp.fetched_at DESC`,
+      tickerArr,
+    );
+    for (const pr of peersRows) {
+      if (!peersMap.has(pr.ticker) && pr.peers_json) {
+        try { peersMap.set(pr.ticker, JSON.parse(pr.peers_json)); } catch { /* skip malformed */ }
+      }
+    }
+  }
+
+  // Batch fetch company descriptions from company_profiles for all tickers in this page
+  const descMap = new Map<string, string>();
+  if (tickerSet.size > 0) {
+    const tickerArr = Array.from(tickerSet);
+    const placeholders = tickerArr.map(() => "?").join(",");
+    const descRows = await getDb().all<any[]>(
+      `SELECT s.ticker, cp.description
+       FROM company_profiles cp
+       JOIN securities s ON s.id = cp.security_id
+       WHERE s.ticker IN (${placeholders}) AND cp.description IS NOT NULL AND cp.description != ''
+       ORDER BY cp.fetched_at DESC`,
+      tickerArr,
+    );
+    for (const dr of descRows) {
+      if (!descMap.has(dr.ticker)) {
+        descMap.set(dr.ticker, dr.description);
+      }
+    }
+  }
+
+  const mapped = rows.map((row) => mapNewsRow(row, sentimentMap, peersMap, descMap));
   const hasMore = mapped.length > limit;
   const items = hasMore ? mapped.slice(0, limit) : mapped;
   const nextCursor = hasMore ? encodeCursor(items[items.length - 1]) : undefined;
@@ -296,6 +336,8 @@ export async function insertNewsItem(params: {
 function mapNewsRow(
   row: any,
   sentimentMap?: Map<string, { bullishPct: number | null; bearishPct: number | null; newsScore: number | null }>,
+  peersMap?: Map<string, string[]>,
+  descMap?: Map<string, string>,
 ): NewsItem {
   const tickers = splitCsvEnvelope(row.tickers_csv);
 
@@ -343,6 +385,10 @@ function mapNewsRow(
     sentimentBullishPct: sent?.bullishPct ?? null,
     sentimentBearishPct: sent?.bearishPct ?? null,
     companyNewsScore: sent?.newsScore ?? null,
+    // Peers
+    peers: (primaryTicker && peersMap ? peersMap.get(primaryTicker) : undefined) ?? [],
+    // Company description
+    companyDescription: (primaryTicker && descMap ? descMap.get(primaryTicker) : undefined) ?? null,
   };
 }
 

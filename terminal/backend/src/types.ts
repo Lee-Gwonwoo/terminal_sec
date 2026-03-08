@@ -48,4 +48,8 @@ export type NewsItem = {
   sentimentBullishPct?: number | null;
   sentimentBearishPct?: number | null;
   companyNewsScore?: number | null;
+  // ver3: peers (Step 7)
+  peers?: string[];
+  // ver3: company description (Step 8)
+  companyDescription?: string | null;
 };

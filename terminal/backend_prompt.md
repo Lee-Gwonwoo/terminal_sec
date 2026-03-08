@@ -184,6 +184,30 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 - `UNIQUE (event_type, unique_key)` 인덱스 존재
 
+#### `company_profiles`
+컬럼:
+
+- `[][][]id[][][]`
+- `[][][]security_id[][][]`
+- `[][][]source[][][]`
+- `[][][]description[][][]`
+- `[][][]ceo[][][]`
+- `[][][]employees[][][]`
+- `[][][]website[][][]`
+- `[][][]ipo_date[][][]`
+- `[][][]market_cap[][][]`
+- `[][][]raw_json[][][]`
+- `[][][]fetched_at[][][]`
+- `[][][]peers_json[][][]`
+
+의미:
+
+- 종목별 회사 프로필 canonical 저장소. `source` 컬럼으로 데이터 출처를 구분한다.
+- `source = 'fmp'`: FMP(Financial Modeling Prep)에서 가져온 description/ceo/employees 등.
+- `source = 'finnhub'`: Finnhub `/stock/peers`에서 가져온 peers 데이터. 이 경우 `peers_json`만 채워지고 나머지(description 등)는 비어 있을 수 있다.
+- `peers_json`: JSON 배열 문자열. 예: `["DELL","WDC","HPE"]`. Finnhub peers API 결과를 그대로 저장한다.
+- `security_id`는 `securities` 테이블과 FK로 연결된다.
+
 #### `update_status`
 컬럼:
 
@@ -355,7 +379,9 @@ limit 정책:
       "analysisStatus": "completed",
       "sentimentBullishPct": 0.72,
       "sentimentBearishPct": 0.15,
-      "companyNewsScore": 0.85
+      "companyNewsScore": 0.85,
+      "peers": ["DELL", "WDC", "HPE"],
+      "companyDescription": "Apple Inc. designs, manufactures, and markets smartphones..."
     }
   ],
   "nextCursor": "..."
@@ -393,8 +419,20 @@ limit 정책:
 - `[][][]sentimentBullishPct[][][]`
 - `[][][]sentimentBearishPct[][][]`
 - `[][][]companyNewsScore[][][]`
+- `[][][]peers[][][]`
+- `[][][]companyDescription[][][]`
 
-score/scoreEvidence/analysisStatus 규칙:
+companyDescription 규칙:
+
+- `companyDescription`은 `company_profiles.description`에서 가져온다. 뉴스 row의 대표 ticker(tickers 배열의 첫 번째)를 기준으로 company_profiles를 lookup한다.
+- 해당 ticker에 description이 없거나 빈 문자열이면 `null`이다.
+- company profile pull을 하지 않은 ticker는 항상 `null`이다.
+
+peers 규칙:
+
+- `peers`는 `company_profiles.peers_json`에서 가져온다. 뉴스 row의 대표 ticker(tickers 배열의 첫 번째)를 기준으로 company_profiles를 lookup한다.
+- 해당 ticker에 peers가 없으면 빈 배열 `[]`이다.
+- peers pull을 하지 않은 ticker는 항상 빈 배열이다.
 
 - `analysis_status`가 `null` 또는 `not_started`이면 score/scoreEvidence도 `null`이 정상이다 (아직 분석 안 됨).
 - `analysis_status=completed`인데 score나 scoreEvidence가 `null`이면 유실(lost)로 간주한다.
@@ -702,18 +740,41 @@ query:
 
 현재 구현은 synchronous response다. background job이 아니다.
 
-동작:
-
-1. `pullIbkrCalendar([])` 실행
-2. event upsert
-3. `mock_provider` row 삭제
-4. `update_status.ibkr_calendar` 갱신
-
-응답:
+요청 body:
 
 ```json
-{ "upserted": 10, "deletedMockRows": 5, "source": "IBKR" }
+{ "mode": "backfill" }
 ```
+
+- `mode`: `"backfill"` | `"refresh"` (기본값: `"backfill"`)
+  - `backfill`: 과거 2년 + 미래 180일. 초기 적재용.
+  - `refresh`: 최근 30일 overlap + 미래 90일. 반복 갱신용. 과거 전체를 다시 받지 않는다.
+
+동작:
+
+1. `req.body.mode` 읽기 → `backfill` 또는 `refresh`
+2. `getCalendarDateRange(mode)` → 날짜 범위 계산
+3. `getDefaultUniverseTickers()` → 대상 종목 가져오기
+4. `pullIbkrCalendar(tickers, mode)` 실행 (현재 stub — TWS 미연결 시 에러)
+5. event upsert
+6. `mock_provider` row 삭제
+7. `update_status.ibkr_calendar` 갱신 (mode, dateRange 포함)
+
+응답 (성공 시):
+
+```json
+{ "mode": "backfill", "dateRange": { "from": "2024-03-08", "to": "2026-09-03" }, "upserted": 10, "deletedMockRows": 5, "source": "IBKR" }
+```
+
+응답 (현재 stub 에러):
+
+```json
+{ "error": "IBKR 캘린더 미구현 (mode=backfill, range=2024-03-08~2026-09-03): TWS 실행 상태 + Python bridge 스크립트가 필요합니다 (Step 6-3)." }
+```
+
+UI 위치:
+- Data Control → Updates → Calendar Update 그룹: `Initial Calendar Backfill` / `Refresh Upcoming Calendar` 버튼
+- News Feed → update 드롭다운 → Calendar Update 섹션: 동일한 두 버튼
 
 ## OHLC API
 
@@ -832,6 +893,50 @@ folder와 연관 bookmark_items가 함께 삭제된다.
 
 요청 body: `{"newsId": "...", "fromFolderId": "...", "toFolderId": "..."}`
 동작: fromFolderId에서 삭제 후 toFolderId에 INSERT OR IGNORE.
+
+## Company Profile API
+
+### `GET /api/company-profiles/:ticker`
+
+지정 ticker의 회사 프로필을 반환한다. `securities` 테이블과 `company_profiles`를 join해서 가장 최근 프로필을 내려준다.
+
+### `POST /api/company-profiles/pull-fmp`
+
+FMP(Financial Modeling Prep)에서 회사 설명을 가져와 `company_profiles`에 저장한다.
+
+요청 body:
+
+```json
+{ "maxTickers": 50 }
+```
+
+### `POST /api/company-profiles/pull-peers`
+
+Finnhub `/stock/peers` API로 관련 종목 데이터를 수집해 `company_profiles.peers_json`에 저장한다.
+
+요청 body:
+
+```json
+{ "tickers": ["AAPL", "MSFT"], "maxTickers": 50 }
+```
+
+- `tickers` 생략 시 `ticker_universes/default` 기준으로 대상을 결정한다.
+- `maxTickers` 기본값: 50
+
+응답 출력 컬럼:
+
+- `[][][]requested[][][]`
+- `[][][]fetched[][][]`
+- `[][][]upserted[][][]`
+- `[][][]errors[][][]`
+- `[][][]errorDetails[][][]`
+
+동작:
+
+1. 대상 ticker 목록을 결정한다 (body에서 지정 또는 default universe).
+2. Finnhub `/stock/peers?symbol=X`를 ticker당 120ms 간격으로 호출한다.
+3. 결과를 `company_profiles`에 `source = 'finnhub'`로 upsert한다.
+4. 동일 security_id + source 조합이 이미 있으면 UPDATE, 없으면 INSERT.
 
 ## AI Analysis API
 
