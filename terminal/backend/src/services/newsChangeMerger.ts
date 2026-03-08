@@ -22,13 +22,22 @@ function resolveOhlcDbPath(): string {
   throw new Error("OHLC database (ohlc_1d_watchlist.sqlite) not found");
 }
 
-let ohlcDb: Database<sqlite3.Database, sqlite3.Statement> | null = null;
+// OHLC connection pool — one connection per concurrent worker for true parallel reads.
+const OHLC_POOL_SIZE = 6;
+let ohlcPool: Database<sqlite3.Database, sqlite3.Statement>[] = [];
+let ohlcPoolIdx = 0;
 
-async function getOhlcDb(): Promise<Database<sqlite3.Database, sqlite3.Statement>> {
-  if (ohlcDb) return ohlcDb;
-  const dbPath = resolveOhlcDbPath();
-  ohlcDb = await open({ filename: dbPath, driver: sqlite3.Database });
-  return ohlcDb;
+async function getOhlcConn(): Promise<Database<sqlite3.Database, sqlite3.Statement>> {
+  if (ohlcPool.length === 0) {
+    const dbPath = resolveOhlcDbPath();
+    for (let i = 0; i < OHLC_POOL_SIZE; i++) {
+      const conn = await open({ filename: dbPath, driver: sqlite3.Database });
+      await conn.exec("PRAGMA journal_mode=WAL;");
+      ohlcPool.push(conn);
+    }
+  }
+  // Round-robin (safe — JS is single-threaded between awaits)
+  return ohlcPool[ohlcPoolIdx++ % ohlcPool.length];
 }
 
 // ---------- OHLC query ----------
@@ -42,7 +51,7 @@ type OhlcRow = {
 
 /** Get the closest OHLC bar on or before `date` (for non-trading days). */
 async function getOhlcCloseOnOrBefore(symbol: string, date: string): Promise<OhlcRow | null> {
-  const db = await getOhlcDb();
+  const db = await getOhlcConn();
   const row = await db.get<OhlcRow>(
     `SELECT Symbol, Datetime, Open, Close FROM ohlc_1d
      WHERE Symbol = ? AND Datetime <= ?
@@ -53,23 +62,26 @@ async function getOhlcCloseOnOrBefore(symbol: string, date: string): Promise<Ohl
   return row ?? null;
 }
 
-/** Get the N-th trading day AFTER baseDate (forward-looking).
- *  daysForward=1 → next trading day after baseDate.
- *  daysForward=5 → 5th trading day after baseDate (~7 calendar days). */
-async function getOhlcCloseNDaysForward(
+/** Get anchor OHLC + up to maxForward trading days in 2 queries (instead of 5).
+ *  Returns anchor row and an array of forward rows ordered ASC. */
+async function getOhlcAnchorAndForwards(
   symbol: string,
-  baseDate: string,
-  daysForward: number,
-): Promise<OhlcRow | null> {
-  const db = await getOhlcDb();
-  const row = await db.get<OhlcRow>(
+  date: string,
+  maxForward = 22,
+): Promise<{ anchor: OhlcRow; forwards: OhlcRow[] } | null> {
+  const anchor = await getOhlcCloseOnOrBefore(symbol, date);
+  if (!anchor) return null;
+
+  const db = await getOhlcConn();
+  const forwards = await db.all<OhlcRow[]>(
     `SELECT Symbol, Datetime, Open, Close FROM ohlc_1d
      WHERE Symbol = ? AND Datetime > ?
      ORDER BY Datetime ASC
-     LIMIT 1 OFFSET ?`,
-    [symbol, baseDate, daysForward - 1],
+     LIMIT ?`,
+    [symbol, anchor.Datetime, maxForward],
   );
-  return row ?? null;
+
+  return { anchor, forwards };
 }
 
 function pctChange(current: number, reference: number): number | null {
@@ -79,108 +91,162 @@ function pctChange(current: number, reference: number): number | null {
 
 const now = () => new Date().toISOString();
 
-// ---------- Upsert a single metric row into news_change_metrics ----------
+// ---------- Concurrency pool for parallel item processing ----------
 
-async function upsertMetric(
-  newsId: string,
-  metricKey: string,
-  valuePct: number | null,
-  ohlcTicker: string,
-  referenceDate: string,
-  targetDate: string,
-  forwardTradingDays: number | null,
+export const DEFAULT_MERGE_CONCURRENCY = 6;
+
+async function poolRun<T>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<void>,
+  isCancelled?: () => boolean,
 ): Promise<void> {
-  await getDb().run(
-    `INSERT INTO news_change_metrics
-       (news_id, metric_key, value_pct, ohlc_ticker, reference_date, target_date, forward_trading_days, computed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(news_id, metric_key) DO UPDATE SET
-       value_pct = excluded.value_pct,
-       ohlc_ticker = excluded.ohlc_ticker,
-       reference_date = excluded.reference_date,
-       target_date = excluded.target_date,
-       forward_trading_days = excluded.forward_trading_days,
-       computed_at = excluded.computed_at`,
-    [newsId, metricKey, valuePct, ohlcTicker, referenceDate, targetDate, forwardTradingDays, now()],
+  let next = 0;
+  async function worker() {
+    while (true) {
+      if (isCancelled?.()) return;
+      const idx = next++;
+      if (idx >= items.length) return;
+      await fn(items[idx], idx);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, () => worker()),
   );
 }
+
+// ---------- Multi-row upsert SQL for 5 standard metrics ----------
+
+const UPSERT_5_METRICS_SQL = `INSERT INTO news_change_metrics
+  (news_id, metric_key, value_pct, ohlc_ticker, reference_date, target_date, forward_trading_days, computed_at)
+VALUES (?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?)
+ON CONFLICT(news_id, metric_key) DO UPDATE SET
+  value_pct = excluded.value_pct,
+  ohlc_ticker = excluded.ohlc_ticker,
+  reference_date = excluded.reference_date,
+  target_date = excluded.target_date,
+  forward_trading_days = excluded.forward_trading_days,
+  computed_at = excluded.computed_at`;
 
 // ---------- Standard metrics for one news item (forward-looking) ----------
 
 /** Compute and upsert standard change metrics for a single news item.
  *  Direction: news date close → N trading days AFTER close.
  *  change_from_open_pct: news date open → news date close (intraday).
+ *  OHLC reads reduced to 2 queries per item; 5 upserts batched in 1 statement.
  *  Returns true if at least one metric was written. */
 export async function mergeChangeForNewsItem(
   newsId: string,
   ticker: string,
   publishedAt: string,
 ): Promise<boolean> {
-  const newsDate = publishedAt.slice(0, 10);
-
-  // Get OHLC for the news date (or nearest previous trading day)
-  const dayRow = await getOhlcCloseOnOrBefore(ticker, newsDate);
-  if (!dayRow) return false;
-
-  const anchorDate = dayRow.Datetime;
-  const anchorClose = dayRow.Close;
-  const anchorOpen = dayRow.Open;
-
-  // from open: intraday (open → close on news day)
-  const changeFromOpen = pctChange(anchorClose, anchorOpen);
-  await upsertMetric(newsId, "change_from_open_pct", changeFromOpen, ticker,
-    anchorDate, anchorDate, 0);
-
-  // 1d: anchor close → 1 trading day AFTER close
-  const fwd1 = await getOhlcCloseNDaysForward(ticker, anchorDate, 1);
-  const change1d = fwd1 ? pctChange(fwd1.Close, anchorClose) : null;
-  await upsertMetric(newsId, "change_1d_pct", change1d, ticker,
-    anchorDate, fwd1 ? fwd1.Datetime : anchorDate, 1);
-
-  // 7d: anchor close → 5 trading days AFTER close
-  const fwd5 = await getOhlcCloseNDaysForward(ticker, anchorDate, 5);
-  const change7d = fwd5 ? pctChange(fwd5.Close, anchorClose) : null;
-  await upsertMetric(newsId, "change_7d_pct", change7d, ticker,
-    anchorDate, fwd5 ? fwd5.Datetime : anchorDate, 5);
-
-  // 14d: anchor close → 10 trading days AFTER close
-  const fwd10 = await getOhlcCloseNDaysForward(ticker, anchorDate, 10);
-  const change14d = fwd10 ? pctChange(fwd10.Close, anchorClose) : null;
-  await upsertMetric(newsId, "change_14d_pct", change14d, ticker,
-    anchorDate, fwd10 ? fwd10.Datetime : anchorDate, 10);
-
-  // 30d: anchor close → 22 trading days AFTER close
-  const fwd22 = await getOhlcCloseNDaysForward(ticker, anchorDate, 22);
-  const change30d = fwd22 ? pctChange(fwd22.Close, anchorClose) : null;
-  await upsertMetric(newsId, "change_30d_pct", change30d, ticker,
-    anchorDate, fwd22 ? fwd22.Datetime : anchorDate, 22);
-
+  const m = await computeMetricsForItem(newsId, ticker, publishedAt);
+  if (!m) return false;
+  await batchWriteMetrics([m]);
   return true;
+}
+
+// ---------- Two-phase helpers: compute (read-only) → batch write ----------
+
+type ComputedMetrics = {
+  newsId: string;
+  ticker: string;
+  anchorDate: string;
+  changeFromOpen: number | null;
+  change1d: number | null;
+  change7d: number | null;
+  change14d: number | null;
+  change30d: number | null;
+  fwd1Date: string;
+  fwd5Date: string;
+  fwd10Date: string;
+  fwd22Date: string;
+};
+
+async function computeMetricsForItem(
+  newsId: string,
+  ticker: string,
+  publishedAt: string,
+): Promise<ComputedMetrics | null> {
+  const newsDate = publishedAt.slice(0, 10);
+  const result = await getOhlcAnchorAndForwards(ticker, newsDate);
+  if (!result) return null;
+
+  const { anchor, forwards } = result;
+  const anchorDate = anchor.Datetime;
+  const fwd1  = forwards[0]  ?? null;
+  const fwd5  = forwards[4]  ?? null;
+  const fwd10 = forwards[9]  ?? null;
+  const fwd22 = forwards[21] ?? null;
+
+  return {
+    newsId,
+    ticker,
+    anchorDate,
+    changeFromOpen: pctChange(anchor.Close, anchor.Open),
+    change1d:  fwd1  ? pctChange(fwd1.Close,  anchor.Close) : null,
+    change7d:  fwd5  ? pctChange(fwd5.Close,  anchor.Close) : null,
+    change14d: fwd10 ? pctChange(fwd10.Close, anchor.Close) : null,
+    change30d: fwd22 ? pctChange(fwd22.Close, anchor.Close) : null,
+    fwd1Date:  fwd1?.Datetime  ?? anchorDate,
+    fwd5Date:  fwd5?.Datetime  ?? anchorDate,
+    fwd10Date: fwd10?.Datetime ?? anchorDate,
+    fwd22Date: fwd22?.Datetime ?? anchorDate,
+  };
+}
+
+const WRITE_CHUNK_SIZE = 1000;
+
+async function batchWriteMetrics(metrics: ComputedMetrics[]): Promise<void> {
+  if (metrics.length === 0) return;
+  const db = getDb();
+  const ts = now();
+
+  for (let start = 0; start < metrics.length; start += WRITE_CHUNK_SIZE) {
+    const chunk = metrics.slice(start, start + WRITE_CHUNK_SIZE);
+    await db.run("BEGIN IMMEDIATE");
+    try {
+      for (const m of chunk) {
+        await db.run(UPSERT_5_METRICS_SQL, [
+          m.newsId, "change_from_open_pct", m.changeFromOpen, m.ticker, m.anchorDate, m.anchorDate, 0, ts,
+          m.newsId, "change_1d_pct",  m.change1d,  m.ticker, m.anchorDate, m.fwd1Date,  1,  ts,
+          m.newsId, "change_7d_pct",  m.change7d,  m.ticker, m.anchorDate, m.fwd5Date,  5,  ts,
+          m.newsId, "change_14d_pct", m.change14d, m.ticker, m.anchorDate, m.fwd10Date, 10, ts,
+          m.newsId, "change_30d_pct", m.change30d, m.ticker, m.anchorDate, m.fwd22Date, 22, ts,
+        ]);
+      }
+      await db.run("COMMIT");
+    } catch (e) {
+      await db.run("ROLLBACK");
+      throw e;
+    }
+  }
 }
 
 // ---------- Batch merge for newly inserted items ----------
 
 export async function mergeChangeForNewItems(
   newsIds: Array<{ id: string; tickers: string[]; publishedAt: string }>,
+  concurrency = DEFAULT_MERGE_CONCURRENCY,
+  isCancelled?: () => boolean,
 ): Promise<{ merged: number; skipped: number }> {
-  let merged = 0;
+  const computed: ComputedMetrics[] = [];
   let skipped = 0;
 
-  for (const item of newsIds) {
+  // Phase 1: parallel OHLC reads + compute
+  await poolRun(newsIds, concurrency, async (item) => {
     const ticker = item.tickers[0];
-    if (!ticker) {
-      skipped++;
-      continue;
-    }
-    const success = await mergeChangeForNewsItem(item.id, ticker, item.publishedAt);
-    if (success) {
-      merged++;
-    } else {
-      skipped++;
-    }
-  }
+    if (!ticker) { skipped++; return; }
+    const m = await computeMetricsForItem(item.id, ticker, item.publishedAt);
+    if (m) { computed.push(m); } else { skipped++; }
+  }, isCancelled);
 
-  return { merged, skipped };
+  if (isCancelled?.()) return { merged: computed.length, skipped };
+
+  // Phase 2: batch write in chunked transactions
+  await batchWriteMetrics(computed);
+
+  return { merged: computed.length, skipped };
 }
 
 // ---------- Recent Change Update (all metrics, last 7 days of news) ----------
@@ -190,6 +256,8 @@ export async function mergeChangeForNewItems(
  *  Progress callback: (completed, total) */
 export async function bulkUpdateRecentChange(
   onProgress?: (completed: number, total: number) => void,
+  concurrency = DEFAULT_MERGE_CONCURRENCY,
+  isCancelled?: () => boolean,
 ): Promise<{ updated: number; skipped: number }> {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - 7);
@@ -201,20 +269,30 @@ export async function bulkUpdateRecentChange(
      ORDER BY published_at DESC`,
     [cutoffIso],
   );
-  let updated = 0;
+
+  const computed: ComputedMetrics[] = [];
   let skipped = 0;
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
+  let completed = 0;
+
+  // Phase 1: parallel reads
+  await poolRun(rows, concurrency, async (row) => {
     const tickers = row.tickers_csv.split(",").map(t => t.trim()).filter(Boolean);
     const ticker = tickers[0];
-    if (!ticker) { skipped++; continue; }
+    if (!ticker) { skipped++; } else {
+      const m = await computeMetricsForItem(row.id, ticker, row.published_at);
+      if (m) { computed.push(m); } else { skipped++; }
+    }
+    completed++;
+    if (onProgress && completed % 50 === 0) onProgress(completed, rows.length);
+  }, isCancelled);
 
-    const ok = await mergeChangeForNewsItem(row.id, ticker, row.published_at);
-    if (ok) { updated++; } else { skipped++; }
-    if (onProgress && (i + 1) % 50 === 0) onProgress(i + 1, rows.length);
-  }
+  if (isCancelled?.()) return { updated: computed.length, skipped };
+
+  // Phase 2: batch write
+  await batchWriteMetrics(computed);
+
   if (onProgress) onProgress(rows.length, rows.length);
-  return { updated, skipped };
+  return { updated: computed.length, skipped };
 }
 
 // ---------- Custom Change Update (date range, all metrics) ----------
@@ -225,6 +303,8 @@ export async function bulkUpdateCustomChange(
   from: string,
   to: string,
   onProgress?: (completed: number, total: number) => void,
+  concurrency = DEFAULT_MERGE_CONCURRENCY,
+  isCancelled?: () => boolean,
 ): Promise<{ updated: number; skipped: number }> {
   const fromIso = `${from}T00:00:00.000Z`;
   const toIso = `${to}T23:59:59.999Z`;
@@ -235,18 +315,28 @@ export async function bulkUpdateCustomChange(
      ORDER BY published_at DESC`,
     [fromIso, toIso],
   );
-  let updated = 0;
+
+  const computed: ComputedMetrics[] = [];
   let skipped = 0;
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
+  let completed = 0;
+
+  // Phase 1: parallel reads
+  await poolRun(rows, concurrency, async (row) => {
     const tickers = row.tickers_csv.split(",").map(t => t.trim()).filter(Boolean);
     const ticker = tickers[0];
-    if (!ticker) { skipped++; continue; }
+    if (!ticker) { skipped++; } else {
+      const m = await computeMetricsForItem(row.id, ticker, row.published_at);
+      if (m) { computed.push(m); } else { skipped++; }
+    }
+    completed++;
+    if (onProgress && completed % 50 === 0) onProgress(completed, rows.length);
+  }, isCancelled);
 
-    const ok = await mergeChangeForNewsItem(row.id, ticker, row.published_at);
-    if (ok) { updated++; } else { skipped++; }
-    if (onProgress && (i + 1) % 50 === 0) onProgress(i + 1, rows.length);
-  }
+  if (isCancelled?.()) return { updated: computed.length, skipped };
+
+  // Phase 2: batch write
+  await batchWriteMetrics(computed);
+
   if (onProgress) onProgress(rows.length, rows.length);
-  return { updated, skipped };
+  return { updated: computed.length, skipped };
 }

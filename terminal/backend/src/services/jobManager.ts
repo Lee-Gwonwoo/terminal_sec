@@ -23,7 +23,7 @@ export interface JobProgress {
 
 export interface JobState {
   id: string;
-  status: "running" | "done" | "failed";
+  status: "running" | "done" | "failed" | "cancelled";
   progress: JobProgress;
   logs: string[];
   error?: string;
@@ -119,4 +119,22 @@ export function failJob(id: string, error: string): void {
   job.error = error;
   job.updatedAt = new Date().toISOString();
   appendLog(id, `❌ Job failed: ${error}`);
+}
+
+// ─── Cancellation ───
+
+const cancelledJobs = new Set<string>();
+
+export function cancelJob(id: string): boolean {
+  const job = jobs.get(id);
+  if (!job || job.status !== "running") return false;
+  cancelledJobs.add(id);
+  job.status = "cancelled";
+  job.updatedAt = new Date().toISOString();
+  appendLog(id, "🛑 Job cancelled by user");
+  return true;
+}
+
+export function isJobCancelled(id: string): boolean {
+  return cancelledJobs.has(id);
 }

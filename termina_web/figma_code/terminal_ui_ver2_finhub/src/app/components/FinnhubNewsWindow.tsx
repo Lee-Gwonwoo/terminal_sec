@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { Search, Save, FolderOpen, Filter, ChevronDown, ArrowUp, ArrowDown, GripVertical, FileText, AlignLeft, RotateCw, Download, Columns3, Eye, X, Calendar, TrendingUp, Plus, Settings2 } from 'lucide-react';
+import { Search, Save, FolderOpen, Filter, ChevronDown, ArrowUp, ArrowDown, GripVertical, FileText, AlignLeft, RotateCw, Download, Columns3, Eye, X, Calendar, TrendingUp, Plus, Settings2, Square } from 'lucide-react';
 import { VariableSizeList as List } from 'react-window';
 import { BookmarkManager } from './BookmarkManager';
 
@@ -391,7 +391,7 @@ export function FinnhubNewsWindow({
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [showLogPanel, setShowLogPanel] = useState(false);
   const [jobStatus, setJobStatus] = useState<{
-    status: 'running' | 'done' | 'failed';
+    status: 'running' | 'done' | 'failed' | 'cancelled';
     progress: { completed: number; total: number; pct: number };
     logs: string[];
     error?: string;
@@ -893,6 +893,9 @@ export function FinnhubNewsWindow({
           setUpdating(false);
           setFtUpdating(false);
           setError(data.error || 'Job failed');
+        } else if (data.status === 'cancelled') {
+          setUpdating(false);
+          setFtUpdating(false);
         }
       } catch {
         // Ignore transient fetch errors; will retry next interval
@@ -2005,23 +2008,39 @@ export function FinnhubNewsWindow({
               <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
                 jobStatus.status === 'running' ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300' :
                 jobStatus.status === 'done' ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300' :
+                jobStatus.status === 'cancelled' ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300' :
                 'bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300'
               }`}>
-                {jobStatus.status === 'running' ? 'Running' : jobStatus.status === 'done' ? 'Done' : 'Failed'}
+                {jobStatus.status === 'running' ? 'Running' : jobStatus.status === 'done' ? 'Done' : jobStatus.status === 'cancelled' ? 'Cancelled' : 'Failed'}
               </span>
               <span className="text-[10px] text-gray-400 tabular-nums">
                 {jobStatus.progress.completed}/{jobStatus.progress.total} ({jobStatus.progress.pct}%)
               </span>
             </div>
-            <button onClick={() => setShowLogPanel(false)} className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors" title="Close (Esc)">
-              <X className="w-3.5 h-3.5 text-gray-500" />
-            </button>
+            <div className="flex items-center gap-1">
+              {jobStatus.status === 'running' && currentJobId && (
+                <button
+                  onClick={async () => {
+                    try {
+                      await fetch(`${API_BASE}/api/jobs/${currentJobId}/cancel`, { method: 'POST' });
+                    } catch { /* ignore */ }
+                  }}
+                  className="p-1 hover:bg-red-100 dark:hover:bg-red-900/40 rounded transition-colors"
+                  title="Stop job"
+                >
+                  <Square className="w-3.5 h-3.5 text-red-500" />
+                </button>
+              )}
+              <button onClick={() => setShowLogPanel(false)} className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors" title="Close (Esc)">
+                <X className="w-3.5 h-3.5 text-gray-500" />
+              </button>
+            </div>
           </div>
           {/* Progress bar */}
           <div className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 shrink-0">
             <div
               className={`h-full transition-all duration-300 ${
-                jobStatus.status === 'failed' ? 'bg-red-500' : jobStatus.status === 'done' ? 'bg-green-500' : 'bg-blue-500'
+                jobStatus.status === 'failed' ? 'bg-red-500' : jobStatus.status === 'done' ? 'bg-green-500' : jobStatus.status === 'cancelled' ? 'bg-amber-500' : 'bg-blue-500'
               }`}
               style={{ width: `${jobStatus.progress.pct}%` }}
             />

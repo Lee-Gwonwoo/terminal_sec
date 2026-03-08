@@ -39,7 +39,7 @@ import {
 } from "./services/finnhubNewsProvider.js";
 import type { FinnhubMappedItem } from "./services/finnhubNewsProvider.js";
 import { mergeChangeForNewItems, bulkUpdateRecentChange, bulkUpdateCustomChange } from "./services/newsChangeMerger.js";
-import { createJob, getJob, updateProgress, appendLog, completeJob, failJob } from "./services/jobManager.js";
+import { createJob, getJob, updateProgress, appendLog, completeJob, failJob, cancelJob, isJobCancelled } from "./services/jobManager.js";
 import { getFulltext, getUnextractedNewsIds } from "./services/fulltextRepository.js";
 import { runFulltextUpdate, runFulltextPlainTextBackfill } from "./services/fulltextUpdateService.js";
 import { backfillPublisher } from "./services/finnhubNewsProvider.js";
@@ -545,11 +545,12 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
         let processedCount = 0;
         let remainingTickers = [...tickerList];
         for (const batchSize of BATCH_LEVELS) {
-          if (remainingTickers.length === 0) break;
+          if (remainingTickers.length === 0 || isJobCancelled(jobId)) break;
           appendLog(jobId, `[batch] concurrency=${batchSize}, remaining=${remainingTickers.length}`);
           const failedTickers: string[] = [];
 
           for (let i = 0; i < remainingTickers.length; i += batchSize) {
+            if (isJobCancelled(jobId)) { appendLog(jobId, `🛑 Cancelled — stopping ticker processing`); break; }
             const chunk = remainingTickers.slice(i, i + batchSize);
             const results = await Promise.allSettled(chunk.map((t) => processOneTicker(t)));
             for (let j = 0; j < results.length; j++) {
@@ -580,7 +581,7 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
           remainingTickers = failedTickers;
         }
 
-        if (pullMarket) {
+        if (pullMarket && !isJobCancelled(jobId)) {
           appendLog(jobId, `[market] Processing market news...`);
           try {
             const marketResult = isRecent
@@ -615,10 +616,10 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
 
         // Merge change% for newly inserted items
         let changeMergeResult = { merged: 0, skipped: 0 };
-        if (newItems.length > 0) {
+        if (newItems.length > 0 && !isJobCancelled(jobId)) {
           appendLog(jobId, `Merging change% for ${newItems.length} new items...`);
           try {
-            changeMergeResult = await mergeChangeForNewItems(newItems);
+            changeMergeResult = await mergeChangeForNewItems(newItems, undefined, () => isJobCancelled(jobId));
             appendLog(jobId, `Change merge: ${changeMergeResult.merged} merged, ${changeMergeResult.skipped} skipped`);
           } catch (err: any) {
             console.error(`[pull-finhub] change merger error: ${err.message}`);
@@ -673,6 +674,16 @@ app.get("/api/jobs/:jobId", (req, res) => {
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
   });
+});
+
+// ── Cancel a running job ──
+app.post("/api/jobs/:jobId/cancel", (req, res) => {
+  const ok = cancelJob(req.params.jobId);
+  if (!ok) {
+    res.status(404).json({ error: "Job not found or not running" });
+    return;
+  }
+  res.json({ cancelled: true });
 });
 
 // ── Full Text Extraction endpoints (Step 10) ──
@@ -743,7 +754,8 @@ app.post("/api/news/change/update-recent", async (_req, res, next) => {
       try {
         await bulkUpdateRecentChange((done, total) => {
           updateProgress(jobId, done, total);
-        });
+        }, undefined, () => isJobCancelled(jobId));
+        if (isJobCancelled(jobId)) return;
         await setLastSuccess("news_change_recent", new Date().toISOString());
         completeJob(jobId);
       } catch (err: any) {
@@ -769,7 +781,8 @@ app.post("/api/news/change/update-custom", async (req, res, next) => {
       try {
         await bulkUpdateCustomChange(from, to, (done, total) => {
           updateProgress(jobId, done, total);
-        });
+        }, undefined, () => isJobCancelled(jobId));
+        if (isJobCancelled(jobId)) return;
         await setLastSuccess("news_change_custom", new Date().toISOString(), { from, to });
         completeJob(jobId);
       } catch (err: any) {
@@ -1122,6 +1135,7 @@ app.post("/api/ibkr/ohlc1d/update", async (req, res, next) => {
 
         // 3. Fetch + upsert per symbol
         for (let i = 0; i < tickers.length; i++) {
+          if (isJobCancelled(jobId)) { appendLog(jobId, '🛑 Cancelled by user'); break; }
           const symbol = tickers[i];
           try {
             const symbolMaxDate = await getSymbolMaxDate(symbol);
@@ -1166,14 +1180,14 @@ app.post("/api/ibkr/ohlc1d/update", async (req, res, next) => {
         }
 
         // 4. Compute derived metrics
-        if (affectedSymbols.size > 0) {
+        if (affectedSymbols.size > 0 && !isJobCancelled(jobId)) {
           appendLog(jobId, `Computing derived metrics for ${affectedSymbols.size} symbols...`);
           const derived = await computeDerivedForAffectedSymbols(affectedSymbols);
           appendLog(jobId, `Derived metrics: ${derived.totalUpdated} rows updated`);
         }
 
         // 5. Standard change metric backfill (Step 7-8)
-        if (affectedSymbols.size > 0) {
+        if (affectedSymbols.size > 0 && !isJobCancelled(jobId)) {
           appendLog(jobId, `Backfilling news change metrics...`);
           const newsRows = await (await import("./db.js")).getDb().all<
             { id: string; tickers_csv: string; published_at: string }[]
@@ -1199,6 +1213,8 @@ app.post("/api/ibkr/ohlc1d/update", async (req, res, next) => {
         }
 
         const overallMaxDateAfter = await getOverallMaxDate();
+
+        if (isJobCancelled(jobId)) return;
 
         // 6. Update status
         await setLastSuccess("ibkr_ohlc_1d", new Date().toISOString(), {
@@ -1401,6 +1417,7 @@ app.post("/api/news/sentiment/update", async (req, res, next) => {
       let updated = 0;
       try {
         for (let i = 0; i < tickers.length; i++) {
+          if (isJobCancelled(jobId)) { appendLog(jobId, '🛑 Cancelled by user'); break; }
           try {
             const wrote = await upsertSentimentSnapshot(tickers[i]);
             if (wrote) updated++;
@@ -1411,6 +1428,7 @@ app.post("/api/news/sentiment/update", async (req, res, next) => {
           updateProgress(jobId, i + 1);
           await new Promise((r) => setTimeout(r, 300));
         }
+        if (isJobCancelled(jobId)) return;
         completeJob(jobId, { updated, total: tickers.length });
       } catch (err: any) {
         failJob(jobId, err.message);

@@ -7,7 +7,7 @@
 
 import { getUnextractedNewsIds, insertFulltext } from "./fulltextRepository.js";
 import { extractByDomain, htmlToPlainText } from "./fulltextExtractors.js";
-import { updateProgress, appendLog, completeJob, failJob } from "./jobManager.js";
+import { updateProgress, appendLog, completeJob, failJob, isJobCancelled } from "./jobManager.js";
 import { getDb } from "../db.js";
 
 /** Delay between requests to the same domain (ms) */
@@ -39,6 +39,7 @@ export async function runFulltextUpdate(
     let failedCount = 0;
 
     for (let i = 0; i < unextracted.length; i++) {
+      if (isJobCancelled(jobId)) { appendLog(jobId, '🛑 Cancelled by user'); break; }
       const item = unextracted[i];
       const publisher = item.publisher ?? "UNKNOWN";
 
@@ -92,6 +93,7 @@ export async function runFulltextUpdate(
       jobId,
       `Extraction complete: ${successCount} success, ${skippedCount} skipped, ${failedCount} failed (total ${total})`,
     );
+    if (isJobCancelled(jobId)) return;
     completeJob(jobId, {
       processed: total,
       success: successCount,
@@ -131,6 +133,7 @@ export async function runFulltextPlainTextBackfill(jobId: string): Promise<void>
 
     let converted = 0;
     for (let i = 0; i < htmlRows.length; i++) {
+      if (isJobCancelled(jobId)) { appendLog(jobId, '🛑 Cancelled by user'); break; }
       const row = htmlRows[i];
       const plain = htmlToPlainText(row.full_text);
       const wc = plain.split(/\s+/).filter(Boolean).length;
@@ -149,6 +152,7 @@ export async function runFulltextPlainTextBackfill(jobId: string): Promise<void>
     }
 
     appendLog(jobId, `Backfill complete: ${converted}/${total} rows converted to plain text`);
+    if (isJobCancelled(jobId)) return;
     completeJob(jobId, { processed: total, converted });
   } catch (err: any) {
     failJob(jobId, err.message ?? "Unknown error in runFulltextPlainTextBackfill");

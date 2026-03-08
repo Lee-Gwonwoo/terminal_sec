@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { RefreshCw, Eye, X } from 'lucide-react';
+import { RefreshCw, Eye, X, Square } from 'lucide-react';
 
 const API_BASE = "";
 
@@ -15,7 +15,7 @@ interface OhlcStatus {
 }
 
 interface JobStatus {
-  status: 'running' | 'done' | 'failed';
+  status: 'running' | 'done' | 'failed' | 'cancelled';
   progress: { completed: number; total: number; pct: number };
   logs: string[];
   error?: string;
@@ -151,6 +151,8 @@ export function DataControlWindow({
           } else if (data.status === 'failed') {
             setUpdating(prev => ({ ...prev, [key]: false }));
             setErrors(prev => ({ ...prev, [key]: data.error || 'Job failed' }));
+          } else if (data.status === 'cancelled') {
+            setUpdating(prev => ({ ...prev, [key]: false }));
           }
         } catch {
           // Transient — retry next interval
@@ -709,23 +711,41 @@ export function DataControlWindow({
               <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
                 activeLog.status === 'running' ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300' :
                 activeLog.status === 'done' ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300' :
+                activeLog.status === 'cancelled' ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300' :
                 'bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300'
               }`}>
-                {activeLog.status === 'running' ? 'Running' : activeLog.status === 'done' ? 'Done' : 'Failed'}
+                {activeLog.status === 'running' ? 'Running' : activeLog.status === 'done' ? 'Done' : activeLog.status === 'cancelled' ? 'Cancelled' : 'Failed'}
               </span>
               <span className="text-[10px] text-gray-400 tabular-nums">
                 {activeLog.progress.completed}/{activeLog.progress.total} ({activeLog.progress.pct}%)
               </span>
             </div>
-            <button onClick={() => setLogSection(null)} className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors" title="Close (Esc)">
-              <X className="w-3.5 h-3.5 text-gray-500" />
-            </button>
+            <div className="flex items-center gap-1">
+              {activeLog.status === 'running' && logSection && jobIds[logSection] && (
+                <button
+                  onClick={async () => {
+                    const jid = jobIds[logSection!];
+                    if (!jid) return;
+                    try {
+                      await fetch(`${API_BASE}/api/jobs/${jid}/cancel`, { method: 'POST' });
+                    } catch { /* ignore */ }
+                  }}
+                  className="p-1 hover:bg-red-100 dark:hover:bg-red-900/40 rounded transition-colors"
+                  title="Stop job"
+                >
+                  <Square className="w-3.5 h-3.5 text-red-500" />
+                </button>
+              )}
+              <button onClick={() => setLogSection(null)} className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors" title="Close (Esc)">
+                <X className="w-3.5 h-3.5 text-gray-500" />
+              </button>
+            </div>
           </div>
           {/* Progress bar */}
           <div className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 shrink-0">
             <div
               className={`h-full transition-all duration-300 ${
-                activeLog.status === 'failed' ? 'bg-red-500' : activeLog.status === 'done' ? 'bg-green-500' : 'bg-blue-500'
+                activeLog.status === 'failed' ? 'bg-red-500' : activeLog.status === 'done' ? 'bg-green-500' : activeLog.status === 'cancelled' ? 'bg-amber-500' : 'bg-blue-500'
               }`}
               style={{ width: `${activeLog.progress.pct}%` }}
             />
