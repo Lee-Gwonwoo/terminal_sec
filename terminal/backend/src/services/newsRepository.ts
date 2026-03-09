@@ -122,8 +122,11 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
     SELECT ni.id, ni.published_at, ni.source, ni.publisher, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
            cm_1d.ohlc_ticker,
            cm_1d.target_date AS ohlc_date,
+           cm_chg.value_pct AS change_pct,
            cm_1d.value_pct AS change_1d_pct,
            cm_open.value_pct AS change_from_open_pct,
+           cm_oth.value_pct AS change_open_to_high_pct,
+           cm_3d.value_pct AS change_3d_pct,
            cm_7d.value_pct AS change_7d_pct,
            cm_14d.value_pct AS change_14d_pct,
            cm_30d.value_pct AS change_30d_pct,
@@ -136,8 +139,11 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
            naa.keywords_json AS ai_keywords_json
     FROM news_items ni
     LEFT JOIN news_fulltext nf ON nf.news_id = ni.id
+    LEFT JOIN news_change_metrics cm_chg ON cm_chg.news_id = ni.id AND cm_chg.metric_key = 'change_pct'
     LEFT JOIN news_change_metrics cm_1d ON cm_1d.news_id = ni.id AND cm_1d.metric_key = 'change_1d_pct'
     LEFT JOIN news_change_metrics cm_open ON cm_open.news_id = ni.id AND cm_open.metric_key = 'change_from_open_pct'
+    LEFT JOIN news_change_metrics cm_oth ON cm_oth.news_id = ni.id AND cm_oth.metric_key = 'change_open_to_high_pct'
+    LEFT JOIN news_change_metrics cm_3d ON cm_3d.news_id = ni.id AND cm_3d.metric_key = 'change_3d_pct'
     LEFT JOIN news_change_metrics cm_7d ON cm_7d.news_id = ni.id AND cm_7d.metric_key = 'change_7d_pct'
     LEFT JOIN news_change_metrics cm_14d ON cm_14d.news_id = ni.id AND cm_14d.metric_key = 'change_14d_pct'
     LEFT JOIN news_change_metrics cm_30d ON cm_30d.news_id = ni.id AND cm_30d.metric_key = 'change_30d_pct'
@@ -231,8 +237,11 @@ export async function getNewsById(id: string): Promise<NewsItem | null> {
     `SELECT ni.id, ni.published_at, ni.source, ni.publisher, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
             cm_1d.ohlc_ticker,
             cm_1d.target_date AS ohlc_date,
+            cm_chg.value_pct AS change_pct,
             cm_1d.value_pct AS change_1d_pct,
             cm_open.value_pct AS change_from_open_pct,
+            cm_oth.value_pct AS change_open_to_high_pct,
+            cm_3d.value_pct AS change_3d_pct,
             cm_7d.value_pct AS change_7d_pct,
             cm_14d.value_pct AS change_14d_pct,
             cm_30d.value_pct AS change_30d_pct,
@@ -245,8 +254,11 @@ export async function getNewsById(id: string): Promise<NewsItem | null> {
             naa.keywords_json AS ai_keywords_json
      FROM news_items ni
      LEFT JOIN news_fulltext nf ON nf.news_id = ni.id
+     LEFT JOIN news_change_metrics cm_chg ON cm_chg.news_id = ni.id AND cm_chg.metric_key = 'change_pct'
      LEFT JOIN news_change_metrics cm_1d ON cm_1d.news_id = ni.id AND cm_1d.metric_key = 'change_1d_pct'
      LEFT JOIN news_change_metrics cm_open ON cm_open.news_id = ni.id AND cm_open.metric_key = 'change_from_open_pct'
+     LEFT JOIN news_change_metrics cm_oth ON cm_oth.news_id = ni.id AND cm_oth.metric_key = 'change_open_to_high_pct'
+     LEFT JOIN news_change_metrics cm_3d ON cm_3d.news_id = ni.id AND cm_3d.metric_key = 'change_3d_pct'
      LEFT JOIN news_change_metrics cm_7d ON cm_7d.news_id = ni.id AND cm_7d.metric_key = 'change_7d_pct'
      LEFT JOIN news_change_metrics cm_14d ON cm_14d.news_id = ni.id AND cm_14d.metric_key = 'change_14d_pct'
      LEFT JOIN news_change_metrics cm_30d ON cm_30d.news_id = ni.id AND cm_30d.metric_key = 'change_30d_pct'
@@ -364,8 +376,11 @@ function mapNewsRow(
     created_at: row.created_at,
     ohlc_ticker: row.ohlc_ticker ?? null,
     ohlc_date: row.ohlc_date ?? null,
+    change_pct: row.change_pct ?? null,
     change_1d_pct: row.change_1d_pct ?? null,
     change_from_open_pct: row.change_from_open_pct ?? null,
+    change_open_to_high_pct: row.change_open_to_high_pct ?? null,
+    change_3d_pct: row.change_3d_pct ?? null,
     change_7d_pct: row.change_7d_pct ?? null,
     change_14d_pct: row.change_14d_pct ?? null,
     change_30d_pct: row.change_30d_pct ?? null,

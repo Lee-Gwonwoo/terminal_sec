@@ -46,6 +46,7 @@ type OhlcRow = {
   Symbol: string;
   Datetime: string;
   Open: number;
+  High: number;
   Close: number;
 };
 
@@ -53,7 +54,7 @@ type OhlcRow = {
 async function getOhlcCloseOnOrBefore(symbol: string, date: string): Promise<OhlcRow | null> {
   const db = await getOhlcConn();
   const row = await db.get<OhlcRow>(
-    `SELECT Symbol, Datetime, Open, Close FROM ohlc_1d
+    `SELECT Symbol, Datetime, Open, High, Close FROM ohlc_1d
      WHERE Symbol = ? AND Datetime <= ?
      ORDER BY Datetime DESC
      LIMIT 1`,
@@ -68,20 +69,28 @@ async function getOhlcAnchorAndForwards(
   symbol: string,
   date: string,
   maxForward = 22,
-): Promise<{ anchor: OhlcRow; forwards: OhlcRow[] } | null> {
+): Promise<{ anchor: OhlcRow; prev: OhlcRow | null; forwards: OhlcRow[] } | null> {
   const anchor = await getOhlcCloseOnOrBefore(symbol, date);
   if (!anchor) return null;
 
   const db = await getOhlcConn();
+  const prev = await db.get<OhlcRow>(
+    `SELECT Symbol, Datetime, Open, High, Close FROM ohlc_1d
+     WHERE Symbol = ? AND Datetime < ?
+     ORDER BY Datetime DESC
+     LIMIT 1`,
+    [symbol, anchor.Datetime],
+  ) ?? null;
+
   const forwards = await db.all<OhlcRow[]>(
-    `SELECT Symbol, Datetime, Open, Close FROM ohlc_1d
+    `SELECT Symbol, Datetime, Open, High, Close FROM ohlc_1d
      WHERE Symbol = ? AND Datetime > ?
      ORDER BY Datetime ASC
      LIMIT ?`,
     [symbol, anchor.Datetime, maxForward],
   );
 
-  return { anchor, forwards };
+  return { anchor, prev, forwards };
 }
 
 function pctChange(current: number, reference: number): number | null {
@@ -115,11 +124,11 @@ async function poolRun<T>(
   );
 }
 
-// ---------- Multi-row upsert SQL for 5 standard metrics ----------
+// ---------- Multi-row upsert SQL for 8 standard metrics ----------
 
-const UPSERT_5_METRICS_SQL = `INSERT INTO news_change_metrics
+const UPSERT_METRICS_SQL = `INSERT INTO news_change_metrics
   (news_id, metric_key, value_pct, ohlc_ticker, reference_date, target_date, forward_trading_days, computed_at)
-VALUES (?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?)
+VALUES (?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?)
 ON CONFLICT(news_id, metric_key) DO UPDATE SET
   value_pct = excluded.value_pct,
   ohlc_ticker = excluded.ohlc_ticker,
@@ -131,9 +140,11 @@ ON CONFLICT(news_id, metric_key) DO UPDATE SET
 // ---------- Standard metrics for one news item (forward-looking) ----------
 
 /** Compute and upsert standard change metrics for a single news item.
- *  Direction: news date close → N trading days AFTER close.
+ *  Reference price for forward metrics: previous trading day close.
+ *  change_pct: prev close → news date close (Chg).
  *  change_from_open_pct: news date open → news date close (intraday).
- *  OHLC reads reduced to 2 queries per item; 5 upserts batched in 1 statement.
+ *  change_open_to_high_pct: news date open → news date high (intraday).
+ *  OHLC reads: 3 queries per item; 8 upserts batched in 1 statement.
  *  Returns true if at least one metric was written. */
 export async function mergeChangeForNewsItem(
   newsId: string,
@@ -152,12 +163,17 @@ type ComputedMetrics = {
   newsId: string;
   ticker: string;
   anchorDate: string;
+  prevDate: string;
+  changePct: number | null;
   changeFromOpen: number | null;
+  changeOpenToHigh: number | null;
   change1d: number | null;
+  change3d: number | null;
   change7d: number | null;
   change14d: number | null;
   change30d: number | null;
   fwd1Date: string;
+  fwd3Date: string;
   fwd5Date: string;
   fwd10Date: string;
   fwd22Date: string;
@@ -172,9 +188,11 @@ async function computeMetricsForItem(
   const result = await getOhlcAnchorAndForwards(ticker, newsDate);
   if (!result) return null;
 
-  const { anchor, forwards } = result;
+  const { anchor, prev, forwards } = result;
   const anchorDate = anchor.Datetime;
+  const prevClose = prev?.Close ?? null;
   const fwd1  = forwards[0]  ?? null;
+  const fwd3  = forwards[2]  ?? null;
   const fwd5  = forwards[4]  ?? null;
   const fwd10 = forwards[9]  ?? null;
   const fwd22 = forwards[21] ?? null;
@@ -183,12 +201,17 @@ async function computeMetricsForItem(
     newsId,
     ticker,
     anchorDate,
+    prevDate: prev?.Datetime ?? anchorDate,
+    changePct: prevClose !== null ? pctChange(anchor.Close, prevClose) : null,
     changeFromOpen: pctChange(anchor.Close, anchor.Open),
-    change1d:  fwd1  ? pctChange(fwd1.Close,  anchor.Close) : null,
-    change7d:  fwd5  ? pctChange(fwd5.Close,  anchor.Close) : null,
-    change14d: fwd10 ? pctChange(fwd10.Close, anchor.Close) : null,
-    change30d: fwd22 ? pctChange(fwd22.Close, anchor.Close) : null,
+    changeOpenToHigh: pctChange(anchor.High, anchor.Open),
+    change1d:  fwd1  && prevClose !== null ? pctChange(fwd1.Close,  prevClose) : null,
+    change3d:  fwd3  && prevClose !== null ? pctChange(fwd3.Close,  prevClose) : null,
+    change7d:  fwd5  && prevClose !== null ? pctChange(fwd5.Close,  prevClose) : null,
+    change14d: fwd10 && prevClose !== null ? pctChange(fwd10.Close, prevClose) : null,
+    change30d: fwd22 && prevClose !== null ? pctChange(fwd22.Close, prevClose) : null,
     fwd1Date:  fwd1?.Datetime  ?? anchorDate,
+    fwd3Date:  fwd3?.Datetime  ?? anchorDate,
     fwd5Date:  fwd5?.Datetime  ?? anchorDate,
     fwd10Date: fwd10?.Datetime ?? anchorDate,
     fwd22Date: fwd22?.Datetime ?? anchorDate,
@@ -207,12 +230,15 @@ async function batchWriteMetrics(metrics: ComputedMetrics[]): Promise<void> {
     await db.run("BEGIN IMMEDIATE");
     try {
       for (const m of chunk) {
-        await db.run(UPSERT_5_METRICS_SQL, [
-          m.newsId, "change_from_open_pct", m.changeFromOpen, m.ticker, m.anchorDate, m.anchorDate, 0, ts,
-          m.newsId, "change_1d_pct",  m.change1d,  m.ticker, m.anchorDate, m.fwd1Date,  1,  ts,
-          m.newsId, "change_7d_pct",  m.change7d,  m.ticker, m.anchorDate, m.fwd5Date,  5,  ts,
-          m.newsId, "change_14d_pct", m.change14d, m.ticker, m.anchorDate, m.fwd10Date, 10, ts,
-          m.newsId, "change_30d_pct", m.change30d, m.ticker, m.anchorDate, m.fwd22Date, 22, ts,
+        await db.run(UPSERT_METRICS_SQL, [
+          m.newsId, "change_pct",              m.changePct,        m.ticker, m.prevDate,   m.anchorDate, 0,  ts,
+          m.newsId, "change_from_open_pct",    m.changeFromOpen,   m.ticker, m.anchorDate, m.anchorDate, 0,  ts,
+          m.newsId, "change_open_to_high_pct", m.changeOpenToHigh, m.ticker, m.anchorDate, m.anchorDate, 0,  ts,
+          m.newsId, "change_1d_pct",  m.change1d,  m.ticker, m.prevDate, m.fwd1Date,  1,  ts,
+          m.newsId, "change_3d_pct",  m.change3d,  m.ticker, m.prevDate, m.fwd3Date,  3,  ts,
+          m.newsId, "change_7d_pct",  m.change7d,  m.ticker, m.prevDate, m.fwd5Date,  5,  ts,
+          m.newsId, "change_14d_pct", m.change14d, m.ticker, m.prevDate, m.fwd10Date, 10, ts,
+          m.newsId, "change_30d_pct", m.change30d, m.ticker, m.prevDate, m.fwd22Date, 22, ts,
         ]);
       }
       await db.run("COMMIT");

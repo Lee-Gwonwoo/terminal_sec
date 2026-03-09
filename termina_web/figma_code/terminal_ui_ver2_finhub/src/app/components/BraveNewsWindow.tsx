@@ -382,11 +382,14 @@ export function BraveNewsWindow({ onTickerClick, initialTicker }: BraveNewsWindo
         return (
           <div className="flex flex-col justify-center gap-0 w-full">
             <div className="flex items-center gap-1">
-              <span className="text-gray-500 w-[30px] shrink-0">Chg:</span>
+              <span className="text-gray-500 shrink-0">fr.O→C:</span>
+              <span className={changeColor(newsItem.openChange)}>{formatChange(newsItem.openChange)}</span>
+              <span className="text-gray-400 mx-0.5">|</span>
+              <span className="text-gray-500 shrink-0">+1D:</span>
               <span className={changeColor(newsItem.changePercent)}>{formatChange(newsItem.changePercent)}</span>
               <span className="text-gray-400 mx-0.5">|</span>
-              <span className="text-gray-500 shrink-0">fr.Open:</span>
-              <span className={changeColor(newsItem.openChange)}>{formatChange(newsItem.openChange)}</span>
+              <span className="text-gray-500 shrink-0">+3D:</span>
+              <span className="text-gray-300 dark:text-gray-600">-</span>
               <span className="text-gray-400 mx-0.5">|</span>
               <span className="text-gray-500 shrink-0">+7D:</span>
               <span className={changeColor(newsItem.sevenDaysChange)}>{formatChange(newsItem.sevenDaysChange)}</span>

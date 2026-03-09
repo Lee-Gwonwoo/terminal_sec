@@ -99,8 +99,11 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `[][][]created_at[][][]`
 - `[][][]ohlc_ticker[][][]`
 - `[][][]ohlc_date[][][]`
+- `[][][]change_pct[][][]`
 - `[][][]change_1d_pct[][][]`
 - `[][][]change_from_open_pct[][][]`
+- `[][][]change_open_to_high_pct[][][]`
+- `[][][]change_3d_pct[][][]`
 - `[][][]change_7d_pct[][][]`
 - `[][][]change_14d_pct[][][]`
 - `[][][]change_30d_pct[][][]`
@@ -133,19 +136,25 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 표준 metric key:
 
+- `[][][]change_pct[][][]`
 - `[][][]change_from_open_pct[][][]`
+- `[][][]change_open_to_high_pct[][][]`
 - `[][][]change_1d_pct[][][]`
+- `[][][]change_3d_pct[][][]`
 - `[][][]change_7d_pct[][][]`
 - `[][][]change_14d_pct[][][]`
 - `[][][]change_30d_pct[][][]`
 
 운영적 정의:
 
-- `change_from_open_pct`: 뉴스 기준일 시가 -> 기준일 종가
-- `change_1d_pct`: 기준일 종가 -> 1거래일 후 종가
-- `change_7d_pct`: 기준일 종가 -> 5거래일 후 종가
-- `change_14d_pct`: 기준일 종가 -> 10거래일 후 종가
-- `change_30d_pct`: 기준일 종가 -> 22거래일 후 종가
+- `change_pct`: 전일 종가 → 뉴스 기준일 종가 (Chg)
+- `change_from_open_pct`: 뉴스 기준일 시가 → 기준일 종가
+- `change_open_to_high_pct`: 뉴스 기준일 시가 → 기준일 고가
+- `change_1d_pct`: 전일 종가 → 1거래일 후 종가
+- `change_3d_pct`: 전일 종가 → 3거래일 후 종가
+- `change_7d_pct`: 전일 종가 → 5거래일 후 종가
+- `change_14d_pct`: 전일 종가 → 10거래일 후 종가
+- `change_30d_pct`: 전일 종가 → 22거래일 후 종가
 
 주의:
 
@@ -416,8 +425,11 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `[][][]created_at[][][]`
 - `[][][]ohlc_ticker[][][]`
 - `[][][]ohlc_date[][][]`
+- `[][][]change_pct[][][]`
 - `[][][]change_1d_pct[][][]`
 - `[][][]change_from_open_pct[][][]`
+- `[][][]change_open_to_high_pct[][][]`
+- `[][][]change_3d_pct[][][]`
 - `[][][]change_7d_pct[][][]`
 - `[][][]change_14d_pct[][][]`
 - `[][][]change_30d_pct[][][]`
@@ -729,8 +741,11 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `[][][]created_at[][][]`
 - `[][][]ohlc_ticker[][][]`
 - `[][][]ohlc_date[][][]`
+- `[][][]change_pct[][][]`
 - `[][][]change_1d_pct[][][]`
 - `[][][]change_from_open_pct[][][]`
+- `[][][]change_open_to_high_pct[][][]`
+- `[][][]change_3d_pct[][][]`
 - `[][][]change_7d_pct[][][]`
 - `[][][]change_14d_pct[][][]`
 - `[][][]change_30d_pct[][][]`
@@ -764,19 +779,25 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 표준 metric key:
 
+- `[][][]change_pct[][][]`
 - `[][][]change_from_open_pct[][][]`
+- `[][][]change_open_to_high_pct[][][]`
 - `[][][]change_1d_pct[][][]`
+- `[][][]change_3d_pct[][][]`
 - `[][][]change_7d_pct[][][]`
 - `[][][]change_14d_pct[][][]`
 - `[][][]change_30d_pct[][][]`
 
 운영적 정의:
 
+- `change_pct`: 전일 종가 → 뉴스 기준일 종가 (Chg)
 - `change_from_open_pct`: 뉴스 기준일 시가 → 뉴스 기준일 종가
-- `change_1d_pct`: 뉴스 기준일 종가 → 1거래일 후 종가
-- `change_7d_pct`: 뉴스 기준일 종가 → 5거래일 후 종가
-- `change_14d_pct`: 뉴스 기준일 종가 → 10거래일 후 종가
-- `change_30d_pct`: 뉴스 기준일 종가 → 22거래일 후 종가
+- `change_open_to_high_pct`: 뉴스 기준일 시가 → 뉴스 기준일 고가
+- `change_1d_pct`: 전일 종가 → 1거래일 후 종가
+- `change_3d_pct`: 전일 종가 → 3거래일 후 종가
+- `change_7d_pct`: 전일 종가 → 5거래일 후 종가
+- `change_14d_pct`: 전일 종가 → 10거래일 후 종가
+- `change_30d_pct`: 전일 종가 → 22거래일 후 종가
 
 주의:
 
@@ -999,8 +1020,11 @@ limit 정책:
       "created_at": "...",
       "ohlc_ticker": "AAPL",
       "ohlc_date": "2026-03-07",
+      "change_pct": -0.85,
       "change_1d_pct": 1.23,
       "change_from_open_pct": -0.42,
+      "change_open_to_high_pct": 0.55,
+      "change_3d_pct": 2.01,
       "change_7d_pct": 3.11,
       "change_14d_pct": null,
       "change_30d_pct": null,
@@ -1038,8 +1062,11 @@ limit 정책:
 - `[][][]created_at[][][]`
 - `[][][]ohlc_ticker[][][]`
 - `[][][]ohlc_date[][][]`
+- `[][][]change_pct[][][]`
 - `[][][]change_1d_pct[][][]`
 - `[][][]change_from_open_pct[][][]`
+- `[][][]change_open_to_high_pct[][][]`
+- `[][][]change_3d_pct[][][]`
 - `[][][]change_7d_pct[][][]`
 - `[][][]change_14d_pct[][][]`
 - `[][][]change_30d_pct[][][]`

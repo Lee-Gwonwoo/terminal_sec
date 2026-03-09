@@ -82,8 +82,11 @@ interface BackendNewsItem {
   created_at: string;
   ohlc_ticker?: string | null;
   ohlc_date?: string | null;
+  change_pct?: number | null;
   change_1d_pct?: number | null;
   change_from_open_pct?: number | null;
+  change_open_to_high_pct?: number | null;
+  change_3d_pct?: number | null;
   change_7d_pct?: number | null;
   change_14d_pct?: number | null;
   change_30d_pct?: number | null;
@@ -115,8 +118,11 @@ interface DisplayItem {
   source: string;
   sourceType: string;
   url: string;
+  changePct: number | null;
   change1dPct: number | null;
   changeFromOpenPct: number | null;
+  changeOpenToHighPct: number | null;
+  change3dPct: number | null;
   change7dPct: number | null;
   change14dPct: number | null;
   change30dPct: number | null;
@@ -152,8 +158,11 @@ function mapBackendItem(item: BackendNewsItem): DisplayItem {
     source: item.source,
     sourceType: item.source_type,
     url: item.url,
+    changePct: item.change_pct ?? null,
     change1dPct: item.change_1d_pct ?? null,
     changeFromOpenPct: item.change_from_open_pct ?? null,
+    changeOpenToHighPct: item.change_open_to_high_pct ?? null,
+    change3dPct: item.change_3d_pct ?? null,
     change7dPct: item.change_7d_pct ?? null,
     change14dPct: item.change_14d_pct ?? null,
     change30dPct: item.change_30d_pct ?? null,
@@ -1229,16 +1238,25 @@ export function FinnhubNewsWindow({
         return (
           <div className="flex flex-col justify-center gap-0 w-full">
             <div className="flex items-center gap-1">
-              <span className="text-gray-500 w-[30px] shrink-0">Chg:</span>
-              <span className={changeColor(newsItem.change1dPct)}>{formatChange(newsItem.change1dPct)}</span>
+              <span className="text-gray-500 shrink-0">Chg:</span>
+              <span className={changeColor(newsItem.changePct)}>{formatChange(newsItem.changePct)}</span>
               <span className="text-gray-400 mx-0.5">|</span>
-              <span className="text-gray-500 shrink-0">fr.Open:</span>
+              <span className="text-gray-500 shrink-0">fr.O→C:</span>
               <span className={changeColor(newsItem.changeFromOpenPct)}>{formatChange(newsItem.changeFromOpenPct)}</span>
               <span className="text-gray-400 mx-0.5">|</span>
-              <span className="text-gray-500 shrink-0">+7D:</span>
-              <span className={changeColor(newsItem.change7dPct)}>{formatChange(newsItem.change7dPct)}</span>
+              <span className="text-gray-500 shrink-0">fr.O→H:</span>
+              <span className={changeColor(newsItem.changeOpenToHighPct)}>{formatChange(newsItem.changeOpenToHighPct)}</span>
+              <span className="text-gray-400 mx-0.5">|</span>
+              <span className="text-gray-500 shrink-0">+1D:</span>
+              <span className={changeColor(newsItem.change1dPct)}>{formatChange(newsItem.change1dPct)}</span>
+              <span className="text-gray-400 mx-0.5">|</span>
+              <span className="text-gray-500 shrink-0">+3D:</span>
+              <span className={changeColor(newsItem.change3dPct)}>{formatChange(newsItem.change3dPct)}</span>
             </div>
             <div className="flex items-center gap-1">
+              <span className="text-gray-500 shrink-0">+7D:</span>
+              <span className={changeColor(newsItem.change7dPct)}>{formatChange(newsItem.change7dPct)}</span>
+              <span className="text-gray-400 mx-0.5">|</span>
               <span className="text-gray-500 shrink-0">+14D:</span>
               <span className={changeColor(newsItem.change14dPct)}>{formatChange(newsItem.change14dPct)}</span>
               <span className="text-gray-400 mx-0.5">|</span>
