@@ -18,7 +18,7 @@ import {
 import { listAlertRules, upsertAlertRule } from "./services/alertsRepository.js";
 import { StreamHub } from "./realtime/streamHub.js";
 import { ensureSeedData } from "./seed.js";
-import { pullIbkrCalendar, getCalendarDateRange } from "./services/calendarIngestion.js";
+import { pullIbkrCalendar, pullIbkrCalendarCustom, getCalendarDateRange } from "./services/calendarIngestion.js";
 import type { CalendarUpdateMode } from "./services/calendarIngestion.js";
 import { pullEodhdNews, pullEodhdNewsAll } from "./services/eodhdNewsProvider.js";
 import { insertNewsItem } from "./services/newsRepository.js";
@@ -1087,6 +1087,50 @@ app.post("/api/ibkr/calendar/update", async (req, res, next) => {
     });
 
     res.json({ mode, dateRange, upserted, deletedMockRows, source: "IBKR" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Custom calendar update: user-specified date range, default universe tickers
+app.post("/api/ibkr/calendar/update-custom", async (req, res, next) => {
+  try {
+    const from = req.body?.from;
+    const to = req.body?.to;
+    if (!from || !to || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+      res.status(400).json({ error: "from/to must be YYYY-MM-DD" });
+      return;
+    }
+    const tickers = await getDefaultUniverseTickers();
+    const result = await pullIbkrCalendarCustom(tickers, from, to);
+
+    let upserted = 0;
+    for (const ev of result.events) {
+      await upsertCalendarEvent({
+        type: ev.type,
+        eventTime: ev.eventTime,
+        ticker: ev.ticker,
+        title: ev.title,
+        fieldsJson: ev.fieldsJson,
+        source: "IBKR",
+        uniqueKey: ev.uniqueKey,
+      });
+      upserted++;
+    }
+
+    const deletedMockRows = await deleteMockCalendarRows();
+    if (deletedMockRows > 0) {
+      console.log(`[ibkr-calendar-custom] mock_provider rows 삭제: ${deletedMockRows}건`);
+    }
+
+    await setLastSuccess("ibkr_calendar", new Date().toISOString(), {
+      mode: "custom",
+      dateRange: { from, to },
+      upserted,
+      deletedMockRows,
+    });
+
+    res.json({ mode: "custom", dateRange: { from, to }, upserted, deletedMockRows, source: "IBKR" });
   } catch (error) {
     next(error);
   }

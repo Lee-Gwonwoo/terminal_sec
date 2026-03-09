@@ -392,6 +392,9 @@ export function FinnhubNewsWindow({
   const [showChangeCustomDateModal, setShowChangeCustomDateModal] = useState(false);
   const [changeCustomFrom, setChangeCustomFrom] = useState('');
   const [changeCustomTo, setChangeCustomTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [showCalendarCustomDateModal, setShowCalendarCustomDateModal] = useState(false);
+  const [calendarCustomFrom, setCalendarCustomFrom] = useState('');
+  const [calendarCustomTo, setCalendarCustomTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [showPreflightModal, setShowPreflightModal] = useState(false);
   const [preflightData, setPreflightData] = useState<{ totalTickers: number; fallbackCount: number; fallbackTickers: string[] } | null>(null);
   const [pendingUpdateSourceType, setPendingUpdateSourceType] = useState<UpdateSourceType>('all');
@@ -807,6 +810,27 @@ export function FinnhubNewsWindow({
       }
     } catch (err: any) {
       setError(err.message || 'Failed to start calendar update');
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  // ─── Calendar Custom Update ───
+  const handleCalendarUpdateCustom = async (from: string, to: string) => {
+    setUpdating(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/ibkr/calendar/update-custom`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from, to }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || `HTTP ${res.status}`);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to start custom calendar update');
     } finally {
       setUpdating(false);
     }
@@ -1692,6 +1716,10 @@ export function FinnhubNewsWindow({
                         <RotateCw className="w-3.5 h-3.5 shrink-0 text-rose-400" />
                         <div><div className="font-medium">Refresh Upcoming Calendar</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Last 30 days overlap + next 90 days · does not re-fetch full history</div></div>
                       </button>
+                      <button onClick={() => { setShowUpdateMenu(false); setCalendarCustomFrom(''); setCalendarCustomTo(new Date().toISOString().slice(0, 10)); setShowCalendarCustomDateModal(true); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <Calendar className="w-3.5 h-3.5 shrink-0 text-rose-300" />
+                        <div><div className="font-medium">Custom Calendar Update</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">사용자 지정 날짜 범위로 캘린더 이벤트를 수집합니다</div></div>
+                      </button>
                     </div>
                   </div>
                 )}
@@ -2106,6 +2134,35 @@ export function FinnhubNewsWindow({
       )}
 
       {/* ─── Custom Date Picker Modal ─── */}
+      {showCalendarCustomDateModal && (
+        <div className="absolute inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-4 w-80 border border-gray-200 dark:border-gray-700">
+            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><Calendar className="w-4 h-4 text-rose-500" />Custom Calendar Update — Date Range</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">From</label>
+                <input type="date" value={calendarCustomFrom} onChange={(e) => setCalendarCustomFrom(e.target.value)}
+                  className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">To</label>
+                <input type="date" value={calendarCustomTo} onChange={(e) => setCalendarCustomTo(e.target.value)}
+                  className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+              </div>
+              <p className="text-[10px] text-gray-400">IBKR WSH bulk filter로 전체 default 유니버스를 한번에 조회합니다.</p>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setShowCalendarCustomDateModal(false)} className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
+              <button
+                onClick={() => { if (!calendarCustomFrom || !calendarCustomTo) return; setShowCalendarCustomDateModal(false); handleCalendarUpdateCustom(calendarCustomFrom, calendarCustomTo); }}
+                disabled={!calendarCustomFrom || !calendarCustomTo}
+                className="px-3 py-1.5 text-xs bg-rose-600 text-white rounded hover:bg-rose-700 disabled:opacity-50"
+              >Start Update</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showCustomDateModal && (
         <div className="absolute inset-0 bg-black/30 flex items-center justify-center z-50">
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-4 w-80 border border-gray-200 dark:border-gray-700">

@@ -1,9 +1,18 @@
 // calendarIngestion.ts — IBKR 캘린더 인제션
 // Step 6-1 (2026-03-06): mock_provider 생성기 코드 전면 제거.
-//   이전의 mock worker 함수(runEarningsWorker 등)와 startCalendarIngestionWorkers()는 삭제됨.
-// Step 6-3: pullIbkrCalendar() stub 추가.
-//   BLOCKED — IBKR TWS 실행 + Python child_process bridge 구현 후 정상 동작.
+// Step 6-3 (구현 완료): Python child_process bridge를 통한 WSH calendar pull.
 // Step 9-1/9-2: mode 기반 날짜 범위 계약 추가 (backfill / refresh).
+
+import { spawn } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const WSH_SCRIPT_PATH = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..", "..", "scripts", "ibkr_wsh_calendar.py",
+);
+
+const MAX_STDOUT_BYTES = 50 * 1024 * 1024; // 50 MB safety limit
 
 /** IBKR WSH API에서 가져온 캘린더 이벤트 (정규화 후) */
 export interface IbkrCalendarEvent {
@@ -48,26 +57,108 @@ export function getCalendarDateRange(mode: CalendarUpdateMode): { from: string; 
 
 /**
  * IBKR WSH API에서 캘린더 이벤트를 수집한다.
- * Python child_process 브리지를 통해 IBKR TWS 소켓 API에 접속한다 (결정 #6, 옵션 B).
- *
- * @param tickers 대상 종목 배열
- * @param mode "backfill" = 초기 적재 (과거 2년 + 미래 180일), "refresh" = 반복 갱신 (최근 30일 overlap + 미래 90일)
- *
- * BLOCKED: IBKR TWS가 실행 중이고 Python bridge script가 구현된 후에만 정상 동작.
- * 현재는 Step 6-3 구현 미착수 상태이므로 에러를 던진다.
+ * Python child_process 브리지를 통해 IBKR TWS 소켓 API에 접속한다.
  */
 export async function pullIbkrCalendar(
-  _tickers: string[],
-  _mode: CalendarUpdateMode = "backfill"
+  tickers: string[],
+  mode: CalendarUpdateMode = "backfill",
 ): Promise<IbkrCalendarResult> {
-  const dateRange = getCalendarDateRange(_mode);
-  // TODO (Step 6-3 + 결정 #6 Python child_process bridge):
-  //   1. _tickers.length > 0 검증
-  //   2. Python 스크립트 실행: python ibkr_wsh_pull.py --tickers AAPL,MSFT,... --from {dateRange.from} --to {dateRange.to}
-  //      (ib_insync reqWshEventData 기반, conId → ticker 매핑 포함)
-  //   3. stdout JSON 파싱 → IbkrCalendarEvent[]
-  //   4. return { events, source: "IBKR", mode: _mode, dateRange }
-  throw new Error(
-    `IBKR 캘린더 미구현 (mode=${_mode}, range=${dateRange.from}~${dateRange.to}): TWS 실행 상태 + Python bridge 스크립트가 필요합니다 (Step 6-3).`
-  );
+  const dateRange = getCalendarDateRange(mode);
+
+  if (tickers.length === 0) {
+    return { events: [], source: "IBKR", mode, dateRange };
+  }
+
+  return runWshScript(tickers, dateRange, mode);
+}
+
+/**
+ * Custom date range calendar pull.
+ */
+export async function pullIbkrCalendarCustom(
+  tickers: string[],
+  from: string,
+  to: string,
+): Promise<IbkrCalendarResult> {
+  const dateRange = { from, to };
+  const mode: CalendarUpdateMode = "backfill"; // custom is treated as backfill for result typing
+
+  if (tickers.length === 0) {
+    return { events: [], source: "IBKR", mode, dateRange };
+  }
+
+  return runWshScript(tickers, dateRange, mode);
+}
+
+function runWshScript(
+  tickers: string[],
+  dateRange: { from: string; to: string },
+  mode: CalendarUpdateMode,
+): Promise<IbkrCalendarResult> {
+  const args = [
+    WSH_SCRIPT_PATH,
+    "--tickers", tickers.join(","),
+    "--start-date", dateRange.from,
+    "--end-date", dateRange.to,
+  ];
+
+  return new Promise<IbkrCalendarResult>((resolve, reject) => {
+    const proc = spawn("python", args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+
+    let stdout = "";
+    let stderr = "";
+    let stdoutBytes = 0;
+
+    proc.stdout.on("data", (chunk: Buffer) => {
+      stdoutBytes += chunk.length;
+      if (stdoutBytes > MAX_STDOUT_BYTES) {
+        proc.kill("SIGTERM");
+        reject(new Error(`stdout exceeded ${MAX_STDOUT_BYTES} bytes`));
+        return;
+      }
+      stdout += chunk.toString();
+    });
+
+    proc.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
+    proc.on("error", (err) => {
+      reject(new Error(`Failed to spawn Python WSH script: ${err.message}`));
+    });
+
+    proc.on("close", (code) => {
+      if (code === 2) {
+        reject(new Error(`Permanent error (WSH calendar): ${stderr.trim()}`));
+        return;
+      }
+      if (code !== 0) {
+        reject(new Error(`Python WSH exited with code ${code}: ${stderr.trim()}`));
+        return;
+      }
+
+      // Parse NDJSON stdout
+      const events: IbkrCalendarEvent[] = [];
+      const lines = stdout.trim().split("\n").filter(Boolean);
+      for (const line of lines) {
+        try {
+          const evt = JSON.parse(line) as IbkrCalendarEvent;
+          if (evt.type && evt.uniqueKey) {
+            events.push(evt);
+          }
+        } catch {
+          // skip non-JSON lines
+        }
+      }
+
+      if (stderr.trim()) {
+        console.log(`[calendarIngestion] stderr:\n${stderr.trim()}`);
+      }
+
+      resolve({ events, source: "IBKR", mode, dateRange });
+    });
+  });
 }

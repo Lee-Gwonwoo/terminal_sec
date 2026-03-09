@@ -22,7 +22,7 @@ interface JobStatus {
   result?: Record<string, unknown>;
 }
 
-type SectionKey = 'price' | 'calendarBackfill' | 'calendarRefresh' | 'companyDesc' | 'peersPull' | 'recent' | 'custom';
+type SectionKey = 'price' | 'calendarBackfill' | 'calendarRefresh' | 'calendarCustom' | 'companyDesc' | 'peersPull' | 'recent' | 'custom';
 
 interface DataControlWindowProps {
   fontScale?: number;
@@ -53,19 +53,19 @@ export function DataControlWindow({
 
   // ─── Per-section job state ───
   const [jobIds, setJobIds] = useState<Record<SectionKey, string | null>>({
-    price: null, calendarBackfill: null, calendarRefresh: null, companyDesc: null, peersPull: null, 'recent': null, custom: null,
+    price: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, peersPull: null, 'recent': null, custom: null,
   });
   const [updating, setUpdating] = useState<Record<SectionKey, boolean>>({
-    price: false, calendarBackfill: false, calendarRefresh: false, companyDesc: false, peersPull: false, 'recent': false, custom: false,
+    price: false, calendarBackfill: false, calendarRefresh: false, calendarCustom: false, companyDesc: false, peersPull: false, 'recent': false, custom: false,
   });
   const [errors, setErrors] = useState<Record<SectionKey, string | null>>({
-    price: null, calendarBackfill: null, calendarRefresh: null, companyDesc: null, peersPull: null, 'recent': null, custom: null,
+    price: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, peersPull: null, 'recent': null, custom: null,
   });
 
   // ─── View Log state (only one section's log at a time) ───
   const [logSection, setLogSection] = useState<SectionKey | null>(null);
   const [jobStatuses, setJobStatuses] = useState<Record<SectionKey, JobStatus | null>>({
-    price: null, calendarBackfill: null, calendarRefresh: null, companyDesc: null, peersPull: null, 'recent': null, custom: null,
+    price: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, peersPull: null, 'recent': null, custom: null,
   });
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -87,6 +87,10 @@ export function DataControlWindow({
   // ─── Custom Change date range input ───
   const [customChangeFrom, setCustomChangeFrom] = useState('');
   const [customChangeTo, setCustomChangeTo] = useState(() => new Date().toISOString().slice(0, 10));
+
+  // ─── Calendar custom date range ───
+  const [calendarCustomFrom, setCalendarCustomFrom] = useState('');
+  const [calendarCustomTo, setCalendarCustomTo] = useState(() => new Date().toISOString().slice(0, 10));
 
   // ─── Fetch statuses on mount ───
   const fetchStatuses = async () => {
@@ -211,6 +215,11 @@ export function DataControlWindow({
           headers['Content-Type'] = 'application/json';
           body = JSON.stringify({ mode: 'refresh' });
           break;
+        case 'calendarCustom':
+          url = `${API_BASE}/api/ibkr/calendar/update-custom`;
+          headers['Content-Type'] = 'application/json';
+          body = JSON.stringify({ from: calendarCustomFrom, to: calendarCustomTo });
+          break;
         case 'companyDesc':
           url = `${API_BASE}/api/company-profiles/pull-fmp`;
           break;
@@ -301,6 +310,31 @@ export function DataControlWindow({
       statusKey: 'ibkr_calendar',
       group: 'Calendar Update',
       description: '최근 30일 overlap + 앞으로 90일만 갱신합니다. 과거 전체를 다시 받지 않습니다.',
+    },
+    {
+      key: 'calendarCustom',
+      label: 'Custom Calendar Update',
+      statusKey: 'ibkr_calendar',
+      group: 'Calendar Update',
+      description: '사용자 지정 날짜 범위로 캘린더 이벤트를 수집합니다.',
+      extra: (
+        <div className="flex items-center gap-2 flex-wrap">
+          <label className="text-[11px] text-gray-500 dark:text-gray-400">From:</label>
+          <input
+            type="date"
+            value={calendarCustomFrom}
+            onChange={e => setCalendarCustomFrom(e.target.value)}
+            className="w-28 px-1.5 py-0.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200"
+          />
+          <label className="text-[11px] text-gray-500 dark:text-gray-400">To:</label>
+          <input
+            type="date"
+            value={calendarCustomTo}
+            onChange={e => setCalendarCustomTo(e.target.value)}
+            className="w-28 px-1.5 py-0.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200"
+          />
+        </div>
+      ),
     },
     {
       key: 'companyDesc',

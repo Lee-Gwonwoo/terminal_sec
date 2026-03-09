@@ -122,8 +122,6 @@ export async function initDb(): Promise<void> {
 
   // Step 4-2: news_change_metrics table (separate change data — forward-looking)
   // PLAN CHANGE #10: renamed anchor_date→target_date, lookback→forward
-  // DROP old table first (direction changed: all old data is invalid)
-  await db.exec(`DROP TABLE IF EXISTS news_change_metrics`);
   await db.exec(`
     CREATE TABLE IF NOT EXISTS news_change_metrics (
       news_id TEXT NOT NULL REFERENCES news_items(id),
