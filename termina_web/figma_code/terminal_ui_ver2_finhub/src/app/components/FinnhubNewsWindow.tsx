@@ -1800,7 +1800,7 @@ export function FinnhubNewsWindow({
                       <div className="px-2 py-1 text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">PTPR Press Release</div>
                       <button onClick={() => { setShowUpdateMenu(false); handlePtprUpdate('recent'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <Download className="w-3.5 h-3.5 shrink-0 text-cyan-500" />
-                        <div><div className="font-medium">Recent PTPR Press Release</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Latest 100 press releases from RTPR feed</div></div>
+                        <div><div className="font-medium">Recent PTPR Press Release</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Per-ticker incremental · anchor + confirmed-empty skip</div></div>
                       </button>
                       <button onClick={() => { setShowUpdateMenu(false); handlePtprCustomStart(); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <Calendar className="w-3.5 h-3.5 shrink-0 text-cyan-500" />

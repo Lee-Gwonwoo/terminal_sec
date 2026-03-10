@@ -578,16 +578,18 @@ export async function getTickersWithNews(sourceType?: string): Promise<Set<strin
 /**
  * Returns a Map of ticker → most recent published_at for that ticker+sourceType.
  * Used for per-ticker incremental (recent) updates.
+ * @param source  Defaults to 'FINNHUB'; pass 'RTPR' for RTPR anchor map.
  */
 export async function getTickerAnchorMap(
   sourceType: string,
+  source: string = "FINNHUB",
 ): Promise<Map<string, string>> {
   const rows = await getDb().all<{ tickers_csv: string; max_pub: string }[]>(
     `SELECT tickers_csv, MAX(published_at) as max_pub
      FROM news_items
-     WHERE source = 'FINNHUB' AND source_type = ?
+     WHERE source = ? AND source_type = ?
      GROUP BY tickers_csv`,
-    [sourceType],
+    [source, sourceType],
   );
 
   const map = new Map<string, string>();

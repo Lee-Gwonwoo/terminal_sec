@@ -185,3 +185,56 @@
 | 빌드 | ✅ | backend tsc + frontend vite build 통과 |
 | 자동 테스트 | ✅ | 관련 test suite 없음 |
 | 런타임 통합 | ✅ | POST /api/news/pull-rtpr 100건 insert, 2차 pull 중복 skip, press_release 필터 정상. 브라우저 시각 확인은 사용자 위임 |
+
+### RTPR Recent 증분 구조 리팩터 — Finnhub 동등 (2026-03-10 22:40)
+
+**작성 시각:** 2026-03-10 22:40 (local)
+
+**Status: awaiting user confirmation**
+
+#### PLAN CHANGE 사유
+- 사용자 요청: "기본 유니버스 ticker 목록 → ticker별 anchor → confirmed-empty skip → change% merge → 증분 업데이트. Finnhub recent와 동일하게."
+- 기존 RTPR recent 모드는 `GET /articles?limit=100` 글로벌 최신 100건 스냅샷이었음.
+- Finnhub recent와 동일한 per-ticker 증분 구조로 전면 재작성.
+
+#### 변경 파일
+
+| 파일 | 변경 내용 |
+|------|-----------|
+| `terminal/backend/src/services/finnhubNewsProvider.ts` | `getTickerAnchorMap(sourceType, source='FINNHUB')` — source 파라미터 추가. 기존 Finnhub 호출은 기본값으로 영향 없음. |
+| `terminal/backend/src/server.ts` | `POST /api/news/pull-rtpr` 전면 재작성: recent 모드 → universe tickers 로드 → RTPR anchor map → per-ticker fetch + anchor 필터 + confirmed-empty skip/record → change% merge + setLastSuccess |
+| `termina_web/.../FinnhubNewsWindow.tsx` | "Recent PTPR Press Release" 버튼 설명 업데이트: "Latest 100" → "Per-ticker incremental · anchor + confirmed-empty skip" |
+
+#### 새 동작 구조 (recent 모드)
+
+1. universe ticker 목록 로드 (1698개)
+2. `getTickerAnchorMap('press_release', 'RTPR')` — RTPR 전용 anchor map 조회
+3. ticker별 반복:
+   - anchor 없으면 7일 fallback
+   - `getConfirmedEmptyRange(ticker, 'rtpr_press_release')` — confirmed-empty skip
+   - `fetchRtprArticlesByTicker(ticker, 100)` — RTPR API 호출
+   - articles 0건이면 confirmed-empty 기록
+   - anchor 이후 articles만 필터 → DB insert
+4. `mergeChangeForNewItems(newItems)` — OHLC change% 자동 계산
+5. `setLastSuccess('rtpr_press_release', ...)` — 상태 기록
+
+#### 검증 결과
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | backend tsc --noEmit 0 errors |
+| 빌드 | ✅ | backend tsc + frontend vite build 모두 통과 |
+| 런타임 1차 pull | ✅ | "Starting RTPR recent pull — 1698 tickers", "1673 tickers have no prior RTPR data → 7d fallback", per-ticker 로그 정상 (예: "RTPR BSX: 14 new (14 fetched)") |
+| 런타임 2차 pull | ✅ | fallback count 1673 → 1645 감소 (28개 ticker에 anchor 생성), confirmed-empty skip 동작 확인 |
+| DB 상태 | ✅ | RTPR total: 190건, unique tickers: 113 (증분 수집 정상) |
+| change% merge | ⚠️ | 두 테스트 모두 cancel로 종료해서 merge 미실행. 완전 run 시 정상 실행 예상 |
+
+#### 리스크 / 완화
+
+1. **리스크:** 1698 tickers × 60 rpm = ~31분 소요.
+   - 완화 1: confirmed-empty가 모이면 2차부터 대부분 skip → 속도 대폭 개선.
+   - 완화 2: 필요 시 RTPR 전용 concurrency(현재 1)를 rate limiter 범위 내에서 조절 가능.
+2. **리스크:** `getTickerAnchorMap` source 파라미터 추가가 기존 Finnhub 호출에 영향.
+   - 완화: 기본값 `'FINNHUB'`로 설정 → 기존 코드 무변경.
+3. **리스크:** confirmed-empty key `'rtpr_press_release'`가 `confirmed_empty_ranges` 테이블 source_type 컬럼에 새 값으로 들어감.
+   - 완화: `UNIQUE(ticker, source_type)` 제약으로 Finnhub `'press_release'`와 충돌 없음.

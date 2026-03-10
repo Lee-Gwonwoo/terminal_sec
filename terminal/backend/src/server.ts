@@ -899,17 +899,18 @@ app.post("/api/news/pull-rtpr", async (req, res, next) => {
       activePullJobs.delete(rtprJobKey);
     }
 
-    // For recent mode: just fetch latest 100 articles globally
-    // For custom mode: fetch per-ticker from universe (RTPR has no date range param, but we filter by date after fetch)
-    let tickerList: string[] = [];
-    if (isCustom) {
-      tickerList = await getDefaultUniverseTickers();
-    }
+    // Both modes use per-ticker fetch from universe
+    const tickerList = await getDefaultUniverseTickers();
 
-    const totalSteps = isCustom ? tickerList.length : 1;
-    const jobId = createJob(totalSteps);
+    const jobId = createJob(tickerList.length);
     activePullJobs.set(rtprJobKey, jobId);
-    appendLog(jobId, `Starting RTPR ${input.mode} pull`);
+    appendLog(jobId, `Starting RTPR ${input.mode} pull — ${tickerList.length} tickers`);
+
+    // For recent mode, load RTPR-specific anchor map
+    let rtprAnchorMap: Map<string, string> | undefined;
+    if (!isCustom) {
+      rtprAnchorMap = await getTickerAnchorMap("press_release", "RTPR");
+    }
 
     res.json({ jobId });
 
@@ -917,42 +918,87 @@ app.post("/api/news/pull-rtpr", async (req, res, next) => {
     (async () => {
       const counters = { totalInserted: 0, totalSkipped: 0 };
       const newItems: Array<{ id: string; tickers: string[]; publishedAt: string }> = [];
+      const fallback7d = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10);
+      const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+      // Use 'rtpr_press_release' as confirmed-empty key to separate from Finnhub's 'press_release'
+      const confirmedEmptyKey = "rtpr_press_release";
 
       try {
         if (!isCustom) {
-          // Recent mode: fetch latest articles across all tickers
-          appendLog(jobId, `Fetching latest RTPR articles (limit=100)...`);
-          const items = await fetchRtprArticles(100);
-          appendLog(jobId, `Fetched ${items.length} articles from RTPR`);
-
-          for (const rawItem of items) {
-            const inserted = await insertNewsItem({
-              publishedAt: rawItem.publishedAt,
-              source: rawItem.source,
-              sourceType: rawItem.sourceType,
-              title: rawItem.title,
-              body: rawItem.body,
-              url: rawItem.url,
-              tickers: rawItem.providerTickers,
-              tags: rawItem.tags,
-              publisher: rawItem.publisher,
-            });
-            if (inserted) {
-              counters.totalInserted++;
-              newItems.push({
-                id: inserted.id,
-                tickers: inserted.tickers,
-                publishedAt: inserted.published_at,
-              });
-              streamHub.publishNews(inserted);
-            } else {
-              counters.totalSkipped++;
-            }
+          // ── Recent mode: per-ticker incremental with anchor + confirmed-empty skip ──
+          const fallbackCount = tickerList.filter(
+            (t) => !rtprAnchorMap!.has(t.toUpperCase()),
+          ).length;
+          if (fallbackCount > 0) {
+            appendLog(jobId, `${fallbackCount} tickers have no prior RTPR data → 7d fallback`);
           }
-          updateProgress(jobId, 1);
-          appendLog(jobId, `Inserted: ${counters.totalInserted}, Skipped (dup): ${counters.totalSkipped}`);
+
+          for (let i = 0; i < tickerList.length; i++) {
+            if (isJobCancelled(jobId)) {
+              appendLog(jobId, `🛑 Cancelled — stopping ticker processing`);
+              break;
+            }
+            const ticker = tickerList[i];
+            const anchor = rtprAnchorMap!.get(ticker.toUpperCase());
+            const tickerFrom = anchor ? anchor.slice(0, 10) : fallback7d;
+
+            // Check confirmed-empty range
+            const emptyRange = await getConfirmedEmptyRange(ticker, confirmedEmptyKey);
+            if (emptyRange && tickerFrom >= emptyRange.rangeFrom && yesterday <= emptyRange.rangeTo) {
+              updateProgress(jobId, i + 1);
+              continue; // silently skip — no log for clean output
+            }
+
+            try {
+              const items = await fetchRtprArticlesByTicker(ticker, 100);
+
+              // Record confirmed-empty if API returned 0 articles for this ticker
+              if (items.length === 0 && tickerFrom <= yesterday) {
+                await recordConfirmedEmpty(ticker, confirmedEmptyKey, tickerFrom, yesterday);
+                updateProgress(jobId, i + 1);
+                continue;
+              }
+
+              // Filter by anchor date — keep only items newer than anchor
+              const filtered = items.filter(
+                (item) => item.publishedAt.slice(0, 10) >= tickerFrom,
+              );
+
+              for (const rawItem of filtered) {
+                const inserted = await insertNewsItem({
+                  publishedAt: rawItem.publishedAt,
+                  source: rawItem.source,
+                  sourceType: rawItem.sourceType,
+                  title: rawItem.title,
+                  body: rawItem.body,
+                  url: rawItem.url,
+                  tickers: rawItem.providerTickers,
+                  tags: rawItem.tags,
+                  publisher: rawItem.publisher,
+                });
+                if (inserted) {
+                  counters.totalInserted++;
+                  newItems.push({
+                    id: inserted.id,
+                    tickers: inserted.tickers,
+                    publishedAt: inserted.published_at,
+                  });
+                  streamHub.publishNews(inserted);
+                } else {
+                  counters.totalSkipped++;
+                }
+              }
+              if (filtered.length > 0) {
+                appendLog(jobId, `  RTPR ${ticker}: ${filtered.length} new (${items.length} fetched)`);
+              }
+            } catch (err: any) {
+              console.error(`[pull-rtpr] ${ticker}: ${err.message}`);
+              appendLog(jobId, `  ⚠ RTPR ${ticker}: ${err.message}`);
+            }
+            updateProgress(jobId, i + 1);
+          }
         } else {
-          // Custom mode: per-ticker fetch
+          // ── Custom mode: per-ticker fetch with explicit date range filter ──
           const effectiveFrom = input.from!;
           const effectiveTo = input.to ?? new Date().toISOString().slice(0, 10);
           appendLog(jobId, `Custom mode: ${effectiveFrom} ~ ${effectiveTo}, ${tickerList.length} tickers`);
@@ -1004,14 +1050,39 @@ app.post("/api/news/pull-rtpr", async (req, res, next) => {
             }
             updateProgress(jobId, i + 1);
           }
-          appendLog(jobId, `Total: inserted=${counters.totalInserted}, skipped=${counters.totalSkipped}`);
         }
+
+        appendLog(jobId, `Total: inserted=${counters.totalInserted}, skipped=${counters.totalSkipped}`);
+
+        // ── Merge change% for newly inserted items ──
+        let changeMergeResult = { merged: 0, skipped: 0 };
+        if (newItems.length > 0 && !isJobCancelled(jobId)) {
+          appendLog(jobId, `Merging change% for ${newItems.length} new items...`);
+          try {
+            changeMergeResult = await mergeChangeForNewItems(newItems, undefined, () => isJobCancelled(jobId));
+            appendLog(jobId, `Change merge: ${changeMergeResult.merged} merged, ${changeMergeResult.skipped} skipped`);
+          } catch (err: any) {
+            console.error(`[pull-rtpr] change merger error: ${err.message}`);
+            appendLog(jobId, `⚠ Change merge error: ${err.message}`);
+          }
+        }
+
+        // ── Update status ──
+        await setLastSuccess("rtpr_press_release", new Date().toISOString(), {
+          mode: input.mode,
+          tickerCount: tickerList.length,
+          inserted: counters.totalInserted,
+          skipped: counters.totalSkipped,
+          changeMerged: changeMergeResult.merged,
+        });
 
         completeJob(jobId, {
           source: "RTPR",
           mode: input.mode,
+          tickerCount: tickerList.length,
           inserted: counters.totalInserted,
           skipped: counters.totalSkipped,
+          changeMerged: changeMergeResult.merged,
         });
         activePullJobs.delete(rtprJobKey);
       } catch (err: any) {

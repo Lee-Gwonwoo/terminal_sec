@@ -402,6 +402,38 @@ Invoke-RestMethod -Uri "http://localhost:8080/api/news?source_type=press_release
 ```
 사용자 확인 필요: **예**
 
+#### ⏳ Step 6 — RTPR Recent 증분 구조 리팩터 (Finnhub 동등)
+
+사용자 요청: "기본 유니버스 ticker 목록 → ticker별 anchor → confirmed-empty skip → change% merge — Finnhub recent과 동일 구조로"
+
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 6-1 | `getTickerAnchorMap` source 파라미터 추가 (기본 `'FINNHUB'`) | `finnhubNewsProvider.ts` | tsc 통과 + 기존 Finnhub 호출 영향 없음 | ⏳ |
+| 6-2 | `pull-rtpr` recent 모드 → per-ticker 증분 (anchor + confirmed-empty skip) | `server.ts` | tsc 통과 + 런타임 per-ticker 로그 확인 | ⏳ |
+| 6-3 | `pull-rtpr` 양쪽 mode에 change% merge 추가 | `server.ts` | job 완료 시 changeMerged > 0 확인 | ⏳ |
+| 6-4 | Frontend 버튼 설명 텍스트 업데이트 | `FinnhubNewsWindow.tsx` | vite build 통과 | ⏳ |
+
+- `6-1` 목적: RTPR anchor map을 조회할 수 있도록 `getTickerAnchorMap(sourceType, source)` 확장.
+  - 기존 `getTickerAnchorMap('company_news')` / `getTickerAnchorMap('press_release')` 호출은 기본 source='FINNHUB'로 동작하므로 영향 없음.
+- `6-2` 목적: RTPR recent 모드를 "글로벌 100건 스냅샷"에서 "ticker별 증분"으로 변경.
+  - universe ticker 목록 로드 → RTPR anchor map 조회 → ticker별 API 호출 + anchor 이후만 필터 → confirmed-empty 기록/skip
+  - confirmed-empty key: `'rtpr_press_release'` (Finnhub의 `'press_release'`와 분리)
+- `6-3` 목적: 신규 RTPR 뉴스에 대해 OHLC change% 자동 계산.
+  - `mergeChangeForNewItems(newItems)` — job 종료 직전 실행
+  - `setLastSuccess('rtpr_press_release', ...)` — update status 기록
+- `6-4` 목적: UI 설명을 "Latest 100"에서 "Per-ticker incremental" 으로 갱신.
+
+검증 훅:
+```powershell
+# 1차 pull: per-ticker 로그 확인
+$resp = Invoke-RestMethod -Uri "http://localhost:8080/api/news/pull-rtpr" -Method Post -ContentType "application/json" -Body '{"mode":"recent"}'
+Start-Sleep 20
+$job = Invoke-RestMethod -Uri "http://localhost:8080/api/jobs/$($resp.jobId)"
+$job.logs | Select-Object -First 5
+# confirmed-empty 동작 확인: 2차 run에서 fallback 수 감소
+```
+사용자 확인 필요: **예**
+
 ### 실행 의존성 그래프 (갱신)
 Legend: `✅` 완료+사용자확인 / `⏳` 완료, 사용자확인 대기 / `⬜` 미착수 / `🚫` 차단
 
@@ -426,6 +458,12 @@ Legend: `✅` 완료+사용자확인 / `⏳` 완료, 사용자확인 대기 / `�
     ⏳ 5-1 DB row 존재 확인 (100건 insert 성공)
     ⏳ 5-2 sourceType 필터 호환 (press_release 필터 시 RTPR 포함 확인)
     ⏳ 5-3 중복 방지 확인 (2차 pull: inserted=0, skipped=100)
+
+  ⏳ Step 6 RTPR Recent 증분 구조 리팩터
+    ⏳ 6-1 getTickerAnchorMap source 파라미터 추가
+    ⏳ 6-2 pull-rtpr recent → per-ticker 증분
+    ⏳ 6-3 change% merge 추가
+    ⏳ 6-4 Frontend 버튼 설명 업데이트
 ```
 
 병렬 트랙 요약:
