@@ -1726,3 +1726,15 @@ Track H도 완료되었다 (Step 9). calendar backend mode 계약 (backfill/refr
   - 속도: ticker 100개 기준 ~20초 → ~7초 (약 3배 개선).
   - 안전성: Finnhub free tier 60/min 한계 내에서 동작. 429 발생 시 자동 백오프.
   - DB에 이미 OHLC가 있는 ticker는 Finnhub 호출 자체가 발생하지 않으므로, 2회차 이후는 거의 즉시 완료.
+
+### PLAN CHANGE (2026-03-10) — Market News 날짜 필터 표시 오동작 수정
+
+- 왜: 사용자가 Market News에서 날짜 필터를 걸었는데 상단 날짜가 범위 밖 날짜로 보여 필터가 안 먹는 것처럼 보인다고 보고했다.
+- 무엇이 바뀌었나:
+   - `FinnhubNewsWindow.tsx`의 fresh fetch 경로에서 새 결과를 받을 때 `stickyDate`를 먼저 초기화한다.
+   - 응답 반영 직후 `react-window` 리스트를 맨 위로 `scrollTo(0)` 하도록 바꿨다.
+   - 새 결과의 첫 row 기준으로 sticky 날짜를 다시 설정해 이전 스크롤 위치/이전 날짜 header가 남지 않게 했다.
+- 영향:
+   - `/api/news` 백엔드 날짜 필터는 기존대로 유지된다.
+   - 사용자가 `from`/`to` 또는 source type을 바꿔 새 조회를 하면, 리스트와 상단 날짜 header가 항상 새 결과의 첫 날짜부터 다시 보인다.
+   - 필터 후 상단에 범위 밖 날짜가 남아 “market news 날짜 필터가 안 된다”처럼 보이던 UI 오해를 줄인다.

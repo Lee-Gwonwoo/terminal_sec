@@ -1672,3 +1672,51 @@ Change % 계산에 필요한 OHLC 데이터 소스를 IBKR → Finnhub로 전환
 
 #### 비고
 - 상태: 확인 대기(awaiting user confirmation).
+
+---
+
+### 2026-03-10 01:06 — Market News 날짜 필터 표시 오동작 수정
+
+#### 작업 내용
+사용자 보고: Market News에 날짜 필터를 걸어도 범위 밖 날짜가 상단에 보여 필터가 잘 안 되는 것처럼 보임.
+
+원인 확인:
+- backend `GET /api/news?source_names=FINNHUB&source_type=market_news&from=2026-01-01&to=2026-02-28` 직접 호출 결과는 범위 안 데이터만 반환됨.
+- 실제 문제는 `FinnhubNewsWindow.tsx`에서 fresh fetch 후에도 `react-window` 스크롤 위치와 sticky 날짜 header가 이전 상태를 잠시/계속 유지하는 UI 쪽 표시 문제였음.
+
+#### 변경 파일
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+  - fresh fetch 시작 시 `stickyDate` 초기화
+  - 새 결과 반영 후 `listRef.current?.scrollTo(0)` 수행
+  - 새 결과 첫 item 기준으로 sticky 날짜 재설정
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+  - PLAN CHANGE 추가
+
+#### 검증 방법
+1. backend 직접 호출:
+   - `Invoke-RestMethod 'http://localhost:8080/api/news?source_names=FINNHUB&source_type=market_news&from=2026-01-01&to=2026-02-28&limit=1'`
+   - 반환된 `published_at`이 범위 안인지 확인
+2. 프론트 빌드:
+   - `cd termina_web/figma_code/terminal_ui_ver2_finhub`
+   - `npm run build`
+3. 브라우저에서 Market News 선택 후 날짜를 `2026-01-01 ~ 2026-02-28`로 두고 조회
+   - 상단 sticky 날짜가 범위 안 첫 날짜로 리셋되는지 확인
+   - 이전에 보던 3월 날짜 header가 남지 않는지 확인
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 프론트 변경 후 `npm run build` 통과 |
+| 빌드 | ✅ | frontend build 성공 |
+| 자동 테스트 | ✅ | 기존 backend test 48/48 pass 상태 유지 |
+| 런타임 통합 | ✅ | backend API 직접 호출로 날짜 필터 정상 확인, UI는 코드 리뷰 + 브라우저 시각 확인 사용자 위임 |
+
+#### 문제점 / 리스크
+1. 이번 수정은 표시/UI 리셋 문제를 고친 것이며, market news 수집 범위 자체(Finnhub history depth)는 별도 제약으로 남아 있다.
+   - 완화 방안 1: custom market update 설명 문구 유지
+   - 완화 방안 2: 필요 시 job log에서 reached-from-date / page-limit 로그를 추가 확인
+2. 사용자가 local sort를 건 상태에서 fresh fetch를 반복하면 정렬된 첫 row 기준으로 sticky 날짜가 보인다.
+   - 완화 방안 1: 현재 동작은 정렬 결과와 일관적임
+   - 완화 방안 2: 필요 시 후속 작업에서 필터 변경 시 sort reset 정책 별도 논의
+
+#### 비고
+- 상태: 확인 대기(awaiting user confirmation).

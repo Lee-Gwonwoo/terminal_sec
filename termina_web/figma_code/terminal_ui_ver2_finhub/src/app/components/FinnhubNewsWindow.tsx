@@ -569,6 +569,7 @@ export function FinnhubNewsWindow({
     setLoading(true);
     setError(null);
     setNextCursor(null);
+    setStickyDate('');
     try {
       const params = new URLSearchParams();
       params.set('source_names', 'FINNHUB');
@@ -600,8 +601,13 @@ export function FinnhubNewsWindow({
         return;
       }
       const items: BackendNewsItem[] = data.items ?? [];
-      setNewsData(items.map(mapBackendItem));
+      const mappedItems = items.map(mapBackendItem);
+      setNewsData(mappedItems);
       setNextCursor(data.nextCursor ?? null);
+      requestAnimationFrame(() => {
+        listRef.current?.scrollTo(0);
+        setStickyDate(mappedItems[0]?.date ?? '');
+      });
     } catch (err: any) {
       if (err.name === 'AbortError') return; // stale request — ignore
       setError(err.message || 'Failed to fetch news');
