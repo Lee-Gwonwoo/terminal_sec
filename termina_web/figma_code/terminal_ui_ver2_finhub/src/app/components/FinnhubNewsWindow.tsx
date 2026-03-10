@@ -872,10 +872,16 @@ export function FinnhubNewsWindow({
     setError(null);
     setJobStatus(null);
     try {
+      // Read concurrency from Settings (localStorage)
+      let concurrency = 10;
+      try {
+        const v = parseInt(localStorage.getItem('ft-concurrency') ?? '', 10);
+        if (v >= 1 && v <= 200) concurrency = v;
+      } catch { /* ignore */ }
       const res = await fetch(`${API_BASE}/api/news/fulltext/update`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sourceType }),
+        body: JSON.stringify({ sourceType, concurrency }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -888,6 +894,20 @@ export function FinnhubNewsWindow({
       setError(err.message || 'Failed to start fulltext extraction');
       setFtUpdating(false);
     }
+  };
+
+  /** Reset failed/unavailable fulltext rows and start re-extraction */
+  const handleResetAndRetry = async () => {
+    if (updating || ftUpdating) return;
+    try {
+      const resetRes = await fetch(`${API_BASE}/api/news/fulltext/reset-failed`, { method: 'POST' });
+      const resetData = await resetRes.json();
+      console.log(`[fulltext] reset-failed: deleted ${resetData.deleted} rows`);
+    } catch (err: any) {
+      console.error('[fulltext] reset-failed error:', err);
+    }
+    // Now trigger full extraction for all items
+    await handleFulltextUpdate('all');
   };
 
   // ─── Main button label (reflects last used config) ───
@@ -1814,6 +1834,11 @@ export function FinnhubNewsWindow({
                       <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('market_news'); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <FileText className="w-3.5 h-3.5 shrink-0 text-amber-500" />
                         <div><div className="font-medium">Market News Only</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Attempt extraction for market_news items</div></div>
+                      </button>
+                      <hr className="my-1 border-gray-200 dark:border-gray-700" />
+                      <button onClick={async () => { setShowFtMenu(false); await handleResetAndRetry(); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50 text-red-600 dark:text-red-400">
+                        <RotateCw className="w-3.5 h-3.5 shrink-0" />
+                        <div><div className="font-medium">Reset Failed & Retry</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">이전 실패 행 삭제 후 body fallback으로 재시도</div></div>
                       </button>
                     </div>
                   </div>

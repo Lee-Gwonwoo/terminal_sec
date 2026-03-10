@@ -40,7 +40,7 @@ import {
 import type { FinnhubMappedItem } from "./services/finnhubNewsProvider.js";
 import { mergeChangeForNewItems, bulkUpdateRecentChange, bulkUpdateCustomChange } from "./services/newsChangeMerger.js";
 import { createJob, getJob, updateProgress, appendLog, completeJob, failJob, cancelJob, isJobCancelled } from "./services/jobManager.js";
-import { getFulltext, getUnextractedNewsIds } from "./services/fulltextRepository.js";
+import { getFulltext, getUnextractedNewsIds, deleteFailedFulltextRows, getFulltextStats } from "./services/fulltextRepository.js";
 import { runFulltextUpdate, runFulltextPlainTextBackfill } from "./services/fulltextUpdateService.js";
 import { backfillPublisher } from "./services/finnhubNewsProvider.js";
 import { validateAnalysisCompleteness } from "./services/aiAnalysisRepository.js";
@@ -691,6 +691,7 @@ app.post("/api/jobs/:jobId/cancel", (req, res) => {
 app.post("/api/news/fulltext/update", async (req, res, next) => {
   try {
     const sourceType: string | undefined = req.body?.sourceType; // 'all' | 'company_news' | 'press_release'
+    const concurrency: number = Math.max(1, Math.min(Number(req.body?.concurrency) || 10, 200));
 
     // backfill publisher for any rows missing it
     await backfillPublisher();
@@ -700,11 +701,11 @@ app.post("/api/news/fulltext/update", async (req, res, next) => {
     const jobId = createJob(total);
 
     // Fire-and-forget background job
-    runFulltextUpdate(jobId, sourceType).catch((err) => {
+    runFulltextUpdate(jobId, sourceType, concurrency).catch((err) => {
       console.error("[fulltext-update] unhandled:", err);
     });
 
-    res.json({ jobId, total });
+    res.json({ jobId, total, concurrency });
   } catch (error) {
     next(error);
   }
@@ -718,6 +719,27 @@ app.post("/api/news/fulltext/backfill-plaintext", async (_req, res, next) => {
       console.error("[fulltext-backfill] unhandled:", err);
     });
     res.json({ jobId });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Full text: stats & reset failed ──
+// NOTE: these must be before :newsId to avoid Express treating "stats" as a param
+
+app.get("/api/news/fulltext/stats", async (_req, res, next) => {
+  try {
+    const rows = await getFulltextStats();
+    res.json({ stats: rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/news/fulltext/reset-failed", async (_req, res, next) => {
+  try {
+    const deleted = await deleteFailedFulltextRows();
+    res.json({ deleted });
   } catch (error) {
     next(error);
   }

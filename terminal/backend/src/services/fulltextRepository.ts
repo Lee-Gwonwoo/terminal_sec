@@ -18,6 +18,7 @@ export interface UnextractedNewsRow {
   id: string;
   url: string;
   publisher: string | null;
+  body: string | null;
 }
 
 // ─── Queries ───
@@ -71,7 +72,7 @@ export async function getUnextractedNewsIds(
     params.push(sourceType);
   }
   return getDb().all<UnextractedNewsRow[]>(
-    `SELECT ni.id, ni.url, ni.publisher
+    `SELECT ni.id, ni.url, ni.publisher, ni.body
      FROM news_items ni
      LEFT JOIN news_fulltext nf ON nf.news_id = ni.id
      WHERE nf.news_id IS NULL${whereExtra}
@@ -108,5 +109,30 @@ export async function updateKeywords(
      SET keywords_json = ?, keywords_status = 'ready', keywords_updated_at = ?
      WHERE news_id = ?`,
     [JSON.stringify(keywords), now, newsId],
+  );
+}
+
+/**
+ * Delete failed/unavailable fulltext rows so they can be re-extracted.
+ * Returns the number of rows deleted.
+ */
+export async function deleteFailedFulltextRows(): Promise<number> {
+  const result = await getDb().run(
+    `DELETE FROM news_fulltext WHERE extraction_status IN ('failed', 'unavailable')`,
+  );
+  return result.changes ?? 0;
+}
+
+/**
+ * Get extraction status summary for UI display.
+ */
+export async function getFulltextStats(): Promise<
+  { extraction_status: string; extraction_note: string | null; cnt: number }[]
+> {
+  return getDb().all(
+    `SELECT nf.extraction_status, nf.extraction_note, COUNT(*) as cnt
+     FROM news_fulltext nf
+     GROUP BY nf.extraction_status, nf.extraction_note
+     ORDER BY cnt DESC`,
   );
 }

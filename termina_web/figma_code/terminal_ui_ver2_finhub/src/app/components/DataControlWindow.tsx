@@ -84,6 +84,19 @@ export function DataControlWindow({
     return 'updates';
   });
 
+  // ─── Full Text Concurrency ───
+  const [ftConcurrency, setFtConcurrency] = useState(() => {
+    try {
+      const v = parseInt(localStorage.getItem('ft-concurrency') ?? '', 10);
+      return v >= 1 && v <= 200 ? v : 10;
+    } catch { return 10; }
+  });
+  const saveFtConcurrency = (n: number) => {
+    const v = Math.max(1, Math.min(200, n));
+    setFtConcurrency(v);
+    try { localStorage.setItem('ft-concurrency', String(v)); } catch { /* SSR */ }
+  };
+
   // ─── Custom Change date range input ───
   const [customChangeFrom, setCustomChangeFrom] = useState('');
   const [customChangeTo, setCustomChangeTo] = useState(() => new Date().toISOString().slice(0, 10));
@@ -519,6 +532,41 @@ export function DataControlWindow({
                   <span className="text-[11px] text-gray-500 w-5 text-right">A</span>
                 </div>
               </div>
+            </div>
+          </div>
+          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">
+            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">Full Text Extraction</h3>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3">
+              Concurrency: 동시에 full text를 추출하는 병렬 요청 수. 높을수록 빠르지만, 200 이상은 사이트 차단 위험.
+            </p>
+            <div className="flex gap-2 mb-3 flex-wrap">
+              {[10, 50, 100, 200].map(preset => (
+                <button
+                  key={`ft-c-${preset}`}
+                  onClick={() => saveFtConcurrency(preset)}
+                  className={`px-3 py-1 rounded border text-xs font-medium transition-colors ${
+                    ftConcurrency === preset
+                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+                      : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200'
+                  }`}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-[11px] text-gray-500 w-6">1</span>
+              <input
+                type="range"
+                min={1}
+                max={200}
+                step={1}
+                value={ftConcurrency}
+                onChange={e => saveFtConcurrency(parseInt(e.target.value, 10))}
+                className="flex-1 accent-blue-500"
+              />
+              <span className="text-[11px] text-gray-500 w-8 text-right">200</span>
+              <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300 w-10 text-right">{ftConcurrency}</span>
             </div>
           </div>
         </div>

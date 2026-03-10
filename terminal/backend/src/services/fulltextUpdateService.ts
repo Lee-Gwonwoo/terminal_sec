@@ -10,22 +10,21 @@ import { extractByDomain, htmlToPlainText } from "./fulltextExtractors.js";
 import { updateProgress, appendLog, completeJob, failJob, isJobCancelled } from "./jobManager.js";
 import { getDb } from "../db.js";
 
-/** Delay between requests to the same domain (ms) */
-const DOMAIN_DELAY_MS = 400;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+/** Default concurrency for full text extraction */
+const DEFAULT_CONCURRENCY = 10;
+const MAX_CONCURRENCY = 200;
 
 export async function runFulltextUpdate(
   jobId: string,
   sourceType?: string,
+  concurrency: number = DEFAULT_CONCURRENCY,
 ): Promise<void> {
+  const effectiveConcurrency = Math.max(1, Math.min(concurrency, MAX_CONCURRENCY));
   try {
     const unextracted = await getUnextractedNewsIds(sourceType);
     const total = unextracted.length;
 
-    appendLog(jobId, `Starting full text extraction: ${total} unextracted news items`);
+    appendLog(jobId, `Starting full text extraction: ${total} items, concurrency=${effectiveConcurrency}`);
     updateProgress(jobId, 0);
 
     if (total === 0) {
@@ -37,14 +36,16 @@ export async function runFulltextUpdate(
     let successCount = 0;
     let skippedCount = 0;
     let failedCount = 0;
+    let processed = 0;
+    let lastLogAt = 0;
 
-    for (let i = 0; i < unextracted.length; i++) {
-      if (isJobCancelled(jobId)) { appendLog(jobId, '🛑 Cancelled by user'); break; }
-      const item = unextracted[i];
+    /** Process a single news item */
+    async function processOne(item: typeof unextracted[0]) {
+      if (isJobCancelled(jobId)) return;
       const publisher = item.publisher ?? "UNKNOWN";
 
       try {
-        const result = await extractByDomain(item.url, item.publisher);
+        const result = await extractByDomain(item.url, item.publisher, item.body);
 
         await insertFulltext(item.id, {
           fullText: result.fullText,
@@ -53,47 +54,55 @@ export async function runFulltextUpdate(
           wordCount: result.wordCount,
         });
 
-        if (result.extractionStatus === "success") {
-          successCount++;
-        } else if (result.extractionStatus === "skipped") {
-          skippedCount++;
-        } else {
-          failedCount++;
-        }
-
-        // Log every 10 items or on failure
-        if ((i + 1) % 10 === 0 || result.extractionStatus === "failed") {
-          appendLog(
-            jobId,
-            `[${i + 1}/${total}] ${publisher} → ${result.extractionStatus}${
-              result.extractionNote ? ` (${result.extractionNote})` : ""
-            }`,
-          );
-        }
+        if (result.extractionStatus === "success") successCount++;
+        else if (result.extractionStatus === "skipped") skippedCount++;
+        else failedCount++;
       } catch (err: any) {
         failedCount++;
-        // Record failure but continue
         await insertFulltext(item.id, {
           fullText: "",
           extractionStatus: "failed",
           extractionNote: `unexpected: ${err.message?.slice(0, 200)}`,
         });
-        appendLog(jobId, `[${i + 1}/${total}] ${publisher} UNEXPECTED ERROR: ${err.message?.slice(0, 100)}`);
       }
 
-      updateProgress(jobId, i + 1);
+      processed++;
+      updateProgress(jobId, processed);
 
-      // Rate limit: delay between requests (skip delay for skipped/finnhub items)
-      if (publisher !== "FINNHUB" && i < unextracted.length - 1) {
-        await sleep(DOMAIN_DELAY_MS);
+      // Log every 20 items or on the last item
+      if (processed - lastLogAt >= 20 || processed === total) {
+        lastLogAt = processed;
+        appendLog(
+          jobId,
+          `[${processed}/${total}] ${successCount} ok, ${skippedCount} skip, ${failedCount} fail`,
+        );
       }
+    }
+
+    // ── Concurrent worker pool ──
+    // Node.js single-threaded event loop: cursor++ is safe (synchronous)
+    let cursor = 0;
+    async function worker() {
+      while (cursor < unextracted.length) {
+        if (isJobCancelled(jobId)) break;
+        const i = cursor++;
+        if (i >= unextracted.length) break;
+        await processOne(unextracted[i]);
+      }
+    }
+
+    const workerCount = Math.min(effectiveConcurrency, total);
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+    if (isJobCancelled(jobId)) {
+      appendLog(jobId, '🛑 Cancelled by user');
+      return;
     }
 
     appendLog(
       jobId,
       `Extraction complete: ${successCount} success, ${skippedCount} skipped, ${failedCount} failed (total ${total})`,
     );
-    if (isJobCancelled(jobId)) return;
     completeJob(jobId, {
       processed: total,
       success: successCount,

@@ -23,6 +23,9 @@ export interface ExtractionResult {
 
 // ─── Helpers ───
 
+/** Minimum body length (chars) to accept Finnhub body as fallback full text */
+const MIN_BODY_FALLBACK_LEN = 80;
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -100,7 +103,15 @@ async function fetchWithRetry(
 export async function extractNasdaq(url: string): Promise<ExtractionResult> {
   try {
     const res = await fetchWithRetry(url, {
-      headers: { "User-Agent": UA },
+      headers: {
+        "User-Agent": UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Upgrade-Insecure-Requests": "1",
+      },
     });
 
     if (!res.ok) {
@@ -242,33 +253,59 @@ export async function extractTmx(url: string): Promise<ExtractionResult> {
   }
 }
 
+// ─── Body Fallback Helper ───
+
+function bodyFallback(body: string | null, note: string): ExtractionResult {
+  if (body && body.length >= MIN_BODY_FALLBACK_LEN) {
+    // Strip potential HTML in the body field
+    const plain = /<[a-z][\s\S]*>/i.test(body) ? htmlToPlainText(body) : body.trim();
+    if (plain.length >= MIN_BODY_FALLBACK_LEN) {
+      return {
+        fullText: plain,
+        extractionStatus: "success",
+        extractionNote: `body-fallback (${note})`,
+        wordCount: countWords(plain),
+      };
+    }
+  }
+  return {
+    fullText: "",
+    extractionStatus: "unavailable",
+    extractionNote: note,
+  };
+}
+
 // ─── Domain Dispatcher ───
 
 export async function extractByDomain(
   url: string,
   publisher: string | null,
+  body?: string | null,
 ): Promise<ExtractionResult> {
   const pub = (publisher ?? "").toUpperCase();
 
   switch (pub) {
-    case "NASDAQ":
-      return extractNasdaq(url);
+    case "NASDAQ": {
+      const result = await extractNasdaq(url);
+      // If scraping failed (e.g. Akamai 403), fall back to body text
+      if (result.extractionStatus !== "success") {
+        return bodyFallback(body ?? null, `nasdaq-scrape-${result.extractionNote ?? "failed"}`);
+      }
+      return result;
+    }
 
-    case "TMX":
-      return extractTmx(url);
+    case "TMX": {
+      const result = await extractTmx(url);
+      if (result.extractionStatus !== "success") {
+        return bodyFallback(body ?? null, `tmx-${result.extractionNote ?? "failed"}`);
+      }
+      return result;
+    }
 
     case "FINNHUB":
-      return {
-        fullText: "",
-        extractionStatus: "skipped",
-        extractionNote: "finnhub-no-external-page",
-      };
+      return bodyFallback(body ?? null, "finnhub-no-external-page");
 
     default:
-      return {
-        fullText: "",
-        extractionStatus: "unavailable",
-        extractionNote: `unknown-domain: ${pub || "(empty)"}`,
-      };
+      return bodyFallback(body ?? null, `no-scraper: ${pub || "(empty)"}`);
   }
 }
