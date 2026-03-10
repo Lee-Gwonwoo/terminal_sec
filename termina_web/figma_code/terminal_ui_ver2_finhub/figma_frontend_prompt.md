@@ -364,11 +364,13 @@ localStorage 사용:
 
 저장되는 것:
 
-- `finhub-news-ui-state`: `visibleCols`, `displayMode`, `sourceTypeFilter`, `searchQuery`, `tickerQuery`, `fromDate`, `toDate`, `selectedBookmarkFolderId`
+- `finhub-news-ui-state`: `visibleCols`, `displayMode`, `sourceTypeFilter`, `fromDate`, `toDate`, `selectedBookmarkFolderId`
 - `terminal-workspace-v1`: 탭 순서, 탭/창 레이아웃, `isDarkMode`, `fontScale`, `newsTitleFontSize`, `newsSummaryFontSize`, `linkedTicker`
 - `data-control-active-tab`: DataControl Settings 탭 상태
 
 저장되지 않는 것:
+
+- Finnhub News의 일반 keyword 검색어와 ticker 검색어는 새로고침 후 복원하지 않는다. 새로고침 시 검색창은 빈 상태에서 시작한다.
 
 - saved searches는 component state만 사용한다
 - `nextCursor`, 누적 로드 페이지, in-flight loading 상태는 저장하지 않는다

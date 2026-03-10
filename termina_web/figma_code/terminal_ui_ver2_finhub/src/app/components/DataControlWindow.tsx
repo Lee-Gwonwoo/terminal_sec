@@ -369,12 +369,14 @@ export function DataControlWindow({
       label: 'Recent Change% Update',
       statusKey: 'news_change_recent',
       group: 'Change Update',
+      description: '최근 7일 뉴스 change % 재계산. DB에 OHLC가 없으면 Finnhub에서 가져옵니다.',
     },
     {
       key: 'custom',
       label: 'Custom Change% Update',
       statusKey: 'news_change_custom',
       group: 'Change Update',
+      description: '선택한 날짜 범위 뉴스 change % 재계산. DB에 OHLC가 없으면 Finnhub에서 가져옵니다.',
       extra: (
         <div className="flex items-center gap-2 flex-wrap">
           <label className="text-[11px] text-gray-500 dark:text-gray-400">From:</label>

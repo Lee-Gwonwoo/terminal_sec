@@ -1609,3 +1609,66 @@ npm run build
 
 - 이번 변경은 기존 북마크 메뉴를 제거하지 않고, 같은 row context menu 안에 `Copy ID`를 추가한 UI 확장이다.
 - 사용자 확인 전까지 상태는 `확인 대기(awaiting user confirmation)`로 유지한다.
+
+---
+
+### 2026-03-10 00:36 — 검색어 복원 제거 (새로고침 시 빈 상태)
+
+#### 작업 내용
+사용자가 웹 새로고침 시 SPX 등 이전 검색어가 복원되는 것을 빈 상태로 시작하도록 요청.
+
+#### 변경 파일
+- `FinnhubNewsWindow.tsx` — `searchQuery`, `tickerQuery` 초기값을 빈 문자열로 변경. `initialTicker` 참조 제거. localStorage 저장에서 두 필드 제외.
+- `figma_frontend_prompt.md` — `finhub-news-ui-state` localStorage 문서 업데이트.
+- `plan.md` — Step 3-4 설명, E2E 체크리스트 #19, Decision #4 saved state list 업데이트.
+
+#### 검증
+- 프론트 빌드 통과.
+- 상태: 확인 대기(awaiting user confirmation).
+
+---
+
+### 2026-03-10 01:00 — Change Update OHLC 소스 Finnhub 전환
+
+#### 작업 내용
+Change % 계산에 필요한 OHLC 데이터 소스를 IBKR → Finnhub로 전환. DB에 없는 ticker는 Finnhub `/stock/candle`에서 자동으로 가져와 OHLC DB에 저장 후 재시도.
+
+#### 변경 파일
+- `terminal/backend/src/services/finnhubOhlcProvider.ts` (신규) — Finnhub daily candle provider.
+- `terminal/backend/src/services/newsChangeMerger.ts` — Recent/Custom Change Update에 Finnhub OHLC fallback 추가:
+  - Phase 1: OHLC DB 조회
+  - Phase 1.5: 누락 ticker Finnhub fetch → DB upsert
+  - Phase 1.7: skip 항목 재시도
+  - 반환값에 `finnhubFetched` 추가
+- `FinnhubNewsWindow.tsx` — UI 설명에 "fetches missing OHLC from Finnhub" 추가.
+- `DataControlWindow.tsx` — Change Update description에 Finnhub fallback 설명 추가.
+- `terminal/backend_prompt.md` — change update API 엔드포인트 문서에 OHLC 소스 우선순위 명시.
+- `plan.md` — PLAN CHANGE 항목 추가.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `npx tsc --noEmit` 에러 0 (backend) |
+| 백엔드 빌드 | ✅ | `npx tsc --noEmit` 통과 |
+| 자동 테스트 | ✅ | `npm run test` → 48 tests passed (6 suites) |
+| 프론트 빌드 | ✅ | `npm run build` 성공 |
+| 런타임 통합 | ⏳ | Finnhub candle API 실제 호출은 사용자 검증 필요 |
+
+#### 검증 방법
+1. `terminal/backend`에서 `npm run build` 또는 `npx tsc --noEmit`으로 빌드 확인.
+2. `npm run test`로 기존 테스트 48개 통과 확인.
+3. News Feed에서 Recent Change% Update 실행 → DB에 없는 ticker의 OHLC가 Finnhub에서 자동 fetch됨.
+4. Custom Change% Update도 같은 동작 확인.
+5. Data Control Updates 탭에서 Change Update 설명에 Finnhub fallback 문구 확인.
+
+#### 문제점 / 리스크
+1. Finnhub free plan rate limit (60/min) — ticker가 많으면 느릴 수 있음.
+   - 완화: 150ms 딜레이 + 고유 ticker dedup으로 불필요한 호출 방지.
+2. Finnhub candle API가 일부 ticker에 대해 `no_data`를 반환할 수 있음.
+   - 완화: 해당 ticker는 skip하고 경고 로그 남김. DB에 데이터가 없으면 최종적으로 skipped로 집계.
+3. 기존 IBKR OHLC update 경로(`POST /api/ibkr/ohlc1d/update`)는 그대로 유지됨.
+   - DB에 이미 IBKR로 저장된 OHLC가 있으면 Finnhub 호출 없이 그 데이터 사용.
+
+#### 비고
+- 상태: 확인 대기(awaiting user confirmation).

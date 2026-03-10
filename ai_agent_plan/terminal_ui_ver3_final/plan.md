@@ -51,7 +51,7 @@
 - 현재 Finnhub News UI에는 검색용 날짜 기간 입력이 없고, `GET /api/news`의 `from`/`to` query를 검색 UX에 연결하지 않는다.
 - 현재 Finnhub News 검색은 DB 전체를 server-side로 조회하지만, 한 번의 응답은 최대 200개로 제한되어 있고 프론트는 그 결과를 append 하지 않고 통째로 교체한다.
 - backend `GET /api/news`는 `cursor`/`nextCursor` pagination 구조를 이미 갖고 있지만, 현재 Finnhub News UI는 이를 사용하지 않는다.
-- `FinnhubNewsWindow.tsx`는 `finnhub-last-update-config`와 `finnhub-news-ui-state`를 사용해 update/search/filter/display/column 상태를 localStorage에 저장한다.
+- `FinnhubNewsWindow.tsx`는 `finnhub-last-update-config`와 `finnhub-news-ui-state`를 사용해 update/filter/display/column 상태를 localStorage에 저장한다. 단, 일반 검색어와 ticker 검색어는 새로고침 시 복원하지 않는다.
 - 현재 `FinnhubNewsWindow.tsx`에는 source/url cell 우클릭 메뉴가 있으나 기능은 URL 복사 중심이며, 뉴스 row를 북마크 폴더에 넣는 메뉴는 없다.
 - 현재 Finnhub News UI에는 검색창 근처의 `Bookmark view` 또는 북마크 폴더 선택 UI가 없다.
 - `App.tsx`는 `terminal-workspace-v1`를 사용해 tabs, activeTabId, theme, linkedTicker, fontScale, News Feed title/summary font size를 저장/복원한다.
@@ -796,8 +796,8 @@ npm run build
 3-3 흔한 문제/주의: 렌더 재생성 시 key가 바뀌면 내부 state가 리셋된다.
 
 3-4 목적: 사용자가 말한 “마지막 상태”를 창 내부까지 확장한다.
-3-4 설명: 최소한 컬럼 가시성, source filter, 일반 검색어, ticker 검색어, 날짜 `from`/`to`, display mode, Settings active tab, font size는 저장한다. 다만 `nextCursor`, 현재까지 누적 로드된 페이지, in-flight loading 상태는 저장하지 않는다.
-3-4 완료 조건(눈으로 확인): News Feed 일반 검색/티커 검색/날짜 기간/컬럼 상태가 재실행 후 남아 있다.
+3-4 설명: 최소한 컬럼 가시성, source filter, 날짜 `from`/`to`, display mode, Settings active tab, font size는 저장한다. 다만 Finnhub News의 일반 검색어와 ticker 검색어는 새로고침 시 빈 상태로 시작하도록 저장하지 않고, `nextCursor`, 현재까지 누적 로드된 페이지, in-flight loading 상태도 저장하지 않는다.
+3-4 완료 조건(눈으로 확인): News Feed 컬럼/필터/날짜 기간 상태는 재실행 후 남아 있고, 일반 검색/티커 검색 입력창은 빈 상태로 시작한다.
 3-4 사람 검증(비개발자): 컬럼을 끄고 앱 재시작 후 그대로 꺼져 있다.
 3-4 흔한 문제/주의: 모든 transient state를 저장하면 오히려 버그가 늘 수 있다.
 
@@ -897,7 +897,7 @@ E2E 수동 검증 체크리스트 (1회 실행 순서):
 [Workspace persistence]
 □ 17. 탭 2개 생성, 각 탭 창 위치/크기 다르게 배치
 □ 18. 다크 모드 전환, 검색어 입력
-□ 19. 브라우저 새로고침 → 마지막 탭/창 배치/다크모드/검색어 복원 확인
+□ 19. 브라우저 새로고침 → 마지막 탭/창 배치/다크모드는 복원되고, Finnhub News 검색창은 빈 상태로 초기화되는지 확인
 □ 20. 탭 A → 탭 B → 탭 A 왕복 → 이전 상태 유지 확인
 □ 21. Settings에서 title/summary 글자 크기 변경 → 적용 확인 → 새로고침 후 유지 확인
 □ 22. Bookmark view에서 폴더 선택 → 새로고침 → 같은 폴더 view 복원 확인
@@ -1514,8 +1514,6 @@ Track H도 완료되었다 (Step 9). calendar backend mode 계약 (backfill/refr
 - 전체 글자 크기(`fontScale`)
 - News Feed 컬럼 on/off 상태
 - News Feed source filter
-- News Feed 일반 검색어
-- News Feed ticker 검색어
 - News Feed 날짜 `from`/`to`
 - News Feed display mode
 - News Feed bookmark mode on/off
@@ -1699,3 +1697,20 @@ Track H도 완료되었다 (Step 9). calendar backend mode 계약 (backfill/refr
 - 왜: 사용자가 market news는 날짜 분할보다 30페이지 단위 batch를 반복해서 이어받는 방식이 더 맞다고 지적했고, 기존 구현은 30페이지에서 조용히 멈춰 넓은 기간 custom update가 불완전해질 수 있었다.
 - 무엇이 바뀌었나: market news pull은 내부적으로 30페이지를 한 batch로 보고, `minId`를 이어받아 다음 batch를 계속 수행하도록 기준을 바꿨다. 동시에 job log에 batch 번호, 누적 페이지 수, in-range item 수, oldest published 시각, 종료 사유를 남기도록 정리했다.
 - 영향: custom market news update는 넓은 기간에서도 30페이지 한 번으로 끝나지 않고 더 오래된 페이지를 연속 배치로 탐색한다. 다만 총 페이지 guardrail에 도달하면 warning 로그를 남기고 다음 continuation cursor(`nextMinId`)를 남겨 운영자가 미완료 여부를 판단할 수 있다.
+
+### PLAN CHANGE (2026-03-10) — Change Update OHLC 소스 IBKR → Finnhub 전환
+
+- 왜: 사용자가 change % 계산에 필요한 OHLC 데이터를 IBKR 대신 Finnhub에서 가져오도록 요청했다.
+- 무엇이 바뀌었나:
+  - `finnhubOhlcProvider.ts` 신규 생성 — Finnhub `/stock/candle` API로 일간 OHLC 봉을 가져오는 provider.
+  - `newsChangeMerger.ts` — Recent/Custom Change Update 모두 아래 흐름으로 변경:
+    1. Phase 1: 기존처럼 OHLC DB에서 먼저 조회
+    2. Phase 1.5: DB에 데이터가 없는 ticker는 Finnhub에서 OHLC 가져와서 OHLC DB에 upsert
+    3. Phase 1.7: 이전에 skip된 항목을 재시도
+    4. Phase 2: batch write
+  - 반환 값에 `finnhubFetched` 필드 추가 (Finnhub에서 새로 가져온 ticker 수)
+- 영향:
+  - OHLC 소스 우선순위: OHLC DB → Finnhub (자동 fallback). IBKR OHLC update는 별도 경로로 유지.
+  - Finnhub rate limit (free: 60/min) 고려해 ticker 간 150ms 딜레이 적용.
+  - DB에 데이터가 있으면 Finnhub 호출 없이 그대로 사용 (custom update도 동일).
+  - 프론트 UI 설명에 "fetches missing OHLC from Finnhub" 문구 추가.

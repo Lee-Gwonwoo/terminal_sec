@@ -531,11 +531,15 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 ### `POST /api/news/change/update-recent`
 
+- 최근 7일 뉴스 change % 재계산. DB에 OHLC가 없는 ticker는 Finnhub `/stock/candle`에서 가져와 OHLC DB에 저장한 뒤 재시도한다.
+- OHLC 소스 우선순위: OHLC DB → Finnhub (자동 fallback)
 - 응답 컬럼: `[][][]jobId[][][]`
 
 ### `POST /api/news/change/update-custom`
 
 - 요청 body: `{ "from": "YYYY-MM-DD", "to": "YYYY-MM-DD" }`
+- 선택한 날짜 범위 뉴스 change % 재계산. DB에 OHLC가 없는 ticker는 Finnhub에서 가져와 OHLC DB에 저장한 뒤 재시도한다.
+- OHLC 소스 우선순위: OHLC DB → Finnhub (자동 fallback)
 - 응답 컬럼: `[][][]jobId[][][]`
 
 ### `GET /api/calendar/events`

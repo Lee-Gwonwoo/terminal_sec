@@ -4,6 +4,8 @@ import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { getDb } from "../db.js";
+import { fetchOhlcFromFinnhub } from "./finnhubOhlcProvider.js";
+import { upsertBars } from "./ohlcWatchlistRepository.js";
 
 // ---------- OHLC DB location ----------
 
@@ -220,6 +222,48 @@ async function computeMetricsForItem(
 
 const WRITE_CHUNK_SIZE = 1000;
 
+// ---------- Finnhub OHLC fallback ----------
+
+function shiftDate(dateStr: string, days: number): string {
+  const d = new Date(dateStr + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Fetch OHLC from Finnhub for a ticker and store in OHLC DB.
+ *  Skips if ticker was already attempted in this batch (dedup via fetchedSet).
+ *  Date range: 60 days before earliest news date → min(45 days after latest, today). */
+async function fetchAndStoreOhlcFromFinnhub(
+  ticker: string,
+  earlyDate: string,
+  lateDate: string,
+  fetchedSet: Set<string>,
+  delayMs = 150,
+): Promise<{ bars: number; error?: string }> {
+  if (fetchedSet.has(ticker)) return { bars: 0 };
+  fetchedSet.add(ticker);
+
+  const from = shiftDate(earlyDate, -60);
+  const today = new Date().toISOString().slice(0, 10);
+  const rawTo = shiftDate(lateDate, 45);
+  const to = rawTo > today ? today : rawTo;
+
+  try {
+    const bars = await fetchOhlcFromFinnhub(ticker, from, to);
+    if (bars.length > 0) {
+      await upsertBars(ticker, bars);
+    }
+    return { bars: bars.length };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[Finnhub OHLC fallback] ${ticker}: ${msg}`);
+    return { bars: 0, error: msg };
+  } finally {
+    // Rate-limit pause
+    if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+  }
+}
+
 async function batchWriteMetrics(metrics: ComputedMetrics[]): Promise<void> {
   if (metrics.length === 0) return;
   const db = getDb();
@@ -279,12 +323,13 @@ export async function mergeChangeForNewItems(
 
 /** Compute ALL standard change metrics (open, 1d, 7d, 14d, 30d) for news
  *  published within the last 7 calendar days.
+ *  Finnhub OHLC fallback: DB에 OHLC가 없는 ticker는 Finnhub에서 가져와 DB에 저장한 뒤 재시도.
  *  Progress callback: (completed, total) */
 export async function bulkUpdateRecentChange(
   onProgress?: (completed: number, total: number) => void,
   concurrency = DEFAULT_MERGE_CONCURRENCY,
   isCancelled?: () => boolean,
-): Promise<{ updated: number; skipped: number }> {
+): Promise<{ updated: number; skipped: number; finnhubFetched: number }> {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - 7);
   const cutoffIso = cutoff.toISOString();
@@ -297,41 +342,75 @@ export async function bulkUpdateRecentChange(
   );
 
   const computed: ComputedMetrics[] = [];
+  const missingOhlc: typeof rows = []; // items whose OHLC is not in DB
   let skipped = 0;
   let completed = 0;
 
-  // Phase 1: parallel reads
+  // Phase 1: parallel reads from OHLC DB
   await poolRun(rows, concurrency, async (row) => {
     const tickers = row.tickers_csv.split(",").map(t => t.trim()).filter(Boolean);
     const ticker = tickers[0];
     if (!ticker) { skipped++; } else {
       const m = await computeMetricsForItem(row.id, ticker, row.published_at);
-      if (m) { computed.push(m); } else { skipped++; }
+      if (m) { computed.push(m); } else { missingOhlc.push(row); }
     }
     completed++;
     if (onProgress && completed % 50 === 0) onProgress(completed, rows.length);
   }, isCancelled);
 
-  if (isCancelled?.()) return { updated: computed.length, skipped };
+  if (isCancelled?.()) return { updated: computed.length, skipped, finnhubFetched: 0 };
+
+  // Phase 1.5: Finnhub OHLC fallback for missing tickers
+  let finnhubFetched = 0;
+  if (missingOhlc.length > 0) {
+    const fetchedSet = new Set<string>();
+    const uniqueTickers = [...new Set(missingOhlc.map(r => {
+      const t = r.tickers_csv.split(",").map(s => s.trim()).filter(Boolean);
+      return t[0] ?? "";
+    }).filter(Boolean))];
+
+    const earlyDate = missingOhlc.reduce((min, r) => r.published_at < min ? r.published_at : min, missingOhlc[0].published_at).slice(0, 10);
+    const lateDate = missingOhlc.reduce((max, r) => r.published_at > max ? r.published_at : max, missingOhlc[0].published_at).slice(0, 10);
+
+    for (const ticker of uniqueTickers) {
+      if (isCancelled?.()) break;
+      const result = await fetchAndStoreOhlcFromFinnhub(ticker, earlyDate, lateDate, fetchedSet);
+      if (result.bars > 0) finnhubFetched++;
+    }
+
+    // Phase 1.7: Re-compute for previously missing items
+    if (!isCancelled?.()) {
+      await poolRun(missingOhlc, concurrency, async (row) => {
+        const tickers = row.tickers_csv.split(",").map(t => t.trim()).filter(Boolean);
+        const ticker = tickers[0];
+        if (!ticker) { skipped++; return; }
+        const m = await computeMetricsForItem(row.id, ticker, row.published_at);
+        if (m) { computed.push(m); } else { skipped++; }
+      }, isCancelled);
+    }
+  }
+
+  if (isCancelled?.()) return { updated: computed.length, skipped, finnhubFetched };
 
   // Phase 2: batch write
   await batchWriteMetrics(computed);
 
   if (onProgress) onProgress(rows.length, rows.length);
-  return { updated: computed.length, skipped };
+  return { updated: computed.length, skipped, finnhubFetched };
 }
 
 // ---------- Custom Change Update (date range, all metrics) ----------
 
 /** Compute ALL standard change metrics for news published within [from, to].
- *  from/to are ISO date strings (YYYY-MM-DD). */
+ *  from/to are ISO date strings (YYYY-MM-DD).
+ *  Finnhub OHLC fallback: DB에 OHLC가 없으면 Finnhub에서 가져와 DB에 저장한 뒤 재시도. */
 export async function bulkUpdateCustomChange(
   from: string,
   to: string,
   onProgress?: (completed: number, total: number) => void,
   concurrency = DEFAULT_MERGE_CONCURRENCY,
   isCancelled?: () => boolean,
-): Promise<{ updated: number; skipped: number }> {
+): Promise<{ updated: number; skipped: number; finnhubFetched: number }> {
   const fromIso = `${from}T00:00:00.000Z`;
   const toIso = `${to}T23:59:59.999Z`;
 
@@ -343,26 +422,59 @@ export async function bulkUpdateCustomChange(
   );
 
   const computed: ComputedMetrics[] = [];
+  const missingOhlc: typeof rows = [];
   let skipped = 0;
   let completed = 0;
 
-  // Phase 1: parallel reads
+  // Phase 1: parallel reads from OHLC DB
   await poolRun(rows, concurrency, async (row) => {
     const tickers = row.tickers_csv.split(",").map(t => t.trim()).filter(Boolean);
     const ticker = tickers[0];
     if (!ticker) { skipped++; } else {
       const m = await computeMetricsForItem(row.id, ticker, row.published_at);
-      if (m) { computed.push(m); } else { skipped++; }
+      if (m) { computed.push(m); } else { missingOhlc.push(row); }
     }
     completed++;
     if (onProgress && completed % 50 === 0) onProgress(completed, rows.length);
   }, isCancelled);
 
-  if (isCancelled?.()) return { updated: computed.length, skipped };
+  if (isCancelled?.()) return { updated: computed.length, skipped, finnhubFetched: 0 };
+
+  // Phase 1.5: Finnhub OHLC fallback for missing tickers
+  let finnhubFetched = 0;
+  if (missingOhlc.length > 0) {
+    const fetchedSet = new Set<string>();
+    const uniqueTickers = [...new Set(missingOhlc.map(r => {
+      const t = r.tickers_csv.split(",").map(s => s.trim()).filter(Boolean);
+      return t[0] ?? "";
+    }).filter(Boolean))];
+
+    const earlyDate = from;
+    const lateDate = to;
+
+    for (const ticker of uniqueTickers) {
+      if (isCancelled?.()) break;
+      const result = await fetchAndStoreOhlcFromFinnhub(ticker, earlyDate, lateDate, fetchedSet);
+      if (result.bars > 0) finnhubFetched++;
+    }
+
+    // Phase 1.7: Re-compute for previously missing items
+    if (!isCancelled?.()) {
+      await poolRun(missingOhlc, concurrency, async (row) => {
+        const tickers = row.tickers_csv.split(",").map(t => t.trim()).filter(Boolean);
+        const ticker = tickers[0];
+        if (!ticker) { skipped++; return; }
+        const m = await computeMetricsForItem(row.id, ticker, row.published_at);
+        if (m) { computed.push(m); } else { skipped++; }
+      }, isCancelled);
+    }
+  }
+
+  if (isCancelled?.()) return { updated: computed.length, skipped, finnhubFetched };
 
   // Phase 2: batch write
   await batchWriteMetrics(computed);
 
   if (onProgress) onProgress(rows.length, rows.length);
-  return { updated: computed.length, skipped };
+  return { updated: computed.length, skipped, finnhubFetched };
 }

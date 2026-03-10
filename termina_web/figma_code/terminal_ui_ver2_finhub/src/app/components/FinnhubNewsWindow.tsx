@@ -204,12 +204,11 @@ interface FinnhubNewsWindowProps {
 
 export function FinnhubNewsWindow({
   onTickerClick,
-  initialTicker,
   titleFontSize = 12,
   summaryFontSize = 11,
 }: FinnhubNewsWindowProps) {
-  const [searchQuery, setSearchQuery] = useState(initialTicker || '');
-  const [tickerQuery, setTickerQuery] = useState(initialTicker || '');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [tickerQuery, setTickerQuery] = useState('');
   const [fromDate, setFromDate] = useState(() => {
     try {
       const saved = localStorage.getItem('finhub-news-ui-state');
@@ -1092,21 +1091,19 @@ export function FinnhubNewsWindow({
     });
   }, [displayMode]);
 
-  // ─── Persist UI state (visibleCols / displayMode / sourceTypeFilter / searchQuery / tickerQuery / fromDate / toDate) ───
+  // ─── Persist UI state (visibleCols / displayMode / sourceTypeFilter / fromDate / toDate) ───
   useEffect(() => {
     try {
       localStorage.setItem('finhub-news-ui-state', JSON.stringify({
         visibleCols: Array.from(visibleCols),
         displayMode,
         sourceTypeFilter,
-        searchQuery,
-        tickerQuery,
         fromDate,
         toDate,
         selectedBookmarkFolderId,
       }));
     } catch { /* quota / SSR */ }
-  }, [visibleCols, displayMode, sourceTypeFilter, searchQuery, tickerQuery, fromDate, toDate, selectedBookmarkFolderId]);
+  }, [visibleCols, displayMode, sourceTypeFilter, fromDate, toDate, selectedBookmarkFolderId]);
 
   // ─── Save / Load ───
   const handleSaveSearch = () => {
@@ -1711,11 +1708,11 @@ export function FinnhubNewsWindow({
                       <div className="px-2 py-1 text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Change Update</div>
                       <button onClick={() => { setShowUpdateMenu(false); handleRecentChangeUpdate(); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <TrendingUp className="w-3.5 h-3.5 shrink-0 text-teal-500" />
-                        <div><div className="font-medium">Recent Change% Update</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Recalculate all change % for news from last 7 days</div></div>
+                        <div><div className="font-medium">Recent Change% Update</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Recalculate all change % for news from last 7 days · fetches missing OHLC from Finnhub</div></div>
                       </button>
                       <button onClick={() => { setShowUpdateMenu(false); setChangeCustomFrom(''); setChangeCustomTo(new Date().toISOString().slice(0, 10)); setShowChangeCustomDateModal(true); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <TrendingUp className="w-3.5 h-3.5 shrink-0 text-indigo-500" />
-                        <div><div className="font-medium">Custom Change% Update</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick date range · recalculate all change % for news in range</div></div>
+                        <div><div className="font-medium">Custom Change% Update</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick date range · recalculate all change % for news in range · fetches missing OHLC from Finnhub</div></div>
                       </button>
 
                       {/* ── Calendar Update ── */}
