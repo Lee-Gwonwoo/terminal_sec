@@ -89,8 +89,17 @@ app.use(express.json({ limit: "1mb" }));
 
 const DEMO_USER_ID = "11111111-1111-1111-1111-111111111111";
 
-// Adaptive batch concurrency levels for ticker fetching: 30 → 15 → 7 → 1
-const BATCH_LEVELS = [30, 15, 7, 1] as const;
+const DEFAULT_FINNHUB_TICKER_CONCURRENCY = 5;
+const DEFAULT_FINNHUB_REQUEST_INTERVAL_MS = 1000;
+
+function buildBatchLevels(requestedConcurrency: number): number[] {
+  const safeConcurrency = Math.max(1, Math.min(20, Math.floor(requestedConcurrency)));
+  const middleConcurrency = Math.max(1, Math.ceil(safeConcurrency / 2));
+  return [...new Set([safeConcurrency, middleConcurrency, 1])].sort((a, b) => b - a);
+}
+
+// Track running pull-finhub jobs to prevent duplicate concurrent pulls
+const activePullJobs = new Map<string, string>(); // sourceType → jobId
 
 type TickerListRow = {
   ticker: string;
@@ -459,6 +468,10 @@ const pullFinnhubSchema = z.object({
   csvPath: z.string().optional().default(DEFAULT_TICKERS_CSV),
   /** 0 or omitted = all tickers in CSV (no cap) */
   maxTickers: z.number().int().min(0).optional().default(0),
+  /** Starting per-chunk ticker concurrency. Failed chunks retry at lower derived levels. */
+  tickerConcurrency: z.number().int().min(1).max(20).optional().default(DEFAULT_FINNHUB_TICKER_CONCURRENCY),
+  /** Pause between concurrent ticker chunks in milliseconds. */
+  requestIntervalMs: z.number().int().min(0).max(10_000).optional().default(DEFAULT_FINNHUB_REQUEST_INTERVAL_MS),
   mode: z.enum(["7d", "recent", "custom"]).optional().default("7d"),
   /** Which data types to pull. "market_news" = Finnhub /news general market headlines */
   sourceType: z.enum(["all", "company_news", "press_release", "market_news"]).optional().default("all"),
@@ -545,6 +558,7 @@ app.get("/api/news/pull-finhub/preflight", async (req, res, next) => {
 app.post("/api/news/pull-finhub", async (req, res, next) => {
   try {
     const input = pullFinnhubSchema.parse(req.body ?? {});
+    const batchLevels = buildBatchLevels(input.tickerConcurrency);
     const isCustom = input.mode === "custom";
     const is7d = input.mode === "7d";
     const isRecent = input.mode === "recent";
@@ -584,7 +598,7 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
     if (!pullCompany && !pullPress) {
       tickerList = [];
     }
-    console.log(`[pull-finhub] mode=${input.mode} sourceType=${input.sourceType} maxTickers=${input.maxTickers} → tickerList.length=${tickerList.length}`);
+    console.log(`[pull-finhub] mode=${input.mode} sourceType=${input.sourceType} maxTickers=${input.maxTickers} tickerConcurrency=${input.tickerConcurrency} requestIntervalMs=${input.requestIntervalMs} batchLevels=${batchLevels.join(",")} → tickerList.length=${tickerList.length}`);
 
     // For recent mode, load per-ticker anchor maps
     let companyAnchorMap: Map<string, string> | undefined;
@@ -594,9 +608,26 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
       if (pullPress) pressAnchorMap = await getTickerAnchorMap("press_release");
     }
 
+    // ── Duplicate job guard: reject if same sourceType is already running ──
+    const existingJobId = activePullJobs.get(input.sourceType);
+    if (existingJobId) {
+      const existingJob = getJob(existingJobId);
+      if (existingJob && existingJob.status === "running") {
+        res.status(409).json({
+          error: `A pull job for sourceType='${input.sourceType}' is already running (jobId=${existingJobId}). Wait for it to finish or cancel it first.`,
+          existingJobId,
+        });
+        return;
+      }
+      // Previous job finished — allow new one
+      activePullJobs.delete(input.sourceType);
+    }
+
     // ── Create background job and return immediately ──
     const jobId = createJob(Math.max(tickerList.length + (pullMarket ? 1 : 0), 1));
+    activePullJobs.set(input.sourceType, jobId);
     appendLog(jobId, `Starting ${input.mode}/${input.sourceType} pull for ${tickerList.length} tickers`);
+    appendLog(jobId, `[batch] requested tickerConcurrency=${input.tickerConcurrency}, requestIntervalMs=${input.requestIntervalMs}, levels=${batchLevels.join(" → ")}`);
 
     if (isRecent) {
       const fallbackCount = tickerList.filter((t) => {
@@ -709,12 +740,12 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
           if (hadRateLimitError) throw new Error(`Rate limit hit for ${ticker}`);
         };
 
-        // ── Adaptive concurrent batch: 30 → 15 → 7 → 1 ──
+        // ── Adaptive concurrent batch: requested → half → 1 ──
         // Runs tickers in parallel chunks of batchSize.
         // If any ticker hits a rate-limit error, it is collected and retried at the next smaller concurrency level.
         let processedCount = 0;
         let remainingTickers = [...tickerList];
-        for (const batchSize of BATCH_LEVELS) {
+        for (const batchSize of batchLevels) {
           if (remainingTickers.length === 0 || isJobCancelled(jobId)) break;
           appendLog(jobId, `[batch] concurrency=${batchSize}, remaining=${remainingTickers.length}`);
           const failedTickers: string[] = [];
@@ -731,15 +762,16 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
                 updateProgress(jobId, processedCount);
               }
             }
-            // Brief inter-chunk pause to ease rate pressure
-            if (i + batchSize < remainingTickers.length) {
-              await new Promise((r) => setTimeout(r, 200));
+            // Inter-chunk pause — global rate limiter handles per-request throttle,
+            // but a short pause between chunks prevents request stampedes.
+            if (i + batchSize < remainingTickers.length && input.requestIntervalMs > 0) {
+              await new Promise((r) => setTimeout(r, input.requestIntervalMs));
             }
           }
 
           if (failedTickers.length === 0) break;
 
-          if (batchSize === BATCH_LEVELS[BATCH_LEVELS.length - 1]) {
+          if (batchSize === batchLevels[batchLevels.length - 1]) {
             // Already at concurrency=1 — give up on remaining failed tickers
             appendLog(jobId, `⚠ ${failedTickers.length} tickers still failed at concurrency=1: ${failedTickers.join(", ")}`);
             processedCount += failedTickers.length;
@@ -817,9 +849,11 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
           changeMerged: changeMergeResult.merged,
           details: detailsPerType,
         });
+        activePullJobs.delete(input.sourceType);
       } catch (err: any) {
         console.error(`[pull-finhub] job ${jobId} fatal error: ${err.message}`);
         failJob(jobId, err.message || "Unknown error");
+        activePullJobs.delete(input.sourceType);
       }
     })();
   } catch (error) {

@@ -10,6 +10,32 @@ const MARKET_NEWS_PAGE_BATCH_SIZE = 30;
 const MARKET_NEWS_MAX_TOTAL_PAGES = 300;
 
 /**
+ * Global token-bucket rate limiter for Finnhub API.
+ * Paid plan: 300 req/min. We target 270/min (~4.5 req/sec) to leave headroom.
+ * Each call to acquireToken() waits until a slot is available.
+ */
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX_TOKENS = 270;
+const rateLimitTimestamps: number[] = [];
+
+async function acquireToken(): Promise<void> {
+  while (true) {
+    const now = Date.now();
+    // Purge timestamps older than the window
+    while (rateLimitTimestamps.length > 0 && rateLimitTimestamps[0] <= now - RATE_LIMIT_WINDOW_MS) {
+      rateLimitTimestamps.shift();
+    }
+    if (rateLimitTimestamps.length < RATE_LIMIT_MAX_TOKENS) {
+      rateLimitTimestamps.push(now);
+      return;
+    }
+    // Wait until the oldest timestamp exits the window
+    const waitMs = rateLimitTimestamps[0] - (now - RATE_LIMIT_WINDOW_MS) + 10;
+    await sleep(waitMs);
+  }
+}
+
+/**
  * Adaptive backfill cap threshold.
  * When a single request returns >= this many items, we assume the response
  * may be truncated and split the date range in half.
@@ -106,6 +132,8 @@ function daySpan(from: string, to: string): number {
 
 async function fetchWithRetry(url: string): Promise<any> {
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    // Acquire a rate-limit token before each attempt
+    await acquireToken();
     try {
       const res = await fetch(url);
 

@@ -235,6 +235,27 @@ PLAN CHANGE (2026-03-10 #AI-research-refresh)
 ```
 
 ```
+PLAN CHANGE (2026-03-10 #finnhub-request-interval)
+- 왜: 사용자가 Finnhub 뉴스 update에서 "몇 초 간격으로 요청할지"도 Control Window에서 조절할 수 있게 해 달라고 요청함.
+- 무엇이 바뀌었나:
+  - Data Control Window Settings 탭에 `Finnhub Request Interval` 설정 추가
+  - Finnhub News Window가 update 요청 시 `requestIntervalMs`를 backend로 함께 전송
+  - backend `POST /api/news/pull-finhub`가 chunk 간 대기시간을 고정 1000ms 대신 사용자 설정값으로 적용
+  - job/log에 실제 적용 interval 값을 기록
+- 영향: 사용자는 ticker 병렬도와 별개로 request burst 완화 강도를 직접 조절할 수 있음. 값이 커지면 rate-limit 회피에는 유리하지만 전체 update 시간은 길어진다.
+```
+
+```
+PLAN CHANGE (2026-03-10 #finnhub-request-interval-input)
+- 왜: 사용자가 interval 값을 preset/slider뿐 아니라 직접 숫자로도 입력하고, `0.1초` 같은 세밀한 값도 조정할 수 있게 해 달라고 요청함.
+- 무엇이 바뀌었나:
+  - `Finnhub Request Interval` slider step을 `0.5초`에서 `0.1초`로 낮춤
+  - preset에 `0.1초` 추가
+  - Settings 카드에 직접 입력 가능한 number input 추가
+- 영향: 사용자는 `0.1`, `0.2`, `1.7`처럼 세밀한 interval 값을 바로 입력하거나 slider로 맞출 수 있다.
+```
+
+```
 PLAN CHANGE (2026-03-06 #6)
 - 왜: 사용자가 Finnhub `/news` 일반 시장 헤드라인도 `press_release`, `company_news`와 같은 급의 새 타입으로 메뉴에 추가하고, update도 같은 방식으로 붙이라고 요청함. 표기 이름은 `market news`.
 - 무엇이 바뀌었나:
@@ -2340,6 +2361,20 @@ API 계약(초안)
 2. SELECT publisher, COUNT(*) FROM news_items WHERE source='FINNHUB' GROUP BY publisher → `NASDAQ`/`TMX`/`FINNHUB`/`UNKNOWN` 분포 확인
 3. POST /api/news/fulltext/update → { jobId } 반환 → GET /api/jobs/:jobId 폴링 → done
 4. SELECT extraction_status, COUNT(*) FROM news_fulltext GROUP BY extraction_status → success/skipped/failed 분포 확인
+
+---
+
+### PLAN CHANGE — Finnhub ticker 병렬도 사용자 설정 추가
+
+- 변경 시각: 2026-03-10 12:09 (local)
+- 변경 이유: 사용자가 `control window 에 press release 업데이트 할 때 티커 한번에 몇개 병렬로 요청하는지 수정할 수 있도록` 요청함.
+- 변경 내용:
+  - Data Control > Settings에 **Finnhub Ticker Concurrency** 설정 추가.
+  - Finnhub News Window의 update 요청이 localStorage 설정값을 읽어 `/api/news/pull-finhub`에 `tickerConcurrency`를 전달하도록 확장.
+  - backend는 고정 `5 → 3 → 1` 대신 **요청값 → 절반 → 1** 레벨로 adaptive batch concurrency를 계산하도록 변경.
+- 영향:
+  - Press Release / Company News recent/custom/7d pull의 시작 병렬도를 사용자가 조절할 수 있음.
+  - rate limit 또는 개별 ticker 실패 시에는 backend가 자동으로 더 낮은 병렬도로 재시도함.
 5. GET /api/news/fulltext/<nasdaq_newsId> → fullText 존재, wordCount > 0
 6. GET /api/news/fulltext/<tmx_newsId> → fullText 존재(HTML), wordCount > 0
 7. GET /api/news?source_names=FINNHUB → 각 row에 hasFullText 필드 존재

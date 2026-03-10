@@ -468,6 +468,84 @@
    - 3차: `tzdata` 모듈 미설치 에러 → `pip install tzdata` 후 성공
    - 최종 실행: read-write 모드, 정상 연결
 
+---
+
+### Finnhub request interval 사용자 설정 추가 (2026-03-10)
+
+**작성 시각:** 2026-03-10 12:54 (local)
+
+**Status: done (awaiting user confirmation)**
+
+#### 수정 내용
+
+1. `terminal/backend/src/server.ts`
+   - `POST /api/news/pull-finhub` 입력 스키마에 `requestIntervalMs` 추가
+   - 기존 고정 `1000ms` chunk 대기시간을 사용자 설정값으로 대체
+   - job log / console log에 `requestIntervalMs`를 함께 기록
+
+2. `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx`
+   - Settings 탭에 `Finnhub Request Interval` 설정 카드 추가
+   - localStorage key `finnhub-request-interval-sec`로 초 단위 저장
+   - preset `0 / 0.5 / 1 / 2초`, slider `0~10초` 제공
+
+3. `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+   - Finnhub update 시작 시 저장된 ticker 병렬도와 request interval을 함께 읽어서 backend로 전송
+
+4. `ai_agent_plan/terminal_ui_ver2_finhub/plan.md`
+   - 이번 interval 설정 추가 범위를 `PLAN CHANGE`로 기록
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `server.ts`, `DataControlWindow.tsx`, `FinnhubNewsWindow.tsx` diagnostics 0 errors |
+| 빌드 | ✅ | backend `npm.cmd run build`, frontend `npm.cmd run build` 모두 성공 |
+| 자동 테스트 | ✅ | backend vitest `48/48` pass |
+| 런타임 통합 | ✅ | `POST /api/news/pull-finhub` with `requestIntervalMs=2000` → job log에 `requestIntervalMs=2000` 반영 확인 |
+
+#### 리스크 / 완화
+
+1. `0초`로 두면 chunk 사이 추가 pause가 사라져 burst가 커질 수 있음
+   - 완화: 기본값은 `1초` 유지, global request limiter는 그대로 유지
+2. 설정명이 "request interval"이지만 실제 적용 지점은 chunk 간 pause임
+   - 완화: Settings 설명 문구에 "병렬 chunk 한 묶음 뒤 대기시간"이라고 명시
+3. localStorage 값이 비정상일 경우 UI와 backend 기대값이 어긋날 수 있음
+   - 완화: 프론트/백엔드 모두 범위 clamp 적용
+
+---
+
+### Finnhub request interval 직접 입력 + 0.1초 단위 조정 추가 (2026-03-10)
+
+**작성 시각:** 2026-03-10 12:59 (local)
+
+**Status: done (awaiting user confirmation)**
+
+#### 수정 내용
+
+1. `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx`
+   - `Finnhub Request Interval` slider step을 `0.1초`로 조정
+   - preset에 `0.1초` 버튼 추가
+   - number input을 추가해 `0.1`, `0.2`, `1.7` 같은 값을 직접 입력 가능하게 변경
+
+2. `ai_agent_plan/terminal_ui_ver2_finhub/plan.md`
+   - 세밀한 interval 직접 입력 요구사항을 `PLAN CHANGE`로 추가 기록
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `DataControlWindow.tsx` diagnostics 0 errors |
+| 빌드 | ✅ | frontend `npm.cmd run build` 성공 |
+| 자동 테스트 | ✅ | 프론트 전용 UI 변경. 기존 backend test 영향 없음, 추가 자동 테스트 대상 없음 |
+| 런타임 통합 | ✅ | Vite dev server HMR로 `DataControlWindow.tsx` 반영 확인 + backend `/healthz` 정상 응답 |
+
+#### 리스크 / 완화
+
+1. number input에서 빈 문자열을 완전히 유지하는 UX는 제공하지 않음
+   - 완화: 유효한 숫자가 들어오면 즉시 clamp + 저장하도록 단순화
+2. `0초` 입력 시 이전과 동일하게 chunk pause가 사라짐
+   - 완화: 기본값은 여전히 `1초`, 사용자가 의도적으로 낮출 때만 적용
+
 3. **프로브 결과**
    - 결과 파일: `tmp/probes/ibkr_wsh_probe_AAPL.json`
    - 연결: ✅ 성공 (1개 계정, read-write)
@@ -1454,6 +1532,60 @@
 #### 변경 파일
 
 | 파일 | 변경 내용 |
+
+---
+
+## 2026-03-10
+
+**작성 시각:** 2026-03-10 12:09 (local)
+
+### Finnhub Press Release ticker 병렬도 설정 추가
+
+| 항목 | 내용 |
+|------|------|
+| 시점 | 2026-03-10 12:09 |
+| 상태 | 확인 대기(awaiting user confirmation) |
+| 관련 요청 | control window에서 press release 업데이트 시 ticker 병렬 요청 수를 수정 가능하게 만들기 |
+
+#### 변경 파일
+
+| 파일 | 변경 내용 |
+|------|------|
+| `terminal/backend/src/server.ts` | `pullFinnhubSchema`에 `tickerConcurrency` 추가. 고정 `BATCH_LEVELS = [5, 3, 1]` 제거 후 `buildBatchLevels()` 도입. 요청값을 기준으로 `requested → half → 1` 레벨을 계산해 adaptive retry에 사용. job log에 실제 적용 레벨 기록 추가. |
+| `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx` | Settings 탭에 **Finnhub Ticker Concurrency** 슬라이더/프리셋 추가. localStorage key `finnhub-ticker-concurrency`로 저장. |
+| `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | Finnhub update 시작 시 localStorage의 `finnhub-ticker-concurrency`를 읽어 `/api/news/pull-finhub` body에 `tickerConcurrency` 포함. |
+| `ai_agent_plan/terminal_ui_ver2_finhub/plan.md` | PLAN CHANGE 메모 append. |
+
+#### 현재 구조
+
+- 이전: backend 고정 병렬도 `5 → 3 → 1`.
+- 현재: 사용자가 설정한 시작 병렬도 `N`으로 먼저 시도하고, 실패 ticker는 backend가 `ceil(N/2)` 후 `1`까지 자동 강등해 재시도.
+- 기본값: `5`.
+- 허용 범위: `1 ~ 20`.
+
+#### 사용자가 직접 확인하는 방법
+
+1. Data Control 창 → `Settings` 탭 → `Finnhub Ticker Concurrency`에서 값을 바꾼다.
+2. Finnhub News Window에서 `Recent PR Update` 또는 `7d PR Update`를 실행한다.
+3. `View Log`를 열어 `[batch] requested tickerConcurrency=...` 및 `levels=...` 로그가 바뀌는지 확인한다.
+
+#### 검증 결과
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 수정 파일 3개 `0 errors` |
+| 빌드 | ✅ | backend `npm run build` 성공, frontend `npm run build` 성공 |
+| 자동 테스트 | ✅ | backend `vitest run` 48/48 pass, frontend 별도 테스트 스크립트 없음 |
+| 런타임 통합 | ✅ | `POST /api/news/pull-finhub`에 `tickerConcurrency=7` 전달 후 job log에서 `levels=7 → 4 → 1` 확인. UI는 코드 리뷰 + 빌드로 확인, 시각 확인은 사용자 위임 |
+
+#### 발견된 문제 / 리스크 + 완화안
+
+1. 너무 높은 값은 Finnhub rate limit과 충돌할 수 있음.
+   완화: UI 범위를 `1~20`으로 제한했고, backend는 자동 강등 재시도 유지.
+2. News Window와 Data Control Window가 localStorage로만 값을 공유함.
+   완화: key를 고정(`finnhub-ticker-concurrency`)했고, 기본값 `5` fallback을 두었음.
+3. webui dev 프록시에는 기존 `ECONNREFUSED` 잡음이 있어 브라우저 시각 검증이 불안정할 수 있음.
+   완화: backend 직통 API 런타임 검증으로 기능 반영을 확인했고, 최종 시각 확인은 사용자 화면에서 수행 가능.
 |------|------|
 | `terminal/backend/src/services/jobManager.ts` | **신규 생성** — 메모리 기반 잡 관리 모듈. `createJob`, `getJob`, `updateProgress`, `appendLog`, `completeJob`, `failJob` 내보내기. 30분 후 완료 잡 자동 정리, 최대 500줄 로그 |
 | `terminal/backend/src/server.ts` | (1) `jobManager` import 추가 (2) `POST /api/news/pull-finhub` → `{ jobId }` 즉시 반환 + fire-and-forget async IIFE로 백그라운드 수집 (3) `GET /api/jobs/:jobId` 폴링 엔드포인트 추가 |
