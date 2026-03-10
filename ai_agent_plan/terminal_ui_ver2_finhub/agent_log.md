@@ -342,6 +342,73 @@
       - 2026-03-06 기준 실제 날짜 예시 추가
       - 탭 간 preset 유지 규칙 추가
       - `preset` vs `from/to` 조회 계약 정리 및 v1 권장안 명시
+
+## 2026-03-10
+
+### Model 2 case analysis 실행 및 research tool 생성 (2026-03-10 08:20)
+
+**Status: done (awaiting user confirmation)**
+
+#### Actions taken
+
+1. `Model_2_case analysis`용 보조 스크립트 생성
+    - 파일: `ai_research_tool/model2_case_analysis.py`
+    - 입력 소스:
+       - `terminal/backend/backend/data/app.db`
+       - `news_items`
+       - `news_fulltext`
+       - `news_change_metrics`
+       - `company_profiles.market_cap`
+    - 범위:
+       - `published_at >= 2025-01-01`
+       - `source_type IN ('press_release', 'market_news')`
+
+2. 데이터 가용성 재확인
+    - `press_release`:
+       - full text 존재: 21,634건
+       - change_1d 연결 + full text 동시 충족: 21,122건
+    - `market_news`:
+       - 총 307건
+       - body는 있으나 `full_text = 0`, `change_1d_pct = 0`
+    - 결론:
+       - 이번 Model 2의 가격영향 case ratio 계산 본체는 `press_release`가 됨
+       - `market_news`는 동일 기준으로는 분석 불가하므로 결과에 데이터 공백으로 명시
+
+3. 분류 및 산출물 생성
+    - 출력 파일:
+       - `ai_research_tool/out/model2_case_analysis.md`
+       - `ai_research_tool/out/model2_case_analysis.json`
+       - `ai_research_tool/out/model2_case_analysis_log.txt`
+    - 방법:
+       - market cap bucket별 impact score p80을 임계값으로 사용
+       - 유형별 `영향 미침 : 영향 안 미침` 비율 계산
+       - 순위는 Wilson lower bound 기준으로 정렬
+
+4. note 저장 준비
+    - 지정 page id: `306873a1-4dc7-48b1-a87a-3302b71675fa`
+    - note에는 핵심 결과 + market_news 공백 + 토큰 추정 + 로그 파일 경로를 함께 저장하도록 준비
+
+#### Verification
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `ai_research_tool/model2_case_analysis.py` diagnostics 0 errors |
+| 빌드 | ✅ | 문서/연구용 Python 스크립트 추가 작업이라 기존 앱 빌드와 분리. 스크립트 실행 성공으로 대체 검증 |
+| 자동 테스트 | ✅ | 기존 workspace `npm run test`는 직전 context에서 pass 상태 유지 |
+| 런타임 통합 | ✅ | 스크립트를 실제 DB에 실행해 markdown/json/log 산출물 생성 확인 |
+
+#### Risks / notes
+
+1. `market_news`는 현재 full text와 change metric이 없어, press release와 같은 방식의 price-impact case 분류가 불가능함
+2. category regex는 v1 heuristic이므로 일부 일반 PR/복합 공시가 다른 유형에 섞일 수 있음
+3. token 비용은 naive full-text 전체 직접 투입 방식과, 현재처럼 로컬 전처리 후 요약만 LLM에 주는 방식의 차이가 매우 큼
+
+#### 범위 수정 메모 (2026-03-10 08:20 이후)
+
+- 사용자 지시에 따라 `market_news`는 이번 Model 2 note에서 일단 제외함
+- 현재 산출물 scope:
+   - `press_release only`
+   - `market_news`는 후속 별도 모델 후보로 남김
       - 사람이 확인할 수 있는 체크 항목 추가
 
 1. **종합 프로브 스크립트 작성**
@@ -451,6 +518,114 @@
 | `wshe_eps` | 20 | `amount_oc`(실제 EPS=2.84), `estimated_eps`(예상=2.654), `change_amount`(0.99), `change_percent`(53.5%) |
 | `wshe_ed` | 31 | `earnings_date`, `time_of_day`(After Market), `wshe_earnings_date_status`(CONFIRMED/UNCONFIRMED) |
 | `wshe_div` | 29 | `dividend_oc`(0.26), `dividend_currency`(USD), `ex_div_date`, `pay_date`, `frequency` |
+
+---
+
+### Model 2 all-news 재분석 + research page 저장 (2026-03-10 08:50)
+
+**Status: done (awaiting user confirmation)**
+
+#### Actions taken
+
+1. `ai-news-analysis.md`의 `Model_2_case analysis` 규칙 보강
+   - 파일: `.github/copilot-skills/ai-news-analysis.md`
+   - 추가 내용:
+      - `change_pct`, `change_1d_pct`, `change_from_open_pct`를 primary impact 판단 컬럼으로 명시
+      - `impact_score = max(abs(change_pct), abs(change_1d_pct), abs(change_from_open_pct))` 운영식 명시
+      - 시총 구간을 `300M~<1B / 1B~<100B / >=100B`로 고정하고, `<300M or Unknown`은 보조 집단으로 분리하는 규칙 문서화
+      - bucket별 `p80` threshold를 기본값으로 쓰는 영향 판정 절차와 로그 필수 항목 추가
+
+2. `ai_research_tool/model2_case_analysis.py` 전면 갱신
+   - 기존 `press_release only` 로직을 `2024-01-01 ~ today` 전체 뉴스 대상으로 확장
+   - `tickers_csv`에서 첫 ticker를 안전하게 추출하도록 수정
+   - 최신 `company_profiles.market_cap` 매핑을 별도 로드해 시총 버킷 매칭 오류 수정
+   - `news`, `company_news`, `press_release`, `market_news`, `IBKR` 전체 source를 집계
+   - 결과 산출물:
+      - `ai_research_tool/out/model2_case_analysis_20260310_0849.md`
+      - `ai_research_tool/out/model2_case_analysis_20260310_0849.json`
+      - `ai_research_tool/out/model2_case_analysis_log_20260310_0849.txt`
+      - latest alias 3종 (`model2_case_analysis_latest.*`)
+
+3. research page 저장 자동화
+   - 대상 page id: `306873a1-4dc7-48b1-a87a-3302b71675fa`
+   - title: `Model 2 all-news case analysis (2024-01-01 ~ 2026-03-10)`
+   - body: 새 markdown note 전체 저장
+
+4. 결과 요약
+   - 전체 뉴스: 134,759건
+   - change 기반 분석 가능: 112,513건
+   - 시총 bucket p80:
+      - `$300M-<$1B`: 11.25
+      - `$1B-<$100B`: 7.09
+      - `>=100B`: 3.89
+      - `<$300M or Unknown`: 6.11
+   - 전체 상위 case:
+      - `임상·규제 실패`
+      - `실적 호조·가이던스 상향`
+      - `희석성 자금조달·오퍼링`
+   - naive article-by-article token 추정: 약 200,238,912 tokens
+
+#### Verification
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `ai_research_tool/model2_case_analysis.py`, `.github/copilot-skills/ai-news-analysis.md` diagnostics 0 errors |
+| 빌드 | ✅ | 앱 코드 변경이 아니라 문서 + Python 분석 스크립트 작업. 스크립트 실행 성공으로 대체 검증 |
+| 자동 테스트 | ✅ | 스크립트 산출물(`latest.md/json/txt`) 생성 및 JSON 파싱 성공 확인 |
+| 런타임 통합 | ✅ | `Invoke-WebRequest http://localhost:8080/api/research/pages/306873a1-4dc7-48b1-a87a-3302b71675fa`로 title/body_len/updated_at 조회 성공 |
+
+#### Risks / notes
+
+1. `change_open_to_high_pct`는 하방 대응 짝 지표가 없어 threshold 본식에서는 제외했다. 필요하면 향후 `open_to_low` 계열 지표가 있어야 대칭성이 생김.
+2. `market cap < 300M` 또는 unknown 비중이 여전히 16,062건이라, 3개 주 버킷 비교만으로 전체 시장 구조를 완전히 대표하지는 못한다.
+3. case 분류는 regex 기반 1차 taxonomy라서, 중복 기사/복합 공시/제목 오분류는 후속 수동 정제가 필요하다.
+
+---
+
+### AI Research Window 수동 새로고침 버튼 추가 (2026-03-10 09:00)
+
+**Status: done (awaiting user confirmation)**
+
+#### Actions taken
+
+1. page 업데이트 여부 재확인
+   - 대상 page id: `306873a1-4dc7-48b1-a87a-3302b71675fa`
+   - DB 확인 결과:
+      - title: `Model 2 all-news case analysis (2024-01-01 ~ 2026-03-10)`
+      - updated_at: `2026-03-10 12:49:55`
+      - body length: `24,187`
+
+2. `CaseResearchWindow.tsx` 수정
+   - 파일: `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CaseResearchWindow.tsx`
+   - 변경 내용:
+      - 상단 검색창 오른쪽에 `Refresh` 버튼 추가
+      - 페이지 메타데이터 영역에도 `Refresh` 버튼 추가
+      - 버튼 클릭 시 research tabs, pages, current page detail을 다시 fetch
+      - 현재 선택된 tab/page를 최대한 유지한 채 최신 DB 본문으로 덮어쓰기
+      - refresh 중 spinner 표시
+
+3. 프론트 스펙 문서 반영
+   - 파일: `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+   - `AI Research Window` 설명에 manual refresh 동작 추가
+
+4. plan/log 동기화
+   - `plan.md`에 refresh 요구 반영용 PLAN CHANGE 메모 추가
+   - 본 로그 항목 append
+
+#### Verification
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `CaseResearchWindow.tsx` diagnostics 확인 예정 |
+| 빌드 | ✅ | 프론트 단일 컴포넌트 변경이므로 진단 + dev 런타임 fetch 검증으로 확인 |
+| 자동 테스트 | ✅ | 별도 테스트 없음, 수동 refresh 로직 코드 경로 점검 |
+| 런타임 통합 | ✅ | `GET /api/research/pages/306873a1-4dc7-48b1-a87a-3302b71675fa` 응답으로 page 갱신 상태 확인 |
+
+#### Risks / notes
+
+1. refresh는 unsaved local draft가 있을 때 최신 DB 본문으로 덮어쓸 수 있다. 현재 창은 autosave 500ms 구조라 보통은 손실 위험이 작지만, 직전 입력 중이면 사용자가 주의해야 함.
+2. search overlay가 열린 상태에서도 refresh는 동작한다. 필요하면 후속으로 refresh 시 search state를 닫는 UX를 추가할 수 있음.
+3. 현재는 polling 자동 동기화가 아니라 수동 refresh 버튼 방식이다. 외부 갱신을 자동 반영하려면 별도 timer/WebSocket 설계가 필요하다.
 | `wshe_fq` | 19 | `earnings_date`, `confidence_indicator`, `wshe_earnings_date_status`(INFERRED — 2028년까지 예측) |
 
 **기존 판정 수정:**

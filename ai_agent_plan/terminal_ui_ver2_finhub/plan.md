@@ -225,6 +225,16 @@ PLAN CHANGE (2026-03-06 #5)
 ```
 
 ```
+PLAN CHANGE (2026-03-10 #AI-research-refresh)
+- 왜: research page가 외부 스크립트/DB 업데이트로 바뀌어도, 열린 AI Research Window가 자동 재조회하지 않아 사용자가 수동으로 최신 본문을 다시 불러올 수단이 필요함.
+- 무엇이 바뀌었나:
+  - `CaseResearchWindow`에 수동 `Refresh` 버튼 추가
+  - 버튼 클릭 시 `GET /api/research/tabs`, `GET /api/research/tabs/:tabId/pages`, `GET /api/research/pages/:id`를 다시 호출해 현재 선택 상태를 유지한 채 최신 DB 상태 재로드
+  - 프론트 스펙 문서에 refresh 동작 설명 추가
+- 영향: 외부 분석 스크립트가 특정 research page를 갱신한 뒤에도 사용자는 창을 닫지 않고 최신 내용을 바로 확인할 수 있음.
+```
+
+```
 PLAN CHANGE (2026-03-06 #6)
 - 왜: 사용자가 Finnhub `/news` 일반 시장 헤드라인도 `press_release`, `company_news`와 같은 급의 새 타입으로 메뉴에 추가하고, update도 같은 방식으로 붙이라고 요청함. 표기 이름은 `market news`.
 - 무엇이 바뀌었나:

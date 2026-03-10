@@ -1,0 +1,5 @@
+since=2025-01-01
+scope=press_release_only
+press_release_rows=21634
+press_release_analyzable=21108
+top_case_types=['clinical_regulatory_negative', 'listing_capital_markets', 'financing_offering', 'earnings_guidance', 'strategic_review_restructuring']

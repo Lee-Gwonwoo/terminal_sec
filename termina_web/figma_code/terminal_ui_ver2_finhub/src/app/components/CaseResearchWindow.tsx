@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, Search, Trash2, Copy, FileText, FolderOpen, Check } from 'lucide-react';
+import { Plus, Search, Trash2, Copy, FileText, FolderOpen, Check, RefreshCw } from 'lucide-react';
 
 const API_BASE = '';
 
@@ -44,6 +44,7 @@ export function CaseResearchWindow() {
   const [editingTabName, setEditingTabName] = useState('');
   const [copiedId, setCopiedId] = useState(false);
   const [draggedPageId, setDraggedPageId] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const titleRef = useRef<HTMLInputElement>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
@@ -64,14 +65,15 @@ export function CaseResearchWindow() {
   }, [activeTabId]);
 
   // ─── Fetch pages for active tab ───
-  const fetchPages = useCallback(async (tabId: string) => {
+  const fetchPages = useCallback(async (tabId: string, preferredPageId?: string | null) => {
     try {
       const res = await fetch(`${API_BASE}/api/research/tabs/${tabId}/pages`);
       const data: ResearchPage[] = await res.json();
       setPages(data);
       if (data.length > 0) {
-        setActivePageId(data[0].id);
-        setActivePage(data[0]);
+        const nextPage = data.find(page => page.id === preferredPageId) ?? data[0];
+        setActivePageId(nextPage.id);
+        setActivePage(nextPage);
       } else {
         setActivePageId(null);
         setActivePage(null);
@@ -102,8 +104,20 @@ export function CaseResearchWindow() {
   useEffect(() => { fetchTabs(); }, [fetchTabs]);
 
   useEffect(() => {
-    if (activeTabId) fetchPages(activeTabId);
+    if (activeTabId) fetchPages(activeTabId, activePageId);
   }, [activeTabId, fetchPages]);
+
+  const fetchPageDetail = useCallback(async (pageId: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/research/pages/${pageId}`);
+      const data: ResearchPage = await res.json();
+      setActivePageId(data.id);
+      setActivePage(data);
+      setPages(prev => prev.map(page => page.id === data.id ? data : page));
+    } catch (err) {
+      console.error('Failed to fetch research page detail', err);
+    }
+  }, []);
 
   // Search debounce
   useEffect(() => {
@@ -240,6 +254,46 @@ export function CaseResearchWindow() {
     setActivePage(page);
   };
 
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      const tabsRes = await fetch(`${API_BASE}/api/research/tabs`);
+      const nextTabs: ResearchTab[] = await tabsRes.json();
+      setTabs(nextTabs);
+
+      const nextTabId = nextTabs.find(tab => tab.id === activeTabId)?.id ?? nextTabs[0]?.id ?? null;
+      setActiveTabId(nextTabId);
+
+      if (!nextTabId) {
+        setPages([]);
+        setActivePageId(null);
+        setActivePage(null);
+        return;
+      }
+
+      const pagesRes = await fetch(`${API_BASE}/api/research/tabs/${nextTabId}/pages`);
+      const nextPages: ResearchPage[] = await pagesRes.json();
+      setPages(nextPages);
+
+      const nextPageId = nextPages.find(page => page.id === activePageId)?.id ?? nextPages[0]?.id ?? null;
+      setActivePageId(nextPageId);
+
+      if (!nextPageId) {
+        setActivePage(null);
+        return;
+      }
+
+      const pageRes = await fetch(`${API_BASE}/api/research/pages/${nextPageId}`);
+      const nextPage: ResearchPage = await pageRes.json();
+      setActivePage(nextPage);
+      setPages(prev => prev.map(page => page.id === nextPage.id ? nextPage : page));
+    } catch (err) {
+      console.error('Manual refresh failed', err);
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [activePageId, activeTabId]);
+
   const persistPageOrder = useCallback(async (tabId: string, nextPages: ResearchPage[]) => {
     try {
       const res = await fetch(`${API_BASE}/api/research/tabs/${tabId}/pages/reorder`, {
@@ -299,6 +353,15 @@ export function CaseResearchWindow() {
           onChange={e => setSearchQuery(e.target.value)}
           className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
         />
+        <button
+          onClick={() => { void handleRefresh(); }}
+          disabled={isRefreshing}
+          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:border-blue-400 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:text-blue-400"
+          title="Refresh tabs, pages, and the current note"
+        >
+          <RefreshCw size={12} className={isRefreshing ? 'animate-spin' : ''} />
+          Refresh
+        </button>
         {searchQuery && (
           <button onClick={() => { setSearchQuery(''); setIsSearching(false); setSearchResults([]); }} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">
             <span className="text-xs">✕</span>
@@ -454,6 +517,15 @@ export function CaseResearchWindow() {
                 <div className="flex gap-4 mt-2 text-[10px] text-slate-500 dark:text-slate-400">
                   <span>Created: {formatDate(activePage.created_at)}</span>
                   <span>Modified: {formatDate(activePage.updated_at)}</span>
+                  <button
+                    onClick={() => { void handleRefresh(); }}
+                    disabled={isRefreshing}
+                    className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-60 dark:text-slate-400 dark:hover:text-blue-400"
+                    title="Refresh current note from DB"
+                  >
+                    <RefreshCw size={10} className={isRefreshing ? 'animate-spin' : ''} />
+                    Refresh
+                  </button>
                 </div>
               </div>
 

@@ -1,0 +1,918 @@
+{
+  "since": "2025-01-01",
+  "scope": "press_release_only",
+  "analysis": {
+    "thresholds": {
+      "small": {
+        "count": 12090,
+        "p50": 4.817,
+        "p80": 10.671400000000002,
+        "p90": 16.26569
+      },
+      "mid": {
+        "count": 3624,
+        "p50": 4.17135,
+        "p80": 8.997620000000001,
+        "p90": 12.8342
+      },
+      "large": {
+        "count": 5166,
+        "p50": 2.2407000000000004,
+        "p80": 4.7802,
+        "p90": 6.9398
+      },
+      "unknown": {
+        "count": 228,
+        "p50": 3.001,
+        "p80": 7.321580000000003,
+        "p90": 9.969390000000002
+      }
+    },
+    "analyzable_press_release_rows": 21108,
+    "case_summaries": [
+      {
+        "case_type": "clinical_regulatory_negative",
+        "label_ko": "임상·규제 실패",
+        "description_ko": "임상 실패, CRL, 주요 endpoint 미충족, hold·중단 등 바이오 규제/임상 악재",
+        "total": 62,
+        "impacted": 26,
+        "not_impacted": 36,
+        "impact_ratio": 0.41935483870967744,
+        "impact_ratio_wilson_lb": 0.30477395467281665,
+        "positive_impacted": 14,
+        "negative_impacted": 12,
+        "median_impact_score": 6.8706,
+        "bucket_breakdown": {
+          "$300M-$2B": {
+            "total": 43,
+            "impacted": 22
+          },
+          ">$10B": {
+            "total": 12,
+            "impacted": 2
+          },
+          "$2B-$10B": {
+            "total": 7,
+            "impacted": 2
+          }
+        },
+        "top_examples": [
+          {
+            "date": "2025-12-11 07:00:00",
+            "ticker": "RZLT",
+            "title": "Rezolute Announces Phase 3 sunRIZE Study Results in Congenital Hyperinsulinism",
+            "change_pct": -87.2029,
+            "change_1d_pct": -83.5466,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-07-22 07:00:00",
+            "ticker": "REPL",
+            "title": "Replimune Receives Complete Response Letter from FDA for RP1 Biologics License Application for the Treatment of Advanced Melanoma",
+            "change_pct": -77.2101,
+            "change_1d_pct": -72.9927,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-04-03 08:00:00",
+            "ticker": "ALDX",
+            "title": "Aldeyra Therapeutics Receives Complete Response Letter from the U.S. Food and Drug Administration for the Reproxalap New Drug Application for the Treatment of Signs and Symptoms of Dry Eye Disease",
+            "change_pct": -73.3333,
+            "change_1d_pct": -64.507,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-09-18 09:15:00",
+            "ticker": "REPL",
+            "title": "Replimune Provides Update Following Type A Meeting with FDA",
+            "change_pct": -39.4046,
+            "change_1d_pct": -43.4326,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2026-03-02 07:05:00",
+            "ticker": "QURE",
+            "title": "uniQure Announces 2025 Financial Results and Provides Recent Company Updates",
+            "change_pct": -32.8215,
+            "change_1d_pct": -42.2265,
+            "market_cap_bucket": "$300M-$2B"
+          }
+        ],
+        "counter_examples": [
+          {
+            "date": "2025-10-02 09:00:00",
+            "ticker": "AMGN",
+            "title": "LANDMARK PHASE 3 TRIAL (VESALIUS-CV) MEETS PRIMARY ENDPOINTS IN A CARDIOVASCULAR PRIMARY PREVENTION STUDY OF 12,000 PATIENTS",
+            "change_pct": -0.3685,
+            "change_1d_pct": -0.2044,
+            "market_cap_bucket": ">$10B"
+          },
+          {
+            "date": "2025-10-30 06:00:00",
+            "ticker": "WLKP",
+            "title": "Westlake Chemical Partners Announces Renewal of Ethylene Sales Agreement",
+            "change_pct": 0.0,
+            "change_1d_pct": -0.4749,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2026-01-26 08:00:00",
+            "ticker": "ARQT",
+            "title": "Arcutis Biotherapeutics, Inc. Announces Termination of Promotion Agreement with Kowa",
+            "change_pct": 0.458,
+            "change_1d_pct": 0.4962,
+            "market_cap_bucket": "$2B-$10B"
+          }
+        ]
+      },
+      {
+        "case_type": "listing_capital_markets",
+        "label_ko": "상장·직상장·자본시장 구조 이벤트",
+        "description_ko": "direct listing, uplisting, Nasdaq listing, market debut 같은 상장 구조 이벤트",
+        "total": 64,
+        "impacted": 25,
+        "not_impacted": 39,
+        "impact_ratio": 0.390625,
+        "impact_ratio_wilson_lb": 0.28055388546896454,
+        "positive_impacted": 11,
+        "negative_impacted": 14,
+        "median_impact_score": 6.6879,
+        "bucket_breakdown": {
+          "$300M-$2B": {
+            "total": 36,
+            "impacted": 13
+          },
+          "$2B-$10B": {
+            "total": 25,
+            "impacted": 12
+          },
+          ">$10B": {
+            "total": 3,
+            "impacted": 0
+          }
+        },
+        "top_examples": [
+          {
+            "date": "2025-10-21 17:45:00",
+            "ticker": "OWLS",
+            "title": "D. Boral Capital Acted as Exclusive Financial Advisor to OBOOK Holdings Inc. (Nasdaq:OWLS) in Connection with its Direct Listing",
+            "change_pct": -32.2917,
+            "change_1d_pct": -66.9444,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-10-14 11:01:00",
+            "ticker": "TMQ",
+            "title": "Canadian Investment Regulatory Organization Trade Resumption - TMQ",
+            "change_pct": 61.5854,
+            "change_1d_pct": 28.9634,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-10-14 10:57:00",
+            "ticker": "TMQ",
+            "title": "Canadian Investment Regulatory Organization Trading Halt - TMQ",
+            "change_pct": 61.5854,
+            "change_1d_pct": 28.9634,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-10-14 10:57:00",
+            "ticker": "TMQ",
+            "title": "Canadian Investment Regulatory Organization Trading Halt - TMQ",
+            "change_pct": 61.5854,
+            "change_1d_pct": 28.9634,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-10-14 11:01:00",
+            "ticker": "TMQ",
+            "title": "Canadian Investment Regulatory Organization Trade Resumption - TMQ",
+            "change_pct": 61.5854,
+            "change_1d_pct": 28.9634,
+            "market_cap_bucket": "$300M-$2B"
+          }
+        ],
+        "counter_examples": [
+          {
+            "date": "2025-09-23 12:00:00",
+            "ticker": "CHE",
+            "title": "Chemed Corporation to Present at the Jefferies 2025 Healthcare Services Conference",
+            "change_pct": -0.4409,
+            "change_1d_pct": 0.2347,
+            "market_cap_bucket": "$2B-$10B"
+          },
+          {
+            "date": "2025-07-01 08:05:00",
+            "ticker": "NDAQ",
+            "title": "Nasdaq Welcomes 142 IPOs in the First Half of 2025",
+            "change_pct": -0.5368,
+            "change_1d_pct": 0.1118,
+            "market_cap_bucket": ">$10B"
+          },
+          {
+            "date": "2025-01-24 17:15:00",
+            "ticker": "SKYH",
+            "title": "Sky Harbour Group to Ring Closing Bell at the NYSE to Mark Uplisting and 3rd Anniversary as a Public Company; Announces Investor Conference Schedule for First Half of 2025",
+            "change_pct": -0.9769,
+            "change_1d_pct": -0.444,
+            "market_cap_bucket": "$300M-$2B"
+          }
+        ]
+      },
+      {
+        "case_type": "financing_offering",
+        "label_ko": "희석성 자금조달·오퍼링",
+        "description_ko": "public offering, private placement, warrants, notes, financing, refinancing 등 자본조달 이슈",
+        "total": 1085,
+        "impacted": 319,
+        "not_impacted": 766,
+        "impact_ratio": 0.29400921658986173,
+        "impact_ratio_wilson_lb": 0.2676646116211986,
+        "positive_impacted": 167,
+        "negative_impacted": 152,
+        "median_impact_score": 5.1639,
+        "bucket_breakdown": {
+          "$300M-$2B": {
+            "total": 662,
+            "impacted": 213
+          },
+          "$2B-$10B": {
+            "total": 211,
+            "impacted": 56
+          },
+          ">$10B": {
+            "total": 190,
+            "impacted": 44
+          },
+          "Unknown": {
+            "total": 22,
+            "impacted": 6
+          }
+        },
+        "top_examples": [
+          {
+            "date": "2025-09-24 16:06:00",
+            "ticker": "QURE",
+            "title": "uniQure Announces $200 Million Proposed Public Offering",
+            "change_pct": 247.7306,
+            "change_1d_pct": 285.4319,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-09-24 07:10:00",
+            "ticker": "QURE",
+            "title": "uniQure Announces Refinancing of Existing $50 Million Debt and Securing Up to an Additional $125 Million in Non-Dilutive Funding",
+            "change_pct": 247.7306,
+            "change_1d_pct": 285.4319,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-10-16 23:45:00",
+            "ticker": "PRAX",
+            "title": "Praxis Precision Medicines, Inc. Announces Pricing of $525 Million Public Offering",
+            "change_pct": 183.714,
+            "change_1d_pct": 231.2816,
+            "market_cap_bucket": "$2B-$10B"
+          },
+          {
+            "date": "2025-09-24 16:21:00",
+            "ticker": "PEPG",
+            "title": "PepGen Announces Proposed Public Offering",
+            "change_pct": 36.4103,
+            "change_1d_pct": 201.5385,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-09-24 22:51:00",
+            "ticker": "PEPG",
+            "title": "PepGen Announces Pricing of $100 Million Public Offering",
+            "change_pct": 36.4103,
+            "change_1d_pct": 201.5385,
+            "market_cap_bucket": "$300M-$2B"
+          }
+        ],
+        "counter_examples": [
+          {
+            "date": "2025-07-01 07:30:00",
+            "ticker": "WSO.B",
+            "title": "Watsco Declares $3.00 Quarterly Dividend",
+            "change_pct": 0.0,
+            "change_1d_pct": 0.0,
+            "market_cap_bucket": ">$10B"
+          },
+          {
+            "date": "2026-02-18 08:11:00",
+            "ticker": "GEL",
+            "title": "Genesis Energy, L.P. Announces Public Offering of Senior Notes",
+            "change_pct": 0.0566,
+            "change_1d_pct": -0.0566,
+            "market_cap_bucket": "$2B-$10B"
+          },
+          {
+            "date": "2026-02-18 20:53:00",
+            "ticker": "GEL",
+            "title": "Genesis Energy, L.P. Upsizes and Prices Public Offering of Senior Notes",
+            "change_pct": 0.0566,
+            "change_1d_pct": -0.0566,
+            "market_cap_bucket": "$2B-$10B"
+          }
+        ]
+      },
+      {
+        "case_type": "earnings_guidance",
+        "label_ko": "실적·가이던스",
+        "description_ko": "quarter/full year financial results, revenue, guidance, backlog, outlook 등 실적성 이벤트",
+        "total": 5182,
+        "impacted": 1403,
+        "not_impacted": 3779,
+        "impact_ratio": 0.27074488614434583,
+        "impact_ratio_wilson_lb": 0.2588196242848589,
+        "positive_impacted": 863,
+        "negative_impacted": 540,
+        "median_impact_score": 4.908,
+        "bucket_breakdown": {
+          "$300M-$2B": {
+            "total": 3400,
+            "impacted": 829
+          },
+          "$2B-$10B": {
+            "total": 905,
+            "impacted": 266
+          },
+          ">$10B": {
+            "total": 823,
+            "impacted": 291
+          },
+          "Unknown": {
+            "total": 54,
+            "impacted": 17
+          }
+        },
+        "top_examples": [
+          {
+            "date": "2025-05-12 06:15:00",
+            "ticker": "CTMX",
+            "title": "CytomX Therapeutics Announces First Quarter 2025 Financial Results and Provides Business Update",
+            "change_pct": 129.427,
+            "change_1d_pct": 169.2805,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-10-20 08:00:00",
+            "ticker": "GSIT",
+            "title": "GSI Technology to Announce Fiscal Second Quarter 2026 Results on October 30, 2025",
+            "change_pct": 155.315,
+            "change_1d_pct": 113.7795,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-08-11 09:02:00",
+            "ticker": "TLS",
+            "title": "Telos Corporation Announces Second Quarter 2025 Earnings",
+            "change_pct": 62.605,
+            "change_1d_pct": 120.1681,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-02-05 16:05:00",
+            "ticker": "APPS",
+            "title": "Digital Turbine Reports Fiscal 2025 Third Quarter Financial Results",
+            "change_pct": 2.4194,
+            "change_1d_pct": 101.2097,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-02-27 16:05:00",
+            "ticker": "ORGO",
+            "title": "Organogenesis Holdings Inc. Reports Fourth Quarter 2024 Financial Results",
+            "change_pct": -5.5385,
+            "change_1d_pct": 91.0769,
+            "market_cap_bucket": "$300M-$2B"
+          }
+        ],
+        "counter_examples": [
+          {
+            "date": "2025-04-23 17:00:00",
+            "ticker": "GROY",
+            "title": "Gold Royalty Announces First Quarter 2025 Preliminary Results",
+            "change_pct": 0.0,
+            "change_1d_pct": 0.0,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2026-01-27 08:30:00",
+            "ticker": "CPS",
+            "title": "Cooper Standard to Discuss Fourth Quarter and Full Year 2025 Results; Provides Details for Management Conference Call",
+            "change_pct": 0.0319,
+            "change_1d_pct": 0.0,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-02-12 07:15:00",
+            "ticker": "KRNT",
+            "title": "Kornit Digital Reports Fourth Quarter and Full Year 2024 Results",
+            "change_pct": 0.0343,
+            "change_1d_pct": 0.0,
+            "market_cap_bucket": "$300M-$2B"
+          }
+        ]
+      },
+      {
+        "case_type": "strategic_review_restructuring",
+        "label_ko": "전략대안·구조조정·생존성",
+        "description_ko": "strategic alternatives, restructuring, going concern, layoffs 등 사업 지속성/재편 이슈",
+        "total": 42,
+        "impacted": 14,
+        "not_impacted": 28,
+        "impact_ratio": 0.3333333333333333,
+        "impact_ratio_wilson_lb": 0.21012280761972318,
+        "positive_impacted": 6,
+        "negative_impacted": 8,
+        "median_impact_score": 4.1499500000000005,
+        "bucket_breakdown": {
+          "$2B-$10B": {
+            "total": 7,
+            "impacted": 2
+          },
+          "$300M-$2B": {
+            "total": 23,
+            "impacted": 9
+          },
+          "Unknown": {
+            "total": 2,
+            "impacted": 0
+          },
+          ">$10B": {
+            "total": 10,
+            "impacted": 3
+          }
+        },
+        "top_examples": [
+          {
+            "date": "2025-05-08 08:30:00",
+            "ticker": "VOR",
+            "title": "Vor Bio Announces Exploration of Strategic Alternatives to Maximize Shareholder Value",
+            "change_pct": -70.1214,
+            "change_1d_pct": -71.746,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-06-06 07:30:00",
+            "ticker": "FCEL",
+            "title": "FuelCell Energy Reports Second Quarter of Fiscal 2025 Results",
+            "change_pct": 24.4231,
+            "change_1d_pct": 43.6538,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-11-17 11:54:00",
+            "ticker": "SHMD",
+            "title": "SCHMID Group N.V. Receives Notice of Delisting or Failure to Satisfy a Continued Listing Rule or Standard",
+            "change_pct": -21.1293,
+            "change_1d_pct": -31.5118,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-02-19 16:05:00",
+            "ticker": "AMPL",
+            "title": "Amplitude Announces Fourth Quarter and Fiscal Year 2024 Financial Results",
+            "change_pct": -2.147,
+            "change_1d_pct": 19.2403,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-10-29 16:05:00",
+            "ticker": "WOLF",
+            "title": "Wolfspeed Reports Financial Results for the First Quarter of Fiscal 2026",
+            "change_pct": 3.9987,
+            "change_1d_pct": -14.9545,
+            "market_cap_bucket": "$300M-$2B"
+          }
+        ],
+        "counter_examples": [
+          {
+            "date": "2025-02-25 07:00:00",
+            "ticker": "SSNC",
+            "title": "State Street and SS&C Technologies Restructure International Financial Data Services (IFDS) Joint Venture in Luxembourg and Ireland",
+            "change_pct": -0.2256,
+            "change_1d_pct": -0.3497,
+            "market_cap_bucket": "Unknown"
+          },
+          {
+            "date": "2025-02-25 07:00:00",
+            "ticker": "SSNC",
+            "title": "State Street and SS&C Technologies Restructure International Financial Data Services (IFDS) Joint Venture in Luxembourg and Ireland",
+            "change_pct": -0.2256,
+            "change_1d_pct": -0.3497,
+            "market_cap_bucket": "Unknown"
+          },
+          {
+            "date": "2025-05-06 08:03:00",
+            "ticker": "INMD",
+            "title": "InMode Granted Injunction Against Counterfeit Sales of Morpheus8 Radio Frequency Microneedling Devices and Needle Cartridges",
+            "change_pct": 0.3509,
+            "change_1d_pct": -0.2105,
+            "market_cap_bucket": "$300M-$2B"
+          }
+        ]
+      },
+      {
+        "case_type": "clinical_regulatory_positive",
+        "label_ko": "임상·규제 성공",
+        "description_ko": "positive topline, phase trial data, NDA/BLA acceptance, approval 같은 바이오 임상·규제 호재",
+        "total": 1446,
+        "impacted": 334,
+        "not_impacted": 1112,
+        "impact_ratio": 0.23098201936376211,
+        "impact_ratio_wilson_lb": 0.20998844697795277,
+        "positive_impacted": 231,
+        "negative_impacted": 103,
+        "median_impact_score": 4.32885,
+        "bucket_breakdown": {
+          "$2B-$10B": {
+            "total": 161,
+            "impacted": 35
+          },
+          "$300M-$2B": {
+            "total": 994,
+            "impacted": 258
+          },
+          ">$10B": {
+            "total": 275,
+            "impacted": 35
+          },
+          "Unknown": {
+            "total": 16,
+            "impacted": 6
+          }
+        },
+        "top_examples": [
+          {
+            "date": "2025-07-08 07:00:00",
+            "ticker": "PROK",
+            "title": "ProKidney Reports Statistically and Clinically Significant Topline Results for the Phase 2 REGEN-007 Trial Evaluating Rilparencel in Patients with Chronic Kidney Disease and Diabetes",
+            "change_pct": 515.0041,
+            "change_1d_pct": 615.5812,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-09-24 07:05:00",
+            "ticker": "QURE",
+            "title": "uniQure Announces Positive Topline Results from Pivotal Phase I/II Study of AMT-130 in Patients with Huntington’s Disease",
+            "change_pct": 247.7306,
+            "change_1d_pct": 285.4319,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-09-24 16:16:00",
+            "ticker": "PEPG",
+            "title": "PepGen Announces Highest Mean Splicing Correction Reported in DM1 Patients",
+            "change_pct": 36.4103,
+            "change_1d_pct": 201.5385,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2026-01-16 16:01:00",
+            "ticker": "CRVS",
+            "title": "Corvus Pharmaceuticals to Announce Results from Cohort 4 of Placebo-Controlled Phase 1 Clinical Trial of Soquelitinib for Atopic Dermatitis",
+            "change_pct": 12.7451,
+            "change_1d_pct": 199.8599,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2026-01-20 07:00:00",
+            "ticker": "CRVS",
+            "title": "Corvus Pharmaceuticals Announces Positive Data from Cohort 4 Confirming Results for Placebo-Controlled Phase 1 Clinical Trial of Soquelitinib for Atopic Dermatitis",
+            "change_pct": 165.9627,
+            "change_1d_pct": 175.1553,
+            "market_cap_bucket": "$300M-$2B"
+          }
+        ],
+        "counter_examples": [
+          {
+            "date": "2026-03-06 08:00:00",
+            "ticker": "HALO",
+            "title": "U.S. FDA Approves TECVAYLI® in Combination with DARZALEX FASPRO® for Relapsed/Refractory Multiple Myeloma",
+            "change_pct": 0.0148,
+            "change_1d_pct": null,
+            "market_cap_bucket": "$2B-$10B"
+          },
+          {
+            "date": "2026-03-04 16:10:00",
+            "ticker": "EHAB",
+            "title": "Enhabit Reports Fourth Quarter 2025 Financial Results",
+            "change_pct": 0.0735,
+            "change_1d_pct": 0.0735,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-06-18 07:15:00",
+            "ticker": "ABBV",
+            "title": "AbbVie Announces New Data Demonstrating Atogepant (QULIPTA® / AQUIPTA®) Achieves Superiority Across All Endpoints in Phase 3 Head-to-Head Study Compared to Topiramate for Migraine Prevention",
+            "change_pct": 0.0054,
+            "change_1d_pct": -0.097,
+            "market_cap_bucket": ">$10B"
+          }
+        ]
+      },
+      {
+        "case_type": "strategic_deal_policy",
+        "label_ko": "전략 제휴·라이선스·정부지원·대형 계약",
+        "description_ko": "partnership, collaboration, license, acquisition, government investment, permit, contract, award 등 외부 자원 연결 이슈",
+        "total": 2711,
+        "impacted": 536,
+        "not_impacted": 2175,
+        "impact_ratio": 0.19771302102545185,
+        "impact_ratio_wilson_lb": 0.18315278248661332,
+        "positive_impacted": 346,
+        "negative_impacted": 190,
+        "median_impact_score": 3.7383,
+        "bucket_breakdown": {
+          "$300M-$2B": {
+            "total": 1570,
+            "impacted": 324
+          },
+          ">$10B": {
+            "total": 719,
+            "impacted": 142
+          },
+          "$2B-$10B": {
+            "total": 401,
+            "impacted": 67
+          },
+          "Unknown": {
+            "total": 21,
+            "impacted": 3
+          }
+        },
+        "top_examples": [
+          {
+            "date": "2026-02-18 08:15:00",
+            "ticker": "RXT",
+            "title": "Rackspace and Palantir Partner to Run Foundry and AIP in Production with Governed Managed Operations",
+            "change_pct": 226.969,
+            "change_1d_pct": 192.3628,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-10-06 19:54:00",
+            "ticker": "TMQ",
+            "title": "Trilogy Metals Applauds President Trump's Decision to Grant Permits for the Ambler Access Project to Enable the Development of Critical Minerals in Alaska",
+            "change_pct": 0.4808,
+            "change_1d_pct": 212.5,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-10-06 17:03:00",
+            "ticker": "TMQ",
+            "title": "Trilogy Metals Announces Strategic Investment by US Federal Government",
+            "change_pct": 0.4808,
+            "change_1d_pct": 212.5,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-10-06 19:54:00",
+            "ticker": "TMQ",
+            "title": "Trilogy Metals Applauds President Trump's Decision to Grant Permits for the Ambler Access Project to Enable the Development of Critical Minerals in Alaska",
+            "change_pct": 0.4808,
+            "change_1d_pct": 212.5,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-10-06 17:03:00",
+            "ticker": "TMQ",
+            "title": "Trilogy Metals Announces Strategic Investment by US Federal Government",
+            "change_pct": 0.4808,
+            "change_1d_pct": 212.5,
+            "market_cap_bucket": "$300M-$2B"
+          }
+        ],
+        "counter_examples": [
+          {
+            "date": "2026-02-25 10:19:00",
+            "ticker": "FE",
+            "title": "FirstEnergy Foundation Invests in First Responder Training with $10,000 Grant to Butler County Community College",
+            "change_pct": 0.0,
+            "change_1d_pct": 0.0,
+            "market_cap_bucket": ">$10B"
+          },
+          {
+            "date": "2025-07-11 07:43:00",
+            "ticker": "BBOT",
+            "title": "Helix Acquisition Corp. II and BridgeBio Oncology Therapeutics Announce Effectiveness of Registration Statement for Proposed Business Combination",
+            "change_pct": 0.0,
+            "change_1d_pct": 0.0,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2026-02-18 07:20:00",
+            "ticker": "GEL",
+            "title": "Genesis Energy, L.P. Files Form 10-K",
+            "change_pct": 0.0566,
+            "change_1d_pct": -0.0566,
+            "market_cap_bucket": "$2B-$10B"
+          }
+        ]
+      },
+      {
+        "case_type": "commercial_launch_expansion",
+        "label_ko": "상업화·시설·사업 확장",
+        "description_ko": "launch, facility, operations, expansion, production, commercialization 등 사업 확장성 이벤트",
+        "total": 2177,
+        "impacted": 344,
+        "not_impacted": 1833,
+        "impact_ratio": 0.15801561782269177,
+        "impact_ratio_wilson_lb": 0.1432972105685741,
+        "positive_impacted": 216,
+        "negative_impacted": 128,
+        "median_impact_score": 3.5714,
+        "bucket_breakdown": {
+          "$2B-$10B": {
+            "total": 375,
+            "impacted": 66
+          },
+          "$300M-$2B": {
+            "total": 1225,
+            "impacted": 171
+          },
+          ">$10B": {
+            "total": 549,
+            "impacted": 103
+          },
+          "Unknown": {
+            "total": 28,
+            "impacted": 4
+          }
+        },
+        "top_examples": [
+          {
+            "date": "2025-08-25 12:26:00",
+            "ticker": "USAS",
+            "title": "Silver Mining Sector Emerges as Clear Winner Amid Production Expansion Wave",
+            "change_pct": -3.9216,
+            "change_1d_pct": 138.2353,
+            "market_cap_bucket": "$2B-$10B"
+          },
+          {
+            "date": "2025-08-25 12:26:00",
+            "ticker": "USAS",
+            "title": "Silver Mining Sector Emerges as Clear Winner Amid Production Expansion Wave",
+            "change_pct": -3.9216,
+            "change_1d_pct": 138.2353,
+            "market_cap_bucket": "$2B-$10B"
+          },
+          {
+            "date": "2025-10-13 08:27:00",
+            "ticker": "ABAT",
+            "title": "American Battery Technology Company Completes All Required NEPA Baseline Studies for its Tonopah Flats Lithium Project, One of the Largest Critical Mineral Lithium Projects in the U.S.",
+            "change_pct": 36.5926,
+            "change_1d_pct": 67.8519,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-10-10 09:15:00",
+            "ticker": "ASPI",
+            "title": "ASP Isotopes Inc. to host Institutional Investor Access Event in South Africa from November 11 – 13, 2025",
+            "change_pct": 14.4633,
+            "change_1d_pct": 50.5085,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-11-20 07:00:00",
+            "ticker": "WSHP",
+            "title": "WeShop Launches in the U.S. After Strong Nasdaq Debut, Allowing Users to Earn Ownership through their Shopping",
+            "change_pct": -22.575,
+            "change_1d_pct": -43.3,
+            "market_cap_bucket": "$300M-$2B"
+          }
+        ],
+        "counter_examples": [
+          {
+            "date": "2025-03-06 08:05:00",
+            "ticker": "SVRA",
+            "title": "Savara Announces U.S. Launch of the aPAP ClearPath™ Dried Blood Spot Test to Detect Autoimmune Pulmonary Alveolar Proteinosis (aPAP)",
+            "change_pct": 0.0,
+            "change_1d_pct": 0.0,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-08-26 12:00:00",
+            "ticker": "WMT",
+            "title": "Walmart Unveils New Seller Capabilities and Tools, Growth Initiatives and Next-Level Omnichannel Opportunities at Marketplace Seller Summit",
+            "change_pct": -0.0208,
+            "change_1d_pct": 0.0104,
+            "market_cap_bucket": ">$10B"
+          },
+          {
+            "date": "2026-01-06 08:30:00",
+            "ticker": "AENT",
+            "title": "Alliance Entertainment Launches Alliance Authentic™, Introducing The Ultimate Vinyl Collectible™ and a New Marketplace for Authenticated, Numbered Vinyl Collectibles",
+            "change_pct": 0.0,
+            "change_1d_pct": 0.0636,
+            "market_cap_bucket": "$300M-$2B"
+          }
+        ]
+      },
+      {
+        "case_type": "general_corporate_pr",
+        "label_ko": "일반 corporate PR",
+        "description_ko": "conference, publication, appointment, facility update 등 일반 PR성 공지",
+        "total": 8339,
+        "impacted": 1222,
+        "not_impacted": 7117,
+        "impact_ratio": 0.14654035256025902,
+        "impact_ratio_wilson_lb": 0.13911263234833512,
+        "positive_impacted": 729,
+        "negative_impacted": 493,
+        "median_impact_score": 3.274,
+        "bucket_breakdown": {
+          "$300M-$2B": {
+            "total": 4137,
+            "impacted": 579
+          },
+          "$2B-$10B": {
+            "total": 1532,
+            "impacted": 219
+          },
+          ">$10B": {
+            "total": 2585,
+            "impacted": 414
+          },
+          "Unknown": {
+            "total": 85,
+            "impacted": 10
+          }
+        },
+        "top_examples": [
+          {
+            "date": "2025-01-08 16:05:00",
+            "ticker": "SANA",
+            "title": "Sana Biotechnology to Present at the 43rd Annual J.P. Morgan Healthcare Conference",
+            "change_pct": 160.6061,
+            "change_1d_pct": 121.8182,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-10-20 09:00:00",
+            "ticker": "GSIT",
+            "title": "Compute-In-Memory APU Achieves GPU-Class AI Performance at a Fraction of the Energy Cost",
+            "change_pct": 155.315,
+            "change_1d_pct": 113.7795,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-09-24 07:00:00",
+            "ticker": "LAC",
+            "title": "Lithium Americas Comments on Share Price Movement",
+            "change_pct": 95.7655,
+            "change_1d_pct": 140.0651,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-06-06 12:27:00",
+            "ticker": "PHAT",
+            "title": "Phathom Pharmaceuticals Announces Positive FDA Decision to Recognize 10 Years of Regulatory Exclusivity for VOQUEZNA® (vonoprazan) Tablets through May 3, 2032",
+            "change_pct": 90.1919,
+            "change_1d_pct": 88.2729,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-05-12 06:30:00",
+            "ticker": "BW",
+            "title": "Babcock & Wilcox Announces Private Bond Exchanges to Reduce Outstanding Debt, Lower Annual Interest Expense and Extend Debt Maturity to 2030",
+            "change_pct": 30.1406,
+            "change_1d_pct": 90.1406,
+            "market_cap_bucket": "$300M-$2B"
+          }
+        ],
+        "counter_examples": [
+          {
+            "date": "2025-10-31 16:30:00",
+            "ticker": "RBBN",
+            "title": "Ribbon Communications Announces Inducement Equity Grants to Steve McCaffery and Don Toft Under Nasdaq Listing Rule 5635(c)(4)",
+            "change_pct": 0.0,
+            "change_1d_pct": 0.0,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2025-04-23 06:00:00",
+            "ticker": "GROY",
+            "title": "GoldMining Inc. Identifies Significant Antimony Mineralization Including 2.79 g/t AuEq (0.71 g/t Au and 0.59% Sb) over 79 metres and 1.91 g/t AuEq (1.56 g/t Au and 0.10% Sb) over 128 metres at its 100% Owned Crucero Project",
+            "change_pct": 0.0,
+            "change_1d_pct": 0.0,
+            "market_cap_bucket": "$300M-$2B"
+          },
+          {
+            "date": "2026-03-05 06:00:00",
+            "ticker": "EHAB",
+            "title": "Shareholder Investigation Launched by Kaskela Law Firm into Fairness of Enhabit, Inc. (NYSE: EHAB) Buyout Price; EHAB Investors Encouraged to Contact the Firm ",
+            "change_pct": 0.0,
+            "change_1d_pct": 0.0,
+            "market_cap_bucket": "$300M-$2B"
+          }
+        ]
+      }
+    ]
+  }
+}

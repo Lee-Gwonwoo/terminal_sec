@@ -1,0 +1,8 @@
+since=2024-01-01
+until=2026-03-10
+scope=all_news
+primary_impact_formula=max(abs(change_pct), abs(change_1d_pct), abs(change_from_open_pct))
+market_cap_buckets=$300M-<$1B|$1B-<$100B|>=100B|<$300M or Unknown
+total_rows=134759
+analyzable_rows=112513
+top_case_types=['clinical_regulatory_negative', 'earnings_guidance_positive', 'financing_offering', 'clinical_regulatory_positive', 'analyst_rating_target', 'strategic_review_restructuring', 'commercial_launch_expansion', 'listing_capital_markets', 'general_corporate_pr', 'litigation_investigation']
