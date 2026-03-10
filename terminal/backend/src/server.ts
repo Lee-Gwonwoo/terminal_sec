@@ -1818,13 +1818,33 @@ app.post("/api/company-profiles/pull-fmp", async (req, res) => {
     let upserted = 0;
 
     for (const [ticker, fmp] of profiles) {
-      const secId = await upsertSecurity(
-        ticker,
-        fmp.exchangeShortName || null,
-        fmp.companyName || null,
-        fmp.sector || null,
-        fmp.industry || null,
+      // Find existing security by ticker only to avoid duplicates
+      const existingSec = await getDb().get<{ id: number }>(
+        "SELECT id FROM securities WHERE ticker = ? ORDER BY id ASC LIMIT 1",
+        [ticker.toUpperCase()],
       );
+      let secId: number;
+      if (existingSec) {
+        secId = existingSec.id;
+        const sets: string[] = [];
+        const params: unknown[] = [];
+        if (fmp.exchangeShortName) { sets.push("exchange = ?"); params.push(fmp.exchangeShortName); }
+        if (fmp.companyName) { sets.push("name = ?"); params.push(fmp.companyName); }
+        if (fmp.sector) { sets.push("sector = ?"); params.push(fmp.sector); }
+        if (fmp.industry) { sets.push("industry = ?"); params.push(fmp.industry); }
+        if (sets.length > 0) {
+          params.push(secId);
+          await getDb().run(`UPDATE securities SET ${sets.join(", ")} WHERE id = ?`, params);
+        }
+      } else {
+        secId = await upsertSecurity(
+          ticker,
+          fmp.exchangeShortName || null,
+          fmp.companyName || null,
+          fmp.sector || null,
+          fmp.industry || null,
+        );
+      }
       await upsertCompanyProfile(
         secId,
         "fmp",
@@ -1919,13 +1939,35 @@ app.post("/api/company-profiles/pull-market-cap", async (req, res) => {
 
         let updated = 0;
         for (const [ticker, profile] of results) {
-          const secId = await upsertSecurity(
-            ticker,
-            profile.exchange,
-            profile.name,
-            null,
-            profile.finnhubIndustry,
+          // Look up existing security by ticker only (ignore exchange) to avoid
+          // creating duplicates when Finnhub returns a real exchange name but
+          // the CSV-imported row has exchange=null.
+          const existingSec = await getDb().get<{ id: number }>(
+            "SELECT id FROM securities WHERE ticker = ? ORDER BY id ASC LIMIT 1",
+            [ticker.toUpperCase()],
           );
+          let secId: number;
+          if (existingSec) {
+            secId = existingSec.id;
+            // Update metadata from Finnhub on the existing row
+            const sets: string[] = [];
+            const params: unknown[] = [];
+            if (profile.exchange) { sets.push("exchange = ?"); params.push(profile.exchange); }
+            if (profile.name) { sets.push("name = ?"); params.push(profile.name); }
+            if (profile.finnhubIndustry) { sets.push("industry = ?"); params.push(profile.finnhubIndustry); }
+            if (sets.length > 0) {
+              params.push(secId);
+              await getDb().run(`UPDATE securities SET ${sets.join(", ")} WHERE id = ?`, params);
+            }
+          } else {
+            secId = await upsertSecurity(
+              ticker,
+              profile.exchange,
+              profile.name,
+              null,
+              profile.finnhubIndustry,
+            );
+          }
           await upsertCompanyProfile(
             secId,
             "finnhub",

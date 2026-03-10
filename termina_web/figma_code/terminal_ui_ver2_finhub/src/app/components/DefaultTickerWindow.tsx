@@ -215,6 +215,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
         if (res.status === 404) {
           // Job lost (server restarted or cleaned up)
           setMarketCapUpdating(false);
+          setMarketCapJob(null);
           setError("Market cap update job lost (server may have restarted). Please retry.");
           setMarketCapJobId(null);
           return;

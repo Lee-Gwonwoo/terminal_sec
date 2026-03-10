@@ -2,6 +2,41 @@
 
 ## 2026-03-10
 
+### Bug fix — market cap이 UI에 표시되지 않는 문제 수정 (2026-03-10)
+
+**Status: done (awaiting user confirmation)**
+
+#### 근본 원인
+
+- `upsertSecurity()`는 `(ticker, COALESCE(exchange, ''))` 기준으로 lookup함
+- CSV import 시 securities 테이블에 `exchange=null`로 row 생성 → ticker_universe_items가 이 security_id 참조
+- Finnhub profile2가 실제 exchange 이름(예: "NASDAQ NMS - GLOBAL MARKET")을 반환 → `upsertSecurity()`가 다른 exchange로 인식 → **새 security row 생성**
+- market_cap은 새 security_id에 저장되었으나, default universe는 원래 security_id를 참조 → JOIN 결과 market_cap=null
+- 1677개 ticker가 duplicate security row 존재
+
+#### 수정 내용
+
+1. `terminal/backend/src/server.ts` — pull-market-cap 핸들러 수정
+   - `upsertSecurity(ticker, profile.exchange, ...)` → 먼저 ticker만으로 기존 security 검색 (`ORDER BY id ASC LIMIT 1`)
+   - 기존 row 발견 시 해당 security_id 재사용 + metadata(exchange, name, industry) 업데이트
+   - 기존 row 미발견 시에만 `upsertSecurity()` 호출로 신규 생성
+
+2. `terminal/backend/src/server.ts` — FMP profile 핸들러도 동일하게 수정
+   - `fmp.exchangeShortName` 전달 시에도 같은 duplicate 방지 로직 적용
+
+3. 기존 데이터 마이그레이션 실행
+   - 1677개 duplicate security row의 company_profiles를 원래 security_id로 이동
+   - duplicate security row 삭제 + metadata(exchange, name, industry) 원래 row에 병합
+   - 마이그레이션 후 duplicate 0개 확인
+
+#### 검증
+
+- `GET /api/tickers` → `withMarketCap: 1677 / total: 1698` (수정 전: 0 / 1698)
+- AAPL: security_id=1192, market_cap=$3.8T 확인
+- TS 에러 없음
+
+---
+
 ### Step — market cap ingestion + Default Ticker/News Feed UI 반영 (2026-03-10)
 
 **Status: done (awaiting user confirmation)**
