@@ -1282,17 +1282,18 @@ export function FinnhubNewsWindow({
               <span className="text-gray-400 mx-0.5">|</span>
               <span className="text-gray-500 shrink-0">fr.O→H:</span>
               <span className={changeColor(newsItem.changeOpenToHighPct)}>{formatChange(newsItem.changeOpenToHighPct)}</span>
-              <span className="text-gray-400 mx-0.5">|</span>
+            </div>
+            <div className="flex items-center gap-1">
               <span className="text-gray-500 shrink-0">+1D:</span>
               <span className={changeColor(newsItem.change1dPct)}>{formatChange(newsItem.change1dPct)}</span>
               <span className="text-gray-400 mx-0.5">|</span>
               <span className="text-gray-500 shrink-0">+3D:</span>
               <span className={changeColor(newsItem.change3dPct)}>{formatChange(newsItem.change3dPct)}</span>
-            </div>
-            <div className="flex items-center gap-1">
+              <span className="text-gray-400 mx-0.5">|</span>
               <span className="text-gray-500 shrink-0">+7D:</span>
               <span className={changeColor(newsItem.change7dPct)}>{formatChange(newsItem.change7dPct)}</span>
-              <span className="text-gray-400 mx-0.5">|</span>
+            </div>
+            <div className="flex items-center gap-1">
               <span className="text-gray-500 shrink-0">+14D:</span>
               <span className={changeColor(newsItem.change14dPct)}>{formatChange(newsItem.change14dPct)}</span>
               <span className="text-gray-400 mx-0.5">|</span>
