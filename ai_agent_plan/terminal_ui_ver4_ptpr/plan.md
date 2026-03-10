@@ -300,3 +300,137 @@ Legend: `✅` 완료+사용자확인 완료 / `⏳` 완료, 사용자확인 대�
 - 범위 결론
   - 현재 확인 범위는 press release feed다.
   - 별도 market news / general news / macro commentary endpoint는 문서와 probe에서 확인되지 않았다.
+
+---
+
+### PLAN CHANGE (2026-03-10) — 구현 단계 추가
+
+사용자 요청: "recent ptpr press release, custom ptpr press release / 버튼 추가 기능도 작동하도록 하고 / log view 도 이 버튼에 적용되게 하라 / 속도 고려"
+
+**결정 확정:**
+- `D-1` 저장 전략: 기존 `news_items` 테이블에 `source='RTPR'`, `source_type='press_release'`로 적재. URL은 합성키 `rtpr://{ticker}/{created_iso}` 사용.
+- `D-2` WebSocket 운영: 이번 범위에서는 REST만 사용. WebSocket은 후속 과제.
+- `D-3` dedup key: `UNIQUE(source, url)` 제약 활용 → `source='RTPR'` + `url='rtpr://{TICKER}/{created_iso}'`로 중복 방지.
+- `D-4` ET canonical: `published_at`에 ET 변환된 ISO string 저장 (기존 Finnhub 패턴과 동일). raw `created`는 body에 자연스럽게 포함.
+
+**추가되는 Steps: 3 ~ 5**
+
+#### ⏳ Step 3 — Backend RTPR provider + pull endpoint
+
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 3-1 | `config.ts`에 RTPR API key 로딩 추가 | `terminal/backend/src/config.ts` | `config.rtprApiKey` 값 존재 확인 | ⏳ |
+| 3-2 | `ptprNewsProvider.ts` 생성 — REST fetch + rate limiter + FinnhubMappedItem 변환 | `terminal/backend/src/services/ptprNewsProvider.ts` | `npx tsc --noEmit` 통과 | ⏳ |
+| 3-3 | `server.ts`에 `POST /api/news/pull-rtpr` endpoint 추가 (recent/custom mode, job 기반) | `terminal/backend/src/server.ts` | backend build 성공 + endpoint 응답 확인 | ⏳ |
+
+- `3-1` 목적: RTPR API key를 안전하게 로드. 설명: `ai_agent_plan/ptpr_api_key/ptpr_api_key` 파일에서 읽어 `config.rtprApiKey`로 노출.
+  - 완료 조건: config 객체에 rtprApiKey 존재
+  - 사람 검증: backend 시작 시 에러 없음
+  - 흔한 문제: 파일 경로 오타, 빈 키 파일
+- `3-2` 목적: RTPR REST API를 호출하고 결과를 `FinnhubMappedItem` 호환 형식으로 변환하는 provider.
+  - `fetchRtprArticles(limit)` — 전체 최신 articles
+  - `fetchRtprArticlesByTicker(ticker, limit)` — ticker별 articles
+  - ET 시각 변환 포함 (UTC → America/New_York)
+  - 60 rpm rate limiter
+  - 완료 조건: tsc 통과 + 함수 export 확인
+  - 사람 검증: provider import 시 컴파일 에러 없음
+  - 흔한 문제: timezone 변환 라이브러리 누락, rate limit 미적용
+- `3-3` 목적: 프론트엔드에서 호출할 pull endpoint. mode=recent은 `GET /articles?limit=100`, mode=custom은 ticker별 조회.
+  - job 기반 비동기 실행 (createJob → appendLog → completeJob/failJob)
+  - `activePullJobs`에 `rtpr_press_release` key 사용하여 중복 방지
+  - 완료 조건: `POST /api/news/pull-rtpr` → `{ jobId }` 응답
+  - 사람 검증: curl/PowerShell로 endpoint 호출 시 jobId 반환
+  - 흔한 문제: import 누락, zod schema 오류
+
+검증 훅:
+```powershell
+cd c:\github_coding\terminal_sec\terminal\backend
+npx tsc --noEmit
+npm run build
+# dev 서버 시작 후
+Invoke-RestMethod -Uri "http://localhost:8080/api/news/pull-rtpr" -Method Post -ContentType "application/json" -Body '{"mode":"recent"}'
+```
+사용자 확인 필요: **예**
+
+#### ⏳ Step 4 — Frontend PTPR 버튼 + Log View 통합
+
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 4-1 | Update 메뉴에 "PTPR Press Release" 섹션 추가 (Recent + Custom 2개 버튼) | `FinnhubNewsWindow.tsx` | frontend build 성공 | ⏳ |
+| 4-2 | `handlePtprUpdate` 함수 추가 — `POST /api/news/pull-rtpr` 호출, jobId 설정 | `FinnhubNewsWindow.tsx` | 버튼 클릭 시 job 시작 확인 | ⏳ |
+| 4-3 | Log View가 PTPR job에도 동작하는지 확인 (기존 jobId polling 재사용) | `FinnhubNewsWindow.tsx` | View Log 패널에 PTPR 로그 표시 | ⏳ |
+
+- `4-1` 목적: 사용자가 PTPR 데이터를 Pull 할 수 있는 UI 진입점.
+  - "PTPR Press Release" 섹션 헤더 + "Recent PTPR Press Release", "Custom PTPR Press Release" 버튼
+  - 완료 조건: 메뉴에 2개 버튼 표시됨
+  - 사람 검증: 브라우저에서 Update 드롭다운 열면 PTPR 섹션 보임
+  - 흔한 문제: JSX 닫힘 태그 누락, key prop 누락
+- `4-2` 목적: 버튼 클릭 시 backend RTPR pull job을 시작하고 jobId를 받아 상태 추적.
+  - `handlePtprUpdate(mode: 'recent' | 'custom', from?, to?)` 함수
+  - 기존 `handleUpdate`와 유사하나 endpoint는 `/api/news/pull-rtpr`
+  - 완료 조건: 버튼 클릭 → job 시작 → jobId 설정
+  - 사람 검증: 버튼 클릭 후 View Log 활성화됨
+  - 흔한 문제: wrong endpoint URL, body 형식 불일치
+- `4-3` 목적: Log View는 이미 `currentJobId` 기반으로 동작하므로 별도 수정 없이 PTPR job 로그도 표시됨.
+  - 완료 조건: PTPR job 실행 중 View Log 클릭 시 로그 표시
+  - 사람 검증: 브라우저에서 PTPR pull 후 View Log 열기
+  - 흔한 문제: jobId가 설정되지 않으면 View Log 비활성
+
+검증 훅:
+```powershell
+cd c:\github_coding\terminal_sec\termina_web\figma_code\terminal_ui_ver2_finhub
+npm run build
+```
+사용자 확인 필요: **예**
+
+#### ⏳ Step 5 — 통합 테스트 + sourceType 필터 호환
+
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 5-1 | RTPR pull 후 news_items 테이블에 `source='RTPR'` 행 존재 확인 | (런타임) | DB query 검증 | ⏳ |
+| 5-2 | sourceType 필터에서 `press_release` 선택 시 RTPR 기사도 표시되는지 확인 | (런타임) | API 응답에 RTPR source 포함 | ⏳ |
+| 5-3 | 중복 실행 시 INSERT OR IGNORE로 중복 insert 방지 확인 | (런타임) | 2회 실행 후 row count 동일 | ⏳ |
+
+- `5-1` 완료 조건: `SELECT COUNT(*) FROM news_items WHERE source='RTPR'` > 0
+- `5-2` 완료 조건: source_type=press_release 필터 시 RTPR 기사 포함
+- `5-3` 완료 조건: 2회 pull 후 totalSkipped > 0
+
+검증 훅:
+```powershell
+# backend dev 서버 상태에서
+Invoke-RestMethod -Uri "http://localhost:8080/api/news?source_type=press_release&limit=5"
+```
+사용자 확인 필요: **예**
+
+### 실행 의존성 그래프 (갱신)
+Legend: `✅` 완료+사용자확인 / `⏳` 완료, 사용자확인 대기 / `⬜` 미착수 / `🚫` 차단
+
+```text
+트랙 A — Discovery (완료)
+  ⏳ Step 0 현재 상태 고정
+  ⏳ Step 1 provider spec/base URL 확보
+  ⏳ Step 2 실제 API probe 및 데이터 타입 카탈로그
+
+트랙 B — 구현 (완료, 사용자 확인 대기)
+  ⏳ Step 3 Backend RTPR provider + pull endpoint
+    ⏳ 3-1 config.ts RTPR key 로딩
+    ⏳ 3-2 ptprNewsProvider.ts 생성
+    ⏳ 3-3 server.ts pull-rtpr endpoint
+
+  ⏳ Step 4 Frontend PTPR 버튼 + Log View
+    ⏳ 4-1 Update 메뉴 PTPR 섹션 추가
+    ⏳ 4-2 handlePtprUpdate 함수
+    ⏳ 4-3 Log View 통합 확인
+
+  ⏳ Step 5 통합 테스트
+    ⏳ 5-1 DB row 존재 확인 (100건 insert 성공)
+    ⏳ 5-2 sourceType 필터 호환 (press_release 필터 시 RTPR 포함 확인)
+    ⏳ 5-3 중복 방지 확인 (2차 pull: inserted=0, skipped=100)
+```
+
+병렬 트랙 요약:
+- Step 3 → Step 4 → Step 5 순차 (각 Step 내 세부 단계도 순차)
+- Step 4는 Step 3 완료 후 진행 (backend endpoint 필요)
+- Step 5는 Step 3+4 완료 후 진행
+
+차단 요약: 없음 (D-1~D-4 모두 확정)

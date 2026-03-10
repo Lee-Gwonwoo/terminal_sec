@@ -157,3 +157,31 @@
 
 - 현재 문서 기준으로 RTPR는 `press_release` 전용 provider, 내부 시각 표준은 ET로 정리했다.
 - 다음 구현 단계에서 `created_raw + created_et` 병행 저장으로 갈지 여부를 확인하면 된다.
+
+### RTPR Backend + Frontend 전체 구현 완료 (2026-03-10 22:10)
+
+**작성 시각:** 2026-03-10 22:10 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. **config.ts** — `loadRtprApiKey()` 추가. 파일 첫 줄만 읽도록 구현 (Customer ID가 2번째 줄에 있어 수정).
+2. **ptprNewsProvider.ts** 신규 생성 — REST fetch + 60 rpm rate limiter + ET 변환 + 합성 URL dedup.
+3. **server.ts** — `POST /api/news/pull-rtpr` endpoint 추가 (recent/custom mode, job 기반).
+4. **FinnhubNewsWindow.tsx** — Update 메뉴에 PTPR 섹션 + 2개 버튼 + Custom date modal + handler 추가.
+
+#### 런타임 검증 결과
+
+- RTPR recent pull: 100건 fetch → 100건 insert → status=done
+- 2차 pull: 0건 insert, 100건 skipped (중복 방지 정상)
+- press_release 필터 시 RTPR 기사 정상 조회 확인
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | backend + frontend 0 errors |
+| 빌드 | ✅ | backend tsc + frontend vite build 통과 |
+| 자동 테스트 | ✅ | 관련 test suite 없음 |
+| 런타임 통합 | ✅ | POST /api/news/pull-rtpr 100건 insert, 2차 pull 중복 skip, press_release 필터 정상. 브라우저 시각 확인은 사용자 위임 |

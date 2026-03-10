@@ -66,10 +66,35 @@ function loadFmpApiKey(): string {
   return ""; // FMP is optional
 }
 
+function loadRtprApiKey(): string {
+  // 1. Environment variable
+  const envKey = process.env.RTPR_API_KEY;
+  if (envKey && envKey.trim()) {
+    return envKey.trim();
+  }
+
+  // 2. File fallback
+  const repoRoot = resolveRepoRoot();
+  const keyPath = path.join(repoRoot, "ai_agent_plan", "ptpr_api_key", "ptpr_api_key");
+  try {
+    const raw = fs.readFileSync(keyPath, "utf8");
+    // Key file may contain multiple lines (e.g. Customer ID on line 2) — take first line only
+    const fileKey = raw.split(/\r?\n/)[0].trim();
+    if (fileKey) {
+      return fileKey;
+    }
+  } catch {
+    // File not found or unreadable — fall through
+  }
+
+  return ""; // RTPR is optional
+}
+
 export const config = {
   port: Number(process.env.PORT ?? 8080),
   sqlitePath: process.env.SQLITE_PATH ?? "./backend/data/app.db",
   frontendOrigin: process.env.FRONTEND_ORIGIN ?? "http://localhost:5174",
   finnhubApiKey: loadFinnhubApiKey(),
   fmpApiKey: loadFmpApiKey(),
+  rtprApiKey: loadRtprApiKey(),
 };

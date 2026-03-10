@@ -102,6 +102,49 @@
 
   `overall_impact_score = max(immediate_reaction_score, short_followthrough_score, medium_persistence_score)`
 
+- 실제 계산 순서는 아래와 같다.
+  1. 뉴스 1건에 대해 `change_from_open_pct`, `change_open_to_high_pct`, `change_pct`, `change_1d_pct`, `change_3d_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct`를 읽는다.
+  2. 각 구간에서는 **부호를 잠시 무시하고 절대값**만 본다. 즉 `+12%`와 `-12%`는 둘 다 영향 강도 `12`로 취급한다.
+  3. 당일 구간 점수는 아래 3개 절대값 중 최대값이다.
+
+     `immediate_reaction_score = max(abs(change_from_open_pct), abs(change_open_to_high_pct), abs(change_pct))`
+
+  4. 1~3거래일 구간 점수는 아래 2개 절대값 중 최대값이다.
+
+     `short_followthrough_score = max(abs(change_1d_pct), abs(change_3d_pct))`
+
+  5. 7~30거래일 구간 점수는 아래 3개 절대값 중 최대값이다.
+
+     `medium_persistence_score = max(abs(change_7d_pct), abs(change_14d_pct), abs(change_30d_pct))`
+
+  6. 마지막으로 위 3개 구간 점수 중 최대값을 `overall_impact_score`로 둔다.
+
+     `overall_impact_score = max(immediate_reaction_score, short_followthrough_score, medium_persistence_score)`
+
+- 계산 예시:
+  - 입력값:
+    - `change_from_open_pct = 4`
+    - `change_open_to_high_pct = 9`
+    - `change_pct = -3`
+    - `change_1d_pct = 12`
+    - `change_3d_pct = -7`
+    - `change_7d_pct = 5`
+    - `change_14d_pct = 18`
+    - `change_30d_pct = 10`
+  - 계산:
+    - `immediate_reaction_score = max(4, 9, 3) = 9`
+    - `short_followthrough_score = max(12, 7) = 12`
+    - `medium_persistence_score = max(5, 18, 10) = 18`
+    - `overall_impact_score = max(9, 12, 18) = 18`
+  - 해석:
+    - 이 뉴스의 최종 영향 강도 점수는 `18`이다.
+    - 이후 이 뉴스가 속한 market cap bucket의 `p80`과 비교해서 `영향 미침 / 영향 안 미침`을 판정한다.
+
+- `None` 처리 규칙:
+  - 특정 change 컬럼 값이 없으면 그 값은 해당 구간 최대값 계산에서 제외한다.
+  - 한 구간의 값이 모두 비어 있으면 그 구간 점수는 `None`이다.
+  - 3개 구간 점수가 모두 `None`이면 `overall_impact_score`도 `None`이고, 이 row는 `with_change`에 포함되지 않는다.
+
 - 이 방식의 이유:
   - `immediate_reaction_score`는 뉴스가 당일 바로 반응했는지 본다.
   - `short_followthrough_score`는 다음 1~3거래일 동안 후속 추세가 붙는지 본다.
@@ -120,6 +163,16 @@
   - bucket별 `overall_impact_score`의 `p80` 이상이면 `영향 미침`
   - 단, 보조 판정으로 `short_followthrough_score` 또는 `medium_persistence_score`가 같은 bucket의 `p80`을 넘으면 **지연형/지속형 영향**으로 별도 태그를 붙인다.
 - 더 보수적으로 보고 싶으면 `p90`, 더 넓게 잡고 싶으면 `p70` 또는 `p75`로 바꿀 수 있지만, 문서/로그에 반드시 명시한다.
+
+- `p80`의 뜻:
+  - 같은 market cap bucket 안에서 `overall_impact_score`를 작은 값부터 큰 값 순으로 정렬했을 때, 상위 20% 경계에 해당하는 값이다.
+  - 따라서 `overall_impact_score >= p80`이면 그 bucket 기준으로는 “상대적으로 큰 반응”에 속한다고 본다.
+  - 예를 들어 어떤 bucket의 `p80 = 20.23`이면, 최종 영향 점수가 `20.23` 이상인 뉴스만 `영향 미침`으로 분류한다.
+
+- `with_change`의 뜻:
+  - `with_change`는 `영향 미침` 개수가 아니다.
+  - `with_change`는 8개 change 컬럼 중 적어도 일부 값이 있어서 `overall_impact_score`를 계산할 수 있었던 row 수다.
+  - 즉 `total`은 전체 뉴스 수, `with_change`는 판정 가능 뉴스 수, 그중 `p80` 이상인 row들이 실제 `영향 미침` 뉴스다.
 
 반응 타입 태깅 규칙:
 
