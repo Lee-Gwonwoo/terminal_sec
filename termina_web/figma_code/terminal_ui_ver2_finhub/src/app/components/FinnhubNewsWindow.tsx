@@ -607,7 +607,7 @@ export function FinnhubNewsWindow({
     setNextCursor(null);
     try {
       const params = new URLSearchParams();
-      params.set('source_names', 'FINNHUB');
+      params.set('source_names', 'FINNHUB,RTPR');
       if (selectedBookmarkFolderId) {
         params.set('bookmarkFolderId', selectedBookmarkFolderId);
       }
@@ -652,7 +652,7 @@ export function FinnhubNewsWindow({
     setLoadingMore(true);
     try {
       const params = new URLSearchParams();
-      params.set('source_names', 'FINNHUB');
+      params.set('source_names', 'FINNHUB,RTPR');
       if (selectedBookmarkFolderId) {
         params.set('bookmarkFolderId', selectedBookmarkFolderId);
       }

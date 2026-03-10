@@ -300,3 +300,31 @@
 
 - 현재 RTPR는 기본 5개 병렬 처리이며, Control Window에서 값을 바꿀 수 있다.
 - 다음 단계로는 `custom PTPR`의 confirmed-empty/anchor skip 최적화(Plan Step 7-3)로 이어가면 된다.
+
+### News Feed UI에서 RTPR 표시 누락 수정 (2026-03-10 23:24)
+
+**작성 시각:** 2026-03-10 23:24 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. DB/API 확인 결과 RTPR press release row는 이미 정상 저장되어 있었음.
+2. 하지만 `FinnhubNewsWindow.tsx`의 목록 조회가 `source_names=FINNHUB`로 고정되어 있어 UI에서 RTPR가 숨겨지고 있었음.
+3. `fetchNews()`와 `fetchMore()`의 query를 `FINNHUB,RTPR`로 변경하여 News Feed에서 RTPR도 함께 표시되도록 수정.
+
+#### 검증 결과
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 런타임 API | ✅ | `GET /api/news?limit=20&source_type=press_release&source_names=RTPR` 에서 RTPR 기사 확인 |
+| 런타임 API(혼합) | ✅ | `GET /api/news?limit=10&source_type=press_release` 에서 RTPR 기사 포함 확인 |
+| 정적 분석 | ✅ | `FinnhubNewsWindow.tsx` 에러 없음 |
+| 빌드(frontend) | ✅ | `vite build` 통과 |
+
+#### 리스크 / 완화
+
+1. **리스크:** 이제 News Feed가 FINNHUB 전용이 아니라 RTPR도 함께 보여주므로, 기존 사용자 기대와 달라질 수 있다.
+   - 완화: 현재는 `FINNHUB,RTPR`만 포함해 EODHD 등 다른 provider까지 넓히지는 않았다.
+2. **리스크:** 화면이 열려 있던 상태면 즉시 반영되지 않을 수 있다.
+   - 완화: 페이지 새로고침 후 Press Release 탭에서 재확인한다.
