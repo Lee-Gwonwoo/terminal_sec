@@ -208,28 +208,8 @@ export function FinnhubNewsWindow({
   titleFontSize = 12,
   summaryFontSize = 11,
 }: FinnhubNewsWindowProps) {
-  const [searchQuery, setSearchQuery] = useState(() => {
-    if (initialTicker) return initialTicker;
-    try {
-      const saved = localStorage.getItem('finhub-news-ui-state');
-      if (saved) {
-        const p = JSON.parse(saved);
-        if (typeof p.searchQuery === 'string') return p.searchQuery;
-      }
-    } catch { /* ignore */ }
-    return '';
-  });
-  const [tickerQuery, setTickerQuery] = useState(() => {
-    if (initialTicker) return initialTicker;
-    try {
-      const saved = localStorage.getItem('finhub-news-ui-state');
-      if (saved) {
-        const p = JSON.parse(saved);
-        if (typeof p.tickerQuery === 'string') return p.tickerQuery;
-      }
-    } catch { /* ignore */ }
-    return '';
-  });
+  const [searchQuery, setSearchQuery] = useState(initialTicker || '');
+  const [tickerQuery, setTickerQuery] = useState(initialTicker || '');
   const [fromDate, setFromDate] = useState(() => {
     try {
       const saved = localStorage.getItem('finhub-news-ui-state');
@@ -410,6 +390,11 @@ export function FinnhubNewsWindow({
     result?: Record<string, unknown>;
   } | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
+  const fetchAbortRef = useRef<AbortController | null>(null);
+  const tickerQueryRef = useRef(tickerQuery);
+  tickerQueryRef.current = tickerQuery;
+  const searchQueryRef = useRef(searchQuery);
+  searchQueryRef.current = searchQuery;
 
   const listContainerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<List>(null);
@@ -577,12 +562,16 @@ export function FinnhubNewsWindow({
 
   // ─── Fetch news from backend (server-side search via keyword param) ───
   const fetchNews = useCallback(async (keyword?: string) => {
+    // Cancel any in-flight request to avoid stale responses overwriting fresh data
+    fetchAbortRef.current?.abort();
+    const controller = new AbortController();
+    fetchAbortRef.current = controller;
+
     setLoading(true);
     setError(null);
     setNextCursor(null);
     try {
       const params = new URLSearchParams();
-      params.set('source_names', 'FINNHUB');
       params.set('source_names', 'FINNHUB');
       if (selectedBookmarkFolderId) {
         params.set('bookmarkFolderId', selectedBookmarkFolderId);
@@ -593,8 +582,9 @@ export function FinnhubNewsWindow({
       if (keyword) {
         params.set('keyword', keyword);
       }
-      if (tickerQuery.trim()) {
-        params.set('tickers', tickerQuery.trim().toUpperCase());
+      const currentTicker = tickerQueryRef.current.trim();
+      if (currentTicker) {
+        params.set('tickers', currentTicker.toUpperCase());
       }
       if (fromDate) {
         params.set('from', fromDate);
@@ -604,7 +594,7 @@ export function FinnhubNewsWindow({
       }
       params.set('limit', '500');
 
-      const res = await fetch(`${API_BASE}/api/news?${params.toString()}`);
+      const res = await fetch(`${API_BASE}/api/news?${params.toString()}`, { signal: controller.signal });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || `HTTP ${res.status}`);
@@ -614,11 +604,12 @@ export function FinnhubNewsWindow({
       setNewsData(items.map(mapBackendItem));
       setNextCursor(data.nextCursor ?? null);
     } catch (err: any) {
+      if (err.name === 'AbortError') return; // stale request — ignore
       setError(err.message || 'Failed to fetch news');
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
-  }, [selectedBookmarkFolderId, sourceTypeFilter, tickerQuery, fromDate, toDate]);
+  }, [selectedBookmarkFolderId, sourceTypeFilter, fromDate, toDate]);
 
   // ─── Fetch more (cursor-based append) ───
   const fetchMore = useCallback(async () => {
@@ -627,18 +618,18 @@ export function FinnhubNewsWindow({
     try {
       const params = new URLSearchParams();
       params.set('source_names', 'FINNHUB');
-      params.set('source_names', 'FINNHUB');
       if (selectedBookmarkFolderId) {
         params.set('bookmarkFolderId', selectedBookmarkFolderId);
       }
       if (sourceTypeFilter !== 'all') {
         params.set('source_type', sourceTypeFilter);
       }
-      if (searchQuery) {
-        params.set('keyword', searchQuery);
+      if (searchQueryRef.current) {
+        params.set('keyword', searchQueryRef.current);
       }
-      if (tickerQuery.trim()) {
-        params.set('tickers', tickerQuery.trim().toUpperCase());
+      const currentTicker = tickerQueryRef.current.trim();
+      if (currentTicker) {
+        params.set('tickers', currentTicker.toUpperCase());
       }
       if (fromDate) {
         params.set('from', fromDate);
@@ -662,25 +653,22 @@ export function FinnhubNewsWindow({
     } finally {
       setLoadingMore(false);
     }
-  }, [nextCursor, loadingMore, selectedBookmarkFolderId, sourceTypeFilter, searchQuery, tickerQuery, fromDate, toDate]);
-
-  // Initial load + refresh on filter change
-  useEffect(() => {
-    fetchNews(searchQuery || undefined);
-  }, [fetchNews]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nextCursor, loadingMore, selectedBookmarkFolderId, sourceTypeFilter, fromDate, toDate]);
 
   useEffect(() => {
     fetchBookmarkFolders();
   }, [fetchBookmarkFolders]);
 
-  // ─── Debounced server-side search (300ms) ───
+  // ─── Auto-reload when discrete filters change (source type, bookmark, dates) ───
   useEffect(() => {
-    const timer = setTimeout(() => {
-      fetchNews(searchQuery || undefined);
-    }, 300);
-    return () => clearTimeout(timer);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchQuery, tickerQuery, fromDate, toDate]);
+    fetchNews(searchQueryRef.current || undefined);
+  }, [fetchNews]);
+
+  // Trigger search explicitly — called on Enter key or Refresh button
+  const triggerSearch = useCallback(() => {
+    fetchNews(searchQueryRef.current || undefined);
+  }, [fetchNews]);
 
   // ─── Update (pull from Finnhub — background job) ───
   const handleUpdate = async (
@@ -1131,6 +1119,7 @@ export function FinnhubNewsWindow({
     setSearchQuery(search.searchQuery);
     setSourceTypeFilter(search.sourceTypeFilter);
     setShowLoadMenu(false);
+    fetchNews(search.searchQuery || undefined);
   };
   const handleDeleteSearch = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -1217,7 +1206,7 @@ export function FinnhubNewsWindow({
         return newsItem.ticker ? (
           <span
             className="inline-block px-1.5 py-0.5 text-[11px] font-medium bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900/60 truncate"
-            onClick={(e) => { e.stopPropagation(); setSearchQuery(newsItem.ticker); onTickerClick?.(newsItem.ticker); }}
+            onClick={(e) => { e.stopPropagation(); setSearchQuery(newsItem.ticker); onTickerClick?.(newsItem.ticker); fetchNews(newsItem.ticker); }}
             title={`Click to filter by ${newsItem.ticker}`}
           >
             {newsItem.ticker}
@@ -1349,7 +1338,7 @@ export function FinnhubNewsWindow({
           <div className="flex flex-wrap gap-0.5 overflow-hidden" title={newsItem.peers.join(', ')}>
             {newsItem.peers.slice(0, 4).map((p, i) => (
               <span key={i} className="inline-block px-1 py-0 text-[9px] bg-purple-50 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400 rounded truncate max-w-[60px]"
-                    onClick={(e) => { e.stopPropagation(); setSearchQuery(p); onTickerClick?.(p); }}
+                    onClick={(e) => { e.stopPropagation(); setSearchQuery(p); onTickerClick?.(p); fetchNews(p); }}
                     style={{ cursor: 'pointer' }}>
                 {p}
               </span>
@@ -1449,12 +1438,16 @@ export function FinnhubNewsWindow({
           <div className="flex-1 flex flex-col gap-2">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search news..."
+              <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') triggerSearch(); }}
+                placeholder="Search news... (Enter)"
                 className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500" />
             </div>
             <div className="relative">
               <TrendingUp className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input type="text" value={tickerQuery} onChange={(e) => setTickerQuery(e.target.value)} placeholder="Ticker only (e.g. AAPL, TSLA)"
+              <input type="text" value={tickerQuery} onChange={(e) => setTickerQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') triggerSearch(); }}
+                placeholder="Ticker only (e.g. AAPL, TSLA) (Enter)"
                 className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500" />
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -1848,7 +1841,7 @@ export function FinnhubNewsWindow({
           })()}
 
           {/* Refresh button */}
-          <button onClick={() => fetchNews(searchQuery || undefined)} disabled={loading} className="p-2 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors" title="Refresh from DB">
+          <button onClick={() => triggerSearch()} disabled={loading} className="p-2 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors" title="Refresh from DB">
             <RotateCw className={`w-3.5 h-3.5 text-gray-600 dark:text-gray-400 ${loading ? 'animate-spin' : ''}`} />
           </button>
 
