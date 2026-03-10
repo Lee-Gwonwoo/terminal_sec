@@ -8,15 +8,15 @@
 ### 목적
 이 지침은 AI 뉴스 분석을 아래 3개 모델로 나눠서 정의한다.
 
-1. `Model_1_new news analysis`
-2. `Model_2_case analysis`
-3. `Model_3_single-news scoring analysis`
+1. `🟦 Model_1_new news analysis`
+2. `🟧 Model_2_case analysis`
+3. `🟥 Model_3_single-news scoring analysis`
 
 기존에 문서에 있던 단일 뉴스 `Score / Score Evidence / Keywords` 생성 방식은 이제 `Model_3`로 분류한다.
 
 ### 모델 분류
 
-#### `Model_1_new news analysis`
+#### `🟦 Model_1_new news analysis`
 
 목적:
 
@@ -47,13 +47,14 @@
 
 이 모델은 현재 뉴스를 해석할 때 참고하는 **유사사례 비교 모델**이다.
 
-#### `Model_2_case analysis`
+#### `🟧 Model_2_case analysis`
 
 목적:
 
 - 현재 들어오는 개별 뉴스 1건을 즉시 평가하는 것이 아니라, 일정 기간 전체를 훑어보며 주가에 강하게 영향을 준 이슈들을 유형별 case로 분류한다.
 - case를 하나하나 수작업으로 나열하는 것이 아니라, 의미 있는 패턴이 보일 정도의 유형으로 묶는다.
-- 분석 대상은 `press_release`만으로 제한할 수도 있지만, 필요하면 `news`, `company_news`, `market_news`까지 포함한 전체 뉴스 집합으로 확장할 수 있다.
+- 기본 운영 모드는 `press_release only`로 둔다.
+- 필요하면 `news`, `company_news`, `market_news`까지 확장할 수 있지만, source가 섞이면 해석 기준과 근거 표도 분리해서 남긴다.
 
 핵심 방법:
 
@@ -76,28 +77,59 @@
   - `[][][]change_1d_pct[][][]`: 전일 종가 → 1거래일 후 종가
   - `[][][]change_from_open_pct[][][]`: 뉴스 기준일 시가 → 뉴스 기준일 종가
   - `[][][]change_open_to_high_pct[][][]`: 뉴스 기준일 시가 → 뉴스 기준일 고가
+  - `[][][]change_3d_pct[][][]`: 전일 종가 → 3거래일 후 종가
+  - `[][][]change_7d_pct[][][]`: 전일 종가 → 7거래일 후 종가
+  - `[][][]change_14d_pct[][][]`: 전일 종가 → 14거래일 후 종가
+  - `[][][]change_30d_pct[][][]`: 전일 종가 → 30거래일 후 종가
 - 시가총액 입력:
   - `[][][]market_cap[][][]` (`company_profiles.market_cap`의 최신값)
 
 운영적 영향 점수 정의:
 
 - `Model_2`에서 “이 뉴스가 가격에 영향을 미쳤는가” 판단은 기본적으로 **change 계열 데이터**를 기준으로 한다.
-- 권장 기본식:
+- **당일 데이터 1~3개만으로 판단하지 않는다.** 뉴스 영향은 지연되거나 1주~1개월 동안 누적될 수 있으므로, 가능한 한 전체 change vector를 같이 본다.
+- 기본 change vector:
 
-  `impact_score = max(abs(change_pct), abs(change_1d_pct), abs(change_from_open_pct))`
+  `V = [change_from_open_pct, change_open_to_high_pct, change_pct, change_1d_pct, change_3d_pct, change_7d_pct, change_14d_pct, change_30d_pct]`
 
-- 이유:
-  - `change_pct`는 뉴스 당일 종가 반응을 본다.
-  - `change_1d_pct`는 하루 더 이어진 후행 반응을 본다.
-  - `change_from_open_pct`는 장중 발표/당일 반응을 보강한다.
-- `change_open_to_high_pct`는 상방 장중 spike를 보는 보조 지표로는 유용하지만, 하방 wick 대응 지표가 현재 짝으로 없으므로 기본 임계값 산정식에는 직접 넣지 않는 쪽이 더 보수적이다.
+- `Model_2`는 아래 3개 구간 점수를 따로 계산한 뒤, 마지막에 종합한다.
+
+  - `immediate_reaction_score = max(abs(change_from_open_pct), abs(change_open_to_high_pct), abs(change_pct))`
+  - `short_followthrough_score = max(abs(change_1d_pct), abs(change_3d_pct))`
+  - `medium_persistence_score = max(abs(change_7d_pct), abs(change_14d_pct), abs(change_30d_pct))`
+
+- 최종 종합 점수는 아래처럼 둔다.
+
+  `overall_impact_score = max(immediate_reaction_score, short_followthrough_score, medium_persistence_score)`
+
+- 이 방식의 이유:
+  - `immediate_reaction_score`는 뉴스가 당일 바로 반응했는지 본다.
+  - `short_followthrough_score`는 다음 1~3거래일 동안 후속 추세가 붙는지 본다.
+  - `medium_persistence_score`는 1~4주 동안 뉴스 효과가 지연 또는 누적으로 남는지 본다.
+- 즉, `Model_2`는 “당일 크게 움직였는가”만이 아니라 “며칠 뒤 또는 몇 주 동안 실질적으로 반응이 이어졌는가”까지 포함해서 case를 평가한다.
 
 영향 여부 판정 규칙:
 
 - 같은 뉴스라도 시총이 크면 절대 변동폭이 작아질 수 있으므로, **전 뉴스 공통 절대값**으로 자르지 않는다.
-- 같은 분석 기간 안에서 같은 시총 bucket에 속한 뉴스들만 모아 `impact_score` 분포를 만든다.
-- 그 bucket의 `p80` 이상이면 `영향 미침`, 미만이면 `영향 안 미침`으로 분류하는 방식을 기본값으로 둔다.
+- 같은 분석 기간 안에서 같은 시총 bucket에 속한 뉴스들만 모아 분포를 만든다.
+- threshold는 `overall_impact_score` 하나만 보지 말고, 아래 3개 구간 점수에도 각각 둘 수 있다.
+  - `immediate_reaction_score`
+  - `short_followthrough_score`
+  - `medium_persistence_score`
+- 권장 기본값:
+  - bucket별 `overall_impact_score`의 `p80` 이상이면 `영향 미침`
+  - 단, 보조 판정으로 `short_followthrough_score` 또는 `medium_persistence_score`가 같은 bucket의 `p80`을 넘으면 **지연형/지속형 영향**으로 별도 태그를 붙인다.
 - 더 보수적으로 보고 싶으면 `p90`, 더 넓게 잡고 싶으면 `p70` 또는 `p75`로 바꿀 수 있지만, 문서/로그에 반드시 명시한다.
+
+반응 타입 태깅 규칙:
+
+- `intraday_only`: immediate는 강하지만 short/medium이 약함
+- `delayed_followthrough`: immediate는 약하지만 short가 강함
+- `sustained_repricing`: medium이 강해서 7d~30d까지 영향이 남음
+- `one_day_spike_then_fade`: immediate만 강하고 이후 유지 실패
+- `multi_window_impact`: immediate, short, medium 중 2개 이상이 함께 강함
+
+이 태그는 case 유형 옆에 붙여서 같은 유형 안에서도 반응 구조가 다른지 확인하는 데 사용한다.
 
 영향력 평가 기준:
 
@@ -114,28 +146,108 @@ market cap 반영 원칙:
   - `[][][]100B~[][][]`
 - `300M 미만` 또는 `market cap unknown` row는 위 3개 버킷과 직접 섞지 말고, 별도 보조 집단으로 집계하거나 제외 사유를 로그에 남긴다.
 
+`press_release only` 운영 모드:
+
+- `Model_2` 기본 실행 모드는 `press_release only`로 둔다.
+- 이유:
+  - `press_release`는 issuer-driven 이벤트라서 case 유형과 가격 반응 연결이 상대적으로 직접적이다.
+  - `company_news`나 `news`는 재서술 기사, commentary, analyst rewrite가 섞여 동일 규칙으로 분류하면 잡음이 커진다.
+- 따라서 먼저 `press_release only + market cap bucket` 기준으로 case taxonomy를 만들고, 나중에 다른 source는 별도 부록 또는 별도 표로 붙인다.
+
 사례 분류 절차:
 
-1. 기간과 source 범위를 먼저 고정한다.
-2. ticker를 정규화해 최신 `market_cap`을 붙인다.
-3. `title/body/full_text`에서 반복되는 표현을 기준으로 case type을 분류한다.
-4. 같은 case type 내부에서 시총 bucket별 `impact_score` 분포와 `영향 미침 비율`을 계산한다.
-5. 전체 비율만 보지 말고, bucket별 반응 편차와 대표 사례/반례를 같이 남긴다.
+1. 기간을 먼저 고정한다.
+2. source 범위를 기본적으로 `press_release only`로 고정한다.
+3. ticker를 정규화해 최신 `market_cap`과 bucket을 붙인다.
+4. `title/body/full_text`에서 반복되는 표현을 기준으로 case type을 분류한다.
+5. 각 뉴스마다 immediate / short / medium 점수와 `overall_impact_score`를 계산한다.
+6. 같은 case type 내부에서 시총 bucket별 `영향 미침 비율`과 반응 타입 비중을 계산한다.
+7. 전체 비율만 보지 말고, bucket별 반응 편차와 대표 사례/반례를 같이 남긴다.
+
+근거 뉴스 표 파일 규칙:
+
+- `Model_2` 결과를 낼 때는 분류 근거가 되는 뉴스들을 별도 표 파일로 남긴다.
+- 기본 저장 위치: `C:\github_coding\terminal_sec\ai_research_tool\model_2_source`
+- 기본 원칙: **분석 note 제목과 같은 base name**으로 근거 표 파일을 만든다.
+- 예시:
+  - note 제목이 `model 2 test gpt5.4`이면 표 파일명은 `model 2 test gpt5.4.md`로 둔다.
+  - 같은 제목을 파일명으로 쓰기 어려운 문자가 있으면 Windows 파일명 금지 문자만 제거하고, 나머지 제목은 최대한 유지한다.
+- note 본문에는 아래를 반드시 적는다.
+  - `근거 표 파일 경로: C:\github_coding\terminal_sec\ai_research_tool\model_2_source\...`
+  - 이 파일이 “유형 분류 근거가 된 전체 뉴스 표”라는 설명
+- 이 파일에는 **유형 결정 근거가 된 모든 뉴스**를 행 단위로 적는다.
+- 최소 컬럼:
+  - `[][][]case_type[][][]`
+  - `[][][]reaction_tag[][][]`
+  - `[][][]news_id[][][]`
+  - `[][][]published_at[][][]`
+  - `[][][]ticker[][][]`
+  - `[][][]market_cap[][][]`
+  - `[][][]market_cap_bucket[][][]`
+  - `[][][]title[][][]`
+- 권장 추가 컬럼:
+  - `[][][]source_type[][][]`
+  - `[][][]change_pct[][][]`
+  - `[][][]change_from_open_pct[][][]`
+  - `[][][]change_open_to_high_pct[][][]`
+  - `[][][]change_1d_pct[][][]`
+  - `[][][]change_3d_pct[][][]`
+  - `[][][]change_7d_pct[][][]`
+  - `[][][]change_14d_pct[][][]`
+  - `[][][]change_30d_pct[][][]`
+  - `[][][]immediate_reaction_score[][][]`
+  - `[][][]short_followthrough_score[][][]`
+  - `[][][]medium_persistence_score[][][]`
+  - `[][][]overall_impact_score[][][]`
+- 이 표 파일은 “왜 이 case 유형을 만들었는가”를 사람이 역추적할 수 있게 하는 근거 registry다.
+- 같은 note를 다시 돌려 업데이트하면, 기존 파일을 덮어쓰거나 같은 제목 기반 새 버전을 만들되, note 본문에 실제 최종 파일 경로를 다시 명시한다.
+
+`Model_2` note 본문 필수 섹션:
+
+- `## 분석 범위`
+- `## 유형 분류 기준`
+- `## 영향 판정 기준`
+- `## market cap bucket 기준`
+- `## 내부 사고과정 로그(주요 판단 요약)`
+- `## 근거 표 파일`
+
+`내부 사고과정 로그(주요 판단 요약)` 작성 규칙:
+
+- 여기서 말하는 로그는 자유서술식 내부 추론 전문 전체를 복붙하는 것이 아니다.
+- 대신, **실제로 분류 결과를 바꾼 주요 판단**을 재현 가능하게 구체적으로 적는다.
+- 너무 짧게 `p80 사용`, `press_release만 사용`처럼 끝내지 말고, 아래 수준으로 남긴다.
+  - 왜 `press_release only`로 제한했는지
+  - 왜 특정 case를 독립 유형으로 분리했고, 왜 다른 표현들은 같은 유형으로 합쳤는지
+  - 왜 특정 threshold를 선택했는지
+  - 어떤 대표 사례/반례를 보고 규칙을 보정했는지
+  - 어떤 row들을 제외했고, 그 제외가 결과에 어떤 영향을 주는지
+- 각 로그 항목은 가능하면 아래 형식을 따른다.
+  - `판단 대상`
+  - `검토한 데이터/패턴`
+  - `최종 결정`
+  - `결정 이유`
+  - `대표 근거 뉴스 id / ticker / title`
+- 목표는 “나중에 note만 읽어도 왜 이런 taxonomy와 threshold가 나왔는지 추적 가능한 상태”이지, 비정형 내부 독백 전체 저장이 아니다.
 
 로그에 반드시 남길 항목:
 
 - 기간: `[][][]since[][][] ~ [][][]until[][][]`
-- source 범위: `[][][]press_release / news / company_news / market_news[][][]` 중 포함한 것
-- 영향 점수 식과 사용한 change 컬럼 목록
+- source 범위: 기본적으로 `[][][]press_release only[][][]`, 확장한 경우 다른 source를 명시
+- 영향 점수 식과 사용한 전체 change 컬럼 목록
 - market cap bucket 정의
 - bucket별 threshold (`p50`, `p80`, `p90` 등)
+- immediate / short / medium / overall 점수 정의
+- reaction tag 규칙
 - case 유형별 `영향 미침 / 영향 안 미침`
 - 대표 사례와 반례
 - 제외된 row 수와 제외 이유 (`market cap unknown`, `change 없음`, `text 없음` 등)
+- 근거 뉴스 표 파일 경로
+- 근거 표 파일명과 note 제목의 매칭 관계
+- `내부 사고과정 로그(주요 판단 요약)` 섹션에서 실제 분류 기준을 바꾼 핵심 판단들
 
 이 모델은 개별 기사 판정용이 아니라, **기간 전체에서 반복되는 가격영향 패턴을 분류하는 메타 모델**이다.
 
-#### `Model_3_single-news scoring analysis`
+#### `🟥 Model_3_single-news scoring analysis`
 
 목적:
 
@@ -148,7 +260,7 @@ market cap 반영 원칙:
 이 3개는 **AI 뉴스 분석 결과**이며, provider가 주는 raw sentiment와는 다른 계층이다.
 문서의 나머지 `출력 계약`, `기본값 규칙`, `금지 규칙`, `테스트 / 품질 보증`은 기본적으로 `Model_3`에 직접 적용한다.
 
-### Model_3 출력 계약
+### 🟥 Model_3 출력 계약
 
 #### `[][][]Score[][][]`
 - 범위: `-10` ~ `10`

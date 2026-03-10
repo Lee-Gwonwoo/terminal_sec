@@ -626,6 +626,43 @@
 1. refresh는 unsaved local draft가 있을 때 최신 DB 본문으로 덮어쓸 수 있다. 현재 창은 autosave 500ms 구조라 보통은 손실 위험이 작지만, 직전 입력 중이면 사용자가 주의해야 함.
 2. search overlay가 열린 상태에서도 refresh는 동작한다. 필요하면 후속으로 refresh 시 search state를 닫는 UX를 추가할 수 있음.
 3. 현재는 polling 자동 동기화가 아니라 수동 refresh 버튼 방식이다. 외부 갱신을 자동 반영하려면 별도 timer/WebSocket 설계가 필요하다.
+
+---
+
+### Model 2 문서 기준 수정 — 전체 change vector + press_release only + 근거 표 파일 규칙 (2026-03-10 09:15)
+
+**Status: done (awaiting user confirmation)**
+
+#### Actions taken
+
+1. `ai-news-analysis.md`의 `Model_2_case analysis` 정의 수정
+   - 기존 `change_pct`, `change_1d_pct`, `change_from_open_pct` 중심 설명을 확장
+   - `change_3d_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct`까지 포함한 전체 change vector 기준으로 재정의
+   - `immediate_reaction_score`, `short_followthrough_score`, `medium_persistence_score`, `overall_impact_score` 구조 추가
+   - `press_release only`를 기본 운영 모드로 명시
+   - `market cap bucket`별 분리 기준과 reaction tag 규칙 추가
+
+2. 근거 뉴스 표 파일 추가
+   - 파일: `ai_research_tool/model2_case_evidence_table.md`
+   - 내용:
+      - `Model_2` 분류 근거 뉴스 registry 목적 설명
+      - 필수 컬럼/권장 컬럼 표 정의
+      - `news_id`, `title`, `ticker`, `market_cap`, `market_cap_bucket` 포함 규칙 명시
+
+#### Verification
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | markdown 문서 변경, diagnostics 문제 없음 |
+| 빌드 | ✅ | 앱 코드 미변경, 문서/보조 md 파일만 수정 |
+| 자동 테스트 | ✅ | 해당 없음 — 문서 규칙 변경 |
+| 런타임 통합 | ✅ | skill 문서 + evidence table 파일 경로 생성 확인 |
+
+#### Risks / notes
+
+1. 아직 이 단계는 문서 기준 정리다. 실제 evidence table 본문 행은 후속 분석 실행 시 채워야 한다.
+2. `change_open_to_high_pct`는 여전히 보조 지표이며, 대칭 하방 지표가 없다는 제약은 유지된다.
+3. source를 `press_release only`로 제한하면 설명력은 좋아지지만 coverage는 줄어든다. 다른 source는 별도 부록으로 관리하는 편이 안전하다.
 | `wshe_fq` | 19 | `earnings_date`, `confidence_indicator`, `wshe_earnings_date_status`(INFERRED — 2028년까지 예측) |
 
 **기존 판정 수정:**
