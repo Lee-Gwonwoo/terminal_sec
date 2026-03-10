@@ -168,6 +168,42 @@ app.get("/api/tickers", async (req, res, next) => {
   }
 });
 
+app.post("/api/tickers/import-default", async (req, res, next) => {
+  try {
+    const { csvPath } = req.body ?? {};
+    if (typeof csvPath !== "string" || !csvPath.trim()) {
+      res.status(400).json({ error: "csvPath is required" });
+      return;
+    }
+
+    const result = await mergeCsvIntoDefaultUniverse(csvPath.trim());
+    await setLastSuccess("tickers_csv", new Date().toISOString(), {
+      csvPath: result.resolvedPath,
+      rowsRead: result.rowsRead,
+      tickersAdded: result.tickersAdded,
+      tickersSkipped: result.tickersSkipped,
+      count: result.tickers.length,
+      source: "db-merge",
+    });
+
+    res.json({
+      csvPath: DEFAULT_TICKERS_CSV,
+      importedFrom: result.resolvedPath,
+      rowsRead: result.rowsRead,
+      tickersAdded: result.tickersAdded,
+      tickersSkipped: result.tickersSkipped,
+      tickers: result.tickers,
+      source: "db",
+    });
+  } catch (error) {
+    if (error instanceof CsvServiceError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    next(error);
+  }
+});
+
 app.post("/api/tickers/add", async (req, res, next) => {
   try {
     const { csvPath, ticker } = req.body ?? {};
@@ -283,6 +319,56 @@ async function getDefaultUniverseTickers(): Promise<string[]> {
   } catch {
     return ["AAPL", "MSFT", "TSLA", "NVDA", "AMD"];
   }
+}
+
+async function ensureDefaultUniverse(): Promise<number> {
+  const universes = await listUniverses();
+  const existing = universes.find((u) => u.name === "default");
+  if (existing) {
+    return existing.id;
+  }
+  return upsertUniverse("default", "TradingView screener default watchlist", DEFAULT_TICKERS_CSV);
+}
+
+async function mergeCsvIntoDefaultUniverse(csvPath: string): Promise<{
+  resolvedPath: string;
+  rowsRead: number;
+  tickersAdded: number;
+  tickersSkipped: number;
+  tickers: string[];
+}> {
+  const { rows, resolvedPath } = readTickerRowsFromCsv(csvPath);
+  if (rows.length === 0) {
+    throw new CsvServiceError("CSV file is empty");
+  }
+
+  const universeId = await ensureDefaultUniverse();
+  const existingItems = await listUniverseItems(universeId);
+  const existingTickers = new Set(existingItems.map((item) => item.ticker.toUpperCase()));
+
+  let sortOrder = existingItems.length;
+  let tickersAdded = 0;
+
+  for (const row of rows) {
+    const secId = await upsertSecurity(row.ticker, null, row.name, row.sector, row.industry);
+    if (existingTickers.has(row.ticker)) {
+      continue;
+    }
+    await addUniverseItem(universeId, secId, sortOrder++);
+    existingTickers.add(row.ticker);
+    tickersAdded++;
+
+    try { await appendTickerToCsv(DEFAULT_TICKERS_CSV, row.ticker); } catch { /* already in CSV or file locked */ }
+  }
+
+  const tickers = await getDefaultUniverseTickers();
+  return {
+    resolvedPath,
+    rowsRead: rows.length,
+    tickersAdded,
+    tickersSkipped: rows.length - tickersAdded,
+    tickers,
+  };
 }
 
 const pullFinnhubSchema = z.object({

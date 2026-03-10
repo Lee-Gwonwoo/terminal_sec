@@ -1738,3 +1738,16 @@ Track H도 완료되었다 (Step 9). calendar backend mode 계약 (backfill/refr
    - `/api/news` 백엔드 날짜 필터는 기존대로 유지된다.
    - 사용자가 `from`/`to` 또는 source type을 바꿔 새 조회를 하면, 리스트와 상단 날짜 header가 항상 새 결과의 첫 날짜부터 다시 보인다.
    - 필터 후 상단에 범위 밖 날짜가 남아 “market news 날짜 필터가 안 된다”처럼 보이던 UI 오해를 줄인다.
+
+### PLAN CHANGE (2026-03-10) — Default Ticker Window custom CSV merge import 추가
+
+- 왜: 사용자가 새 TradingView CSV(`watch lists2_2026-03-10_1a43e.csv` 같은 파일)를 Default Ticker Window에서 반영할 때, 기존 default ticker를 덮어쓰지 말고 추가 merge 되길 요청했다.
+- 무엇이 바뀌었나:
+   - 백엔드에 `POST /api/tickers/import-default` 추가.
+   - 지정 CSV를 읽어 `securities` metadata를 upsert하고, `ticker_universes/default`에는 없는 ticker만 추가한다.
+   - 기존 default ticker는 유지하고, 중복 ticker는 skip한다.
+   - 프론트 `DefaultTickerWindow.tsx`에 custom CSV 경로일 때만 보이는 `Merge into Default` 버튼과 merge 결과 notice를 추가한다.
+- 영향:
+   - custom CSV를 단순 preview로 읽는 기존 `GET /api/tickers?csvPath=...` 동작은 그대로 유지된다.
+   - 사용자가 명시적으로 merge 버튼을 눌렀을 때만 canonical default universe가 갱신된다.
+   - merge 후 창은 다시 default DB universe 기준으로 전환되어, 누적된 ticker 목록을 바로 확인할 수 있다.

@@ -1350,6 +1350,36 @@ query:
 { "csvPath": "...", "tickers": ["AAPL", "MSFT"] }
 ```
 
+### `POST /api/tickers/import-default`
+
+요청 body:
+
+```json
+{ "csvPath": "tradigview_screener/original_data/watch lists2_2026-03-10_1a43e.csv" }
+```
+
+동작:
+
+1. 지정 CSV를 읽는다.
+2. 각 ticker를 `securities`에 upsert한다.
+3. `ticker_universes/default`에 없는 ticker만 추가한다.
+4. 기존 default ticker는 유지하고, 중복 ticker는 skip한다.
+5. best-effort로 legacy default CSV backup에도 ticker를 append sync한다.
+6. 응답은 merge 후 canonical default universe 전체 ticker 목록을 돌려준다.
+
+응답:
+
+```json
+{
+  "csvPath": "tradigview_screener/original_data/watch lists2_2026-02-22.csv",
+  "importedFrom": "C:/github_coding/terminal_sec/tradigview_screener/original_data/watch lists2_2026-03-10_1a43e.csv",
+  "rowsRead": 1200,
+  "tickersAdded": 57,
+  "tickersSkipped": 1143,
+  "tickers": ["AAPL", "MSFT"]
+}
+```
+
 ### `POST /api/tickers/add`
 
 요청 body:

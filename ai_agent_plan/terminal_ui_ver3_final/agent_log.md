@@ -518,6 +518,59 @@ Step 5 전체(5-1 ~ 5-6)를 구현했다. 종목을 뉴스/watchlist와 분리�
 - `GET /api/securities/search?q=TXN` → sector/industry 정상
 - `POST /api/company-profiles/pull-fmp` (AAPL) → description/CEO/ipo_date 저장 확인
 
+### Default Ticker Window custom CSV merge import 추가
+
+**작성 시각:** 2026-03-10 01:22 (local)
+
+**상태:** 확인 대기(awaiting user confirmation)
+
+#### 수행 내용
+
+1. 사용자가 새 TradingView CSV를 Default Ticker Window에서 반영할 때 기존 ticker를 대체하지 말고 추가 merge 되게 해달라고 요청했다.
+2. 원인을 확인한 결과, 기존 구조는 아래처럼 분리되어 있었다.
+   - default 경로: DB canonical universe 조회
+   - custom 경로: 해당 CSV만 direct read
+   - 즉 custom CSV를 읽어도 default universe 자체는 갱신되지 않았다.
+3. `terminal/backend/src/server.ts`에 `POST /api/tickers/import-default` endpoint를 추가했다.
+4. 새 endpoint는 지정 CSV를 읽어 `securities` metadata를 upsert하고, `ticker_universes/default`에 없는 ticker만 추가한다.
+5. 중복 ticker는 skip하고, 기존 default ticker는 유지한다.
+6. `DefaultTickerWindow.tsx`에 custom CSV 경로일 때만 보이는 `Merge into Default` 버튼을 추가했다.
+7. merge 성공 시 창을 다시 default 경로로 전환하고, 추가/중복 skip 개수를 notice로 표시하게 했다.
+8. `backend_prompt.md`, `figma_frontend_prompt.md`, `plan.md`를 현재 구현 기준으로 함께 동기화했다.
+
+#### 생성/수정 파일
+
+- `terminal/backend/src/server.ts`
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DefaultTickerWindow.tsx`
+- `terminal/backend_prompt.md`
+- `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+- `ai_agent_plan/terminal_ui_ver3_final/plan.md`
+- `ai_agent_plan/terminal_ui_ver3_final/agent_log.md`
+
+#### 검증 방법
+
+1. Default Ticker Window의 CSV path에 `tradigview_screener/original_data/watch lists2_2026-03-10_1a43e.csv`를 넣는다.
+2. `Merge into Default` 버튼을 누른다.
+3. 성공 notice에 추가된 ticker 수와 중복 skip 수가 표시되는지 확인한다.
+4. merge 직후 목록이 default DB universe 기준으로 다시 보이고, 기존 ticker + 새 ticker가 함께 보이는지 확인한다.
+5. `POST /api/tickers/import-default`를 직접 호출했을 때 `tickersAdded`, `tickersSkipped`, `tickers`가 반환되는지 확인한다.
+
+#### 문제점 / 리스크
+
+1. legacy default CSV backup sync는 ticker만 append하므로, custom CSV의 모든 수치 컬럼을 그대로 보존하지는 않는다.
+   - 완화 방안 1: canonical source는 DB universe로 유지
+   - 완화 방안 2: 필요 시 추후 full-row batch merge를 별도 구현
+2. custom CSV를 여러 번 merge하면 대부분 duplicate skip 응답이 나올 수 있다.
+   - 완화 방안 1: notice에서 added/skipped 수를 함께 노출
+   - 완화 방안 2: 필요 시 추후 diff preview 기능 추가 검토
+3. 브라우저에서 custom CSV preview와 canonical default universe의 의미를 혼동할 수 있다.
+   - 완화 방안 1: custom 경로에서만 `Merge into Default` 버튼을 노출
+   - 완화 방안 2: merge 직후 default 경로로 자동 복귀시켜 현재 보고 있는 목록의 source를 명확히 함
+
+#### 비고
+
+- 사용자 확인 전까지 상태는 `확인 대기`로 유지한다.
+
 #### 검증 방법 (사용자)
 ```bash
 cd terminal/backend

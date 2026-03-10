@@ -13,17 +13,23 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
   const [tickers, setTickers] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [newTicker, setNewTicker] = useState("");
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
   const [filterText, setFilterText] = useState("");
   const [dataSource, setDataSource] = useState<"db" | "csv" | null>(null);
+  const trimmedCsvPath = csvPath.trim();
+  const isDefaultPath = trimmedCsvPath === DEFAULT_CSV_PATH;
 
   const loadTickers = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setNotice(null);
     try {
-      const url = `${API_BASE}/api/tickers?csvPath=${encodeURIComponent(csvPath)}`;
+      const effectivePath = trimmedCsvPath || DEFAULT_CSV_PATH;
+      const url = `${API_BASE}/api/tickers?csvPath=${encodeURIComponent(effectivePath)}`;
       const res = await fetch(url);
       const data = await res.json();
       if (!res.ok) {
@@ -37,7 +43,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
     } finally {
       setLoading(false);
     }
-  }, [csvPath]);
+  }, [trimmedCsvPath]);
 
   useEffect(() => {
     loadTickers();
@@ -48,11 +54,12 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
     if (!trimmed) return;
     setAdding(true);
     setError(null);
+    setNotice(null);
     try {
       const res = await fetch(`${API_BASE}/api/tickers/add`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ csvPath, ticker: trimmed }),
+        body: JSON.stringify({ csvPath: trimmedCsvPath || DEFAULT_CSV_PATH, ticker: trimmed }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -60,6 +67,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
         return;
       }
       setTickers(data.tickers ?? []);
+      setDataSource(isDefaultPath ? "db" : "csv");
       setNewTicker("");
     } catch (err: any) {
       setError(err.message || "Failed to add ticker");
@@ -71,11 +79,12 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
   const handleRemove = async (ticker: string) => {
     setRemoving(ticker);
     setError(null);
+    setNotice(null);
     try {
       const res = await fetch(`${API_BASE}/api/tickers/remove`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ csvPath, ticker }),
+        body: JSON.stringify({ csvPath: trimmedCsvPath || DEFAULT_CSV_PATH, ticker }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -83,10 +92,38 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
         return;
       }
       setTickers(data.tickers ?? []);
+      setDataSource(isDefaultPath ? "db" : "csv");
     } catch (err: any) {
       setError(err.message || "Failed to remove ticker");
     } finally {
       setRemoving(null);
+    }
+  };
+
+  const handleImportToDefault = async () => {
+    if (!trimmedCsvPath || isDefaultPath) return;
+    setImporting(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/tickers/import-default`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csvPath: trimmedCsvPath }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || `HTTP ${res.status}`);
+        return;
+      }
+      setCsvPath(DEFAULT_CSV_PATH);
+      setTickers(data.tickers ?? []);
+      setDataSource("db");
+      setNotice(`Merged ${data.tickersAdded ?? 0} tickers from CSV into default universe. Skipped duplicates: ${data.tickersSkipped ?? 0}.`);
+    } catch (err: any) {
+      setError(err.message || "Failed to merge CSV into default universe");
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -115,6 +152,16 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
           <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />
           Reload
         </button>
+        {!isDefaultPath && (
+          <button
+            onClick={handleImportToDefault}
+            disabled={importing || loading || !trimmedCsvPath}
+            className="px-2 py-1 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50"
+            title="Add tickers from this CSV into the canonical default universe without removing existing tickers"
+          >
+            {importing ? "Merging..." : "Merge into Default"}
+          </button>
+        )}
       </div>
 
       {/* DB Path badge */}
@@ -139,6 +186,12 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
         <div className="flex items-center gap-2 mb-2 p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded text-xs text-red-600 dark:text-red-400">
           <AlertCircle className="w-3 h-3 flex-shrink-0" />
           {error}
+        </div>
+      )}
+
+      {notice && (
+        <div className="mb-2 p-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded text-xs text-emerald-700 dark:text-emerald-400">
+          {notice}
         </div>
       )}
 

@@ -491,6 +491,7 @@ localStorage 사용:
 
 - CSV path 직접 수정
 - Reload
+- custom CSV를 default universe에 merge import (`Merge into Default`)
 - ticker 추가
 - filter 입력
 - ticker grid 표시
@@ -499,12 +500,14 @@ localStorage 사용:
 API:
 
 - `GET /api/tickers?csvPath=...`
+- `POST /api/tickers/import-default`
 - `POST /api/tickers/add`
 
 현재 제약:
 
 - 허용 경로는 backend allowlist에 의해 제한된다
 - UI는 어떤 CSV든 입력 가능해 보이지만, backend가 허용하지 않으면 error banner를 보여준다
+- custom CSV를 merge import해도 기존 default universe ticker는 제거되지 않고, 중복만 skip된다
 
 ## News Window
 
