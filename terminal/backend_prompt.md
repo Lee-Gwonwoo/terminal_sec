@@ -533,15 +533,18 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 ### `POST /api/news/change/update-recent`
 
-- 최근 7일 뉴스 change % 재계산. 기존 OHLC DB에 있는 데이터만 사용. OHLC가 없는 티커는 skip된다.
-- OHLC DB를 사전에 채우려면 `/api/ibkr/ohlc1d/update`를 먼저 실행할 것.
+- 요청 body: `{ "ibkrConcurrency": 30 }` (선택, 기본값 30, 1~100)
+- 최근 7일 뉴스 change % 재계산.
+- Phase 1: OHLC DB에서 데이터 읽기 → 있으면 바로 계산
+- Phase 1.5 (IBKR fallback): OHLC DB에 없는 티커는 IBKR에서 batch fetch → DB에 upsert → 재계산
+- Phase 2: 계산 결과 일괄 저장
 - 응답 컬럼: `[][][]jobId[][][]`
 
 ### `POST /api/news/change/update-custom`
 
-- 요청 body: `{ "from": "YYYY-MM-DD", "to": "YYYY-MM-DD" }`
-- 선택한 날짜 범위 뉴스 change % 재계산. 기존 OHLC DB에 있는 데이터만 사용. OHLC가 없는 티커는 skip된다.
-- OHLC DB를 사전에 채우려면 `/api/ibkr/ohlc1d/update`를 먼저 실행할 것.
+- 요청 body: `{ "from": "YYYY-MM-DD", "to": "YYYY-MM-DD", "ibkrConcurrency": 30 }` (ibkrConcurrency 선택, 기본값 30)
+- 선택한 날짜 범위 뉴스 change % 재계산.
+- Phase 1: OHLC DB → Phase 1.5: IBKR fallback → Phase 2: 저장 (위와 동일)
 - 응답 컬럼: `[][][]jobId[][][]`
 
 ### `GET /api/calendar/events`
@@ -1279,8 +1282,14 @@ query:
 
 ### `POST /api/news/change/update-recent`
 
-- body 없음
+요청 body:
+
+```json
+{ "ibkrConcurrency": 30 }
+```
+
 - 최근 7일 뉴스 전체에 대해 표준 metric 재계산
+- OHLC DB에 데이터 없는 티커는 IBKR에서 batch fetch 후 계산 (Phase 1.5)
 - 즉시 `jobId` 반환
 - 완료 시 `update_status.news_change_recent` 갱신
 
@@ -1289,10 +1298,11 @@ query:
 요청 body:
 
 ```json
-{ "from": "2026-03-01", "to": "2026-03-06" }
+{ "from": "2026-03-01", "to": "2026-03-06", "ibkrConcurrency": 30 }
 ```
 
 - 지정 기간 뉴스 전체에 대해 표준 metric 재계산
+- OHLC DB에 데이터 없는 티커는 IBKR에서 batch fetch 후 계산 (Phase 1.5)
 - 즉시 `jobId` 반환
 - 완료 시 `update_status.news_change_custom` 갱신
 

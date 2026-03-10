@@ -17,9 +17,27 @@
 ### 현재 레포(terminal_sec) 메모
 이 workspace는 다음이 함께 있는 혼합 레포로 보입니다:
 - `terminal/` 아래 Node/TypeScript 기반의 “terminal” 앱(dev/build/test 스크립트 포함)
-- Python 중심의 스크립트 파이프라인 영역(예: `EODHD/`, `original_data/`, `deep_learning_data/`) — script-first 워크플로우에 사용
+  - 백엔드: `terminal/backend/src/` (Express + SQLite, tsx watch)
+  - 프론트엔드: `termina_web/figma_code/terminal_ui_ver2_finhub/` (React + Vite)
+  - Python 보조 스크립트: `terminal/backend/scripts/` (IBKR 연동 등 — TypeScript에서 child_process로 호출)
+- Python 중심의 스크립트 파이프라인 영역(예: `EODHD/`, `OHLC_data/`, `hts_watch_lists/`, `tmp/`) — 데이터 수집/변환용
 
 작업 대상/디렉토리(Node 앱 vs Python 스크립트)에 따라 적용할 관례를 선택하세요.
+
+#### 백엔드 서비스 구조 (`terminal/backend/src/services/`)
+- **뉴스 수집**: `finnhubNewsProvider.ts`, `eodhdNewsProvider.ts`
+- **뉴스 조회/저장**: `newsRepository.ts` (GET /api/news — 여러 테이블 LEFT JOIN)
+- **Change % 계산**: `newsChangeMerger.ts` (OHLC DB → `news_change_metrics` UPSERT)
+- **OHLC 데이터 소스**: `ohlcWatchlistRepository.ts` (로컬 OHLC SQLite), `ibkrOhlcBatchProvider.ts` (IBKR TWS fallback), `ibkrOhlc1dProvider.ts` (단건 IBKR), `finnhubOhlcProvider.ts` (Finnhub candle)
+- **full text 추출**: `fulltextExtractors.ts` + `fulltextUpdateService.ts` + `fulltextRepository.ts`
+- **AI 분석**: `aiAnalysisRepository.ts` (`news_ai_analysis` 테이블)
+- **기업 프로필**: `companyProfileRepository.ts`, `finnhubProfile2Provider.ts`, `fmpCompanyProfileProvider.ts`
+- **기타**: `industryLookup.ts`, `tickerCsvService.ts`, `tickerUniverseRepository.ts`, `calendarIngestion.ts`, `researchRepository.ts`, `jobManager.ts`
+
+#### Python 보조 스크립트 (`terminal/backend/scripts/`)
+- `ibkr_fetch_ohlc_batch.py`: IBKR TWS에서 다수 종목 OHLC 배치 조회 (stdin JSON → stdout NDJSON). TypeScript `ibkrOhlcBatchProvider.ts`가 child_process로 호출.
+- `ibkr_fetch_ohlc.py`: 단건 IBKR OHLC 조회
+- `ibkr_wsh_calendar.py`: IBKR Wall Street Horizon 캘린더 이벤트 조회
 
 ### 데이터 타입별 저장 경로 지침
 작업 전에 “어떤 데이터 타입을 다루는지” 먼저 정하고, 아래 저장 위치를 기준으로 읽기/쓰기 경로를 판단합니다.
@@ -27,34 +45,67 @@
 - **앱 런타임 SQLite (terminal 백엔드 기본 DB)**
 	- 경로: `terminal/backend/backend/data/app.db`
 	- 용도: terminal 앱의 기본 영속 데이터
-	- 포함 예시: `news_items`, `news_fulltext`, `news_change_metrics`, `calendar_events`, `update_status`, `news_saved_views`, watchlist/alerts 관련 테이블
+	- **전체 테이블 목록 (2026-03 기준)**:
+		| 테이블 | 용도 | 비고 |
+		|--------|------|------|
+		| `news_items` | 뉴스 메타데이터 (134K rows) | PK: `id` (UUID). legacy inline change 컬럼 잔존 (사용 안 함) |
+		| `news_change_metrics` | 뉴스별 change% 파생값 (900K rows) | PK: `(news_id, metric_key)`. **영구 보존** (`CREATE TABLE IF NOT EXISTS`). metric_key: `change_pct`, `change_1d_pct`, `change_from_open_pct`, `change_open_to_high_pct`, `change_3d_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct` |
+		| `news_fulltext` | full text 추출/키워드 (101K rows) | PK: `news_id`. keywords_json/keywords_status 포함 |
+		| `news_ai_analysis` | AI 스코어/증거 (0 rows) | PK: `news_id`. score, score_evidence, analysis_status |
+		| `news_sentiment_snapshots` | 종목별 sentiment (683 rows) | UNIQUE: `(ticker, asof_date)`. Finnhub sentiment API 기반 |
+		| `news_saved_views` | 저장된 뉴스 필터 뷰 (0 rows) | |
+		| `bookmark_folders` | 북마크 폴더 트리 (3 rows) | parent_id 자기참조로 트리 구조 |
+		| `bookmark_items` | 북마크된 뉴스 (3 rows) | PK: `(folder_id, news_id)` |
+		| `confirmed_empty_ranges` | 빈 뉴스 구간 확정 (334 rows) | PK: `(ticker, source_type)` |
+		| `securities` | ticker 마스터 (1,698 rows) | UNIQUE: `(ticker, exchange)`. 서버 시작 시 CSV에서 upsert |
+		| `company_profiles` | 기업 프로필 (1,734 rows) | UNIQUE: `(security_id, source)`. market_cap, peers_json 포함 |
+		| `ticker_universes` | ticker 유니버스 정의 (1 row) | |
+		| `ticker_universe_items` | 유니버스 소속 ticker (1,698 rows) | |
+		| `calendar_events` | 캘린더 이벤트 (0 rows) | |
+		| `update_status` | 업데이트 상태 추적 (8 rows) | PK: `source_key` |
+		| `research_tabs` | Case Research 탭 (2 rows) | |
+		| `research_pages` | Case Research 페이지 (3 rows) | |
+		| `users` | 사용자 (1 row) | |
+		| `watchlists` / `watchlist_items` | 관심종목 (0 rows) | |
+		| `alert_rules` | 알림 규칙 (0 rows) | |
 	- 현재 코드 기준 주의:
-		- `news_change_metrics`는 별도 테이블이지만, 서버 시작 시 재생성(`DROP TABLE IF EXISTS` 후 `CREATE TABLE`)된다. 즉 현재 구현에서는 재시작 후 유지되는 영구 캐시가 아니다.
-		- `news_items`에는 legacy change 관련 컬럼이 남아 있지만, 실제 조회(`GET /api/news`)는 `news_change_metrics`와 `news_fulltext`를 join해서 내려주는 구조다.
+		- `news_change_metrics`는 **영구 테이블**이다 (`CREATE TABLE IF NOT EXISTS`). 서버 재시작 시 삭제/재생성되지 않는다.
+		- `news_items`에는 legacy inline change 컬럼(`change_1d_pct`, `change_from_open_pct` 등)이 남아 있지만, `newsChangeMerger`는 이 컬럼에 쓰지 않고 `news_change_metrics` 테이블에만 UPSERT한다.
+		- 실제 조회(`GET /api/news`)는 `news_items`에 `news_change_metrics` 8개 metric_key를 각각 LEFT JOIN + `news_fulltext` + `news_ai_analysis` + `news_sentiment_snapshots` + `company_profiles` + `securities`를 join해서 응답한다.
 
 - **OHLC 일봉 SQLite (watchlist canonical price DB)**
 	- 경로: `OHLC_data/ohlc_1d_watchlist.sqlite`
-	- 용도: 일봉 OHLCV canonical 저장소
-	- 포함 예시: `ohlc_1d`, `symbols`, 파생 컬럼(`Change_1d_Pct` 등)
+	- 용도: 일봉 OHLCV canonical 저장소 (EODHD 기반 + IBKR fallback upsert)
+	- 테이블:
+		- `ohlc_1d` (4M rows): `Symbol, Datetime, Open, High, Low, Close, Volume, Change_1d_Pct, Change_From_Open_Pct, Change_7d_Pct, Change_14d_Pct, Change_30d_Pct, Derived_Updated_At`
+		- `symbols` (1,188 rows): `Symbol, Industry`
+	- Change% 파생 컬럼은 `ohlcDerivedMetrics.ts`가 계산해서 같은 테이블에 업데이트
+	- **IBKR fallback**: `newsChangeMerger`가 change 계산 시 로컬 OHLC DB에 해당 종목이 없으면 IBKR TWS에서 배치 조회 후 이 DB에 upsert (Phase 1.5)
 
 - **뉴스 원문/뉴스 후처리 데이터**
 	- 기본 원칙: terminal 앱에서 쓰는 뉴스 관련 영속 데이터는 우선 `terminal/backend/backend/data/app.db` 안에서 관리
 	- 포함 예시:
 		- 뉴스 메타데이터 → `news_items`
 		- full text 추출 결과 → `news_fulltext`
-		- change metric 파생값 → `news_change_metrics`
-		- keyword 분석 결과 → 현재는 `news_fulltext.keywords_json`, `news_fulltext.keywords_status`, `news_fulltext.keywords_updated_at`
-		- publisher 보강값 → 현재는 `news_items.publisher`
-		- sentiment / score 같은 신규 뉴스 enrichment → 아직 canonical runtime 테이블은 없음. 추가 시 `app.db` 안의 인접 별도 테이블 또는 명시적 컬럼으로 관리
+		- change metric 파생값 → `news_change_metrics` (8개 metric_key, `newsChangeMerger.ts`가 UPSERT)
+		- keyword 분석 결과 → `news_fulltext.keywords_json`, `news_fulltext.keywords_status`, `news_fulltext.keywords_updated_at`
+		- AI 분석 결과 → `news_ai_analysis` (score, score_evidence, analysis_status)
+		- publisher 보강값 → `news_items.publisher`
+		- sentiment → `news_sentiment_snapshots` (종목별, Finnhub sentiment API → ticker+asof_date 기준)
+		- 북마크 → `bookmark_folders` + `bookmark_items` (트리 구조 폴더)
 	- 현재 코드 기준 운영 규칙:
-		- `GET /api/news`는 `news_items` 단독 조회가 아니라 `news_fulltext`, `news_change_metrics`, industry lookup 결과를 join/병합해서 응답한다.
+		- `GET /api/news`(`newsRepository.ts`)는 `news_items`에 8개 `news_change_metrics` LEFT JOIN + `news_fulltext` + `news_ai_analysis` + `news_sentiment_snapshots` + `company_profiles`/`securities`를 join 해서 응답한다.
+		- change 계산 흐름: UI에서 `update-recent` 또는 `update-custom` API → `newsChangeMerger` → OHLC DB 조회 (없으면 IBKR 배치 fallback) → `news_change_metrics` UPSERT
 		- full text 추출 대상 판단은 현재 `news_fulltext` row 존재 여부 기준이다. 한 번 `failed`/`skipped` row가 생기면 자동 재시도 대상에서 빠질 수 있다.
 		- keyword는 이미 runtime DB 내부 컬럼으로 관리되고 있으므로, 별도 JSONL/CSV를 canonical source로 취급하지 않는다.
+		- AI 분석(`news_ai_analysis`)은 테이블 존재하지만 아직 0건. 향후 구현 예정.
 	- 주의: 테스트/실험 산출물(JSONL/CSV)은 canonical 저장소로 간주하지 않음
 
 - **프론트엔드 런타임 상태 저장**
 	- 현재 상태: `termina_web/figma_code/terminal_ui_ver2_finhub` 프론트는 앱 전체 workspace/tabs/theme를 영속 저장하지 않는다.
-	- 현재 예외: `FinnhubNewsWindow`의 일부 설정(`finnhub-last-update-config`)만 `localStorage`에 저장한다.
+	- localStorage 사용 항목:
+		- `finnhub-last-update-config`: FinnhubNews 마지막 업데이트 설정
+		- `ibkr-concurrency`: IBKR Fetch Concurrency 설정 (기본값 30, 범위 1~100)
 	- 의미: “앱을 껐다 켜도 마지막 상태 유지”, “탭 상태 유지”, “전역 글자 크기 유지” 같은 기능은 아직 canonical 저장 구조가 구현되지 않은 상태다.
 	- 향후 원칙: 프론트 전용 UI state는 1차로 `localStorage`를 사용하고, runtime 데이터 source of truth(`app.db`)와 혼동하지 않는다.
 

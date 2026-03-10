@@ -254,11 +254,13 @@ export function DataControlWindow({
           break;
         case 'recent':
           url = `${API_BASE}/api/news/change/update-recent`;
+          headers['Content-Type'] = 'application/json';
+          body = JSON.stringify({ ibkrConcurrency });
           break;
         case 'custom':
           url = `${API_BASE}/api/news/change/update-custom`;
           headers['Content-Type'] = 'application/json';
-          body = JSON.stringify({ from: customChangeFrom, to: customChangeTo });
+          body = JSON.stringify({ from: customChangeFrom, to: customChangeTo, ibkrConcurrency });
           break;
       }
 
@@ -382,14 +384,14 @@ export function DataControlWindow({
       label: 'Recent Change% Update',
       statusKey: 'news_change_recent',
       group: 'Change Update',
-      description: '최근 7일 뉴스 change % 재계산. DB에 OHLC가 없으면 Finnhub에서 가져옵니다.',
+      description: '최근 7일 뉴스 change % 재계산. DB에 OHLC가 없으면 IBKR에서 배치로 가져옵니다.',
     },
     {
       key: 'custom',
       label: 'Custom Change% Update',
       statusKey: 'news_change_custom',
       group: 'Change Update',
-      description: '선택한 날짜 범위 뉴스 change % 재계산. DB에 OHLC가 없으면 Finnhub에서 가져옵니다.',
+      description: '선택한 날짜 범위 뉴스 change % 재계산. DB에 OHLC가 없으면 IBKR에서 배치로 가져옵니다.',
       extra: (
         <div className="flex items-center gap-2 flex-wrap">
           <label className="text-[11px] text-gray-500 dark:text-gray-400">From:</label>
@@ -582,6 +584,41 @@ export function DataControlWindow({
               />
               <span className="text-[11px] text-gray-500 w-8 text-right">200</span>
               <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300 w-10 text-right">{ftConcurrency}</span>
+            </div>
+          </div>
+          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">
+            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">IBKR Fetch Concurrency</h3>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3">
+              Change% 계산 시 OHLC DB에 데이터가 없는 종목을 IBKR에서 병렬로 가져오는 동시 요청 수. 100 이상은 pacing 제한 위험.
+            </p>
+            <div className="flex gap-2 mb-3 flex-wrap">
+              {[10, 30, 50, 100].map(preset => (
+                <button
+                  key={`ibkr-c-${preset}`}
+                  onClick={() => saveIbkrConcurrency(preset)}
+                  className={`px-3 py-1 rounded border text-xs font-medium transition-colors ${
+                    ibkrConcurrency === preset
+                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+                      : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200'
+                  }`}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-[11px] text-gray-500 w-6">1</span>
+              <input
+                type="range"
+                min={1}
+                max={100}
+                step={1}
+                value={ibkrConcurrency}
+                onChange={e => saveIbkrConcurrency(parseInt(e.target.value, 10))}
+                className="flex-1 accent-blue-500"
+              />
+              <span className="text-[11px] text-gray-500 w-8 text-right">100</span>
+              <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300 w-10 text-right">{ibkrConcurrency}</span>
             </div>
           </div>
         </div>
