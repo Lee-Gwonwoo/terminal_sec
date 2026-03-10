@@ -38,7 +38,7 @@ import {
   getConfirmedEmptyRange,
 } from "./services/finnhubNewsProvider.js";
 import type { FinnhubMappedItem } from "./services/finnhubNewsProvider.js";
-import { mergeChangeForNewItems, bulkUpdateRecentChange, bulkUpdateCustomChange } from "./services/newsChangeMerger.js";
+import { mergeChangeForNewItems, bulkUpdateRecentChange, bulkUpdateCustomChange, type IbkrFallbackOptions } from "./services/newsChangeMerger.js";
 import { createJob, getJob, updateProgress, appendLog, completeJob, failJob, cancelJob, isJobCancelled } from "./services/jobManager.js";
 import { getFulltext, getUnextractedNewsIds, deleteFailedFulltextRows, getFulltextStats } from "./services/fulltextRepository.js";
 import { runFulltextUpdate, runFulltextPlainTextBackfill } from "./services/fulltextUpdateService.js";
@@ -784,7 +784,7 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
           updateProgress(jobId, tickerList.length + 1);
         }
 
-        // Merge change% for newly inserted items
+        // Merge change% for newly inserted items (from existing OHLC DB)
         let changeMergeResult = { merged: 0, skipped: 0 };
         if (newItems.length > 0 && !isJobCancelled(jobId)) {
           appendLog(jobId, `Merging change% for ${newItems.length} new items...`);
@@ -939,14 +939,16 @@ app.get("/api/news/fulltext/:newsId", async (req, res, next) => {
 
 // ── Change Metrics Update endpoints (5-20, 5-21) ──
 
-app.post("/api/news/change/update-recent", async (_req, res, next) => {
+app.post("/api/news/change/update-recent", async (req, res, next) => {
   try {
+    const ibkrConcurrency = Math.max(1, Math.min(100, parseInt(req.body?.ibkrConcurrency, 10) || 30));
+    const ibkrFallback: IbkrFallbackOptions = { enabled: true, concurrency: ibkrConcurrency };
     const jobId = createJob(0); // total unknown upfront
     (async () => {
       try {
         await bulkUpdateRecentChange((done, total) => {
           updateProgress(jobId, done, total);
-        }, undefined, () => isJobCancelled(jobId));
+        }, undefined, () => isJobCancelled(jobId), ibkrFallback, (msg) => appendLog(jobId, msg));
         if (isJobCancelled(jobId)) return;
         await setLastSuccess("news_change_recent", new Date().toISOString());
         completeJob(jobId);
@@ -963,17 +965,20 @@ app.post("/api/news/change/update-recent", async (_req, res, next) => {
 const customChangeSchema = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  ibkrConcurrency: z.number().int().min(1).max(100).optional(),
 });
 
 app.post("/api/news/change/update-custom", async (req, res, next) => {
   try {
-    const { from, to } = customChangeSchema.parse(req.body);
+    const { from, to, ibkrConcurrency: concRaw } = customChangeSchema.parse(req.body);
+    const ibkrConcurrency = concRaw ?? 30;
+    const ibkrFallback: IbkrFallbackOptions = { enabled: true, concurrency: ibkrConcurrency };
     const jobId = createJob(0);
     (async () => {
       try {
         await bulkUpdateCustomChange(from, to, (done, total) => {
           updateProgress(jobId, done, total);
-        }, undefined, () => isJobCancelled(jobId));
+        }, undefined, () => isJobCancelled(jobId), ibkrFallback, (msg) => appendLog(jobId, msg));
         if (isJobCancelled(jobId)) return;
         await setLastSuccess("news_change_custom", new Date().toISOString(), { from, to });
         completeJob(jobId);

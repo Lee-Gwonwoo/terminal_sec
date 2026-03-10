@@ -24,12 +24,14 @@ export interface FetchOhlcResult {
  * @param startDate - "YYYY-MM-DD" inclusive
  * @param endDate - "YYYY-MM-DD" inclusive
  * @param port - TWS/Gateway port (default 4001)
+ * @param clientId - IBKR client ID (default 80)
  */
 export function fetchOhlcBars(
   symbol: string,
   startDate: string,
   endDate: string,
   port = 4001,
+  clientId = 80,
 ): Promise<FetchOhlcResult> {
   return new Promise((resolve, reject) => {
     const args = [
@@ -38,6 +40,7 @@ export function fetchOhlcBars(
       "--start", startDate,
       "--end", endDate,
       "--port", String(port),
+      "--client-id", String(clientId),
     ];
 
     const proc = spawn("python", args, {

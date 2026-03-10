@@ -4,8 +4,16 @@ import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { getDb } from "../db.js";
-import { fetchOhlcFromFinnhub } from "./finnhubOhlcProvider.js";
+import { fetchOhlcBatch } from "./ibkrOhlcBatchProvider.js";
 import { upsertBars } from "./ohlcWatchlistRepository.js";
+
+/** Options for IBKR fallback when OHLC DB has no data for a ticker. */
+export interface IbkrFallbackOptions {
+  enabled: boolean;
+  concurrency: number; // max concurrent IBKR requests (1-100)
+  port?: number;       // TWS port, default 4001
+  clientId?: number;   // default 85
+}
 
 // ---------- OHLC DB location ----------
 
@@ -222,76 +230,70 @@ async function computeMetricsForItem(
 
 const WRITE_CHUNK_SIZE = 1000;
 
-// ---------- Finnhub OHLC fallback ----------
+/** Fetch OHLC from IBKR for missing tickers, upsert to DB, re-compute metrics.
+ *  Returns newly computed metrics. */
+async function ibkrFallbackFetch(
+  missingItems: Array<{ newsId: string; ticker: string; publishedAt: string }>,
+  ibkr: IbkrFallbackOptions,
+  onLog?: (msg: string) => void,
+): Promise<ComputedMetrics[]> {
+  if (missingItems.length === 0) return [];
 
-function shiftDate(dateStr: string, days: number): string {
-  const d = new Date(dateStr + "T00:00:00Z");
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
+  // Deduplicate tickers and find date range needed
+  const tickerSet = new Set(missingItems.map(i => i.ticker));
+  const uniqueTickers = [...tickerSet];
 
-/** Fetch OHLC from Finnhub for a ticker and store in OHLC DB.
- *  Skips if ticker was already attempted in this batch (dedup via fetchedSet).
- *  Date range: 60 days before earliest news date → min(45 days after latest, today). */
-async function fetchAndStoreOhlcFromFinnhub(
-  ticker: string,
-  earlyDate: string,
-  lateDate: string,
-  fetchedSet: Set<string>,
-): Promise<{ bars: number; error?: string }> {
-  if (fetchedSet.has(ticker)) return { bars: 0 };
-  fetchedSet.add(ticker);
-
-  const from = shiftDate(earlyDate, -60);
-  const today = new Date().toISOString().slice(0, 10);
-  const rawTo = shiftDate(lateDate, 45);
-  const to = rawTo > today ? today : rawTo;
-
-  try {
-    const bars = await fetchOhlcFromFinnhub(ticker, from, to);
-    if (bars.length > 0) {
-      await upsertBars(ticker, bars);
-    }
-    return { bars: bars.length };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[Finnhub OHLC fallback] ${ticker}: ${msg}`);
-    return { bars: 0, error: msg };
+  // Find the earliest and latest dates needed (with 45 day margin for forward metrics)
+  let minDate = "9999-12-31";
+  let maxDate = "0000-01-01";
+  for (const item of missingItems) {
+    const d = item.publishedAt.slice(0, 10);
+    if (d < minDate) minDate = d;
+    if (d > maxDate) maxDate = d;
   }
-}
+  // Extend range: 30 days before minDate (for prev close) and 45 days after maxDate (for 30d forward)
+  const startDt = new Date(minDate + "T00:00:00Z");
+  startDt.setUTCDate(startDt.getUTCDate() - 30);
+  const endDt = new Date(maxDate + "T00:00:00Z");
+  endDt.setUTCDate(endDt.getUTCDate() + 45);
+  const startDate = startDt.toISOString().slice(0, 10);
+  const endDate = endDt.toISOString().slice(0, 10);
 
-const FINNHUB_OHLC_CONCURRENCY = 3; // parallel Finnhub candle requests
+  onLog?.(`[IBKR fallback] fetching ${uniqueTickers.length} tickers (${startDate}~${endDate}), concurrency=${ibkr.concurrency}`);
 
-/** Fetch OHLC from Finnhub for multiple tickers in parallel (max FINNHUB_OHLC_CONCURRENCY).
- *  Rate-limited: auto-retry on 429 with backoff. */
-async function fetchAndStoreOhlcBatch(
-  tickers: string[],
-  earlyDate: string,
-  lateDate: string,
-  fetchedSet: Set<string>,
-  isCancelled?: () => boolean,
-): Promise<number> {
-  const toFetch = tickers.filter(t => !fetchedSet.has(t));
-  if (toFetch.length === 0) return 0;
-
-  let fetched = 0;
-  let nextIdx = 0;
-
-  async function worker() {
-    while (true) {
-      if (isCancelled?.()) return;
-      const idx = nextIdx++;
-      if (idx >= toFetch.length) return;
-      const result = await fetchAndStoreOhlcFromFinnhub(toFetch[idx], earlyDate, lateDate, fetchedSet);
-      if (result.bars > 0) fetched++;
-    }
-  }
-
-  await Promise.all(
-    Array.from({ length: Math.min(FINNHUB_OHLC_CONCURRENCY, toFetch.length) }, () => worker()),
+  // Batch fetch from IBKR
+  const results = await fetchOhlcBatch(
+    uniqueTickers,
+    startDate,
+    endDate,
+    ibkr.concurrency,
+    ibkr.port ?? 4001,
+    ibkr.clientId ?? 85,
   );
 
-  return fetched;
+  // Upsert fetched bars to OHLC DB
+  let totalUpserted = 0;
+  let fetchOk = 0;
+  let fetchFail = 0;
+  for (const r of results) {
+    if (r.error || r.bars.length === 0) {
+      fetchFail++;
+      continue;
+    }
+    fetchOk++;
+    const n = await upsertBars(r.symbol, r.bars);
+    totalUpserted += n;
+  }
+  onLog?.(`[IBKR fallback] fetched=${fetchOk}, failed=${fetchFail}, upserted=${totalUpserted} bars`);
+
+  // Re-compute metrics for the missing items (now OHLC DB should have data)
+  const recomputed: ComputedMetrics[] = [];
+  for (const item of missingItems) {
+    const m = await computeMetricsForItem(item.newsId, item.ticker, item.publishedAt);
+    if (m) recomputed.push(m);
+  }
+  onLog?.(`[IBKR fallback] re-computed ${recomputed.length}/${missingItems.length} items`);
+  return recomputed;
 }
 
 async function batchWriteMetrics(metrics: ComputedMetrics[]): Promise<void> {
@@ -353,13 +355,16 @@ export async function mergeChangeForNewItems(
 
 /** Compute ALL standard change metrics (open, 1d, 7d, 14d, 30d) for news
  *  published within the last 7 calendar days.
- *  Finnhub OHLC fallback: DB에 OHLC가 없는 ticker는 Finnhub에서 가져와 DB에 저장한 뒤 재시도.
+ *  If ibkrFallback is enabled, tickers missing from OHLC DB are batch-fetched
+ *  from IBKR, upserted, then re-computed.
  *  Progress callback: (completed, total) */
 export async function bulkUpdateRecentChange(
   onProgress?: (completed: number, total: number) => void,
   concurrency = DEFAULT_MERGE_CONCURRENCY,
   isCancelled?: () => boolean,
-): Promise<{ updated: number; skipped: number; finnhubFetched: number }> {
+  ibkrFallback?: IbkrFallbackOptions,
+  onLog?: (msg: string) => void,
+): Promise<{ updated: number; skipped: number }> {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - 7);
   const cutoffIso = cutoff.toISOString();
@@ -372,71 +377,65 @@ export async function bulkUpdateRecentChange(
   );
 
   const computed: ComputedMetrics[] = [];
-  const missingOhlc: typeof rows = []; // items whose OHLC is not in DB
+  const missingItems: Array<{ newsId: string; ticker: string; publishedAt: string }> = [];
   let skipped = 0;
   let completed = 0;
 
-  // Phase 1: parallel reads from OHLC DB
+  // Phase 1: parallel OHLC reads + compute from DB
   await poolRun(rows, concurrency, async (row) => {
     const tickers = row.tickers_csv.split(",").map(t => t.trim()).filter(Boolean);
     const ticker = tickers[0];
     if (!ticker) { skipped++; } else {
       const m = await computeMetricsForItem(row.id, ticker, row.published_at);
-      if (m) { computed.push(m); } else { missingOhlc.push(row); }
+      if (m) { computed.push(m); } else {
+        missingItems.push({ newsId: row.id, ticker, publishedAt: row.published_at });
+      }
     }
     completed++;
     if (onProgress && completed % 50 === 0) onProgress(completed, rows.length);
   }, isCancelled);
 
-  if (isCancelled?.()) return { updated: computed.length, skipped, finnhubFetched: 0 };
+  if (isCancelled?.()) return { updated: computed.length, skipped };
 
-  // Phase 1.5: Finnhub OHLC fallback for missing tickers (parallel)
-  let finnhubFetched = 0;
-  if (missingOhlc.length > 0) {
-    const fetchedSet = new Set<string>();
-    const uniqueTickers = [...new Set(missingOhlc.map(r => {
-      const t = r.tickers_csv.split(",").map(s => s.trim()).filter(Boolean);
-      return t[0] ?? "";
-    }).filter(Boolean))];
-
-    const earlyDate = missingOhlc.reduce((min, r) => r.published_at < min ? r.published_at : min, missingOhlc[0].published_at).slice(0, 10);
-    const lateDate = missingOhlc.reduce((max, r) => r.published_at > max ? r.published_at : max, missingOhlc[0].published_at).slice(0, 10);
-
-    finnhubFetched = await fetchAndStoreOhlcBatch(uniqueTickers, earlyDate, lateDate, fetchedSet, isCancelled);
-
-    // Phase 1.7: Re-compute for previously missing items
-    if (!isCancelled?.()) {
-      await poolRun(missingOhlc, concurrency, async (row) => {
-        const tickers = row.tickers_csv.split(",").map(t => t.trim()).filter(Boolean);
-        const ticker = tickers[0];
-        if (!ticker) { skipped++; return; }
-        const m = await computeMetricsForItem(row.id, ticker, row.published_at);
-        if (m) { computed.push(m); } else { skipped++; }
-      }, isCancelled);
+  // Phase 1.5: IBKR fallback for missing tickers
+  if (ibkrFallback?.enabled && missingItems.length > 0) {
+    onLog?.(`[change] ${missingItems.length} items missing OHLC, starting IBKR fallback...`);
+    try {
+      const fallbackMetrics = await ibkrFallbackFetch(missingItems, ibkrFallback, onLog);
+      computed.push(...fallbackMetrics);
+      skipped += missingItems.length - fallbackMetrics.length;
+      onLog?.(`[change] IBKR fallback done: ${fallbackMetrics.length} computed, ${missingItems.length - fallbackMetrics.length} still missing`);
+    } catch (err) {
+      onLog?.(`[change] IBKR fallback error: ${err instanceof Error ? err.message : String(err)}`);
+      skipped += missingItems.length;
     }
+  } else {
+    skipped += missingItems.length;
   }
 
-  if (isCancelled?.()) return { updated: computed.length, skipped, finnhubFetched };
+  if (isCancelled?.()) return { updated: computed.length, skipped };
 
   // Phase 2: batch write
   await batchWriteMetrics(computed);
 
   if (onProgress) onProgress(rows.length, rows.length);
-  return { updated: computed.length, skipped, finnhubFetched };
+  return { updated: computed.length, skipped };
 }
 
 // ---------- Custom Change Update (date range, all metrics) ----------
 
 /** Compute ALL standard change metrics for news published within [from, to].
  *  from/to are ISO date strings (YYYY-MM-DD).
- *  Finnhub OHLC fallback: DB에 OHLC가 없으면 Finnhub에서 가져와 DB에 저장한 뒤 재시도. */
+ *  If ibkrFallback is enabled, tickers missing from OHLC DB are batch-fetched. */
 export async function bulkUpdateCustomChange(
   from: string,
   to: string,
   onProgress?: (completed: number, total: number) => void,
   concurrency = DEFAULT_MERGE_CONCURRENCY,
   isCancelled?: () => boolean,
-): Promise<{ updated: number; skipped: number; finnhubFetched: number }> {
+  ibkrFallback?: IbkrFallbackOptions,
+  onLog?: (msg: string) => void,
+): Promise<{ updated: number; skipped: number }> {
   const fromIso = `${from}T00:00:00.000Z`;
   const toIso = `${to}T23:59:59.999Z`;
 
@@ -448,55 +447,47 @@ export async function bulkUpdateCustomChange(
   );
 
   const computed: ComputedMetrics[] = [];
-  const missingOhlc: typeof rows = [];
+  const missingItems: Array<{ newsId: string; ticker: string; publishedAt: string }> = [];
   let skipped = 0;
   let completed = 0;
 
-  // Phase 1: parallel reads from OHLC DB
+  // Phase 1: parallel OHLC reads + compute from DB
   await poolRun(rows, concurrency, async (row) => {
     const tickers = row.tickers_csv.split(",").map(t => t.trim()).filter(Boolean);
     const ticker = tickers[0];
     if (!ticker) { skipped++; } else {
       const m = await computeMetricsForItem(row.id, ticker, row.published_at);
-      if (m) { computed.push(m); } else { missingOhlc.push(row); }
+      if (m) { computed.push(m); } else {
+        missingItems.push({ newsId: row.id, ticker, publishedAt: row.published_at });
+      }
     }
     completed++;
     if (onProgress && completed % 50 === 0) onProgress(completed, rows.length);
   }, isCancelled);
 
-  if (isCancelled?.()) return { updated: computed.length, skipped, finnhubFetched: 0 };
+  if (isCancelled?.()) return { updated: computed.length, skipped };
 
-  // Phase 1.5: Finnhub OHLC fallback for missing tickers (parallel)
-  let finnhubFetched = 0;
-  if (missingOhlc.length > 0) {
-    const fetchedSet = new Set<string>();
-    const uniqueTickers = [...new Set(missingOhlc.map(r => {
-      const t = r.tickers_csv.split(",").map(s => s.trim()).filter(Boolean);
-      return t[0] ?? "";
-    }).filter(Boolean))];
-
-    const earlyDate = from;
-    const lateDate = to;
-
-    finnhubFetched = await fetchAndStoreOhlcBatch(uniqueTickers, earlyDate, lateDate, fetchedSet, isCancelled);
-
-    // Phase 1.7: Re-compute for previously missing items
-    if (!isCancelled?.()) {
-      await poolRun(missingOhlc, concurrency, async (row) => {
-        const tickers = row.tickers_csv.split(",").map(t => t.trim()).filter(Boolean);
-        const ticker = tickers[0];
-        if (!ticker) { skipped++; return; }
-        const m = await computeMetricsForItem(row.id, ticker, row.published_at);
-        if (m) { computed.push(m); } else { skipped++; }
-      }, isCancelled);
+  // Phase 1.5: IBKR fallback for missing tickers
+  if (ibkrFallback?.enabled && missingItems.length > 0) {
+    onLog?.(`[change] ${missingItems.length} items missing OHLC, starting IBKR fallback...`);
+    try {
+      const fallbackMetrics = await ibkrFallbackFetch(missingItems, ibkrFallback, onLog);
+      computed.push(...fallbackMetrics);
+      skipped += missingItems.length - fallbackMetrics.length;
+      onLog?.(`[change] IBKR fallback done: ${fallbackMetrics.length} computed, ${missingItems.length - fallbackMetrics.length} still missing`);
+    } catch (err) {
+      onLog?.(`[change] IBKR fallback error: ${err instanceof Error ? err.message : String(err)}`);
+      skipped += missingItems.length;
     }
+  } else {
+    skipped += missingItems.length;
   }
 
-  if (isCancelled?.()) return { updated: computed.length, skipped, finnhubFetched };
+  if (isCancelled?.()) return { updated: computed.length, skipped };
 
   // Phase 2: batch write
   await batchWriteMetrics(computed);
 
   if (onProgress) onProgress(rows.length, rows.length);
-  return { updated: computed.length, skipped, finnhubFetched };
+  return { updated: computed.length, skipped };
 }

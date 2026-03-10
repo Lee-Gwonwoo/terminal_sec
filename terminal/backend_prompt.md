@@ -9,7 +9,7 @@
 2. `GET /api/news`로 뉴스 통합 조회 API를 제공한다.
 3. 장시간 작업을 background job으로 실행하고 `GET /api/jobs/:jobId`로 상태/로그를 반환한다.
 4. full text, 뉴스 후행 변화율, sentiment, company profile/peers 같은 보강 데이터를 저장한다.
-5. ticker CSV, universe, bookmarks, alerts, calendar, DB inspect API를 제공한다.
+5. ticker CSV, universe, bookmarks, alerts, calendar, research, DB inspect API를 제공한다.
 
 ## 현재 구현 상태 요약
 
@@ -21,6 +21,8 @@
 - `news_change_metrics`는 서버 시작 시 항상 재생성된다. 즉 영구 캐시가 아니라 재계산 가능한 파생 테이블이다.
 - background job 상태와 로그는 메모리 기반이라 서버 재시작 시 유지되지 않는다.
 - default ticker universe는 서버 시작 시 CSV에서 `securities`, `ticker_universes`, `ticker_universe_items`로 import를 시도한다.
+- case research 노트는 같은 `app.db`의 `research_tabs`, `research_pages` 테이블에 저장된다.
+- research API, bookmarks API, alerts API는 현재 고정 demo user id를 기준으로 동작한다.
 - `GET /api/news/stream` SSE endpoint가 존재하며 새 뉴스 insert 시 필터를 만족하는 클라이언트에 push 한다.
 
 ## 실행과 환경
@@ -531,15 +533,15 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 ### `POST /api/news/change/update-recent`
 
-- 최근 7일 뉴스 change % 재계산. DB에 OHLC가 없는 ticker는 Finnhub `/stock/candle`에서 가져와 OHLC DB에 저장한 뒤 재시도한다.
-- OHLC 소스 우선순위: OHLC DB → Finnhub (자동 fallback)
+- 최근 7일 뉴스 change % 재계산. 기존 OHLC DB에 있는 데이터만 사용. OHLC가 없는 티커는 skip된다.
+- OHLC DB를 사전에 채우려면 `/api/ibkr/ohlc1d/update`를 먼저 실행할 것.
 - 응답 컬럼: `[][][]jobId[][][]`
 
 ### `POST /api/news/change/update-custom`
 
 - 요청 body: `{ "from": "YYYY-MM-DD", "to": "YYYY-MM-DD" }`
-- 선택한 날짜 범위 뉴스 change % 재계산. DB에 OHLC가 없는 ticker는 Finnhub에서 가져와 OHLC DB에 저장한 뒤 재시도한다.
-- OHLC 소스 우선순위: OHLC DB → Finnhub (자동 fallback)
+- 선택한 날짜 범위 뉴스 change % 재계산. 기존 OHLC DB에 있는 데이터만 사용. OHLC가 없는 티커는 skip된다.
+- OHLC DB를 사전에 채우려면 `/api/ibkr/ohlc1d/update`를 먼저 실행할 것.
 - 응답 컬럼: `[][][]jobId[][][]`
 
 ### `GET /api/calendar/events`
@@ -617,9 +619,35 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 - `NewsWindow`는 `GET /api/news`와 `POST /api/news/pull-eodhd`를 사용한다.
 - `FinnhubNewsWindow`는 뉴스 조회, Finnhub 적재, fulltext, change update, bookmarks, job polling을 사용한다.
-- `DefaultTickerWindow`는 `GET /api/tickers`, `POST /api/tickers/add`를 사용한다.
-- `DataControlWindow`는 updates status, jobs, OHLC status/update, company profile pull, change update, DB inspect를 사용한다.
+- `DefaultTickerWindow`는 `GET /api/tickers`, `POST /api/tickers/import-default`, `POST /api/tickers/add`, `DELETE /api/tickers/remove`, `POST /api/company-profiles/pull-market-cap`, `GET /api/jobs/:jobId`를 사용한다.
+- `DataControlWindow`는 updates status, jobs, OHLC status/update, IBKR calendar update/update-custom, company profile pull, change update, DB inspect를 사용한다.
+- `CaseResearchWindow`는 `/api/research/*` 전체를 사용해 섹션/페이지 CRUD, reorder, 검색, 자동 저장을 수행한다.
 - 현재 `WatchlistWindow`, `CalendarWindow`는 백엔드 API를 직접 사용하지 않는다.
+
+## Case Research API
+
+연구 노트 데이터는 `app.db`의 `research_tabs`, `research_pages` 두 테이블에 저장된다.
+
+현재 endpoint:
+
+- `GET /api/research/tabs`
+- `POST /api/research/tabs`
+- `PATCH /api/research/tabs/:id`
+- `DELETE /api/research/tabs/:id`
+- `GET /api/research/tabs/:tabId/pages`
+- `POST /api/research/tabs/:tabId/pages`
+- `POST /api/research/tabs/:tabId/pages/reorder`
+- `GET /api/research/pages/:id`
+- `PATCH /api/research/pages/:id`
+- `DELETE /api/research/pages/:id`
+- `GET /api/research/search?q=...`
+
+동작 규칙:
+
+- 모든 endpoint는 현재 고정 `DEMO_USER_ID` 범위에서 동작한다.
+- 페이지 제목/본문 수정은 일반 form submit이 아니라 프론트의 debounce autosave 호출을 전제로 한다.
+- `POST /api/research/tabs/:tabId/pages/reorder`는 정렬된 `pageIds` 배열을 받아 `sort_order`를 재기록한다.
+- `GET /api/research/search`는 제목과 본문을 함께 검색하고 `tab_name`을 포함한 결과를 반환한다.
 
 ## 제약과 주의사항
 
@@ -628,52 +656,7 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `news_change_metrics`는 영구 보존 테이블이 아니다.
 - background job 상태는 메모리 기반이라 재시작 시 유실된다.
 - fulltext 자동 재시도 기준은 `news_fulltext` row 존재 여부다.
-- default ticker source는 현재 CSV + startup import 구조라, 기본 경로를 바꾸면 front/backend 기본값을 함께 맞춰야 한다.# Backend Prompt
-
-## 목적
-이 문서는 `terminal/backend/`의 현재 구현을 기준으로 한 작업용 프롬프트/스펙이다. plan 문서나 별도 설명 없이 이 문서만 읽어도, 백엔드가 지금 무엇을 저장하고 어떤 API를 노출하며 어떤 제약을 가지는지 바로 파악할 수 있어야 한다.
-
-현재 백엔드의 중심 역할은 아래 5가지다.
-
-1. Finnhub, EODHD, IBKR에서 가져온 데이터를 SQLite와 OHLC DB에 저장한다.
-2. 저장된 뉴스를 `GET /api/news`로 조회 가능하게 만든다.
-3. 장시간 작업은 background job으로 실행하고 `GET /api/jobs/:jobId`로 진행 상황과 로그를 반환한다.
-4. 뉴스 full text와 뉴스 이후 가격 변화율(change metrics)을 후처리로 계산해 다시 저장한다.
-5. CSV 티커 목록, watchlist, saved view, alerts, calendar 데이터를 API로 관리한다.
-
-## 현재 구현 상태 요약
-
-- 뉴스 주 저장소는 `terminal/backend/backend/data/app.db` 이다.
-- Finnhub API 키는 서버 시작 시 필수다. 키가 없으면 서버가 기동되지 않는다.
-- EODHD 토큰은 `POST /api/news/pull-eodhd` 호출 시에만 필요하다.
-- Finnhub 뉴스 pull, full text 추출, OHLC 업데이트, 뉴스 change 재계산은 모두 background job으로 실행된다.
-- `GET /api/news`는 `news_items` 본문만 읽는 것이 아니라 `news_change_metrics`, `news_fulltext`, industry lookup 결과를 join/병합해서 내려준다.
-- industry 값은 DB 컬럼이 아니라, 가장 최근 `tradigview_screener/original_data/watch lists2*.csv`에서 읽어온 ticker → industry 매핑을 응답 시점에 붙인다.
-# Backend Prompt
-
-## 목적
-이 문서는 `terminal/backend/`의 현재 구현을 기준으로 한 작업용 프롬프트/스펙이다. plan 문서나 별도 설명 없이 이 문서만 읽어도, 백엔드가 지금 무엇을 저장하고 어떤 API를 노출하며 어떤 제약을 가지는지 바로 파악할 수 있어야 한다.
-
-현재 백엔드의 중심 역할은 아래 5가지다.
-
-1. Finnhub, EODHD, IBKR에서 가져온 데이터를 SQLite와 OHLC DB에 저장한다.
-2. 저장된 뉴스를 `GET /api/news`로 조회 가능하게 만든다.
-3. 장시간 작업은 background job으로 실행하고 `GET /api/jobs/:jobId`로 진행 상황과 로그를 반환한다.
-4. 뉴스 full text와 뉴스 이후 가격 변화율(change metrics)을 후처리로 계산해 다시 저장한다.
-5. CSV 티커 목록, watchlist, saved view, alerts, calendar 데이터를 API로 관리한다.
-
-## 현재 구현 상태 요약
-
-- 뉴스 주 저장소는 `terminal/backend/backend/data/app.db` 이다.
-- Finnhub API 키는 서버 시작 시 필수다. 키가 없으면 서버가 기동되지 않는다.
-- EODHD 토큰은 `POST /api/news/pull-eodhd` 호출 시에만 필요하다.
-- Finnhub 뉴스 pull, full text 추출, OHLC 업데이트, 뉴스 change 재계산은 모두 background job으로 실행된다.
-- `GET /api/news`는 `news_items` 본문만 읽는 것이 아니라 `news_change_metrics`, `news_fulltext`, industry lookup 결과를 join/병합해서 내려준다.
-- industry 값은 DB 컬럼이 아니라, 가장 최근 `tradigview_screener/original_data/watch lists2*.csv`에서 읽어온 ticker → industry 매핑을 응답 시점에 붙인다.
-- full text 추출기는 현재 `NASDAQ`, `TMX`, `FINNHUB` 3가지 publisher 흐름만 구체 처리한다.
-- mock calendar 생성기는 이미 제거되어 startup 시 자동 mock insert는 더 이상 하지 않는다.
-- `news_change_metrics` 테이블은 현재 코드상 서버 시작 때마다 `DROP TABLE IF EXISTS` 후 재생성된다. 즉, change metric 데이터는 서버 재시작 시 초기화된다.
-- job manager는 메모리 기반이다. 서버 재시작 시 job 상태와 로그는 유지되지 않는다.
+- default ticker source는 현재 CSV + startup import 구조라, 기본 경로를 바꾸면 front/backend 기본값을 함께 맞춰야 한다.
 
 ## 실행과 환경
 
@@ -1158,7 +1141,7 @@ SSE endpoint.
 4. background job에서 source type별 fetch를 수행한다.
 5. 새 row는 `INSERT OR IGNORE`로 저장한다.
 6. 신규 row만 SSE로 publish 한다.
-7. 마지막에 신규 뉴스에 대해 `mergeChangeForNewItems()`를 돌린다.
+7. 마지막에 신규 뉴스에 대해 `mergeChangeForNewItems()`를 돌린다 (기존 OHLC DB에서만 계산, OHLC 없는 티커는 skip).
 8. `update_status.finhub_news`를 갱신한다.
 
 응답:

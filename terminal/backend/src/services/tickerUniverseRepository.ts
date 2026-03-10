@@ -23,43 +23,43 @@ export async function upsertSecurity(
   industry: string | null,
 ): Promise<number> {
   const db = getDb();
-  const exchangeVal = exchange ?? "";
+  const upperTicker = ticker.toUpperCase();
 
+  // Look up by ticker only (oldest row first) to avoid creating duplicates
+  // when the same ticker is inserted with different exchange values.
   const existing = await db.get<{ id: number }>(
-    `SELECT id FROM securities WHERE ticker = ? AND COALESCE(exchange, '') = ?`,
-    [ticker.toUpperCase(), exchangeVal],
+    `SELECT id FROM securities WHERE ticker = ? ORDER BY id ASC LIMIT 1`,
+    [upperTicker],
   );
 
   if (existing) {
-    // update name/sector/industry if provided
-    if (name || sector || industry) {
-      const sets: string[] = [];
-      const params: any[] = [];
-      if (name) { sets.push("name = ?"); params.push(name); }
-      if (sector) { sets.push("sector = ?"); params.push(sector); }
-      if (industry) { sets.push("industry = ?"); params.push(industry); }
-      if (sets.length > 0) {
-        params.push(existing.id);
-        await db.run(`UPDATE securities SET ${sets.join(", ")} WHERE id = ?`, params);
-      }
+    // update metadata if provided
+    const sets: string[] = [];
+    const params: any[] = [];
+    if (exchange) { sets.push("exchange = ?"); params.push(exchange); }
+    if (name) { sets.push("name = ?"); params.push(name); }
+    if (sector) { sets.push("sector = ?"); params.push(sector); }
+    if (industry) { sets.push("industry = ?"); params.push(industry); }
+    if (sets.length > 0) {
+      params.push(existing.id);
+      await db.run(`UPDATE securities SET ${sets.join(", ")} WHERE id = ?`, params);
     }
     return existing.id;
   }
 
   const result = await db.run(
     `INSERT INTO securities (ticker, exchange, name, sector, industry) VALUES (?, ?, ?, ?, ?)`,
-    [ticker.toUpperCase(), exchange, name, sector, industry],
+    [upperTicker, exchange, name, sector, industry],
   );
 
   return result.lastID!;
 }
 
-export async function getSecurityByTicker(ticker: string, exchange?: string): Promise<SecurityRow | undefined> {
-  const exchangeVal = exchange ?? "";
+export async function getSecurityByTicker(ticker: string, _exchange?: string): Promise<SecurityRow | undefined> {
   return getDb().get<SecurityRow>(
     `SELECT id, ticker, exchange, name, sector, industry
-     FROM securities WHERE ticker = ? AND COALESCE(exchange, '') = ?`,
-    [ticker.toUpperCase(), exchangeVal],
+     FROM securities WHERE ticker = ? ORDER BY id ASC LIMIT 1`,
+    [ticker.toUpperCase()],
   );
 }
 

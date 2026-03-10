@@ -2,6 +2,44 @@
 
 ## 2026-03-10
 
+### 뉴스 수집 시 Finnhub OHLC fallback 자동 적용 (A-2) + upsertSecurity 근본 수정 (2026-03-10)
+
+**Status: done (awaiting user confirmation)**
+
+#### 문제
+
+- 뉴스 change 메트릭이 부분적으로 null → 원인: OHLC DB에 1,188종목만 있고 universe 1,698종목 중 ~500개 OHLC 미보유
+- `mergeChangeForNewItems()`는 Finnhub OHLC fallback 없이 OHLC DB만 조회 → OHLC 없으면 스킵
+- `upsertSecurity()`가 `(ticker, exchange)` 쌍으로 lookup → exchange 차이 시 중복 security row 생성
+
+#### 수정 내용
+
+1. **`newsChangeMerger.ts`** — `mergeChangeForNewItemsWithFallback()` 함수 추가
+   - Phase 1: 기존 OHLC DB에서 계산
+   - Phase 1.5: OHLC 없는 ticker → Finnhub `/stock/candle` API로 OHLC fetch → DB 저장
+   - Phase 1.7: fetch 후 재계산
+   - Phase 2: 일괄 저장
+
+2. **`server.ts`** — news pull 핸들러(`POST /api/news/pull-finhub`)
+   - `mergeChangeForNewItems` → `mergeChangeForNewItemsWithFallback`으로 교체
+   - 로그에 `finnhubOhlcFetched` 수 표시
+   - `setLastSuccess`/`completeJob`에 `finnhubOhlcFetched` 필드 추가
+
+3. **`tickerUniverseRepository.ts`** — `upsertSecurity()` 근본 수정
+   - `(ticker, exchange)` 쌍 lookup → **ticker만으로 lookup** (`ORDER BY id ASC LIMIT 1`)
+   - exchange 값이 다르더라도 기존 row 재사용 → 중복 방지
+   - `getSecurityByTicker()`도 동일하게 수정
+
+4. **데이터 마이그레이션** — 서버 재시작으로 재생성된 1,677 duplicate securities 재정리
+
+#### 검증
+
+- TS 에러 없음 (server.ts, newsChangeMerger.ts, tickerUniverseRepository.ts)
+- 서버 재시작 → `securities total: 1698` (중복 없음)
+- `GET /api/tickers` → `withMarketCap: 1677 / 1698` 유지
+
+---
+
 ### Bug fix — market cap이 UI에 표시되지 않는 문제 수정 (2026-03-10)
 
 **Status: done (awaiting user confirmation)**

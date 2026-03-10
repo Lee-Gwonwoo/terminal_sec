@@ -7,10 +7,11 @@
 
 - 앱은 React + TypeScript + Vite 기반이다.
 - 창(window) 기반 데스크톱 스타일 UI이며, 각 창은 드래그/리사이즈/최대화/닫기를 지원한다.
-- 실제 API 연동이 살아 있는 주요 창은 `Finnhub News`, `Default Ticker`, `Data Control` 이다.
+- 실제 API 연동이 살아 있는 주요 창은 `Finnhub News`, `Default Ticker`, `Data Control`, `AI Research Window` 이다.
 - `News` 창은 EODHD 적재/조회 로직이 일부 연결되어 있지만 완성형은 아니다.
 - `Watchlist`, `Calendar` 창은 현재 mock data 기반이다.
 - `BraveNewsWindow.tsx` 파일은 남아 있지만 현재 `WindowType`에 연결되어 있지 않아 UI에서 열 수 없다.
+- 탭/창 레이아웃, 다크 모드, 전역 글자 크기, 뉴스 제목/요약 글자 크기, linked ticker는 `terminal-workspace-v1`로 localStorage에 저장된다.
 - API 호출 base는 빈 문자열 `""` 이고, dev 환경에서는 Vite proxy가 `/api`, `/healthz`를 `http://localhost:8080`으로 보낸다.
 
 ## 실행
@@ -50,6 +51,7 @@ Vite dev proxy:
 - 앱 제목: `Stock News Platform`
 - 다크 모드 토글 제공
 - 다크 모드는 `document.documentElement.classList`을 바꾸고 `terminal-workspace-v1`에 저장된다.
+- 같은 저장소에 탭 순서, 창 위치/크기, `fontScale`, `newsTitleFontSize`, `newsSummaryFontSize`, `linkedTicker`도 함께 저장된다.
 
 ### 탭 구조
 
@@ -79,6 +81,7 @@ Vite dev proxy:
 - `finhub-news`
 - `default-ticker`
 - `data-control`
+- `case-research`
 
 `brave-news`는 타입 정의에 없다. 즉 파일은 있지만 앱에서 선택/렌더링되지 않는다.
 
@@ -92,6 +95,7 @@ Vite dev proxy:
 - Watch List
 - Default Ticker
 - Data Control
+- AI Research Window
 
 초기 창 배치 규칙:
 
@@ -104,6 +108,7 @@ Vite dev proxy:
 - `finhub-news` → `News Feed: Finnhub API`
 - `default-ticker` → `Default Ticker`
 - `data-control` → `Data Control`
+- `case-research` → `AI Research Window`
 - 나머지 → `<Type> Window`
 
 ## 창 연결(linked ticker)
@@ -585,6 +590,37 @@ API:
 
 즉 backend의 `calendar_events` API와 아직 연결된 화면이 아니다.
 
+## Case Research Window
+
+파일: `src/app/components/CaseResearchWindow.tsx`
+
+현재 상태:
+
+- 실제 backend API 연동이 있는 연구 노트 창이다.
+- 섹션(tab) + 페이지(page) 구조의 OneNote 스타일 편집 UI다.
+- 상단 검색창은 `GET /api/research/search?q=...` 를 300ms debounce로 호출한다.
+- 새 섹션/페이지 생성, 이름 변경, 삭제, 페이지 순서 재정렬, 본문 자동 저장이 구현되어 있다.
+- 본문/제목 변경은 500ms debounce 후 `PATCH /api/research/pages/:id`로 자동 저장된다.
+
+현재 사용하는 핵심 API:
+
+- `GET /api/research/tabs`
+- `POST /api/research/tabs`
+- `PATCH /api/research/tabs/:id`
+- `DELETE /api/research/tabs/:id`
+- `GET /api/research/tabs/:tabId/pages`
+- `POST /api/research/tabs/:tabId/pages`
+- `POST /api/research/tabs/:tabId/pages/reorder`
+- `GET /api/research/pages/:id`
+- `PATCH /api/research/pages/:id`
+- `DELETE /api/research/pages/:id`
+- `GET /api/research/search`
+
+저장 성격:
+
+- UI state를 localStorage에 저장하지 않고 backend `app.db`의 `research_tabs`, `research_pages`를 source of truth로 사용한다.
+- 프론트 새로고침 후에도 연구 노트 데이터는 DB에서 다시 로드된다.
+
 ## Brave News Window
 
 파일: `src/app/components/BraveNewsWindow.tsx`
@@ -615,7 +651,21 @@ API:
 - `POST /api/ibkr/calendar/update`
 - `GET /api/jobs/:jobId`
 - `GET /api/tickers`
+- `POST /api/tickers/import-default`
 - `POST /api/tickers/add`
+- `DELETE /api/tickers/remove`
+- `POST /api/company-profiles/pull-market-cap`
+- `GET /api/research/tabs`
+- `POST /api/research/tabs`
+- `PATCH /api/research/tabs/:id`
+- `DELETE /api/research/tabs/:id`
+- `GET /api/research/tabs/:tabId/pages`
+- `POST /api/research/tabs/:tabId/pages`
+- `POST /api/research/tabs/:tabId/pages/reorder`
+- `GET /api/research/pages/:id`
+- `PATCH /api/research/pages/:id`
+- `DELETE /api/research/pages/:id`
+- `GET /api/research/search`
 - `GET /api/bookmarks/folders`
 - `POST /api/bookmarks/folders`
 - `PUT /api/bookmarks/folders/:id`
@@ -629,6 +679,8 @@ API:
 
 - Finnhub 뉴스 검색 결과는 모두 backend DB 기반이다. provider raw response를 직접 렌더하지 않는다.
 - update, fulltext, change 계산은 모두 “job 시작 → polling → 완료 후 재조회” 패턴이다.
+- default ticker의 시가총액 보강도 `POST /api/company-profiles/pull-market-cap` job을 시작한 뒤 `GET /api/jobs/:jobId` polling으로 완료를 기다린다.
+- case research의 섹션/페이지 데이터는 localStorage가 아니라 backend DB에 저장된다.
 - 단, calendar update는 프론트는 job처럼 다루지만 backend는 아직 동기 응답형이다.
 - saved search, watchlist menu 선택값 등 일부 UI 상태는 메모리 state만 사용하고 영속 저장되지 않는다.
 
@@ -644,6 +696,7 @@ API:
 - `src/app/components/DataControlWindow.tsx`: 운영/update 창
 - `src/app/components/DefaultTickerWindow.tsx`: CSV ticker 창
 - `src/app/components/NewsWindow.tsx`: EODHD 기반 부분 구현 창
+- `src/app/components/CaseResearchWindow.tsx`: 연구 노트 창
 - `src/app/components/WatchlistWindow.tsx`: mock watchlist 창
 - `src/app/components/CalendarWindow.tsx`: mock calendar 창
 - `src/app/components/BraveNewsWindow.tsx`: 미연결 잔존 파일
@@ -651,7 +704,8 @@ API:
 
 ## 현재 한계와 주의점
 
-- active window 중 backend와 완전히 맞물려 있는 것은 `Finnhub News`, `Default Ticker`, `Data Control` 중심이다.
+- active window 중 backend와 완전히 맞물려 있는 것은 `Finnhub News`, `Default Ticker`, `Data Control`, `AI Research Window` 중심이다.
+- `NewsWindow`는 일부 backend를 사용하지만 현재 운영 기준의 주력 뉴스 창은 아니다.
 - `CalendarWindow`와 `WatchlistWindow`는 UI만 있고 운영 데이터와 연결되어 있지 않다.
 - `keywords`는 backend 응답으로 내려오고 `DEFAULT_COLUMNS`에 포함되어 있으며 컬럼 매뉴에서 표시/숨김 가능하다. 단 기본 숨김 상태다.
 - `DataControlWindow`의 calendar 섹션은 backend가 `jobId`를 돌려준다고 가정하는 UI지만, 실제 backend는 현재 즉시 결과 응답형이다.

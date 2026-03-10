@@ -97,6 +97,19 @@ export function DataControlWindow({
     try { localStorage.setItem('ft-concurrency', String(v)); } catch { /* SSR */ }
   };
 
+  // ─── IBKR Fetch Concurrency ───
+  const [ibkrConcurrency, setIbkrConcurrency] = useState(() => {
+    try {
+      const v = parseInt(localStorage.getItem('ibkr-concurrency') ?? '', 10);
+      return v >= 1 && v <= 100 ? v : 30;
+    } catch { return 30; }
+  });
+  const saveIbkrConcurrency = (n: number) => {
+    const v = Math.max(1, Math.min(100, n));
+    setIbkrConcurrency(v);
+    try { localStorage.setItem('ibkr-concurrency', String(v)); } catch { /* SSR */ }
+  };
+
   // ─── Custom Change date range input ───
   const [customChangeFrom, setCustomChangeFrom] = useState('');
   const [customChangeTo, setCustomChangeTo] = useState(() => new Date().toISOString().slice(0, 10));
