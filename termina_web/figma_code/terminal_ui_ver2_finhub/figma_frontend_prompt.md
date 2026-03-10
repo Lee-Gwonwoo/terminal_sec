@@ -8,10 +8,11 @@
 - 앱은 React + TypeScript + Vite 기반이다.
 - 창(window) 기반 데스크톱 스타일 UI이며, 각 창은 드래그/리사이즈/최대화/닫기를 지원한다.
 - 실제 API 연동이 살아 있는 주요 창은 `Finnhub News`, `Default Ticker`, `Data Control`, `AI Research Window` 이다.
-- `News` 창은 EODHD 적재/조회 로직이 일부 연결되어 있지만 완성형은 아니다.
+- `News` 창도 `GET /api/news`, `POST /api/news/pull-eodhd`를 실제로 호출하지만, 현재 운영 기준의 주력 뉴스 창은 아니다.
 - `Watchlist`, `Calendar` 창은 현재 mock data 기반이다.
 - `BraveNewsWindow.tsx` 파일은 남아 있지만 현재 `WindowType`에 연결되어 있지 않아 UI에서 열 수 없다.
 - 탭/창 레이아웃, 다크 모드, 전역 글자 크기, 뉴스 제목/요약 글자 크기, linked ticker는 `terminal-workspace-v1`로 localStorage에 저장된다.
+- 추가 UI 상태로 `finhub-news-ui-state`, `finnhub-last-update-config`, `data-control-active-tab`, `ft-concurrency`, `ibkr-concurrency`, `finnhub-ticker-concurrency`, `finnhub-request-interval-sec`를 사용한다.
 - API 호출 base는 빈 문자열 `""` 이고, dev 환경에서는 Vite proxy가 `/api`, `/healthz`를 `http://localhost:8080`으로 보낸다.
 
 ## 실행
@@ -384,9 +385,13 @@ localStorage 사용:
 
 저장되는 것:
 
-- `finhub-news-ui-state`: `visibleCols`, `displayMode`, `sourceTypeFilter`, `fromDate`, `toDate`, `selectedBookmarkFolderId`
+- `finhub-news-ui-state`: `visibleCols`, `displayMode`, `sourceTypeFilter`, `fromDate`, `toDate`, `selectedBookmarkFolderId`, `marketCapMin`, `marketCapMax`
 - `terminal-workspace-v1`: 탭 순서, 탭/창 레이아웃, `isDarkMode`, `fontScale`, `newsTitleFontSize`, `newsSummaryFontSize`, `linkedTicker`
-- `data-control-active-tab`: DataControl Settings 탭 상태
+- `data-control-active-tab`: DataControl의 현재 탭(`updates | settings | appdb`)
+- `ft-concurrency`: Full Text Update 동시성 설정
+- `ibkr-concurrency`: Change Update용 IBKR 동시성 설정
+- `finnhub-ticker-concurrency`: Finnhub pull 대상 ticker 동시성 설정
+- `finnhub-request-interval-sec`: Finnhub pull 요청 간격(초)
 
 저장되지 않는 것:
 
@@ -444,6 +449,7 @@ localStorage 사용:
 
 - `Updates`
 - `Settings`
+- `App DB`
 
 ### 로드 시 호출
 
@@ -453,7 +459,11 @@ localStorage 사용:
 ### 섹션
 
 - `IBKR Price Data`
-- `IBKR Calendar Data`
+- `Initial Calendar Backfill`
+- `Refresh Upcoming Calendar`
+- `Custom Calendar Update`
+- `Company Description Update`
+- `Peers Data Update`
 - `Recent Change% Update`
 - `Custom Change% Update`
 
@@ -467,15 +477,20 @@ localStorage 사용:
 추가 정보:
 
 - Price 섹션은 `DB Max Date` 표시
+- Calendar custom 섹션은 `from/to` date input 포함
 - Custom Change 섹션은 `from/to` date input 포함
 
 ### 호출 API
 
 - `POST /api/ibkr/ohlc1d/update`
 - `POST /api/ibkr/calendar/update`
+- `POST /api/ibkr/calendar/update-custom`
+- `POST /api/company-profiles/pull-fmp`
+- `POST /api/company-profiles/pull-peers`
 - `POST /api/news/change/update-recent`
 - `POST /api/news/change/update-custom`
 - `GET /api/jobs/:jobId`
+- `GET /api/db/inspect`
 
 ### 로그 패널
 
@@ -495,8 +510,19 @@ localStorage 사용:
 - News Feed 전용 typography control을 제공한다.
   - `Title Text`
   - `Summary Text`
+- 운영용 동시성/간격 설정을 제공한다.
+  - `Full Text Concurrency`
+  - `IBKR Fetch Concurrency`
+  - `Finnhub Pull Ticker Concurrency`
+  - `Finnhub Request Interval (sec)`
 - 위 두 값은 Control Window에서만 조정한다. News Feed 창 toolbar에는 별도 font size control이 없다.
 - 저장 위치는 `terminal-workspace-v1`이며 앱 재실행 후에도 유지된다.
+
+### App DB 탭
+
+- `GET /api/db/inspect` 결과를 읽어 테이블 목록, row 수, 컬럼, foreign key, sample row를 보여준다.
+- `ticker_universes`는 resource view를 추가로 펼쳐 default universe 식별자와 sample ticker를 보여준다.
+- 읽기 전용 점검 탭이며, 여기서 직접 DB를 수정하지는 않는다.
 
 ## Default Ticker Window
 

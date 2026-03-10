@@ -18,9 +18,9 @@
 - FMP API 키는 선택 사항이다. 없으면 company profile FMP pull만 제한된다.
 - EODHD 토큰은 `POST /api/news/pull-eodhd` 호출 시 파일에서 읽는다.
 - `GET /api/news`는 `news_items` 단독 조회가 아니라 `news_change_metrics`, `news_fulltext`, `news_ai_analysis`, sentiment snapshot, peers, company description을 join/병합해서 내려준다.
-- `news_change_metrics`는 서버 시작 시 항상 재생성된다. 즉 영구 캐시가 아니라 재계산 가능한 파생 테이블이다.
+- `news_change_metrics`는 `CREATE TABLE IF NOT EXISTS`로 유지되는 영구 테이블이며, change update 작업이 metric 단위로 UPSERT 한다.
 - background job 상태와 로그는 메모리 기반이라 서버 재시작 시 유지되지 않는다.
-- default ticker universe는 서버 시작 시 CSV에서 `securities`, `ticker_universes`, `ticker_universe_items`로 import를 시도한다.
+- default ticker universe는 서버 시작 시 CSV를 읽어 `securities`, `ticker_universes`, `ticker_universe_items`를 upsert하며, 이후 기본 경로 조회/수정은 DB-primary로 동작하고 CSV는 backup sync 성격이다.
 - case research 노트는 같은 `app.db`의 `research_tabs`, `research_pages` 테이블에 저장된다.
 - research API, bookmarks API, alerts API는 현재 고정 demo user id를 기준으로 동작한다.
 - `GET /api/news/stream` SSE endpoint가 존재하며 새 뉴스 insert 시 필터를 만족하는 클라이언트에 push 한다.
@@ -101,11 +101,8 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `[][][]created_at[][][]`
 - `[][][]ohlc_ticker[][][]`
 - `[][][]ohlc_date[][][]`
-- `[][][]change_pct[][][]`
 - `[][][]change_1d_pct[][][]`
 - `[][][]change_from_open_pct[][][]`
-- `[][][]change_open_to_high_pct[][][]`
-- `[][][]change_3d_pct[][][]`
 - `[][][]change_7d_pct[][][]`
 - `[][][]change_14d_pct[][][]`
 - `[][][]change_30d_pct[][][]`
@@ -119,6 +116,7 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 주의:
 
 - change 관련 컬럼은 legacy 호환용으로 남아 있지만, 실제 조회는 `news_change_metrics` join 값을 우선 사용한다.
+- 오래된 DB에는 `[][][]change_pct[][][]`, `[][][]change_open_to_high_pct[][][]`, `[][][]change_3d_pct[][][]` 같은 legacy 컬럼이 남아 있을 수 있지만, 현재 `initDb()`가 보장하는 핵심 컬럼은 위 목록 기준이다.
 
 #### `news_change_metrics`
 
@@ -160,7 +158,7 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 주의:
 
-- 서버 시작 시 항상 재생성된다.
+- 서버 시작 시 drop/recreate 하지 않는다. change update 작업이 `(news_id, metric_key)` 기준으로 값을 덮어쓴다.
 
 #### `news_fulltext`
 
@@ -332,11 +330,14 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `GET /api/config`
 - `GET /api/updates/status`
 - `GET /api/jobs/:jobId`
+- `POST /api/jobs/:jobId/cancel`
 
 ### ticker / universe / security
 
 - `GET /api/tickers`
+- `POST /api/tickers/import-default`
 - `POST /api/tickers/add`
+- `DELETE /api/tickers/remove`
 - `GET /api/securities`
 - `GET /api/securities/search`
 - `GET /api/universes`
@@ -348,6 +349,7 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `GET /api/news/:id`
 - `GET /api/news/stream`
 - `GET /api/news/fulltext/:newsId`
+- `GET /api/news/fulltext/stats`
 - `GET /api/news/ai-analysis/validate`
 
 ### 뉴스 적재 / 후처리
@@ -357,6 +359,7 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `POST /api/news/pull-eodhd`
 - `POST /api/news/fulltext/update`
 - `POST /api/news/fulltext/backfill-plaintext`
+- `POST /api/news/fulltext/reset-failed`
 - `POST /api/news/change/update-recent`
 - `POST /api/news/change/update-custom`
 - `POST /api/news/sentiment/update`
@@ -387,11 +390,13 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `GET /api/calendar/events/export.csv`
 - `GET /api/calendar/events/:id`
 - `POST /api/ibkr/calendar/update`
+- `POST /api/ibkr/calendar/update-custom`
 - `GET /api/ibkr/ohlc1d/status`
 - `POST /api/ibkr/ohlc1d/update`
 - `GET /api/company-profiles/:ticker`
 - `POST /api/company-profiles/pull-fmp`
 - `POST /api/company-profiles/pull-peers`
+- `POST /api/company-profiles/pull-market-cap`
 - `GET /api/db/inspect`
 
 ## 핵심 API 상세
@@ -656,10 +661,10 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 - Finnhub key가 없으면 서버 전체가 시작되지 않는다.
 - FMP key가 없으면 FMP 회사 설명 pull만 제한된다.
-- `news_change_metrics`는 영구 보존 테이블이 아니다.
+- `news_change_metrics`는 영구 보존 테이블이며, 업데이트 시 UPSERT 된다.
 - background job 상태는 메모리 기반이라 재시작 시 유실된다.
 - fulltext 자동 재시도 기준은 `news_fulltext` row 존재 여부다.
-- default ticker source는 현재 CSV + startup import 구조라, 기본 경로를 바꾸면 front/backend 기본값을 함께 맞춰야 한다.
+- default ticker source는 startup import 이후 DB-primary + CSV backup sync 구조다. 기본 경로를 바꾸면 front/backend 기본값과 startup import 기준을 함께 맞춰야 한다.
 
 ## 실행과 환경
 
@@ -731,11 +736,8 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `[][][]created_at[][][]`
 - `[][][]ohlc_ticker[][][]`
 - `[][][]ohlc_date[][][]`
-- `[][][]change_pct[][][]`
 - `[][][]change_1d_pct[][][]`
 - `[][][]change_from_open_pct[][][]`
-- `[][][]change_open_to_high_pct[][][]`
-- `[][][]change_3d_pct[][][]`
 - `[][][]change_7d_pct[][][]`
 - `[][][]change_14d_pct[][][]`
 - `[][][]change_30d_pct[][][]`
@@ -749,6 +751,7 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 주의:
 
 - change 관련 컬럼은 여전히 테이블에 남아 있지만, 현재 `GET /api/news`는 실질적으로 `news_change_metrics`에서 값을 읽어 join한다.
+- 오래된 DB에는 `[][][]change_pct[][][]`, `[][][]change_open_to_high_pct[][][]`, `[][][]change_3d_pct[][][]`가 남아 있을 수 있지만, 현재 초기화 코드가 직접 보장하는 핵심 컬럼은 위 목록 기준이다.
 
 #### `news_change_metrics`
 컬럼:
@@ -792,7 +795,7 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 주의:
 
 - 코드 주석에는 “30d = 22 trading days”라고 되어 있다.
-- 테이블은 startup 때 항상 재생성된다.
+- 테이블은 startup 때 drop/recreate 하지 않는다. 동일 `(news_id, metric_key)` row를 UPSERT 하며 누적 유지한다.
 
 #### `news_fulltext`
 컬럼:
@@ -1484,6 +1487,30 @@ query:
 UI 위치:
 - Data Control → Updates → Calendar Update 그룹: `Initial Calendar Backfill` / `Refresh Upcoming Calendar` 버튼
 - News Feed → update 드롭다운 → Calendar Update 섹션: 동일한 두 버튼
+
+### `POST /api/ibkr/calendar/update-custom`
+
+현재 구현은 synchronous response다. background job이 아니다.
+
+요청 body:
+
+```json
+{ "from": "2026-03-01", "to": "2026-03-31" }
+```
+
+동작:
+
+1. `from`, `to`가 `YYYY-MM-DD`인지 검증한다.
+2. `getDefaultUniverseTickers()`로 default universe 종목을 읽는다.
+3. `pullIbkrCalendarCustom(tickers, from, to)`를 실행한다.
+4. event upsert 후 `mock_provider` row를 삭제한다.
+5. `update_status.ibkr_calendar`에 `mode=custom` 결과를 기록한다.
+
+응답 (성공 시):
+
+```json
+{ "mode": "custom", "dateRange": { "from": "2026-03-01", "to": "2026-03-31" }, "upserted": 10, "deletedMockRows": 5, "source": "IBKR" }
+```
 
 ## OHLC API
 

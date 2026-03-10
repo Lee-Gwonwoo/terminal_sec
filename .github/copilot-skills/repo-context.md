@@ -120,9 +120,26 @@
 	- UI/백엔드에서 참조 CSV를 쓸 때는 사용자가 선택한 파일과 기본 파일을 구분해서 다룸
 
 - **API 키 / 시크릿 파일**
-	- 대표 경로: `EODHD/API TOKEN`, `finhub/finhub_api_key/finhub_api_key`, `ai_agent_plan/google_api_key/`, `ai_agent_plan/brave_api/`
+	- 대표 경로: `EODHD/API TOKEN`, `finhub/finhub_api_key/finhub_api_key`, `ai_agent_plan/google_api_key/`, `ai_agent_plan/brave_api/`, `ai_agent_plan/ptpr_api_key/ptpr_api_key`
 	- 용도: 외부 provider 인증 정보
 	- 주의: 로그/출력/문서 예시에 실제 값을 노출하지 않음
+
+- **PTPR API 조사 상태 (2026-03-10)**
+	- 시크릿 파일은 `ai_agent_plan/ptpr_api_key/ptpr_api_key`에 존재함을 확인했다. 값 자체는 문서/로그에 노출하지 않는다.
+	- 현재 레포에는 `PTPR` 또는 `ptpr` 명시 연동 코드가 없다. 즉, provider별 base URL, auth 방식, endpoint 매핑은 아직 구현 source of truth가 없다.
+	- 공식 문서는 `https://www.rtpr.io/docs`로 확인됐다. 실제 API base URL은 `https://api.rtpr.io`, WebSocket URL은 `wss://ws.rtpr.io`다.
+	- 인증 방식은 REST는 `Authorization: Bearer <API_KEY>`, WebSocket은 `wss://ws.rtpr.io?apiKey=<API_KEY>` query parameter다.
+	- REST rate limit은 분당 60 requests, WebSocket은 API key당 동시 1 connection이다.
+	- 2026-03-10 실제 probe 결과:
+		- `GET /articles?limit=100` 성공, 최근 100건 모두 `2026-03-10` UTC 기사였다.
+		- `GET /articles/AAPL?limit=5`는 당시 시점 기준 `count=0`이었다.
+		- WebSocket 연결 후 `connected`와 `subscribed` 메시지를 실제 수신했다.
+	- 현재 확인된 데이터 타입:
+		- REST envelope: `[][][]count[][][]`, `[][][]articles[][][]`
+		- REST article item: `[][][]ticker[][][]`, `[][][]exchange[][][]`, `[][][]title[][][]`, `[][][]author[][][]`, `[][][]created[][][]`, `[][][]article_body[][][]`, `[][][]article_body_html[][][]`
+		- WebSocket inbound message types: `[][][]connected[][][]`, `[][][]subscribed[][][]`, `[][][]article[][][]`, `[][][]ping[][][]`, `[][][]error[][][]`
+		- WebSocket outbound client actions: `[][][]subscribe[][][]`, `[][][]unsubscribe[][][]`, `[][][]pong[][][]`
+	- 구현 시에는 `.github/copilot-skills/ptpr_api.md`를 우선 참고한다.
 
 - **플랜 / 감사 / 작업 로그 문서**
 	- 대표 경로: `ai_agent_plan/<project_name>/plan.md`, `ai_agent_plan/<project_name>/agent_log.md`, `ai_agent_plan/<project_name>/test/`
