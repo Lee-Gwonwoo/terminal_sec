@@ -86,6 +86,15 @@ function getFinnhubRequestIntervalMs(): number {
   }
 }
 
+function getRtprTickerConcurrency(): number {
+  try {
+    const value = parseInt(localStorage.getItem('rtpr-ticker-concurrency') ?? '', 10);
+    return Number.isFinite(value) && value >= 1 && value <= 20 ? value : 5;
+  } catch {
+    return 5;
+  }
+}
+
 // ─── Backend news item ───
 interface BackendNewsItem {
   id: string;
@@ -397,6 +406,10 @@ export function FinnhubNewsWindow({
   const [showPtprCustomDateModal, setShowPtprCustomDateModal] = useState(false);
   const [ptprCustomFrom, setPtprCustomFrom] = useState('');
   const [ptprCustomTo, setPtprCustomTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [showControlWindow, setShowControlWindow] = useState(false);
+  const [finnhubTickerConcurrencyInput, setFinnhubTickerConcurrencyInput] = useState(() => String(getFinnhubTickerConcurrency()));
+  const [finnhubRequestIntervalSecInput, setFinnhubRequestIntervalSecInput] = useState(() => String(getFinnhubRequestIntervalMs() / 1000));
+  const [rtprTickerConcurrencyInput, setRtprTickerConcurrencyInput] = useState(() => String(getRtprTickerConcurrency()));
   const [showPreflightModal, setShowPreflightModal] = useState(false);
   const [preflightData, setPreflightData] = useState<{ totalTickers: number; fallbackCount: number; fallbackTickers: string[] } | null>(null);
   const [pendingUpdateSourceType, setPendingUpdateSourceType] = useState<UpdateSourceType>('all');
@@ -768,7 +781,10 @@ export function FinnhubNewsWindow({
     setError(null);
     setJobStatus(null);
     try {
-      const body: Record<string, unknown> = { mode };
+      const body: Record<string, unknown> = {
+        mode,
+        tickerConcurrency: getRtprTickerConcurrency(),
+      };
       if (from) body.from = from;
       if (to) body.to = to;
       const res = await fetch(`${API_BASE}/api/news/pull-rtpr`, {
@@ -794,6 +810,25 @@ export function FinnhubNewsWindow({
     setPtprCustomFrom('');
     setPtprCustomTo(new Date().toISOString().slice(0, 10));
     setShowPtprCustomDateModal(true);
+  };
+
+  const handleSaveControlWindow = () => {
+    const finnhubTickerConcurrency = Math.max(1, Math.min(20, parseInt(finnhubTickerConcurrencyInput, 10) || 5));
+    const finnhubRequestIntervalSec = Math.max(0, Math.min(10, parseFloat(finnhubRequestIntervalSecInput) || 1));
+    const rtprTickerConcurrency = Math.max(1, Math.min(20, parseInt(rtprTickerConcurrencyInput, 10) || 5));
+
+    try {
+      localStorage.setItem('finnhub-ticker-concurrency', String(finnhubTickerConcurrency));
+      localStorage.setItem('finnhub-request-interval-sec', String(finnhubRequestIntervalSec));
+      localStorage.setItem('rtpr-ticker-concurrency', String(rtprTickerConcurrency));
+    } catch {
+      // ignore localStorage failures
+    }
+
+    setFinnhubTickerConcurrencyInput(String(finnhubTickerConcurrency));
+    setFinnhubRequestIntervalSecInput(String(finnhubRequestIntervalSec));
+    setRtprTickerConcurrencyInput(String(rtprTickerConcurrency));
+    setShowControlWindow(false);
   };
 
   // ─── Change Update: Recent (last 7 days, all metrics) ───
@@ -1918,6 +1953,14 @@ export function FinnhubNewsWindow({
             <RotateCw className={`w-3.5 h-3.5 text-gray-600 dark:text-gray-400 ${loading ? 'animate-spin' : ''}`} />
           </button>
 
+          <button
+            onClick={() => setShowControlWindow(true)}
+            className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5"
+            title="Control window"
+          >
+            <Settings2 className="w-3.5 h-3.5" /><span className="text-xs">Control</span>
+          </button>
+
           {/* Save */}
           <button onClick={() => setShowSaveModal(true)} className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5" title="Save search settings">
             <Save className="w-3.5 h-3.5" /><span className="text-xs">Save</span>
@@ -2299,15 +2342,88 @@ export function FinnhubNewsWindow({
                 <input type="date" value={ptprCustomTo} onChange={(e) => setPtprCustomTo(e.target.value)}
                   className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500" />
               </div>
-              <p className="text-[10px] text-gray-400">Per-ticker RTPR press release pull within date range. RTPR rate limit: 60 rpm.</p>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">RTPR Ticker Concurrency</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={rtprTickerConcurrencyInput}
+                  onChange={(e) => setRtprTickerConcurrencyInput(e.target.value)}
+                  className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <p className="text-[10px] text-gray-400">Per-ticker RTPR press release pull within date range. RTPR rate limit: 60 rpm. Saved value is also available in Control.</p>
             </div>
             <div className="flex justify-end gap-2 mt-4">
               <button onClick={() => setShowPtprCustomDateModal(false)} className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
               <button
-                onClick={() => { if (!ptprCustomFrom || !ptprCustomTo) return; setShowPtprCustomDateModal(false); handlePtprUpdate('custom', ptprCustomFrom, ptprCustomTo); }}
+                onClick={() => {
+                  if (!ptprCustomFrom || !ptprCustomTo) return;
+                  const rtprTickerConcurrency = Math.max(1, Math.min(20, parseInt(rtprTickerConcurrencyInput, 10) || 5));
+                  try { localStorage.setItem('rtpr-ticker-concurrency', String(rtprTickerConcurrency)); } catch { /* ignore */ }
+                  setRtprTickerConcurrencyInput(String(rtprTickerConcurrency));
+                  setShowPtprCustomDateModal(false);
+                  handlePtprUpdate('custom', ptprCustomFrom, ptprCustomTo);
+                }}
                 disabled={!ptprCustomFrom || !ptprCustomTo}
                 className="px-3 py-1.5 text-xs bg-cyan-600 text-white rounded hover:bg-cyan-700 disabled:opacity-50"
               >Start Update</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showControlWindow && (
+        <div className="absolute inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-4 w-96 border border-gray-200 dark:border-gray-700">
+            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><Settings2 className="w-4 h-4 text-slate-500" />News Pull Control</h3>
+            <div className="space-y-4">
+              <div className="rounded border border-gray-200 dark:border-gray-700 p-3 space-y-3">
+                <div className="text-xs font-medium text-gray-700 dark:text-gray-200">Finnhub</div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Ticker Concurrency</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={finnhubTickerConcurrencyInput}
+                    onChange={(e) => setFinnhubTickerConcurrencyInput(e.target.value)}
+                    className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Request Interval (sec)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={10}
+                    step="0.1"
+                    value={finnhubRequestIntervalSecInput}
+                    onChange={(e) => setFinnhubRequestIntervalSecInput(e.target.value)}
+                    className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+              <div className="rounded border border-gray-200 dark:border-gray-700 p-3 space-y-3">
+                <div className="text-xs font-medium text-gray-700 dark:text-gray-200">RTPR / PTPR</div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Ticker Concurrency</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={rtprTickerConcurrencyInput}
+                    onChange={(e) => setRtprTickerConcurrencyInput(e.target.value)}
+                    className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+                <p className="text-[10px] text-gray-400">Default 5. RTPR provider still respects the internal 55 req/min token bucket under the documented 60 rpm limit.</p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setShowControlWindow(false)} className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
+              <button onClick={handleSaveControlWindow} className="px-3 py-1.5 text-xs bg-slate-700 text-white rounded hover:bg-slate-800">Save</button>
             </div>
           </div>
         </div>

@@ -92,6 +92,7 @@ const DEMO_USER_ID = "11111111-1111-1111-1111-111111111111";
 
 const DEFAULT_FINNHUB_TICKER_CONCURRENCY = 5;
 const DEFAULT_FINNHUB_REQUEST_INTERVAL_MS = 1000;
+const DEFAULT_RTPR_TICKER_CONCURRENCY = 5;
 
 function buildBatchLevels(requestedConcurrency: number): number[] {
   const safeConcurrency = Math.max(1, Math.min(20, Math.floor(requestedConcurrency)));
@@ -867,6 +868,7 @@ const pullRtprSchema = z.object({
   mode: z.enum(["recent", "custom"]).optional().default("recent"),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  tickerConcurrency: z.number().int().min(1).max(20).optional().default(DEFAULT_RTPR_TICKER_CONCURRENCY),
 });
 
 app.post("/api/news/pull-rtpr", async (req, res, next) => {
@@ -905,6 +907,7 @@ app.post("/api/news/pull-rtpr", async (req, res, next) => {
     const jobId = createJob(tickerList.length);
     activePullJobs.set(rtprJobKey, jobId);
     appendLog(jobId, `Starting RTPR ${input.mode} pull — ${tickerList.length} tickers`);
+    appendLog(jobId, `[batch] requested tickerConcurrency=${input.tickerConcurrency}`);
 
     // For recent mode, load RTPR-specific anchor map
     let rtprAnchorMap: Map<string, string> | undefined;
@@ -922,6 +925,32 @@ app.post("/api/news/pull-rtpr", async (req, res, next) => {
       const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
       // Use 'rtpr_press_release' as confirmed-empty key to separate from Finnhub's 'press_release'
       const confirmedEmptyKey = "rtpr_press_release";
+      const workerCount = Math.max(1, Math.min(input.tickerConcurrency, tickerList.length || 1));
+      let completedTickers = 0;
+
+      const finishOneTicker = () => {
+        completedTickers += 1;
+        updateProgress(jobId, completedTickers);
+      };
+
+      const runTickerPool = async (processTicker: (ticker: string) => Promise<void>) => {
+        let nextIndex = 0;
+        const worker = async () => {
+          while (!isJobCancelled(jobId)) {
+            const currentIndex = nextIndex;
+            nextIndex += 1;
+            if (currentIndex >= tickerList.length) {
+              return;
+            }
+            const ticker = tickerList[currentIndex];
+            await processTicker(ticker);
+            finishOneTicker();
+          }
+        };
+
+        appendLog(jobId, `[batch] concurrency=${workerCount}`);
+        await Promise.all(Array.from({ length: workerCount }, () => worker()));
+      };
 
       try {
         if (!isCustom) {
@@ -933,20 +962,14 @@ app.post("/api/news/pull-rtpr", async (req, res, next) => {
             appendLog(jobId, `${fallbackCount} tickers have no prior RTPR data → 7d fallback`);
           }
 
-          for (let i = 0; i < tickerList.length; i++) {
-            if (isJobCancelled(jobId)) {
-              appendLog(jobId, `🛑 Cancelled — stopping ticker processing`);
-              break;
-            }
-            const ticker = tickerList[i];
+          await runTickerPool(async (ticker) => {
             const anchor = rtprAnchorMap!.get(ticker.toUpperCase());
             const tickerFrom = anchor ? anchor.slice(0, 10) : fallback7d;
 
             // Check confirmed-empty range
             const emptyRange = await getConfirmedEmptyRange(ticker, confirmedEmptyKey);
             if (emptyRange && tickerFrom >= emptyRange.rangeFrom && yesterday <= emptyRange.rangeTo) {
-              updateProgress(jobId, i + 1);
-              continue; // silently skip — no log for clean output
+              return; // silently skip — no log for clean output
             }
 
             try {
@@ -955,8 +978,7 @@ app.post("/api/news/pull-rtpr", async (req, res, next) => {
               // Record confirmed-empty if API returned 0 articles for this ticker
               if (items.length === 0 && tickerFrom <= yesterday) {
                 await recordConfirmedEmpty(ticker, confirmedEmptyKey, tickerFrom, yesterday);
-                updateProgress(jobId, i + 1);
-                continue;
+                return;
               }
 
               // Filter by anchor date — keep only items newer than anchor
@@ -995,20 +1017,14 @@ app.post("/api/news/pull-rtpr", async (req, res, next) => {
               console.error(`[pull-rtpr] ${ticker}: ${err.message}`);
               appendLog(jobId, `  ⚠ RTPR ${ticker}: ${err.message}`);
             }
-            updateProgress(jobId, i + 1);
-          }
+          });
         } else {
           // ── Custom mode: per-ticker fetch with explicit date range filter ──
           const effectiveFrom = input.from!;
           const effectiveTo = input.to ?? new Date().toISOString().slice(0, 10);
           appendLog(jobId, `Custom mode: ${effectiveFrom} ~ ${effectiveTo}, ${tickerList.length} tickers`);
 
-          for (let i = 0; i < tickerList.length; i++) {
-            if (isJobCancelled(jobId)) {
-              appendLog(jobId, `🛑 Cancelled — stopping ticker processing`);
-              break;
-            }
-            const ticker = tickerList[i];
+          await runTickerPool(async (ticker) => {
             try {
               const items = await fetchRtprArticlesByTicker(ticker, 100);
               // Filter by date range
@@ -1048,8 +1064,7 @@ app.post("/api/news/pull-rtpr", async (req, res, next) => {
               console.error(`[pull-rtpr] ${ticker}: ${err.message}`);
               appendLog(jobId, `  ⚠ RTPR ${ticker}: ${err.message}`);
             }
-            updateProgress(jobId, i + 1);
-          }
+          });
         }
 
         appendLog(jobId, `Total: inserted=${counters.totalInserted}, skipped=${counters.totalSkipped}`);
@@ -1071,6 +1086,7 @@ app.post("/api/news/pull-rtpr", async (req, res, next) => {
         await setLastSuccess("rtpr_press_release", new Date().toISOString(), {
           mode: input.mode,
           tickerCount: tickerList.length,
+          tickerConcurrency: input.tickerConcurrency,
           inserted: counters.totalInserted,
           skipped: counters.totalSkipped,
           changeMerged: changeMergeResult.merged,
@@ -1080,6 +1096,7 @@ app.post("/api/news/pull-rtpr", async (req, res, next) => {
           source: "RTPR",
           mode: input.mode,
           tickerCount: tickerList.length,
+          tickerConcurrency: input.tickerConcurrency,
           inserted: counters.totalInserted,
           skipped: counters.totalSkipped,
           changeMerged: changeMergeResult.merged,

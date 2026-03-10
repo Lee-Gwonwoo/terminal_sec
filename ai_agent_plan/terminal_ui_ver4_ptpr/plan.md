@@ -524,13 +524,14 @@ custom 모드에서도 ticker별 기존 데이터를 먼저 확인하여, 지정
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 7-1 | RTPR API pagination probe: `offset`/`page` 파라미터 동작 여부 확인 | (런타임 probe) | offset=100 호출 시 다른 결과 반환 vs 무시 확인 | ⬜ |
+| 7-1 | RTPR API pagination probe: `offset`/`page` 파라미터 동작 여부 확인 | (런타임 probe) | offset=100 호출 시 다른 결과 반환 vs 무시 확인 | ⏳ |
 | 7-2 | P-1 해결 구현: probe 결과에 따라 방안 A 또는 B 적용 | `ptprNewsProvider.ts`, `server.ts` | tsc 통과 + 100건 cap ticker 정상 처리 확인 | ⬜ |
 | 7-3 | P-2 해결 구현: custom 모드에 anchor + confirmed-empty 사전 skip 추가 | `server.ts` | tsc 통과 + 2차 custom 실행 시 skip count > 0 확인 | ⬜ |
 | 7-4 | 통합 테스트: custom 넓은 기간 + 이미 저장된 데이터 혼재 시나리오 | (런타임) | 누락 경고 또는 완전 수집 + skip 동작 확인 | ⬜ |
 
 - `7-1` 목적: 해결 방향 결정의 선행 조건. RTPR `GET /articles/{ticker}?limit=100&offset=100`이 실제로 다른 페이지를 반환하는지 확인.
   - 완료 조건: probe 결과가 "pagination 지원" 또는 "미지원(offset 무시)"으로 확정.
+  - 2026-03-10 probe 결과: `offset`, `page`, `cursor`, `before`, `after` 모두 동일 결과 반환 → 현재 공개 REST 기준 pagination/windowing 미지원으로 판단.
   - 흔한 문제: offset을 보내도 같은 결과를 반환하면 미지원으로 판정해야 함.
 - `7-2` 목적: 넓은 기간에서도 가능한 한 완전 수집 보장.
   - 방안 A 시: `fetchRtprArticlesByTickerPaginated(ticker, from, to)` 추가 — 100건씩 offset 증가, 범위 밖 기사 나오면 중단.
@@ -560,5 +561,36 @@ $resp = Invoke-RestMethod -Uri "http://localhost:8080/api/news/pull-rtpr" -Metho
 Start-Sleep 30
 $job = Invoke-RestMethod -Uri "http://localhost:8080/api/jobs/$($resp.jobId)"
 $job.logs | Select-String "skip|already covered"
+```
+사용자 확인 필요: **예**
+
+#### ⏳ Step 8 — RTPR 속도 개선: 기본 concurrency 5 + Control Window 설정
+
+사용자 요청: "그래도 한 기본 5개정도로 병렬 가능하게 하고, control window 에도 수치 설정할 수 있도록"
+
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 8-1 | `pull-rtpr` 입력 스키마에 `tickerConcurrency` 추가, 기본값 5 | `server.ts` | zod parse 통과 + job log에 requested tickerConcurrency 표시 | ⏳ |
+| 8-2 | RTPR recent/custom를 worker pool 기반 병렬 처리로 전환 | `server.ts` | 런타임 로그에 `[batch] concurrency=5` 확인 | ⏳ |
+| 8-3 | Control Window UI 추가: Finnhub/RTPR concurrency 설정 저장 | `FinnhubNewsWindow.tsx` | vite build 통과 + Control 버튼으로 modal 열림 | ⏳ |
+| 8-4 | PTPR custom modal에도 RTPR concurrency 입력 추가 | `FinnhubNewsWindow.tsx` | custom modal에서 값 변경 후 update 시작 확인 | ⏳ |
+
+- `8-1` 목적: RTPR도 Finnhub처럼 호출 동시성을 body로 제어할 수 있게 한다.
+  - 기본값은 5, 허용 범위는 1~20.
+- `8-2` 목적: 기존 순차 처리(1개씩)를 기본 5개 병렬 처리로 전환해 체감 속도를 개선한다.
+  - 단, provider 내부 token bucket(55 req/min)가 남아 있으므로 병렬이어도 rate limit 상한은 유지된다.
+- `8-3` 목적: localStorage 기반 숨은 설정이 아니라 사용자가 직접 제어할 수 있는 Control Window를 노출한다.
+  - Finnhub ticker concurrency, Finnhub request interval, RTPR ticker concurrency를 저장한다.
+- `8-4` 목적: PTPR custom 실행 직전에도 RTPR concurrency를 바로 조정할 수 있게 한다.
+
+검증 훅:
+```powershell
+# backend 로그/잡 로그에서 concurrency 확인
+$body = @{ mode = 'recent'; tickerConcurrency = 5 } | ConvertTo-Json
+$resp = Invoke-RestMethod -Uri 'http://localhost:8080/api/news/pull-rtpr' -Method Post -ContentType 'application/json' -Body $body
+Start-Sleep 4
+$job = Invoke-RestMethod -Uri "http://localhost:8080/api/jobs/$($resp.jobId)"
+$job.logs | Select-Object -First 8
+Invoke-RestMethod -Uri "http://localhost:8080/api/jobs/$($resp.jobId)/cancel" -Method Post | Out-Null
 ```
 사용자 확인 필요: **예**

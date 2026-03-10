@@ -238,3 +238,65 @@
    - 완화: 기본값 `'FINNHUB'`로 설정 → 기존 코드 무변경.
 3. **리스크:** confirmed-empty key `'rtpr_press_release'`가 `confirmed_empty_ranges` 테이블 source_type 컬럼에 새 값으로 들어감.
    - 완화: `UNIQUE(ticker, source_type)` 제약으로 Finnhub `'press_release'`와 충돌 없음.
+
+### RTPR concurrency 5 기본 병렬 처리 + Control Window 설정 추가 (2026-03-10 23:13)
+
+**작성 시각:** 2026-03-10 23:13 (local)
+
+**Status: awaiting user confirmation**
+
+#### PLAN CHANGE 사유
+- 사용자 요청: "그래도 한 기본 5개정도로 병렬 가능하게 하고, control window 에도 수치 설정할 수 있도록"
+- 기존 RTPR recent/custom는 ticker 루프를 `await` 순차 처리하고 있었음.
+- Finnhub는 이미 설정 가능한 concurrency 개념이 있었지만 RTPR는 body 입력/UI 설정이 없었음.
+
+#### 작업 요약
+
+1. `server.ts`
+   - `pull-rtpr` schema에 `tickerConcurrency` 추가 (기본 5, 범위 1~20)
+   - RTPR recent/custom를 worker pool 기반으로 전환
+   - job log에 `[batch] requested tickerConcurrency=...` / `[batch] concurrency=...` 기록 추가
+   - update status / job result에 `tickerConcurrency` 포함
+2. `FinnhubNewsWindow.tsx`
+   - `Control` 버튼과 `News Pull Control` modal 추가
+   - Finnhub ticker concurrency, Finnhub request interval, RTPR ticker concurrency를 localStorage로 저장
+   - PTPR custom modal에도 RTPR concurrency 입력 추가
+   - `handlePtprUpdate()`가 `tickerConcurrency`를 backend로 전달하도록 수정
+3. RTPR pagination/windowing probe 결과를 유지
+   - `offset`, `page`, `cursor`, `before`, `after`는 동일 결과 반환 → 현재 공개 REST 기준 pagination/windowing 미지원으로 판단 유지
+
+#### 검증 결과
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `server.ts`, `FinnhubNewsWindow.tsx` 에러 없음 |
+| 빌드(backend) | ✅ | `npm run build -w backend` 통과 |
+| 빌드(frontend) | ✅ | `vite build` 통과 |
+| 런타임 통합 | ✅ | RTPR recent job 시작 후 로그에서 `requested tickerConcurrency=5`, `[batch] concurrency=5` 확인 |
+
+#### 런타임 로그 샘플
+
+```text
+[23:13:52] Starting RTPR recent pull — 1698 tickers
+[23:13:52] [batch] requested tickerConcurrency=5
+[23:13:52] 1523 tickers have no prior RTPR data → 7d fallback
+[23:13:52] [batch] concurrency=5
+[23:13:52]   RTPR ETN: 1 new (1 fetched)
+```
+
+#### 리스크 / 완화
+
+1. **리스크:** concurrency를 올려도 RTPR 문서상 60 rpm 제한을 넘기면 429가 날 수 있다.
+   - 완화 1: provider 내부 token bucket은 55 req/min으로 유지한다.
+   - 완화 2: Control Window 입력 범위를 1~20으로 제한한다.
+2. **리스크:** concurrency를 너무 높이면 체감 속도 개선보다 대기 시간이 길어질 수 있다.
+   - 완화 1: 기본값은 5로 둔다.
+   - 완화 2: 사용자가 job log를 보고 낮추거나 높일 수 있게 한다.
+3. **리스크:** custom modal과 Control Window 값이 다르면 혼란이 생길 수 있다.
+   - 완화 1: custom modal 시작 시 저장값(localStorage)을 그대로 사용/갱신한다.
+   - 완화 2: modal 설명에 Control과 연동된다는 문구를 넣는다.
+
+#### 사용자 확인 요청
+
+- 현재 RTPR는 기본 5개 병렬 처리이며, Control Window에서 값을 바꿀 수 있다.
+- 다음 단계로는 `custom PTPR`의 confirmed-empty/anchor skip 최적화(Plan Step 7-3)로 이어가면 된다.
