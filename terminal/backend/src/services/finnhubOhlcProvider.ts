@@ -63,32 +63,53 @@ export async function fetchOhlcFromFinnhub(
 }
 
 /**
- * Batch-fetch daily OHLC for multiple symbols with rate-limit-aware delays.
+ * Batch-fetch daily OHLC for multiple symbols with rate-limit-aware concurrency.
+ * Uses parallel requests (default 3 concurrent) with adaptive delay.
  * Returns fetched bars per symbol. Failures are collected but don't stop the batch.
  */
 export async function fetchOhlcFromFinnhubBatch(
   tickers: string[],
   from: string,
   to: string,
-  delayMs = 150,
+  concurrency = 3,
   onProgress?: (done: number, total: number) => void,
 ): Promise<{ results: Map<string, OhlcBar[]>; errors: Map<string, string> }> {
   const results = new Map<string, OhlcBar[]>();
   const errors = new Map<string, string>();
+  let done = 0;
+  let nextIdx = 0;
 
-  for (let i = 0; i < tickers.length; i++) {
-    const ticker = tickers[i];
-    try {
-      const bars = await fetchOhlcFromFinnhub(ticker, from, to);
-      results.set(ticker, bars);
-    } catch (err) {
-      errors.set(ticker, err instanceof Error ? err.message : String(err));
-    }
-    onProgress?.(i + 1, tickers.length);
-    if (i < tickers.length - 1 && delayMs > 0) {
-      await new Promise((r) => setTimeout(r, delayMs));
+  async function worker() {
+    while (true) {
+      const idx = nextIdx++;
+      if (idx >= tickers.length) return;
+      const ticker = tickers[idx];
+      try {
+        const bars = await fetchOhlcFromFinnhub(ticker, from, to);
+        results.set(ticker, bars);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("rate limit")) {
+          // Back off on 429, then retry once
+          await new Promise((r) => setTimeout(r, 2000));
+          try {
+            const bars = await fetchOhlcFromFinnhub(ticker, from, to);
+            results.set(ticker, bars);
+          } catch (retryErr) {
+            errors.set(ticker, retryErr instanceof Error ? retryErr.message : String(retryErr));
+          }
+        } else {
+          errors.set(ticker, msg);
+        }
+      }
+      done++;
+      onProgress?.(done, tickers.length);
     }
   }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, tickers.length) }, () => worker()),
+  );
 
   return { results, errors };
 }

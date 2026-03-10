@@ -131,6 +131,7 @@
   추가 참고:
   - EODHD 규칙: `copilot-skills/datasource-eodhd.md`
   - ThetaData / ThetaTerminal: `copilot-skills/datasource-thetadata.md`
+  - Finnhub / 기타 API 속도 최적화: `copilot-skills/finhub_other_api.md`
 
 ## 스킬 지침(상황별)
 아래 규칙들은 특정 상황에서만 적용됩니다. 자세한 내용은 `.github/copilot-skills/`를 참고하세요:
@@ -143,3 +144,4 @@
 - [설정 템플릿 파일](copilot-skills/config-templates.md)
 - [EODHD 규칙](copilot-skills/datasource-eodhd.md)
 - [ThetaData / ThetaTerminal](copilot-skills/datasource-thetadata.md)
+- [Finnhub / 기타 API 속도 최적화](copilot-skills/finhub_other_api.md)

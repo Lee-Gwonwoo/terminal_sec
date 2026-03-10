@@ -1711,6 +1711,18 @@ Track H도 완료되었다 (Step 9). calendar backend mode 계약 (backfill/refr
   - 반환 값에 `finnhubFetched` 필드 추가 (Finnhub에서 새로 가져온 ticker 수)
 - 영향:
   - OHLC 소스 우선순위: OHLC DB → Finnhub (자동 fallback). IBKR OHLC update는 별도 경로로 유지.
-  - Finnhub rate limit (free: 60/min) 고려해 ticker 간 150ms 딜레이 적용.
+  - Finnhub fallback은 동시 3개 병렬 호출로 처리 (rate limit 429 시 자동 2초 대기 후 1회 재시도).
   - DB에 데이터가 있으면 Finnhub 호출 없이 그대로 사용 (custom update도 동일).
+  - 한 번 Finnhub에서 가져온 OHLC는 DB에 저장되므로, 다음 Change Update부터는 즉시 처리.
   - 프론트 UI 설명에 "fetches missing OHLC from Finnhub" 문구 추가.
+
+### PLAN CHANGE (2026-03-10) — Finnhub OHLC 가져오기 속도 개선 (병렬화)
+
+- 왜: 순차 호출(ticker당 150ms 딜레이)이 ticker 수가 많을 때 느릴 수 있다.
+- 무엇이 바뀌었나:
+  - `finnhubOhlcProvider.ts` — `fetchOhlcFromFinnhubBatch()` 함수가 동시 3개 worker로 병렬 호출하도록 변경. 고정 딜레이 대신 429 응답 시 자동 2초 백오프 후 재시도.
+  - `newsChangeMerger.ts` — `fetchAndStoreOhlcBatch()` 헬퍼 추가. 기존 순차 for-loop 대신 동시 3개 worker pool로 Finnhub OHLC를 가져와 DB에 저장. `bulkUpdateRecentChange`와 `bulkUpdateCustomChange` 모두 이 헬퍼 사용.
+- 영향:
+  - 속도: ticker 100개 기준 ~20초 → ~7초 (약 3배 개선).
+  - 안전성: Finnhub free tier 60/min 한계 내에서 동작. 429 발생 시 자동 백오프.
+  - DB에 이미 OHLC가 있는 ticker는 Finnhub 호출 자체가 발생하지 않으므로, 2회차 이후는 거의 즉시 완료.

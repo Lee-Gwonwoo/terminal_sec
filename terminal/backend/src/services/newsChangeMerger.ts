@@ -238,7 +238,6 @@ async function fetchAndStoreOhlcFromFinnhub(
   earlyDate: string,
   lateDate: string,
   fetchedSet: Set<string>,
-  delayMs = 150,
 ): Promise<{ bars: number; error?: string }> {
   if (fetchedSet.has(ticker)) return { bars: 0 };
   fetchedSet.add(ticker);
@@ -258,10 +257,41 @@ async function fetchAndStoreOhlcFromFinnhub(
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(`[Finnhub OHLC fallback] ${ticker}: ${msg}`);
     return { bars: 0, error: msg };
-  } finally {
-    // Rate-limit pause
-    if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
   }
+}
+
+const FINNHUB_OHLC_CONCURRENCY = 3; // parallel Finnhub candle requests
+
+/** Fetch OHLC from Finnhub for multiple tickers in parallel (max FINNHUB_OHLC_CONCURRENCY).
+ *  Rate-limited: auto-retry on 429 with backoff. */
+async function fetchAndStoreOhlcBatch(
+  tickers: string[],
+  earlyDate: string,
+  lateDate: string,
+  fetchedSet: Set<string>,
+  isCancelled?: () => boolean,
+): Promise<number> {
+  const toFetch = tickers.filter(t => !fetchedSet.has(t));
+  if (toFetch.length === 0) return 0;
+
+  let fetched = 0;
+  let nextIdx = 0;
+
+  async function worker() {
+    while (true) {
+      if (isCancelled?.()) return;
+      const idx = nextIdx++;
+      if (idx >= toFetch.length) return;
+      const result = await fetchAndStoreOhlcFromFinnhub(toFetch[idx], earlyDate, lateDate, fetchedSet);
+      if (result.bars > 0) fetched++;
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(FINNHUB_OHLC_CONCURRENCY, toFetch.length) }, () => worker()),
+  );
+
+  return fetched;
 }
 
 async function batchWriteMetrics(metrics: ComputedMetrics[]): Promise<void> {
@@ -360,7 +390,7 @@ export async function bulkUpdateRecentChange(
 
   if (isCancelled?.()) return { updated: computed.length, skipped, finnhubFetched: 0 };
 
-  // Phase 1.5: Finnhub OHLC fallback for missing tickers
+  // Phase 1.5: Finnhub OHLC fallback for missing tickers (parallel)
   let finnhubFetched = 0;
   if (missingOhlc.length > 0) {
     const fetchedSet = new Set<string>();
@@ -372,11 +402,7 @@ export async function bulkUpdateRecentChange(
     const earlyDate = missingOhlc.reduce((min, r) => r.published_at < min ? r.published_at : min, missingOhlc[0].published_at).slice(0, 10);
     const lateDate = missingOhlc.reduce((max, r) => r.published_at > max ? r.published_at : max, missingOhlc[0].published_at).slice(0, 10);
 
-    for (const ticker of uniqueTickers) {
-      if (isCancelled?.()) break;
-      const result = await fetchAndStoreOhlcFromFinnhub(ticker, earlyDate, lateDate, fetchedSet);
-      if (result.bars > 0) finnhubFetched++;
-    }
+    finnhubFetched = await fetchAndStoreOhlcBatch(uniqueTickers, earlyDate, lateDate, fetchedSet, isCancelled);
 
     // Phase 1.7: Re-compute for previously missing items
     if (!isCancelled?.()) {
@@ -440,7 +466,7 @@ export async function bulkUpdateCustomChange(
 
   if (isCancelled?.()) return { updated: computed.length, skipped, finnhubFetched: 0 };
 
-  // Phase 1.5: Finnhub OHLC fallback for missing tickers
+  // Phase 1.5: Finnhub OHLC fallback for missing tickers (parallel)
   let finnhubFetched = 0;
   if (missingOhlc.length > 0) {
     const fetchedSet = new Set<string>();
@@ -452,11 +478,7 @@ export async function bulkUpdateCustomChange(
     const earlyDate = from;
     const lateDate = to;
 
-    for (const ticker of uniqueTickers) {
-      if (isCancelled?.()) break;
-      const result = await fetchAndStoreOhlcFromFinnhub(ticker, earlyDate, lateDate, fetchedSet);
-      if (result.bars > 0) finnhubFetched++;
-    }
+    finnhubFetched = await fetchAndStoreOhlcBatch(uniqueTickers, earlyDate, lateDate, fetchedSet, isCancelled);
 
     // Phase 1.7: Re-compute for previously missing items
     if (!isCancelled?.()) {
