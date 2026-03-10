@@ -1,5 +1,56 @@
 # Agent Log — terminal_ui_ver2_finhub
 
+## 2026-03-10
+
+### Step — market cap ingestion + Default Ticker/News Feed UI 반영 (2026-03-10)
+
+**Status: done (awaiting user confirmation)**
+
+#### Actions taken
+
+1. backend market cap 수집 경로 추가
+   - `terminal/backend/src/services/finnhubProfile2Provider.ts` 신규 생성
+   - Finnhub `/stock/profile2`에서 `name`, `exchange`, `finnhubIndustry`, `marketCapitalization` 수집
+   - `marketCapitalization`은 USD 절대값으로 변환해 `company_profiles.market_cap`에 저장하도록 사용
+
+2. backend ticker/news payload 확장
+   - `terminal/backend/src/server.ts`
+     - `GET /api/tickers`가 legacy `tickers` 배열 외에 `rows`를 함께 반환하도록 변경
+     - `POST /api/company-profiles/pull-market-cap` background job endpoint 추가
+   - `terminal/backend/src/services/newsRepository.ts`
+     - 뉴스 대표 ticker 기준 최신 `company_profiles.market_cap`를 join해 `marketCap` 필드 추가
+   - `terminal/backend/src/types.ts`
+     - `NewsItem.marketCap` 추가
+
+3. Default Ticker 창 재작성
+   - `DefaultTickerWindow.tsx`를 grid 기반에서 table 기반으로 교체
+   - 표시 컬럼: `Ticker`, `Name`, `Exchange`, `Industry`, `Market Cap`, `Del`
+   - default universe일 때만 `Market Cap Update` 버튼 표시
+   - market-cap update job polling 후 자동 reload
+
+4. Finnhub News 창 확장
+   - `FinnhubNewsWindow.tsx`
+   - `marketCap` 컬럼 추가 및 정렬 지원
+   - `Market Cap Filter` popup 추가 (`Min ($B)`, `Max ($B)`)
+   - 필터 활성화 시 market cap 없는 row 제외
+   - filter state를 localStorage에 저장
+
+#### Validation
+
+- VS Code diagnostics:
+  - `DefaultTickerWindow.tsx` — no errors
+  - `FinnhubNewsWindow.tsx` — no errors
+  - `server.ts` / `newsRepository.ts` / `finnhubProfile2Provider.ts` / `types.ts` — no errors
+
+#### Risks / follow-up
+
+1. 현재 DB에는 `market_cap` non-null row가 아직 0개이므로 UI 컬럼은 즉시 보이지만 값은 대부분 `-`로 보일 수 있음
+   - 완화: Default Ticker의 `Market Cap Update` 버튼 또는 새 backend endpoint를 실제 실행해 채움
+2. News Feed market cap filter는 client-side라 현재 로드된 500건(+cursor append)에 대해서만 적용됨
+   - 완화: 대량 데이터 서버사이드 필터가 필요하면 추후 `/api/news` query 확장
+3. Finnhub rate limit 상태에 따라 대규모 default universe 갱신 job 시간이 길어질 수 있음
+   - 완화: `delayMs` 조절 또는 ticker subset body 지원 활용
+
 ## 2026-03-02
 
 ### Step 0 — Data availability audit (데이터 수집 가능 범위 점검)

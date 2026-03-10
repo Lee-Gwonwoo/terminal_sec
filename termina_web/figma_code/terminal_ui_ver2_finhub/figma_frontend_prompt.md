@@ -164,6 +164,7 @@ GET /api/news?source_names=FINNHUB&limit=500
 - `[][][]title[][][]`
 - `[][][]publisher[][][]`
 - `[][][]industry[][][]`
+- `[][][]marketCap[][][]`
 - `[][][]source[][][]`
 - `[][][]fulltext[][][]`
 - `[][][]changes[][][]`
@@ -176,6 +177,12 @@ GET /api/news?source_names=FINNHUB&limit=500
 
 - 기본 숨김: `source`, `keywords`, `score`, `scoreEvidence`, `sentiment`
 - 나머지는 기본 표시
+
+market cap 컬럼 규칙:
+
+- `marketCap`은 backend의 최신 `company_profiles.market_cap` 값을 사용한다.
+- 표시는 `$12.34B`, `$950.0M`, `$1.25T` 형식으로 축약한다.
+- 값이 없으면 `-`를 표시한다.
 
 score/scoreEvidence/sentiment 컬럼 규칙:
 
@@ -215,6 +222,14 @@ score/scoreEvidence/sentiment 컬럼 규칙:
 - `company_news`
 - `press_release`
 - `market_news`
+
+### Market Cap 필터
+
+- toolbar에 `Market Cap Filter` 버튼이 있다.
+- popup에서 `Min ($B)`, `Max ($B)`를 입력한다.
+- 필터는 현재 로드된 `newsData`에 대해 client-side로 적용된다.
+- 필터가 하나라도 활성화되면 `marketCap`이 없는 row는 제외된다.
+- `finhub-news-ui-state`에 `marketCapMin`, `marketCapMax`로 저장된다.
 
 ### Update 메뉴
 
@@ -397,6 +412,7 @@ localStorage 사용:
 - `[][][]keywords[][][]`
 - `[][][]keywordsStatus[][][]`
 - `[][][]industry[][][]`
+- `[][][]marketCap[][][]`
 - `[][][]score[][][]`
 - `[][][]scoreEvidence[][][]`
 - `[][][]analysisStatus[][][]`
@@ -492,22 +508,40 @@ localStorage 사용:
 - CSV path 직접 수정
 - Reload
 - custom CSV를 default universe에 merge import (`Merge into Default`)
+- default universe 기준 Finnhub 시가총액 갱신 (`Market Cap Update`)
+  - 진행 상황 표시(completed/total, percent)
+  - **View Log 버튼**: 진행 바 옆에 토글 버튼. 클릭 시 아래에 job 로그 패널(최대 100줄)이 펼쳐짐
+  - job 404 감지: 서버 재시작 등으로 job이 사라지면 자동으로 에러 표시 + 상태 리셋
+  - 이미 24시간 내 market_cap이 있는 ticker는 서버에서 자동 skip
 - ticker 추가
 - filter 입력
-- ticker grid 표시
+- table 표시: `Ticker | Name | Exchange | Industry | Market Cap | Del`
 - ticker 클릭 시 상위 `onTickerClick` 전달
+- 삭제 버튼으로 default universe에서 ticker 제거
 
 API:
 
 - `GET /api/tickers?csvPath=...`
 - `POST /api/tickers/import-default`
 - `POST /api/tickers/add`
+- `DELETE /api/tickers/remove`
+- `POST /api/company-profiles/pull-market-cap`
+
+`GET /api/tickers` 응답에서 프론트가 실제로 쓰는 row 필드:
+
+- `[][][]ticker[][][]`
+- `[][][]exchange[][][]`
+- `[][][]name[][][]`
+- `[][][]sector[][][]`
+- `[][][]industry[][][]`
+- `[][][]marketCap[][][]`
 
 현재 제약:
 
 - 허용 경로는 backend allowlist에 의해 제한된다
 - UI는 어떤 CSV든 입력 가능해 보이지만, backend가 허용하지 않으면 error banner를 보여준다
 - custom CSV를 merge import해도 기존 default universe ticker는 제거되지 않고, 중복만 skip된다
+- `Market Cap Update`는 기본 default path일 때만 보인다. custom CSV view에서는 merge/import가 우선이다.
 
 ## News Window
 

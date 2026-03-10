@@ -119,6 +119,21 @@ export async function upsertPeers(
 /**
  * Get peers array for a ticker (returns parsed string[] or null).
  */
+/**
+ * Return ticker symbols that already have a non-null market_cap
+ * fetched within the last `maxAgeHours` hours.
+ */
+export async function getTickersWithRecentMarketCap(maxAgeHours = 24): Promise<Set<string>> {
+  const cutoff = new Date(Date.now() - maxAgeHours * 3600_000).toISOString();
+  const rows = await getDb().all<{ ticker: string }[]>(
+    `SELECT s.ticker FROM company_profiles cp
+     JOIN securities s ON s.id = cp.security_id
+     WHERE cp.market_cap IS NOT NULL AND cp.fetched_at >= ?`,
+    [cutoff],
+  );
+  return new Set((rows as { ticker: string }[]).map((r) => r.ticker.toUpperCase()));
+}
+
 export async function getPeersByTicker(ticker: string): Promise<string[] | null> {
   const row = await getDb().get<{ peers_json: string | null }>(
     `SELECT cp.peers_json FROM company_profiles cp

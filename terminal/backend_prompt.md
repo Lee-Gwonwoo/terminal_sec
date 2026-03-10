@@ -1347,8 +1347,28 @@ query:
 응답:
 
 ```json
-{ "csvPath": "...", "tickers": ["AAPL", "MSFT"] }
+{
+  "csvPath": "tradigview_screener/original_data/watch lists2_2026-02-22.csv",
+  "source": "db",
+  "tickers": ["AAPL", "MSFT"],
+  "rows": [
+    {
+      "ticker": "AAPL",
+      "exchange": "NASDAQ",
+      "name": "Apple Inc.",
+      "sector": "Technology",
+      "industry": "Consumer Electronics",
+      "marketCap": 3560000000000
+    }
+  ]
+}
 ```
+
+운영적 정의:
+
+1. 기본 CSV path일 때는 `ticker_universes/default` + `ticker_universe_items` + `securities` + 최신 `company_profiles`를 조회해 canonical default universe를 반환한다.
+2. 다른 CSV path일 때는 CSV를 직접 읽어 `rows`를 만든다. 이 경우 `marketCap`은 CSV 자체에는 없으므로 보통 `null`이다.
+3. `tickers`는 legacy 호환용 단순 배열이고, 신규 UI는 `rows`를 우선 사용한다.
 
 ### `POST /api/tickers/import-default`
 
@@ -1365,7 +1385,7 @@ query:
 3. `ticker_universes/default`에 없는 ticker만 추가한다.
 4. 기존 default ticker는 유지하고, 중복 ticker는 skip한다.
 5. best-effort로 legacy default CSV backup에도 ticker를 append sync한다.
-6. 응답은 merge 후 canonical default universe 전체 ticker 목록을 돌려준다.
+6. 응답은 merge 후 canonical default universe 전체 ticker 목록과 `rows`를 돌려준다.
 
 응답:
 
@@ -1633,6 +1653,45 @@ Finnhub `/stock/peers` API로 관련 종목 데이터를 수집해 `company_prof
 2. Finnhub `/stock/peers?symbol=X`를 ticker당 120ms 간격으로 호출한다.
 3. 결과를 `company_profiles`에 `source = 'finnhub'`로 upsert한다.
 4. 동일 security_id + source 조합이 이미 있으면 UPDATE, 없으면 INSERT.
+
+### `POST /api/company-profiles/pull-market-cap`
+
+Finnhub `/stock/profile2` API에서 시가총액과 기본 회사 메타데이터를 가져와 `company_profiles`와 `securities`를 보강한다.
+
+요청 body:
+
+```json
+{ "tickers": ["AAPL", "MSFT"], "maxTickers": 100 }
+```
+
+- `tickers` 생략 시 `ticker_universes/default` 전체를 대상으로 한다.
+- 호출 간격: token-bucket rate limiter (55 req/min) + worker pool (concurrency 3)
+- 이전 순차 방식(~40 req/min) 대비 약 30-50% 속도 향상
+- **Skip 로직**: 최근 24시간 내 market_cap이 이미 저장된 ticker는 자동 건너뛴다.
+- **취소 지원**: `POST /api/jobs/:jobId/cancel`로 중단 가능.
+
+응답:
+
+```json
+{ "jobId": "..." }
+```
+
+job 완료 result 예시:
+
+```json
+{ "updated": 120, "total": 125, "skippedRecent": 50, "errors": 5 }
+```
+
+동작:
+
+1. 대상 ticker 목록을 결정한다.
+2. 24시간 이내에 market_cap이 이미 있는 ticker를 DB에서 조회해 skip 목록을 만든다.
+3. 남은 ticker에 대해 Finnhub `/stock/profile2?symbol=X`를 1050ms 간격으로 순차 호출한다.
+4. 매 반복마다 job 취소 여부를 확인하고, 취소 시 즉시 중단한다.
+5. `securities`의 `name`, `exchange`, `industry`를 best-effort로 upsert한다.
+6. `company_profiles`에 `source='finnhub'` row를 upsert하면서 `[][][]market_cap[][][]`에 USD 절대값을 저장한다.
+7. `update_status.company_profiles_market_cap`에 최근 실행 정보와 요약을 기록한다.
+8. background job 로그에는 ticker별 성공/실패와 진행률이 남는다.
 
 ## AI Analysis API
 

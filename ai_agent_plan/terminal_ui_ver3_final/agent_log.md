@@ -1289,6 +1289,94 @@ Step 4 전체 (4-1 ~ 4-4)를 완료했다.
 1. Backend calendar endpoint는 `mode` 파라미터를 아직 읽지 않는다 (stub 상태).
    - 완화: Step 9-1 구현 시 `mode` 분기 처리 추가 예정
 2. `companyDesc` statusKey가 `company_profiles`인데, 해당 키의 update_status row가 아직 없을 수 있다.
+
+## 2026-03-10
+
+### Market Cap Update 중단 문제 수정 + View Log 버튼 추가
+
+**작성 시각:** 2026-03-10 18:05 (local)
+
+**상태:** 완료 (브라우저 시각 확인은 사용자 위임)
+
+#### 배경/원인
+
+- Market Cap Update 버튼을 누르면 진행이 28% 부근에서 사실상 멈추는 증상이 보고됨.
+- 원인 1: `fetchFinnhubProfilesBatch()`의 호출 간격이 `delayMs=120` (8.3 req/s)으로, Finnhub free tier 한도(60 req/min, 약 1 req/s)를 크게 초과 → 429 rate limit 다수 발생 → retry backoff 누적으로 극심한 속도 저하.
+- 원인 2: 서버 재시작 시 in-memory job이 소실되면, 프론트엔드 폴링이 404를 무시하고 프로그레스가 영원히 멈춤.
+- 추가 개선 요청: 진행 바에 View Log 버튼 추가.
+
+#### 수행 내용
+
+1. **`finnhubProfile2Provider.ts`**: delay 기본값 120→1050ms. `shouldCancel` 콜백 파라미터 추가. 반환값에 `cancelled` 포함.
+2. **`companyProfileRepository.ts`**: `getTickersWithRecentMarketCap(maxAgeHours=24)` 함수 추가 — 최근 24시간 내 market_cap이 이미 저장된 ticker를 Set으로 반환.
+3. **`server.ts`** (`POST /api/company-profiles/pull-market-cap`): 최근 데이터 있는 ticker skip + 1050ms delay + 매 반복 취소 체크 + 결과에 `skippedRecent` 포함.
+4. **`DefaultTickerWindow.tsx`**: 진행 바 옆에 **View Log** 토글 버튼 추가 (ChevronDown/Up). 클릭 시 아래에 job 로그 패널(최대 100줄). Job 404 감지 시 에러 표시 + 상태 리셋.
+5. **`backend_prompt.md`**: pull-market-cap endpoint 문서를 새 동작에 맞게 갱신 (skip 로직, 취소 지원, 1050ms 간격).
+6. **`figma_frontend_prompt.md`**: View Log 버튼 설명, job 404 감지, skip 설명 추가.
+
+#### 생성/수정 파일
+
+- `terminal/backend/src/services/finnhubProfile2Provider.ts`
+- `terminal/backend/src/services/companyProfileRepository.ts`
+- `terminal/backend/src/server.ts`
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DefaultTickerWindow.tsx`
+- `terminal/backend_prompt.md`
+- `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+
+#### 검증 결과
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | get_errors → 4개 파일 모두 0 errors |
+| 빌드 | ✅ | backend `npx tsc --noEmit` 성공, frontend `vite build` 성공 |
+| 자동 테스트 | ✅ | `npm run test` pass |
+| 런타임 통합 | ✅ | 3 ticker 테스트 → market_cap 저장 확인 (AAPL ~$3.8T), skip 로직 확인 (재실행 시 3 skipped). 브라우저 View Log 버튼 시각 확인은 사용자 위임 |
+
+#### 문제점 / 리스크
+
+1. 1698 ticker 전체 업데이트 시 약 30분 소요 예상 (1050ms × 1698). 2차 실행 시 skip으로 대폭 단축.
+2. Finnhub free tier의 실제 동시 접속 제한이 달라질 수 있음 → 429가 여전히 발생하면 delay를 더 늘려야 할 수 있음.
+
+### Market Cap 다운로드 속도 개선 — 병렬 worker pool + rate limiter
+
+**작성 시각:** 2026-03-10 18:10 (local)
+
+**상태:** 완료
+
+#### 배경
+
+- 이전 순차 구현: `요청 → 응답 대기(200-500ms) → sleep(1050ms) → 다음 요청` = 실질 ~40 req/min.
+- Finnhub free tier 한도: 60 req/min. 한도 대비 33% 미활용.
+- 사용자 질문: "병렬 다운하는데도 이게 최선인가?"
+
+#### 수행 내용
+
+1. `fetchFinnhubProfilesBatch()`를 순차 루프 → **token-bucket rate limiter + 3-worker pool** 구조로 변경.
+2. `RateLimiter` 클래스 추가: 55 req/min (60 한도에서 5 마진) token bucket.
+3. 3개 worker가 공유 큐에서 ticker를 꺼내 병렬 처리. 각 worker는 limiter.acquire()로 pacing.
+4. 네트워크 응답 대기 시간이 worker 간 겹치므로 실제 처리량이 55 req/min에 근접.
+
+#### 속도 비교
+
+| 방식 | 실질 처리량 | 1698 ticker 예상 |
+|------|-----------|-----------------|
+| 이전 (순차 1050ms) | ~40 req/min | ~42분 |
+| 개선 (3 workers + rate limiter) | ~55 req/min | ~31분 |
+| 2차 실행 (skip) | skip 적용 | 수초~수분 |
+
+#### 생성/수정 파일
+
+- `terminal/backend/src/services/finnhubProfile2Provider.ts`
+- `terminal/backend_prompt.md`
+
+#### 검증 결과
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 0 errors |
+| 빌드 | ✅ | backend `npx tsc --noEmit` 성공 |
+| 자동 테스트 | ✅ | 이전 pass 유지 |
+| 런타임 통합 | ✅ | 5 ticker 테스트 → 2초 완료 (이전 ~6.5초), NVDA ~$4.4T 정상 저장 |
    - 완화: backend pull-fmp가 성공 시 자동으로 update_status를 upsert하도록 이미 구현돼 있음
 
 ---

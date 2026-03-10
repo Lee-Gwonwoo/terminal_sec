@@ -14,7 +14,7 @@ const ROW_HEIGHT_WITH_ABSTRACT = 140;
 type DisplayMode = 'title-only' | 'title-abstract';
 
 // ─── Column definition ───
-type ColumnId = 'date' | 'ticker' | 'time' | 'title' | 'publisher' | 'industry' | 'source' | 'changes' | 'fulltext' | 'keywords' | 'score' | 'scoreEvidence' | 'sentiment' | 'peers' | 'companyDesc';
+type ColumnId = 'date' | 'ticker' | 'time' | 'title' | 'publisher' | 'industry' | 'marketCap' | 'source' | 'changes' | 'fulltext' | 'keywords' | 'score' | 'scoreEvidence' | 'sentiment' | 'peers' | 'companyDesc';
 
 interface ColumnDef {
   id: ColumnId;
@@ -31,6 +31,7 @@ const DEFAULT_COLUMNS: ColumnDef[] = [
   { id: 'title',        label: 'Title',      defaultWidth: 300, minWidth: 100, flex: true },
   { id: 'publisher',    label: 'Publisher',  defaultWidth: 96,  minWidth: 60 },
   { id: 'industry',     label: 'Industry',   defaultWidth: 110, minWidth: 60 },
+  { id: 'marketCap',    label: 'Market Cap', defaultWidth: 110, minWidth: 70 },
   { id: 'source',       label: 'Sources',    defaultWidth: 90,  minWidth: 50 },
   { id: 'fulltext',     label: 'Full Text',  defaultWidth: 60,  minWidth: 40 },
   { id: 'changes',      label: 'Changes %',  defaultWidth: 280, minWidth: 160 },
@@ -95,6 +96,7 @@ interface BackendNewsItem {
   keywords?: string[];
   keywordsStatus?: string | null;
   industry?: string | null;
+  marketCap?: number | null;
   score?: number | null;
   scoreEvidence?: string | null;
   analysisStatus?: string | null;
@@ -130,6 +132,7 @@ interface DisplayItem {
   keywords: string[];
   keywordsStatus: string | null;
   industry: string | null;
+  marketCap: number | null;
   score: number | null;
   scoreEvidence: string | null;
   sentiment: number | null;
@@ -170,6 +173,7 @@ function mapBackendItem(item: BackendNewsItem): DisplayItem {
     keywords: item.keywords ?? [],
     keywordsStatus: item.keywordsStatus ?? null,
     industry: item.industry ?? null,
+    marketCap: item.marketCap ?? null,
     score: item.score ?? null,
     scoreEvidence: item.scoreEvidence ?? null,
     sentiment: item.sentimentBullishPct ?? null,
@@ -190,6 +194,15 @@ const formatChange = (val: number | null) => {
 const changeColor = (val: number | null) => {
   if (val === null || val === undefined) return 'text-gray-400';
   return val > 0 ? 'text-green-600 dark:text-green-400' : val < 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-500';
+};
+
+const formatMarketCap = (val: number | null) => {
+  if (val === null || val === undefined || !Number.isFinite(val)) return '-';
+  const abs = Math.abs(val);
+  if (abs >= 1_000_000_000_000) return `$${(val / 1_000_000_000_000).toFixed(2)}T`;
+  if (abs >= 1_000_000_000) return `$${(val / 1_000_000_000).toFixed(2)}B`;
+  if (abs >= 1_000_000) return `$${(val / 1_000_000).toFixed(1)}M`;
+  return `$${val.toFixed(0)}`;
 };
 
 // ═══════════════════════════════════════════════
@@ -248,6 +261,26 @@ export function FinnhubNewsWindow({
   const [editingBookmarkFolderName, setEditingBookmarkFolderName] = useState('');
   const [bookmarkFolderCtxMenu, setBookmarkFolderCtxMenu] = useState<null | { x: number; y: number; folderId: string }>(null);
   const [showFilterMenu, setShowFilterMenu] = useState(false);
+  const [marketCapMin, setMarketCapMin] = useState(() => {
+    try {
+      const saved = localStorage.getItem('finhub-news-ui-state');
+      if (saved) {
+        const p = JSON.parse(saved);
+        if (typeof p.marketCapMin === 'string') return p.marketCapMin;
+      }
+    } catch { /* ignore */ }
+    return '';
+  });
+  const [marketCapMax, setMarketCapMax] = useState(() => {
+    try {
+      const saved = localStorage.getItem('finhub-news-ui-state');
+      if (saved) {
+        const p = JSON.parse(saved);
+        if (typeof p.marketCapMax === 'string') return p.marketCapMax;
+      }
+    } catch { /* ignore */ }
+    return '';
+  });
   const [showWatchlistMenu, setShowWatchlistMenu] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showLoadMenu, setShowLoadMenu] = useState(false);
@@ -1005,6 +1038,7 @@ export function FinnhubNewsWindow({
       case 'title': return item.title.toLowerCase();
       case 'publisher': return (item.publisher ?? '').toLowerCase();
       case 'industry': return (item.industry ?? '').toLowerCase();
+      case 'marketCap': return item.marketCap ?? -Infinity;
       case 'source': return item.source.toLowerCase();
       case 'fulltext': return item.hasFullText ? 1 : 0;
       case 'changes': return item.changeFromOpenPct ?? 0;
@@ -1028,6 +1062,17 @@ export function FinnhubNewsWindow({
   // ─── Sort + Group (search is now server-side) ───
   const groupedNews = useMemo(() => {
     let filtered = [...newsData];
+
+    const minValue = marketCapMin.trim() ? Number(marketCapMin) * 1_000_000_000 : null;
+    const maxValue = marketCapMax.trim() ? Number(marketCapMax) * 1_000_000_000 : null;
+    if ((minValue !== null && Number.isFinite(minValue)) || (maxValue !== null && Number.isFinite(maxValue))) {
+      filtered = filtered.filter((item) => {
+        if (item.marketCap === null || item.marketCap === undefined) return false;
+        if (minValue !== null && Number.isFinite(minValue) && item.marketCap < minValue) return false;
+        if (maxValue !== null && Number.isFinite(maxValue) && item.marketCap > maxValue) return false;
+        return true;
+      });
+    }
 
     if (sort.column && sort.dir) {
       const col = sort.column;
@@ -1057,7 +1102,7 @@ export function FinnhubNewsWindow({
       result.push({ type: 'load-more' });
     }
     return result;
-  }, [newsData, sort, getSortValue, nextCursor]);
+  }, [newsData, marketCapMin, marketCapMax, sort, getSortValue, nextCursor]);
 
   const findStickyDateForIndex = useCallback((index: number) => {
     for (let i = Math.min(index, groupedNews.length - 1); i >= 0; i--) {
@@ -1097,7 +1142,7 @@ export function FinnhubNewsWindow({
     });
   }, [displayMode]);
 
-  // ─── Persist UI state (visibleCols / displayMode / sourceTypeFilter / fromDate / toDate) ───
+  // ─── Persist UI state (visibleCols / displayMode / sourceTypeFilter / fromDate / toDate / marketCap filters) ───
   useEffect(() => {
     try {
       localStorage.setItem('finhub-news-ui-state', JSON.stringify({
@@ -1106,10 +1151,12 @@ export function FinnhubNewsWindow({
         sourceTypeFilter,
         fromDate,
         toDate,
+        marketCapMin,
+        marketCapMax,
         selectedBookmarkFolderId,
       }));
     } catch { /* quota / SSR */ }
-  }, [visibleCols, displayMode, sourceTypeFilter, fromDate, toDate, selectedBookmarkFolderId]);
+  }, [visibleCols, displayMode, sourceTypeFilter, fromDate, toDate, marketCapMin, marketCapMax, selectedBookmarkFolderId]);
 
   // ─── Save / Load ───
   const handleSaveSearch = () => {
@@ -1256,6 +1303,12 @@ export function FinnhubNewsWindow({
         return renderLinkCell(newsItem.publisher, 'text-gray-600 dark:text-gray-400');
       case 'industry':
         return <span className="truncate text-gray-600 dark:text-gray-400" title={newsItem.industry ?? undefined}>{newsItem.industry ?? '-'}</span>;
+      case 'marketCap':
+        return (
+          <span className="truncate text-gray-600 dark:text-gray-400 tabular-nums" title={newsItem.marketCap != null ? String(newsItem.marketCap) : undefined}>
+            {formatMarketCap(newsItem.marketCap)}
+          </span>
+        );
       case 'source':
         return renderLinkCell(newsItem.source, 'text-gray-600 dark:text-gray-400');
       case 'fulltext':
@@ -1932,6 +1985,71 @@ export function FinnhubNewsWindow({
           {error && (
             <span className="text-[10px] text-red-500 truncate max-w-[200px]" title={error}>{error}</span>
           )}
+
+          {/* Market cap filter */}
+          <div className="relative" ref={filterMenuRef}>
+            <button
+              onClick={() => { setShowFilterMenu(!showFilterMenu); setShowLoadMenu(false); setShowDisplayModeMenu(false); setShowWatchlistMenu(false); setShowColumnMenu(false); }}
+              className="px-2.5 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5"
+              title="Filter by market cap range"
+            >
+              <Filter className="w-3.5 h-3.5 text-gray-500" />
+              <span className="whitespace-nowrap">Market Cap Filter</span>
+              {(marketCapMin || marketCapMax) && <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />}
+            </button>
+            {showFilterMenu && (
+              <div className="absolute top-full mt-1 right-0 w-64 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-lg z-30">
+                <div className="p-3 space-y-3">
+                  <div>
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-2">Market Cap Range</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] text-gray-500 mb-1">Min ($B)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.1"
+                          value={marketCapMin}
+                          onChange={(e) => setMarketCapMin(e.target.value)}
+                          className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          placeholder="0.5"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-gray-500 mb-1">Max ($B)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.1"
+                          value={marketCapMax}
+                          onChange={(e) => setMarketCapMax(e.target.value)}
+                          className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          placeholder="25"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] text-gray-500">
+                    <span>Rows without market cap are excluded when a filter is active.</span>
+                  </div>
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      onClick={() => { setMarketCapMin(''); setMarketCapMax(''); }}
+                      className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700"
+                    >
+                      Clear
+                    </button>
+                    <button
+                      onClick={() => setShowFilterMenu(false)}
+                      className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600"
+                    >
+                      Apply
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Column visibility toggle */}
           <div className="relative ml-auto" ref={columnMenuRef}>

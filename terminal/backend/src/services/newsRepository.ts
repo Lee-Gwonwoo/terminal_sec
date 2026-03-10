@@ -204,6 +204,25 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
     }
   }
 
+  const marketCapMap = new Map<string, number | null>();
+  if (tickerSet.size > 0) {
+    const tickerArr = Array.from(tickerSet);
+    const placeholders = tickerArr.map(() => "?").join(",");
+    const marketCapRows = await getDb().all<any[]>(
+      `SELECT s.ticker, cp.market_cap
+       FROM company_profiles cp
+       JOIN securities s ON s.id = cp.security_id
+       WHERE s.ticker IN (${placeholders}) AND cp.market_cap IS NOT NULL
+       ORDER BY cp.fetched_at DESC`,
+      tickerArr,
+    );
+    for (const mr of marketCapRows) {
+      if (!marketCapMap.has(mr.ticker)) {
+        marketCapMap.set(mr.ticker, mr.market_cap ?? null);
+      }
+    }
+  }
+
   // Batch fetch company descriptions from company_profiles for all tickers in this page
   const descMap = new Map<string, string>();
   if (tickerSet.size > 0) {
@@ -224,7 +243,7 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
     }
   }
 
-  const mapped = rows.map((row) => mapNewsRow(row, sentimentMap, peersMap, descMap));
+  const mapped = rows.map((row) => mapNewsRow(row, sentimentMap, peersMap, descMap, marketCapMap));
   const hasMore = mapped.length > limit;
   const items = hasMore ? mapped.slice(0, limit) : mapped;
   const nextCursor = hasMore ? encodeCursor(items[items.length - 1]) : undefined;
@@ -288,7 +307,22 @@ export async function getNewsById(id: string): Promise<NewsItem | null> {
     }
   }
 
-  return mapNewsRow(row, sentimentMap);
+  const marketCapMap = new Map<string, number | null>();
+  if (tickers.length > 0) {
+    const marketCapRow = await getDb().get<any>(
+      `SELECT cp.market_cap
+       FROM company_profiles cp
+       JOIN securities s ON s.id = cp.security_id
+       WHERE s.ticker = ? AND cp.market_cap IS NOT NULL
+       ORDER BY cp.fetched_at DESC LIMIT 1`,
+      [tickers[0]],
+    );
+    if (marketCapRow) {
+      marketCapMap.set(tickers[0], marketCapRow.market_cap ?? null);
+    }
+  }
+
+  return mapNewsRow(row, sentimentMap, undefined, undefined, marketCapMap);
 }
 
 export async function insertNewsItem(params: {
@@ -350,6 +384,7 @@ function mapNewsRow(
   sentimentMap?: Map<string, { bullishPct: number | null; bearishPct: number | null; newsScore: number | null }>,
   peersMap?: Map<string, string[]>,
   descMap?: Map<string, string>,
+  marketCapMap?: Map<string, number | null>,
 ): NewsItem {
   const tickers = splitCsvEnvelope(row.tickers_csv);
 
@@ -392,6 +427,7 @@ function mapNewsRow(
       for (const t of tickers) { const ind = getIndustry(t); if (ind) return ind; }
       return null;
     })(),
+    marketCap: (primaryTicker && marketCapMap ? marketCapMap.get(primaryTicker) : undefined) ?? null,
     // AI analysis
     score: row.ai_score ?? null,
     scoreEvidence: row.ai_score_evidence ?? null,

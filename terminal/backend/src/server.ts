@@ -79,6 +79,7 @@ import {
   reorderResearchPages,
   searchResearch,
 } from "./services/researchRepository.js";
+import { fetchFinnhubProfilesBatch } from "./services/finnhubProfile2Provider.js";
 
 const app = express();
 const streamHub = new StreamHub();
@@ -90,6 +91,15 @@ const DEMO_USER_ID = "11111111-1111-1111-1111-111111111111";
 
 // Adaptive batch concurrency levels for ticker fetching: 30 → 15 → 7 → 1
 const BATCH_LEVELS = [30, 15, 7, 1] as const;
+
+type TickerListRow = {
+  ticker: string;
+  exchange: string | null;
+  name: string | null;
+  sector: string | null;
+  industry: string | null;
+  marketCap: number | null;
+};
 
 function parseList(input: unknown): string[] | undefined {
   if (typeof input !== "string" || input.trim() === "") {
@@ -151,14 +161,15 @@ app.get("/api/tickers", async (req, res, next) => {
 
     if (!csvPath || csvPath === DEFAULT_TICKERS_CSV) {
       // DB-primary: canonical universe first, CSV fallback handled inside helper
-      const tickers = await getDefaultUniverseTickers();
-      res.json({ csvPath: effectivePath, tickers, source: "db" });
+      const rows = await getDefaultUniverseRows();
+      res.json({ csvPath: effectivePath, tickers: rows.map((row) => row.ticker), rows, source: "db" });
       return;
     }
 
     // Custom CSV path: direct CSV read
-    const result = readTickersFromCsv(csvPath);
-    res.json({ csvPath, tickers: result.tickers, source: "csv" });
+    const result = readTickerRowsFromCsv(csvPath);
+    const rows = mapCsvTickerRowsToListRows(result.rows);
+    res.json({ csvPath, tickers: rows.map((row) => row.ticker), rows, source: "csv" });
   } catch (error) {
     if (error instanceof CsvServiceError) {
       res.status(400).json({ error: error.message });
@@ -193,6 +204,7 @@ app.post("/api/tickers/import-default", async (req, res, next) => {
       tickersAdded: result.tickersAdded,
       tickersSkipped: result.tickersSkipped,
       tickers: result.tickers,
+      rows: await getDefaultUniverseRows(),
       source: "db",
     });
   } catch (error) {
@@ -227,11 +239,12 @@ app.post("/api/tickers/add", async (req, res, next) => {
       await addUniverseItem(def.id, secId, currentCount + 1);
       // Best-effort CSV backup (ignore if already exists)
       try { await appendTickerToCsv(effectiveCsvPath, normalizedTicker); } catch { /* already in CSV or file locked */ }
-      const tickers = await getDefaultUniverseTickers();
+      const rows = await getDefaultUniverseRows();
+      const tickers = rows.map((row) => row.ticker);
       await setLastSuccess("tickers_csv", new Date().toISOString(), {
         csvPath: effectiveCsvPath, tickerAdded: normalizedTicker, count: tickers.length, source: "db",
       });
-      res.json({ csvPath: effectiveCsvPath, tickerAdded: normalizedTicker, tickers });
+      res.json({ csvPath: effectiveCsvPath, tickerAdded: normalizedTicker, tickers, rows, source: "db" });
     } else {
       // Custom CSV path: CSV-only (existing behaviour)
       if (typeof csvPath !== "string" || !csvPath) {
@@ -239,10 +252,11 @@ app.post("/api/tickers/add", async (req, res, next) => {
         return;
       }
       const result = await appendTickerToCsv(csvPath, normalizedTicker);
+      const rows = mapCsvTickerRowsToListRows(readTickerRowsFromCsv(csvPath).rows);
       await setLastSuccess("tickers_csv", new Date().toISOString(), {
         csvPath, tickerAdded: result.tickerAdded, count: result.tickers.length,
       });
-      res.json({ csvPath, tickerAdded: result.tickerAdded, tickers: result.tickers });
+      res.json({ csvPath, tickerAdded: result.tickerAdded, tickers: result.tickers, rows, source: "csv" });
     }
   } catch (error) {
     if (error instanceof CsvServiceError) {
@@ -278,8 +292,9 @@ app.delete("/api/tickers/remove", async (req, res, next) => {
       }
       // Best-effort CSV backup sync (ignore if not in CSV)
       try { await removeTickerFromCsv(effectiveCsvPath, normalizedTicker); } catch { /* not in CSV or file locked */ }
-      const tickers = await getDefaultUniverseTickers();
-      res.json({ csvPath: effectiveCsvPath, tickerRemoved: normalizedTicker, tickers });
+      const rows = await getDefaultUniverseRows();
+      const tickers = rows.map((row) => row.ticker);
+      res.json({ csvPath: effectiveCsvPath, tickerRemoved: normalizedTicker, tickers, rows, source: "db" });
     } else {
       // Custom CSV path: CSV-only
       if (typeof csvPath !== "string" || !csvPath) {
@@ -287,7 +302,8 @@ app.delete("/api/tickers/remove", async (req, res, next) => {
         return;
       }
       const result = await removeTickerFromCsv(csvPath, normalizedTicker);
-      res.json({ csvPath, tickerRemoved: result.tickerRemoved, tickers: result.tickers });
+      const rows = mapCsvTickerRowsToListRows(readTickerRowsFromCsv(csvPath).rows);
+      res.json({ csvPath, tickerRemoved: result.tickerRemoved, tickers: result.tickers, rows, source: "csv" });
     }
   } catch (error) {
     if (error instanceof CsvServiceError) {
@@ -300,6 +316,17 @@ app.delete("/api/tickers/remove", async (req, res, next) => {
 
 // ── Finnhub News Pull ───────────────────────────────────
 const DEFAULT_TICKERS_CSV = "tradigview_screener/original_data/watch lists2_2026-02-22.csv";
+
+function mapCsvTickerRowsToListRows(rows: Array<{ ticker: string; name: string | null; industry: string | null; sector: string | null }>): TickerListRow[] {
+  return rows.map((row) => ({
+    ticker: row.ticker,
+    exchange: null,
+    name: row.name,
+    sector: row.sector,
+    industry: row.industry,
+    marketCap: null,
+  }));
+}
 
 /** canonical default universe에서 ticker 목록 조회. DB 미준비 시 CSV fallback. */
 async function getDefaultUniverseTickers(): Promise<string[]> {
@@ -318,6 +345,63 @@ async function getDefaultUniverseTickers(): Promise<string[]> {
     return rows.map((r) => r.ticker);
   } catch {
     return ["AAPL", "MSFT", "TSLA", "NVDA", "AMD"];
+  }
+}
+
+async function getDefaultUniverseRows(): Promise<TickerListRow[]> {
+  try {
+    const universes = await listUniverses();
+    const def = universes.find((u) => u.name === "default");
+    if (def) {
+      const rows = await getDb().all<Array<{
+        ticker: string;
+        exchange: string | null;
+        name: string | null;
+        sector: string | null;
+        industry: string | null;
+        market_cap: number | null;
+      }>>(
+        `SELECT s.ticker, s.exchange, s.name, s.sector, s.industry,
+                (
+                  SELECT cp.market_cap
+                  FROM company_profiles cp
+                  WHERE cp.security_id = s.id
+                  ORDER BY cp.fetched_at DESC
+                  LIMIT 1
+                ) AS market_cap
+         FROM ticker_universe_items ui
+         JOIN securities s ON s.id = ui.security_id
+         WHERE ui.universe_id = ?
+         ORDER BY ui.sort_order, s.ticker`,
+        [def.id],
+      );
+      if (rows.length > 0) {
+        return rows.map((row) => ({
+          ticker: row.ticker,
+          exchange: row.exchange ?? null,
+          name: row.name ?? null,
+          sector: row.sector ?? null,
+          industry: row.industry ?? null,
+          marketCap: row.market_cap ?? null,
+        }));
+      }
+    }
+  } catch {
+    // DB not ready yet
+  }
+
+  try {
+    const { rows } = readTickerRowsFromCsv(DEFAULT_TICKERS_CSV);
+    return mapCsvTickerRowsToListRows(rows);
+  } catch {
+    return ["AAPL", "MSFT", "TSLA", "NVDA", "AMD"].map((ticker) => ({
+      ticker,
+      exchange: null,
+      name: null,
+      sector: null,
+      industry: null,
+      marketCap: null,
+    }));
   }
 }
 
@@ -1798,6 +1882,93 @@ app.post("/api/company-profiles/pull-peers", async (req, res) => {
   }
 });
 
+// ── Pull Finnhub Market Cap ────────────────────────────────────────────────
+app.post("/api/company-profiles/pull-market-cap", async (req, res) => {
+  try {
+    const body = req.body as { tickers?: string[]; maxTickers?: number };
+    let tickers = body.tickers;
+    if (!tickers || tickers.length === 0) {
+      tickers = await getDefaultUniverseTickers();
+    }
+    const max = body.maxTickers ?? tickers.length;
+    const target = tickers.slice(0, max);
+
+    // Skip tickers that already have recent market_cap (within 24h)
+    const { getTickersWithRecentMarketCap } = await import("./services/companyProfileRepository.js");
+    const recentSet = await getTickersWithRecentMarketCap(24);
+    const filtered = target.filter((t) => !recentSet.has(t.toUpperCase()));
+    const skippedCount = target.length - filtered.length;
+
+    const jobId = createJob(filtered.length);
+    appendLog(jobId, `Starting Finnhub market cap update: ${filtered.length} tickers to fetch (${skippedCount} skipped — already have recent data)`);
+    res.json({ jobId });
+
+    void (async () => {
+      try {
+        const { results, errors, cancelled } = await fetchFinnhubProfilesBatch(
+          filtered,
+          1050,
+          (done, total) => { updateProgress(jobId, done, total); },
+          () => isJobCancelled(jobId),
+        );
+
+        if (cancelled) {
+          appendLog(jobId, `Job cancelled by user after ${results.size} tickers`);
+          return;
+        }
+
+        let updated = 0;
+        for (const [ticker, profile] of results) {
+          const secId = await upsertSecurity(
+            ticker,
+            profile.exchange,
+            profile.name,
+            null,
+            profile.finnhubIndustry,
+          );
+          await upsertCompanyProfile(
+            secId,
+            "finnhub",
+            null,
+            null,
+            null,
+            null,
+            null,
+            profile.marketCapitalization,
+            JSON.stringify(profile.raw),
+          );
+          updated++;
+          appendLog(jobId, `${ticker}: market cap ${profile.marketCapitalization != null ? "updated" : "missing"}`);
+        }
+
+        for (const [ticker, message] of errors) {
+          appendLog(jobId, `${ticker}: error - ${message}`);
+        }
+
+        await setLastSuccess("company_profiles_market_cap", new Date().toISOString(), {
+          requested: target.length,
+          fetched: filtered.length,
+          skippedRecent: skippedCount,
+          updated,
+          errors: errors.size,
+          source: "finnhub-profile2",
+        });
+
+        completeJob(jobId, {
+          updated,
+          total: filtered.length,
+          skippedRecent: skippedCount,
+          errors: errors.size,
+        });
+      } catch (error) {
+        failJob(jobId, error instanceof Error ? error.message : String(error));
+      }
+    })();
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Unknown error" });
+  }
+});
+
 // ── App DB Inspection ────────────────────────────────────────────────────────
 const TABLE_UI_USAGE: Record<string, string[]> = {
   securities: [
@@ -1808,6 +1979,7 @@ const TABLE_UI_USAGE: Record<string, string[]> = {
   company_profiles: [
     "POST /api/company-profiles/pull-fmp (FMP 회사 설명 저장)",
     "POST /api/company-profiles/pull-peers (Finnhub peers 수집)",
+    "POST /api/company-profiles/pull-market-cap (Finnhub market cap 수집)",
     "GET /api/company-profiles/:ticker",
   ],
   ticker_universes: [
