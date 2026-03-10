@@ -472,3 +472,93 @@ Legend: `✅` 완료+사용자확인 / `⏳` 완료, 사용자확인 대기 / `�
 - Step 5는 Step 3+4 완료 후 진행
 
 차단 요약: 없음 (D-1~D-4 모두 확정)
+
+---
+
+#### ⬜ Step 7 — Custom PTPR 백필 완전성 + 불필요 호출 제거
+
+##### 문제 정의
+
+| # | 문제 | 원인 | 영향 |
+|---|------|------|------|
+| P-1 | **넓은 기간 백필 시 누락 가능** | ticker당 1회 호출 × 최대 100건 → 기간 안 기사가 100건 넘는 ticker는 오래된 기사부터 잘림 | custom PTPR update의 "지정 기간 완전 수집" 목적과 불일치 |
+| P-2 | **이미 저장된 ticker에 대해서도 API 호출** | anchor/DB 사전 조회 없이 무조건 `fetchRtprArticlesByTicker` 호출 → DB insert 시점에서만 dedup | 불필요한 네트워크 호출 + RTPR rate limit(60 rpm) 낭비 |
+
+##### 해결 방안
+
+**P-1 해결: RTPR pagination 또는 offset 방식 확인 후 반복 fetch**
+
+현재 RTPR REST API(`GET /articles/{ticker}?limit=N`)는 `limit` 파라미터만 확인되어 있고, `offset`/`page`/`before`/`after` 같은 pagination 파라미터가 공식 문서에 명시되어 있지 않다.
+
+- **방안 A (offset/cursor 존재 시):** RTPR API가 offset 또는 cursor 기반 pagination을 지원하면, 100건 단위로 반복 fetch한다. 기간 필터가 서버측 파라미터로 없으므로 클라이언트에서 `created` 날짜로 필터하되, 기사가 범위 밖으로 나가면 중단한다.
+  ```
+  1회차: GET /articles/AAPL?limit=100&offset=0  → 100건
+  2회차: GET /articles/AAPL?limit=100&offset=100 → 80건 (< 100 → 종료)
+  필터: from ~ to 범위 안에 있는 것만 DB insert
+  ```
+- **방안 B (pagination 미지원 시):** RTPR API가 pagination을 지원하지 않으면, 100건이 ticker의 전체 히스토리이므로 그 이상 수집이 불가능하다. 이 경우:
+  - 100건 반환 시 로그에 `⚠ {ticker}: 100건 cap 도달, 누락 가능` 경고를 남긴다.
+  - job 완료 시 cap에 도달한 ticker 목록을 summary에 포함한다.
+  - 사용자가 해당 ticker만 기간을 좁혀서 재실행할 수 있도록 안내한다.
+- **방안 C (하이브리드):** 방안 B를 기본으로 하되, RTPR global feed(`GET /articles?limit=100`)를 보조로 활용한다. global feed는 ticker 무관 최신순이므로, custom 기간이 최근이면 global feed에서 놓친 기사를 보충할 수 있다.
+
+> **우선순위:** 먼저 RTPR API에 offset/page 파라미터가 실제 동작하는지 probe한다(Step 7-1). 결과에 따라 A 또는 B를 선택한다.
+
+**P-2 해결: custom 모드에서 DB 사전 조회로 불필요 호출 skip**
+
+custom 모드에서도 ticker별 기존 데이터를 먼저 확인하여, 지정 범위 안에 이미 충분히 수집된 ticker는 API 호출을 건너뛴다.
+
+- **방안 1 (anchor 기반 skip):** `from ~ to` 범위 안에 해당 ticker의 RTPR 기사가 이미 존재하고, anchor가 `to` 이후이면 → 이미 해당 기간은 수집 완료로 간주하고 skip.
+  ```sql
+  SELECT MAX(published_at) FROM news_items
+  WHERE source = 'RTPR' AND tickers LIKE '%AAPL%'
+    AND published_at >= :from AND published_at <= :to
+  ```
+  결과가 있고 anchor ≥ to이면 skip.
+- **방안 2 (confirmed-empty 활용):** recent 모드에서 이미 `confirmed_empty_ranges`에 기록된 ticker+기간은 custom에서도 skip한다. 현재 recent 모드만 confirmed-empty를 기록/조회하는데, custom에서도 `getConfirmedEmptyRange(ticker, 'rtpr_press_release')`를 조회하여 `from ~ to`가 confirmed-empty 범위 안이면 skip.
+- **방안 3 (방안 1 + 2 결합, 권장):** confirmed-empty와 anchor를 모두 조회하여, 둘 중 하나라도 "이 기간은 이미 처리됨"을 보장하면 skip. 어느 쪽도 해당 안 되면 API 호출.
+
+> **권장:** 방안 3. confirmed-empty는 "기사가 없다고 확인된 구간"이고, anchor는 "기사가 있어서 여기까지 수집된 구간"이므로 둘 다 봐야 커버리지가 완전하다.
+
+##### 구현 세부 단계
+
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 7-1 | RTPR API pagination probe: `offset`/`page` 파라미터 동작 여부 확인 | (런타임 probe) | offset=100 호출 시 다른 결과 반환 vs 무시 확인 | ⬜ |
+| 7-2 | P-1 해결 구현: probe 결과에 따라 방안 A 또는 B 적용 | `ptprNewsProvider.ts`, `server.ts` | tsc 통과 + 100건 cap ticker 정상 처리 확인 | ⬜ |
+| 7-3 | P-2 해결 구현: custom 모드에 anchor + confirmed-empty 사전 skip 추가 | `server.ts` | tsc 통과 + 2차 custom 실행 시 skip count > 0 확인 | ⬜ |
+| 7-4 | 통합 테스트: custom 넓은 기간 + 이미 저장된 데이터 혼재 시나리오 | (런타임) | 누락 경고 또는 완전 수집 + skip 동작 확인 | ⬜ |
+
+- `7-1` 목적: 해결 방향 결정의 선행 조건. RTPR `GET /articles/{ticker}?limit=100&offset=100`이 실제로 다른 페이지를 반환하는지 확인.
+  - 완료 조건: probe 결과가 "pagination 지원" 또는 "미지원(offset 무시)"으로 확정.
+  - 흔한 문제: offset을 보내도 같은 결과를 반환하면 미지원으로 판정해야 함.
+- `7-2` 목적: 넓은 기간에서도 가능한 한 완전 수집 보장.
+  - 방안 A 시: `fetchRtprArticlesByTickerPaginated(ticker, from, to)` 추가 — 100건씩 offset 증가, 범위 밖 기사 나오면 중단.
+  - 방안 B 시: 기존 `fetchRtprArticlesByTicker` 유지 + cap 도달 경고 로그 + job summary에 cap ticker 목록 포함.
+- `7-3` 목적: 이미 수집 완료된 ticker에 대한 불필요한 API 호출 제거.
+  - custom 모드 ticker 루프 진입 시:
+    1. `getConfirmedEmptyRange(ticker, 'rtpr_press_release')` 조회 → from~to가 empty 범위 안이면 skip
+    2. DB에서 해당 ticker의 from~to 구간 RTPR 기사 존재 + anchor ≥ to이면 skip
+    3. 둘 다 해당 안 되면 API 호출
+  - skip된 ticker는 로그에 `↩ {ticker}: already covered (skip)` 로 기록.
+- `7-4` 목적: 전체 시나리오 결합 검증.
+  - 시나리오 1: 이미 recent로 수집한 뒤 같은 기간으로 custom 실행 → 대부분 skip 확인.
+  - 시나리오 2: 넓은 기간(30일) + 기사 많은 ticker → 방안 A면 pagination 동작, 방안 B면 cap 경고 확인.
+
+검증 훅:
+```powershell
+# 7-1: pagination probe
+$headers = @{ Authorization = "Bearer $((Get-Content 'c:\github_coding\terminal_sec\ai_agent_plan\ptpr_api_key\ptpr_api_key' -TotalCount 1).Trim())" }
+# offset=0 vs offset=100 비교
+$p1 = Invoke-RestMethod -Uri "https://api.rtpr.io/articles?limit=5&offset=0" -Headers $headers
+$p2 = Invoke-RestMethod -Uri "https://api.rtpr.io/articles?limit=5&offset=5" -Headers $headers
+# 같은 결과면 pagination 미지원
+if ($p1.articles[0].title -eq $p2.articles[0].title) { "PAGINATION NOT SUPPORTED" } else { "PAGINATION SUPPORTED" }
+
+# 7-3: custom 2차 실행 skip 확인
+$resp = Invoke-RestMethod -Uri "http://localhost:8080/api/news/pull-rtpr" -Method Post -ContentType "application/json" -Body '{"mode":"custom","from":"2026-03-09","to":"2026-03-10"}'
+Start-Sleep 30
+$job = Invoke-RestMethod -Uri "http://localhost:8080/api/jobs/$($resp.jobId)"
+$job.logs | Select-String "skip|already covered"
+```
+사용자 확인 필요: **예**

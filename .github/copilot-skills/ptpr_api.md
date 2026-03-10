@@ -71,9 +71,36 @@
   - `limit` optional, 기본 50, 최대 100
 - 실제 확인 결과(2026-03-10):
   - `GET https://api.rtpr.io/articles/AAPL?limit=5` → `{ "count": 0, "articles": [] }`
+  - `GET https://api.rtpr.io/articles/ORCL?limit=5` → `count=5`, 실제 ORCL 기사 반환
 - 해석:
   - endpoint 자체는 정상 동작했다.
   - 특정 ticker에 데이터가 없을 수 있으므로 `count=0`을 정상 케이스로 취급한다.
+
+### ticker endpoint 동작 해석(중요)
+- 현재 문서와 live probe 기준으로 `GET /articles/{ticker}`는 **특정 ticker의 최신 press release를 최대 100건까지 반환하는 endpoint**로 해석하는 것이 맞다.
+- 확인된 쿼리 파라미터는 `limit`뿐이다.
+- 아래 파라미터를 실제로 붙여 호출했지만 결과가 바뀌지 않았다.
+  - `offset`
+  - `page`
+  - `cursor`
+  - `before`
+  - `after`
+- 따라서 현재 공개 REST API 기준으로는 **pagination** 또는 **날짜 windowing** 지원이 확인되지 않았다.
+
+운영적 의미:
+- 같은 ticker에 대해 반복 호출해도 "다음 100건"으로 넘어가지 않고, 같은 최신 구간을 다시 받을 가능성이 높다.
+- 즉, REST만으로는 `101번째` 이후의 더 오래된 ticker별 기사를 내려가며 가져오는 방식이 현재 확인되지 않았다.
+- 따라서 과거 기사를 아예 못 받는 것은 아니지만, **최신 100건 안에 포함되는 과거 기사만 받을 수 있고, 그보다 더 오래된 히스토리는 현재 확인된 REST 스펙만으로는 접근할 수 없다.**
+
+구체 예시:
+- 어떤 ticker에 press release가 총 250건 있다고 가정한다.
+- `GET /articles/{ticker}?limit=100` 호출 시 최신 100건은 받을 수 있다.
+- 하지만 `101~250번째`의 더 오래된 기사로 이동하는 공식 파라미터가 현재 확인되지 않았으므로, 이 구간은 현재 REST만으로는 추가 수집할 수 없다.
+
+custom/backfill에 대한 직접 영향:
+- `custom PTPR update`를 "지정 기간 전체를 완전 수집하는 historical backfill"로 해석하면 안 된다.
+- 현재 확인된 REST 스펙만으로는 ticker당 최신 최대 100건 범위 안에서만 기간 필터가 가능하다.
+- 따라서 넓은 기간을 지정했더라도, 해당 ticker의 최신 100건보다 더 과거에 있는 기사는 누락될 수 있다.
 
 ### 확인된 REST 데이터 타입
 - **Envelope 타입**
@@ -193,6 +220,12 @@ wss://ws.rtpr.io?apiKey=<API_KEY>
 - ticker별로 다수 호출할 때는 `.github/copilot-skills/finhub_other_api.md`의 병렬화 원칙을 같이 적용한다.
 - 하지만 REST limit가 60 rpm이므로 기본 동시성은 작게 시작한다.
   - 권장 시작값: `API_CONCURRENCY = 2`
+- ticker endpoint는 현재 확인상 최신 최대 100건 조회용으로 보는 것이 안전하다.
+- REST만으로 깊은 historical backfill을 보장할 수 없으므로, UI/문서에서 `custom`을 전체 히스토리 보장 기능처럼 설명하면 안 된다.
+- 넓은 기간 custom 실행 시에는 다음 중 하나가 필요하다.
+  - 100건 cap 도달 ticker에 경고를 남기기
+  - 최근 구간 보강 용도로만 안내하기
+  - vendor가 pagination/windowing을 추가 지원할 때까지 완전 backfill 보장을 하지 않기
 
 #### 실시간 alert / feed 용도
 - 실시간성이 중요하면 WebSocket을 우선한다.
@@ -231,8 +264,12 @@ wss://ws.rtpr.io?apiKey=<API_KEY>
   - `count`와 `articles.length`가 일치하는지 확인
   - `created`가 parse 가능한 timestamp인지 확인
   - parse 후 ET로 변환한 `created_et`가 기대 시각과 일치하는지 확인
+- pagination/windowing probe:
+  - `offset`, `page`, `cursor`, `before`, `after`를 붙여도 결과가 동일하면 미지원으로 간주
+  - 같은 ticker에 대해 반복 호출 시 더 오래된 기사로 내려가지 않으면 latest-window endpoint로 해석
 - 특정 ticker:
   - `GET /articles/{ticker}`에서 `count=0`도 정상으로 처리되는지 확인
+  - 데이터가 있는 ticker 예시(`ORCL`)에서 `count>0`과 실제 기사 반환을 확인
 - WebSocket:
   - 연결 직후 `connected` 수신
   - `subscribe` 후 `subscribed` 수신
@@ -244,3 +281,5 @@ wss://ws.rtpr.io?apiKey=<API_KEY>
 - `article_body_html`을 항상 안전한 완전 HTML이라고 가정하지 않는다.
 - 60 rpm 제한을 무시한 고병렬 REST polling을 기본값으로 두지 않는다.
 - RTPR를 일반 market news feed로 가정하고 UI/저장소 이름을 넓게 짓지 않는다.
+- `GET /articles/{ticker}`를 깊은 historical backfill API라고 가정하지 않는다.
+- pagination/windowing 근거 없이 "반복 호출하면 과거 전체를 다 받을 수 있다"고 가정하지 않는다.
