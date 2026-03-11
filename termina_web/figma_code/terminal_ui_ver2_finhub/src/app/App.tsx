@@ -46,7 +46,6 @@ export default function App() {
       if (typeof p.fontScale === 'number') setFontScale(p.fontScale);
       setNewsTitleFontSize(clampNumber(p.newsTitleFontSize, 12, 10, 20));
       setNewsSummaryFontSize(clampNumber(p.newsSummaryFontSize, 11, 9, 18));
-      if (p.linkedTicker && typeof p.linkedTicker === 'object') setLinkedTicker(p.linkedTicker);
     } catch { /* corrupted — use defaults */ }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 

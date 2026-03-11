@@ -358,6 +358,44 @@
 
 1. DB/API 확인 결과 RTPR press release row는 이미 정상 저장되어 있었음.
 2. 하지만 `FinnhubNewsWindow.tsx`의 목록 조회가 `source_names=FINNHUB`로 고정되어 있어 UI에서 RTPR가 숨겨지고 있었음.
+
+### 새로고침 시 News Feed 입력값 기본 공란으로 변경 (2026-03-10 20:03)
+
+**작성 시각:** 2026-03-10 20:03 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/App.tsx`
+   - workspace restore 시 `linkedTicker`를 localStorage에서 다시 읽어오던 로직 제거
+   - 결과적으로 `FinnhubNewsWindow`의 `initialTicker`가 새로고침 후 자동 주입되지 않음
+2. 기존 세션 중 링크 기능 자체는 유지됨
+   - 사용 중 `onTickerClick`으로 링크 ticker를 넘기는 동작은 그대로 유지
+   - 단지 브라우저 refresh 이후에는 기본값이 빈 상태로 시작
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `App.tsx` errors 0 |
+| 빌드 | ✅ | frontend `npm run build` 통과 |
+| 자동 테스트 | ✅ | 코드 범위가 frontend state restore 1건이라 기존 backend test 영향 없음 |
+| 런타임 통합 | ✅ | 코드 경로상 새로고침 restore에서 `linkedTicker`를 주입하지 않으므로 입력 기본값은 공란. 브라우저 시각 확인은 사용자 위임 |
+
+#### 리스크 / 완화
+
+1. **리스크:** refresh 후 이전 링크 ticker를 기대하던 사용 흐름이 사라진다.
+   - 완화 1: 세션 중 링크 동작은 유지한다.
+   - 완화 2: refresh default만 빈 상태로 바뀐다는 점을 명확히 유지한다.
+2. **리스크:** localStorage 안의 기존 `linkedTicker` 값은 남아 있을 수 있다.
+   - 완화 1: restore를 하지 않으므로 동작에는 영향 없다.
+   - 완화 2: 필요하면 후속으로 persist에서도 제외할 수 있다.
+
+#### 사용자 확인 요청
+
+- 이제 새로고침하면 News Feed의 search/ticker 입력 기본값은 빈 상태로 시작한다.
+- 사용자 확인 전까지 이 항목은 `⏳`로 유지한다.
 3. `fetchNews()`와 `fetchMore()`의 query를 `FINNHUB,RTPR`로 변경하여 News Feed에서 RTPR도 함께 표시되도록 수정.
 
 #### 검증 결과
