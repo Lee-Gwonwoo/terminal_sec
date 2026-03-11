@@ -258,6 +258,44 @@ Legend: `✅` 완료+사용자확인 완료 / `⏳` 완료, 사용자확인 대�
   - 레포에는 provider 연동이 없다.
   - 공식 docs는 `https://www.rtpr.io/docs`로 확인됐다.
   - 실제 API와 WebSocket endpoint도 확인됐다.
+
+#### ⏳ Step 10 — RTPR 전용 Full Text Backfill 버튼
+
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 10-1 | RTPR source + body 기반 백필 대상 조회 추가 | `terminal/backend/src/services/fulltextRepository.ts` | RTPR body 존재 + fulltext 누락/실패 row만 조회되는지 코드 확인 | ⏳ |
+| 10-2 | RTPR body를 `news_fulltext`로 upsert하는 백그라운드 job 추가 | `terminal/backend/src/services/fulltextUpdateService.ts` | backend build 후 job 시작 로그 확인 | ⏳ |
+| 10-3 | RTPR 전용 backfill API endpoint 추가 | `terminal/backend/src/server.ts` | `POST /api/news/fulltext/backfill-rtpr` 응답에 `jobId` 반환 확인 | ⏳ |
+| 10-4 | Full Text 메뉴에 RTPR Body Backfill 버튼 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | webui build 후 메뉴 항목/핸들러 코드 확인 | ⏳ |
+
+- `10-1` 목적: 일반 fulltext update와 별도로 RTPR 전용 누락 대상만 정확히 잡는다. 설명: `news_items.source='RTPR'` 이고 body가 있으며 fulltext가 없거나 비정상인 행만 백필 후보가 되면 완료다.
+  - 완료 조건(눈으로 확인): 쿼리 조건에 RTPR/source/body/fulltext 상태 기준이 모두 들어간다.
+  - 사람 검증(비개발자): 코드에서 `RTPR`와 `body` 조건이 함께 보이는지 확인한다.
+  - 흔한 문제/주의: 이미 성공한 fulltext를 덮어쓰는 과도한 재처리는 피해야 한다.
+- `10-2` 목적: 외부 링크 재수집 없이 저장된 RTPR 본문으로 즉시 fulltext를 채운다. 설명: job이 `htmlToPlainText` 후 `news_fulltext`를 upsert하면 완료다.
+  - 완료 조건(눈으로 확인): job log에 RTPR backfill 시작/완료 메시지가 남는다.
+  - 사람 검증(비개발자): job 로그에 성공/실패 카운트가 증가하는지 본다.
+  - 흔한 문제/주의: 빈 문자열 body를 성공으로 처리하면 품질이 무너진다.
+- `10-3` 목적: UI에서 재사용 가능한 별도 실행 경로를 만든다. 설명: 백엔드가 `jobId`를 반환하고 기존 job polling에 그대로 연결되면 완료다.
+  - 완료 조건(눈으로 확인): API route가 존재하고 `jobId`를 반환한다.
+  - 사람 검증(비개발자): 호출 후 작업 로그 패널이 열릴 수 있다.
+  - 흔한 문제/주의: 기존 `/api/news/fulltext/update`와 payload 형태가 달라 프론트 분기가 필요하다.
+- `10-4` 목적: 사용자가 메뉴에서 RTPR 전용 backfill을 직접 실행할 수 있게 한다. 설명: Full Text 드롭다운에 별도 항목이 보이고 클릭 시 RTPR 전용 endpoint로 요청하면 완료다.
+  - 완료 조건(눈으로 확인): 메뉴에 `RTPR Body Backfill` 항목이 추가된다.
+  - 사람 검증(비개발자): 메뉴 클릭 후 메인 버튼 라벨이 `FT RTPR`로 바뀐다.
+  - 흔한 문제/주의: 기존 fulltext 메뉴 동작이나 label 계산을 깨뜨리지 않아야 한다.
+
+검증 훅:
+```powershell
+cd c:\github_coding\terminal_sec\terminal
+npm run build
+
+cd c:\github_coding\terminal_sec\termina_web\figma_code\terminal_ui_ver2_finhub
+npm run build
+
+Invoke-WebRequest -UseBasicParsing -Method Post -ContentType 'application/json' -Body '{"concurrency":2}' http://127.0.0.1:4000/api/news/fulltext/backfill-rtpr
+```
+사용자 확인 필요: **예**
 - 따라서 지금 가장 값비싼 실수는 “문서상 타입과 실제 probe 타입을 구분하지 않고 구현하는 것”이다.
 - 올바른 다음 입력값:
   - 저장 전략 결정
@@ -592,5 +630,29 @@ Start-Sleep 4
 $job = Invoke-RestMethod -Uri "http://localhost:8080/api/jobs/$($resp.jobId)"
 $job.logs | Select-Object -First 8
 Invoke-RestMethod -Uri "http://localhost:8080/api/jobs/$($resp.jobId)/cancel" -Method Post | Out-Null
+```
+사용자 확인 필요: **예**
+
+#### ⏳ Step 9 — RTPR update 시 plain text body를 news_fulltext에 즉시 저장
+
+사용자 요청: "plain text 본문 도 update 버튼 누르면 같이 받게 해야지 . db 에 full text 저장하는 컬럼 있잖아. 구현"
+
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 9-1 | RTPR 기사 insert 시 source+url로 기존 `news_id` 조회 가능 helper 추가 | `newsRepository.ts` | 중복 기사도 기존 row id lookup 가능 | ⏳ |
+| 9-2 | provider-body 전용 fulltext upsert 함수 추가 | `fulltextRepository.ts` | `news_fulltext`에 `success` row insert/update 확인 | ⏳ |
+| 9-3 | `pull-rtpr` recent/custom에서 `article_body`를 `news_fulltext`에 즉시 적재 | `server.ts` | RTPR fetch 직후 `hasFullText=true` 확인 | ⏳ |
+
+- `9-1` 목적: 중복 기사(`INSERT OR IGNORE`)도 full text 저장 대상을 찾을 수 있게 한다.
+- `9-2` 목적: RTPR가 주는 `article_body`는 provider-origin plain text이므로, extractor를 기다리지 않고 `extraction_status='success'`로 직접 저장한다.
+- `9-3` 목적: Update 버튼 실행만으로 RTPR 기사 본문이 `news_fulltext`에 들어가도록 연결한다.
+
+검증 훅:
+```powershell
+$body = @{ mode = 'recent'; tickerConcurrency = 2 } | ConvertTo-Json
+$resp = Invoke-RestMethod -Uri 'http://localhost:8080/api/news/pull-rtpr' -Method Post -ContentType 'application/json' -Body $body
+Start-Sleep 5
+Invoke-RestMethod -Uri 'http://localhost:8080/api/news?limit=20&source_names=RTPR&source_type=press_release&tickers=TXN,T,LMT,ETN,APP'
+Invoke-RestMethod -Uri 'http://localhost:8080/api/news/fulltext/<newsId>'
 ```
 사용자 확인 필요: **예**

@@ -258,6 +258,53 @@
    - job log에 `[batch] requested tickerConcurrency=...` / `[batch] concurrency=...` 기록 추가
    - update status / job result에 `tickerConcurrency` 포함
 2. `FinnhubNewsWindow.tsx`
+
+### RTPR 전용 Full Text Backfill 버튼 추가 (2026-03-10 19:47)
+
+**작성 시각:** 2026-03-10 19:47 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. `terminal/backend/src/services/fulltextRepository.ts`
+   - `getRtprBodyBackfillRows()` 추가
+   - 조건: `source='RTPR'`, body 존재, fulltext 누락/실패/빈 텍스트/word_count 0 인 행만 백필 대상
+2. `terminal/backend/src/services/fulltextUpdateService.ts`
+   - `runRtprBodyBackfill(jobId, concurrency)` 추가
+   - 저장된 RTPR body를 plain text로 정리한 뒤 `news_fulltext`에 `rtpr-body-backfill` note로 upsert
+3. `terminal/backend/src/server.ts`
+   - `POST /api/news/fulltext/backfill-rtpr` endpoint 추가
+4. `FinnhubNewsWindow.tsx`
+   - Full Text 드롭다운에 `RTPR Body Backfill` 항목 추가
+   - 선택 시 RTPR 전용 endpoint를 호출하도록 분기
+   - 마지막 실행 라벨에 `FT RTPR` 표시 추가
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 변경 파일 4개 `get_errors` 0 errors |
+| 빌드 | ✅ | backend `npm run build -w backend`, webui `npm run build` 통과 |
+| 자동 테스트 | ✅ | backend `vitest run` 6 files / 48 tests passed |
+| 런타임 통합 | ✅ | 격리 DB + port 4010 backend에서 `POST /api/news/fulltext/backfill-rtpr` 실행, sample RTPR row 1건이 `news_fulltext`에 `rtpr-body-backfill`로 저장됨 |
+
+#### 리스크 / 완화
+
+1. **리스크:** 기존에 성공 저장된 RTPR fulltext까지 불필요하게 다시 덮어쓸 수 있다.
+   - 완화 1: 조회 조건을 `missing/failed/empty/word_count=0`로 제한했다.
+   - 완화 2: 필요하면 이후 `force` 옵션 없이 현 상태를 유지한다.
+2. **리스크:** RTPR body 안에 HTML이 섞여 있으면 그대로 저장될 수 있다.
+   - 완화 1: job에서 `htmlToPlainText()`를 먼저 적용한다.
+   - 완화 2: 비어 버리면 raw trimmed body를 fallback으로 사용한다.
+3. **리스크:** Full Text 메인 버튼이 RTPR 전용 모드로 남아 사용자가 일반 추출로 오해할 수 있다.
+   - 완화 1: 메인 라벨을 `FT RTPR`로 별도 표시했다.
+   - 완화 2: tooltip에 stored body backfill임을 명시했다.
+
+#### 사용자 확인 요청
+
+- Step 10 구현과 self-verification은 완료했다.
+- 사용자 확인 전까지 이 항목은 `⏳`로 유지한다.
    - `Control` 버튼과 `News Pull Control` modal 추가
    - Finnhub ticker concurrency, Finnhub request interval, RTPR ticker concurrency를 localStorage로 저장
    - PTPR custom modal에도 RTPR concurrency 입력 추가
@@ -328,3 +375,50 @@
    - 완화: 현재는 `FINNHUB,RTPR`만 포함해 EODHD 등 다른 provider까지 넓히지는 않았다.
 2. **리스크:** 화면이 열려 있던 상태면 즉시 반영되지 않을 수 있다.
    - 완화: 페이지 새로고침 후 Press Release 탭에서 재확인한다.
+
+### RTPR update 시 plain text body를 news_fulltext에 즉시 저장 (2026-03-10 23:35)
+
+**작성 시각:** 2026-03-10 23:35 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. `newsRepository.ts`
+   - `getNewsIdBySourceUrl(source, url)` helper 추가
+   - 중복 기사도 기존 `news_id`를 찾을 수 있게 함
+2. `fulltextRepository.ts`
+   - `upsertProvidedFulltext()` 추가
+   - provider가 직접 준 plain text body를 `news_fulltext`에 `success` 상태로 insert/update
+3. `server.ts`
+   - RTPR recent/custom 루프에서 기사 insert 직후 `article_body`를 `news_fulltext`에 즉시 저장
+   - 새 기사뿐 아니라 중복 기사도 기존 `news_id` lookup 후 full text 보강 가능
+
+#### 검증 결과
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `server.ts`, `newsRepository.ts`, `fulltextRepository.ts` 에러 없음 |
+| 빌드(backend) | ✅ | backend build 통과 |
+| 런타임 API | ✅ | RTPR recent 실행 후 `TXN`, `T`, `LMT`, `ETN`, `APP` 기사에서 `hasFullText=true` 확인 |
+| fulltext row | ✅ | `/api/news/fulltext/:id`에서 `extractionStatus='success'`, `wordCount` 확인 |
+
+#### 런타임 검증 샘플
+
+```text
+TXN / T / LMT / ETN / APP 기사들 → hasFullText=true
+/api/news/fulltext/<id> → extractionStatus=success
+```
+
+#### 리스크 / 완화
+
+1. **리스크:** 예전에 저장된 RTPR 기사 중 아직 touch되지 않은 row는 full text가 비어 있을 수 있다.
+   - 완화 1: 이후 RTPR update가 해당 ticker를 다시 fetch하면 자동 보강된다.
+   - 완화 2: 필요하면 RTPR 전용 backfill job으로 한 번 더 채울 수 있다.
+2. **리스크:** provider-body와 extractor 결과가 다를 경우 full text 내용이 달라질 수 있다.
+   - 완화: RTPR는 외부 링크를 주지 않으므로 provider `article_body`를 source-of-truth로 취급한다.
+
+#### 사용자 확인 요청
+
+- 현재는 RTPR update 버튼만 눌러도 fetch된 RTPR 기사의 plain text body가 `news_fulltext`에 바로 저장된다.
+- 과거에 이미 저장돼 있었지만 아직 안 채워진 RTPR row는, 해당 ticker가 다시 fetch되면 보강된다.

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { config } from "./config.js";
 import { initDb } from "./db.js";
-import { getNews, getNewsById } from "./services/newsRepository.js";
+import { getNews, getNewsById, getNewsIdBySourceUrl } from "./services/newsRepository.js";
 import { createSavedView, deleteSavedView, listSavedViews } from "./services/savedViewRepository.js";
 import { createWatchlist, deleteWatchlist, listWatchlists, backfillWatchlistSecurityIds } from "./services/watchlistRepository.js";
 import {
@@ -40,8 +40,8 @@ import {
 import type { FinnhubMappedItem } from "./services/finnhubNewsProvider.js";
 import { mergeChangeForNewItems, bulkUpdateRecentChange, bulkUpdateCustomChange, type IbkrFallbackOptions } from "./services/newsChangeMerger.js";
 import { createJob, getJob, updateProgress, appendLog, completeJob, failJob, cancelJob, isJobCancelled } from "./services/jobManager.js";
-import { getFulltext, getUnextractedNewsIds, deleteFailedFulltextRows, getFulltextStats } from "./services/fulltextRepository.js";
-import { runFulltextUpdate, runFulltextPlainTextBackfill } from "./services/fulltextUpdateService.js";
+import { getFulltext, getUnextractedNewsIds, deleteFailedFulltextRows, getFulltextStats, upsertProvidedFulltext } from "./services/fulltextRepository.js";
+import { runFulltextUpdate, runFulltextPlainTextBackfill, runRtprBodyBackfill } from "./services/fulltextUpdateService.js";
 import { backfillPublisher } from "./services/finnhubNewsProvider.js";
 import { validateAnalysisCompleteness } from "./services/aiAnalysisRepository.js";
 import {
@@ -514,6 +514,22 @@ async function insertFetchedItems(
       counters.totalSkipped++;
     }
   }
+}
+
+function countWords(text: string): number {
+  const trimmed = text.trim();
+  if (!trimmed) return 0;
+  return trimmed.split(/\s+/).length;
+}
+
+async function persistProviderPlainTextFulltext(newsId: string | null, fullText: string, extractionNote: string): Promise<void> {
+  const trimmed = fullText.trim();
+  if (!newsId || !trimmed) return;
+  await upsertProvidedFulltext(newsId, {
+    fullText: trimmed,
+    extractionNote,
+    wordCount: countWords(trimmed),
+  });
 }
 
 // ── Preflight check for Recent Update ──
@@ -998,6 +1014,8 @@ app.post("/api/news/pull-rtpr", async (req, res, next) => {
                   tags: rawItem.tags,
                   publisher: rawItem.publisher,
                 });
+                const newsId = inserted?.id ?? await getNewsIdBySourceUrl(rawItem.source, rawItem.url);
+                await persistProviderPlainTextFulltext(newsId, rawItem.body, "rtpr-article_body");
                 if (inserted) {
                   counters.totalInserted++;
                   newItems.push({
@@ -1045,6 +1063,8 @@ app.post("/api/news/pull-rtpr", async (req, res, next) => {
                   tags: rawItem.tags,
                   publisher: rawItem.publisher,
                 });
+                const newsId = inserted?.id ?? await getNewsIdBySourceUrl(rawItem.source, rawItem.url);
+                await persistProviderPlainTextFulltext(newsId, rawItem.body, "rtpr-article_body");
                 if (inserted) {
                   counters.totalInserted++;
                   newItems.push({
@@ -1175,6 +1195,19 @@ app.post("/api/news/fulltext/backfill-plaintext", async (_req, res, next) => {
       console.error("[fulltext-backfill] unhandled:", err);
     });
     res.json({ jobId });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/news/fulltext/backfill-rtpr", async (req, res, next) => {
+  try {
+    const concurrency: number = Math.max(1, Math.min(Number(req.body?.concurrency) || 10, 200));
+    const jobId = createJob(0);
+    runRtprBodyBackfill(jobId, concurrency).catch((err) => {
+      console.error("[fulltext-backfill-rtpr] unhandled:", err);
+    });
+    res.json({ jobId, concurrency });
   } catch (error) {
     next(error);
   }

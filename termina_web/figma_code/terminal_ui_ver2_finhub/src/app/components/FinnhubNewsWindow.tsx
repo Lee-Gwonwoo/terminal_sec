@@ -946,7 +946,7 @@ export function FinnhubNewsWindow({
   }, []);
 
   // ─── Full text extraction (background job) ───
-  type FtSourceType = 'all' | 'company_news' | 'press_release' | 'market_news';
+  type FtSourceType = 'all' | 'company_news' | 'press_release' | 'market_news' | 'rtpr';
   const [lastFtSourceType, setLastFtSourceType] = useState<FtSourceType>('all');
 
   const handleFulltextUpdate = async (sourceType: FtSourceType = 'all') => {
@@ -962,10 +962,16 @@ export function FinnhubNewsWindow({
         const v = parseInt(localStorage.getItem('ft-concurrency') ?? '', 10);
         if (v >= 1 && v <= 200) concurrency = v;
       } catch { /* ignore */ }
-      const res = await fetch(`${API_BASE}/api/news/fulltext/update`, {
+      const endpoint = sourceType === 'rtpr'
+        ? `${API_BASE}/api/news/fulltext/backfill-rtpr`
+        : `${API_BASE}/api/news/fulltext/update`;
+      const payload = sourceType === 'rtpr'
+        ? { concurrency }
+        : { sourceType, concurrency };
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sourceType, concurrency }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -1890,6 +1896,7 @@ export function FinnhubNewsWindow({
 
             const ftLabel = ftUpdating
               ? 'Extracting...'
+              : lastFtSourceType === 'rtpr' ? 'FT RTPR'
               : lastFtSourceType === 'company_news' ? 'FT Co.'
               : lastFtSourceType === 'press_release' ? 'FT PR'
               : lastFtSourceType === 'market_news' ? 'FT Mkt.'
@@ -1902,7 +1909,7 @@ export function FinnhubNewsWindow({
                   onClick={() => handleFulltextUpdate(lastFtSourceType)}
                   disabled={updating || ftUpdating}
                   className="px-3 py-1.5 border border-r-0 border-gray-300 dark:border-gray-600 rounded-l hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 text-xs disabled:opacity-50"
-                  title={`Extract full text (${getSourceTypeLabel(lastFtSourceType)})`}
+                  title={lastFtSourceType === 'rtpr' ? 'Backfill RTPR full text from stored body' : `Extract full text (${getSourceTypeLabel(lastFtSourceType)})`}
                 >
                   <FileText className={`w-3.5 h-3.5 text-orange-500 ${ftUpdating ? 'animate-pulse' : ''}`} />
                   <span>{ftLabel}</span>
@@ -1935,6 +1942,10 @@ export function FinnhubNewsWindow({
                       <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('market_news'); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <FileText className="w-3.5 h-3.5 shrink-0 text-amber-500" />
                         <div><div className="font-medium">Market News Only</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Attempt extraction for market_news items</div></div>
+                      </button>
+                      <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('rtpr'); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <FileText className="w-3.5 h-3.5 shrink-0 text-cyan-500" />
+                        <div><div className="font-medium">RTPR Body Backfill</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">저장된 RTPR body로 누락 full text 채우기</div></div>
                       </button>
                       <hr className="my-1 border-gray-200 dark:border-gray-700" />
                       <button onClick={async () => { setShowFtMenu(false); await handleResetAndRetry(); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50 text-red-600 dark:text-red-400">

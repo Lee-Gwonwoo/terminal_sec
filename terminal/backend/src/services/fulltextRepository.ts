@@ -21,6 +21,11 @@ export interface UnextractedNewsRow {
   body: string | null;
 }
 
+export interface RtprBodyBackfillRow {
+  id: string;
+  body: string;
+}
+
 // ─── Queries ───
 
 export async function getFulltext(newsId: string): Promise<FulltextRow | null> {
@@ -58,6 +63,35 @@ export async function insertFulltext(
   );
 }
 
+export async function upsertProvidedFulltext(
+  newsId: string,
+  data: {
+    fullText: string;
+    extractionNote?: string;
+    wordCount?: number;
+  },
+): Promise<void> {
+  const now = new Date().toISOString();
+  await getDb().run(
+    `INSERT INTO news_fulltext
+       (news_id, full_text, extraction_status, extraction_note, word_count, extracted_at)
+     VALUES (?, ?, 'success', ?, ?, ?)
+     ON CONFLICT(news_id) DO UPDATE SET
+       full_text = excluded.full_text,
+       extraction_status = 'success',
+       extraction_note = excluded.extraction_note,
+       word_count = excluded.word_count,
+       extracted_at = excluded.extracted_at`,
+    [
+      newsId,
+      data.fullText,
+      data.extractionNote ?? null,
+      data.wordCount ?? null,
+      now,
+    ],
+  );
+}
+
 /**
  * Returns news_items that do NOT have a corresponding news_fulltext row.
  * @param sourceType  Optional filter: 'company_news' | 'press_release'. Omit or 'all' for no filter.
@@ -78,6 +112,23 @@ export async function getUnextractedNewsIds(
      WHERE nf.news_id IS NULL${whereExtra}
      ORDER BY ni.published_at DESC`,
     params,
+  );
+}
+
+export async function getRtprBodyBackfillRows(): Promise<RtprBodyBackfillRow[]> {
+  return getDb().all<RtprBodyBackfillRow[]>(
+    `SELECT ni.id, ni.body
+     FROM news_items ni
+     LEFT JOIN news_fulltext nf ON nf.news_id = ni.id
+     WHERE ni.source = 'RTPR'
+       AND TRIM(COALESCE(ni.body, '')) != ''
+       AND (
+         nf.news_id IS NULL
+         OR nf.extraction_status IN ('failed', 'unavailable')
+         OR TRIM(COALESCE(nf.full_text, '')) = ''
+         OR COALESCE(nf.word_count, 0) = 0
+       )
+     ORDER BY ni.published_at DESC`,
   );
 }
 

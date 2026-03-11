@@ -379,6 +379,14 @@ export async function insertNewsItem(params: {
   };
 }
 
+export async function getNewsIdBySourceUrl(source: string, url: string): Promise<string | null> {
+  const row = await getDb().get<{ id: string }>(
+    `SELECT id FROM news_items WHERE source = ? AND url = ? LIMIT 1`,
+    [source, url],
+  );
+  return row?.id ?? null;
+}
+
 function mapNewsRow(
   row: any,
   sentimentMap?: Map<string, { bullishPct: number | null; bearishPct: number | null; newsScore: number | null }>,
