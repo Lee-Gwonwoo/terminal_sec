@@ -72,6 +72,10 @@
 		- `news_change_metrics`는 **영구 테이블**이다 (`CREATE TABLE IF NOT EXISTS`). 서버 재시작 시 삭제/재생성되지 않는다.
 		- `news_items`에는 legacy inline change 컬럼(`change_1d_pct`, `change_from_open_pct` 등)이 남아 있지만, `newsChangeMerger`는 이 컬럼에 쓰지 않고 `news_change_metrics` 테이블에만 UPSERT한다.
 		- 실제 조회(`GET /api/news`)는 `news_items`에 `news_change_metrics` 8개 metric_key를 각각 LEFT JOIN + `news_fulltext` + `news_ai_analysis` + `news_sentiment_snapshots` + `company_profiles` + `securities`를 join해서 응답한다.
+		- `/api/news` change 날짜 필드는 분리되어 있다.
+		  - `[][][]ohlc_date[][][]` / `[][][]change_pct_ohlc_date[][][]` = `change_pct.target_date`
+		  - `[][][]change_1d_target_date[][][]` = `change_1d_pct.target_date`
+		  - 대응 metric 값이 `null`이면 대응 날짜 필드도 `null`로 내려간다.
 
 - **OHLC 일봉 SQLite (watchlist canonical price DB)**
 	- 경로: `OHLC_data/ohlc_1d_watchlist.sqlite`
@@ -81,6 +85,7 @@
 		- `symbols` (1,188 rows): `Symbol, Industry`
 	- Change% 파생 컬럼은 `ohlcDerivedMetrics.ts`가 계산해서 같은 테이블에 업데이트
 	- **IBKR fallback**: `newsChangeMerger`가 change 계산 시 로컬 OHLC DB에 해당 종목이 없으면 IBKR TWS에서 배치 조회 후 이 DB에 upsert (Phase 1.5)
+	- 현재 운영 규칙: ET `16:00:00` 이전에는 current ET date 일봉을 canonical OHLC DB에 저장하지 않는다. 이미 장중 row가 들어간 경우 purge 후 재계산으로 정리한다.
 
 - **뉴스 원문/뉴스 후처리 데이터**
 	- 기본 원칙: terminal 앱에서 쓰는 뉴스 관련 영속 데이터는 우선 `terminal/backend/backend/data/app.db` 안에서 관리
@@ -96,6 +101,8 @@
 	- 현재 코드 기준 운영 규칙:
 		- `GET /api/news`(`newsRepository.ts`)는 `news_items`에 8개 `news_change_metrics` LEFT JOIN + `news_fulltext` + `news_ai_analysis` + `news_sentiment_snapshots` + `company_profiles`/`securities`를 join 해서 응답한다.
 		- change 계산 흐름: UI에서 `update-recent` 또는 `update-custom` API → `newsChangeMerger` → OHLC DB 조회 (없으면 IBKR 배치 fallback) → `news_change_metrics` UPSERT
+		- 당일 same-day change는 ET 시장일 기준으로 판단하며, ET `16:00:00` 이전이면 `change_pct`, `change_from_open_pct`, `change_open_to_high_pct`를 저장하지 않는다.
+		- 장중에는 current ET date 일봉을 OHLC DB에 저장/참조하지 않으므로, 전일 기사 `change_1d_pct`도 오늘 partial bar를 보지 못한다.
 		- full text 추출 대상 판단은 현재 `news_fulltext` row 존재 여부 기준이다. 한 번 `failed`/`skipped` row가 생기면 자동 재시도 대상에서 빠질 수 있다.
 		- keyword는 이미 runtime DB 내부 컬럼으로 관리되고 있으므로, 별도 JSONL/CSV를 canonical source로 취급하지 않는다.
 		- AI 분석(`news_ai_analysis`)은 테이블 존재하지만 아직 0건. 향후 구현 예정.

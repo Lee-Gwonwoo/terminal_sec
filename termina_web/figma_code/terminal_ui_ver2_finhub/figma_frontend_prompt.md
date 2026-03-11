@@ -288,6 +288,14 @@ Finnhub News 창 안에도 change 계산 버튼이 있다.
 
 이 버튼들은 Data Control 창의 change update와 같은 backend job을 재사용한다.
 
+Change update 후 News Feed가 다시 `GET /api/news`를 읽으면, 날짜 관련 필드는 아래 의미로 사용해야 한다.
+
+- `[][][]ohlc_date[][][]`: 기본 표시 날짜. `change_pct`가 계산된 기준일이다.
+- `[][][]change_pct_ohlc_date[][][]`: `change_pct` 기준일을 명시적으로 다시 준 필드다.
+- `[][][]change_1d_target_date[][][]`: `change_1d_pct`의 forward target date다.
+- `change_1d_pct`가 `null`이면 `change_1d_target_date`도 `null`로 내려온다.
+- 장중(ET `16:00:00` 이전)에는 same-day change와 current ET day forward target이 비어 있을 수 있으며, 이는 정상이다.
+
 ### Full Text 기능
 
 표의 Full Text 셀:
@@ -414,6 +422,8 @@ localStorage 사용:
 - `[][][]url[][][]`
 - `[][][]tickers[][][]`
 - `[][][]change_1d_pct[][][]`
+- `[][][]change_pct_ohlc_date[][][]`
+- `[][][]change_1d_target_date[][][]`
 - `[][][]change_from_open_pct[][][]`
 - `[][][]change_7d_pct[][][]`
 - `[][][]change_14d_pct[][][]`
@@ -711,6 +721,7 @@ API:
 - case research의 섹션/페이지 데이터는 localStorage가 아니라 backend DB에 저장된다.
 - 단, calendar update는 프론트는 job처럼 다루지만 backend는 아직 동기 응답형이다.
 - saved search, watchlist menu 선택값 등 일부 UI 상태는 메모리 state만 사용하고 영속 저장되지 않는다.
+- News Feed의 Changes % 영역에서 기본 날짜 개념은 `ohlc_date = change_pct 기준일`이다. forward 날짜가 필요하면 `change_1d_target_date`를 별도로 봐야 한다.
 
 ## 파일 맵
 

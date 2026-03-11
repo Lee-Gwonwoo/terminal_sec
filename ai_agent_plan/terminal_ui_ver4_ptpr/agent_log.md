@@ -431,6 +431,32 @@
 - `[][][]change_pct_ohlc_date[][][]`는 같은 값을 명시적으로 다시 제공한다.
 - `[][][]change_1d_target_date[][][]`는 `change_1d_pct`가 실제로 있을 때만 채워지고, 값이 없으면 `null`이다.
 
+### 레포 skill + front/backend spec 문서 동기화 (2026-03-11 11:46)
+
+**작성 시각:** 2026-03-11 11:46 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. `.github/copilot-skills/repo-context.md`
+   - `GET /api/news`의 날짜 필드 의미 분리 반영
+   - ET 장중 current day OHLC row 비저장 규칙 반영
+2. `terminal/backend_prompt.md`
+   - `change_pct_ohlc_date`, `change_1d_target_date` 문서화
+   - metric이 `null`이면 대응 날짜 필드도 `null`이라는 규칙 반영
+3. `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+   - 프론트가 받아야 하는 새 날짜 필드와 Changes % 영역 해석 규칙 반영
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 문서 3개 에러 0개 |
+| 빌드 | ✅ | 직전 build/test 사이클 통과 상태 유지 |
+| 자동 테스트 | ✅ | 코드 변경 검증은 직전 `9 files / 55 tests passed` 상태 유지 |
+| 런타임 통합 | ✅ | 직전 `/api/news` raw JSON 검증 결과와 문서 내용 일치 확인 |
+
 ### RTPR 전용 Full Text Backfill 버튼 추가 (2026-03-10 19:47)
 
 **작성 시각:** 2026-03-10 19:47 (local)
