@@ -259,6 +259,56 @@ Legend: `✅` 완료+사용자확인 완료 / `⏳` 완료, 사용자확인 대�
   - 공식 docs는 `https://www.rtpr.io/docs`로 확인됐다.
   - 실제 API와 WebSocket endpoint도 확인됐다.
 
+### PLAN CHANGE — 2026-03-11 당일 change/진행률 규칙 보강
+
+- 배경: RTPR/PTPR 기사에 대해 `published_at` 날짜와 `ohlc_date`가 같더라도, ET 장 종료 전이면 same-day change가 UI에 노출되면 안 된다는 운영 규칙이 추가됐다.
+- 추가 요구사항:
+  - `POST /api/news/change/update-recent`
+  - `POST /api/news/change/update-custom`
+  - RTPR ingest 후 `mergeChangeForNewItems()`
+  - 위 세 경로 모두에서 **ET 시장일 기준 same-day change는 ET 16:00 이전 비저장**으로 동작해야 한다.
+  - `GET /api/jobs/:jobId`의 running progress는 최종 완료 전 `100%`를 보여주면 안 된다.
+
+#### ⏳ Step 3 — same-day change 차단 + job progress 의미 보정
+
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 3-1 | `published_at`를 ET 시장일로 해석하는 helper를 추가하고 same-day gating 기준을 ET로 통일 | `terminal/backend/src/services/newsChangeMerger.ts` | Vitest `newsChangeMerger.test.ts`에서 UTC/ET-naive 입력 모두 ET 날짜로 해석되는지 확인 | ⏳ |
+| 3-2 | 현재 ET 시장일 기사에 대해 ET 16:00 이전에는 same-day metric 저장을 막고, 기존 stale metric도 삭제 | `terminal/backend/src/services/newsChangeMerger.ts` | Vitest + runtime에서 3/11 RTPR 행의 change 값이 null인지 확인 | ⏳ |
+| 3-3 | running 상태 job progress는 99% 상한, 완료 처리 후에만 100% 전환 | `terminal/backend/src/services/jobManager.ts` | Vitest `jobManager.test.ts`에서 running 99 → done 100 확인 | ⏳ |
+| 3-4 | ET 장중에는 canonical OHLC DB에도 당일 일봉을 저장/참조하지 않도록 보강 | `terminal/backend/src/services/ohlcWatchlistRepository.ts`, `terminal/backend/src/services/newsChangeMerger.ts` | Vitest `ohlcWatchlistRepository.test.ts` + runtime에서 `OHLC_data` 3/11 row count가 0인지 확인 | ⏳ |
+| 3-5 | backend spec 문서와 작업 로그에 새 규칙 반영 | `terminal/backend_prompt.md`, `ai_agent_plan/terminal_ui_ver4_ptpr/agent_log.md`, `ai_agent_plan/terminal_ui_ver4_ptpr/plan.md` | 문서 diff와 agent_log append 확인 | ⏳ |
+
+- `3-1` 목적: 소스별 timestamp 포맷이 달라도 같은 시장일 규칙으로 비교하게 만들기. 설명: UTC ISO는 ET로 변환하고, RTPR ET-naive는 그대로 ET로 간주하면 완료다.
+  - 완료 조건(눈으로 확인): helper가 UTC 입력 `2026-03-11T00:30:00Z`를 ET 날짜 `2026-03-10`으로 바꾼다.
+  - 사람 검증(비개발자): 테스트 이름에 UTC→ET 변환 케이스가 보인다.
+  - 흔한 문제/주의: naive ISO를 `new Date()`로 파싱하면 시스템 timezone 영향으로 날짜가 틀어질 수 있다.
+- `3-2` 목적: 당일 장중 change 노출 차단. 설명: same-day 기사라도 ET 16:00 전이면 metric write를 건너뛰고, 이전 run에서 남은 metric도 지우면 완료다.
+  - 완료 조건(눈으로 확인): 장중 테스트는 defer=true, 장마감 후 테스트는 defer=false이며 runtime 조회에서 3/11 change 값이 null이다.
+  - 사람 검증(비개발자): 테스트 설명에서 "before ET market close" / "after ET market close"가 구분된다.
+  - 흔한 문제/주의: anchorDate 일치만으로 저장을 허용하거나 기존 metric 삭제를 빼먹으면 오늘 장중 값이 계속 남는다.
+- `3-3` 목적: View Log의 조기 100% 오해 방지. 설명: 잡이 아직 running이면 진행률 최대치가 99로 제한되면 완료다.
+  - 완료 조건(눈으로 확인): 테스트에서 running progress는 99, `completeJob()` 후 100이다.
+  - 사람 검증(비개발자): View Log에서 running 중에는 100% 대신 99% 이하만 보인다.
+  - 흔한 문제/주의: UI만 고치고 backend는 100을 계속 보내면 다른 화면/폴링 경로가 다시 틀어진다.
+- `3-4` 목적: 오늘 일봉 자체를 canonical OHLC DB에서 배제해 forward metric도 장중에는 오늘 bar를 못 보게 만든다. 설명: pre-close 3/11 row를 저장하지 않고, max-date/forward 조회에서도 무시하면 완료다.
+  - 완료 조건(눈으로 확인): OHLC DB `Datetime='2026-03-11'` count가 0이고, 3/10 RTPR 기사에 `target_date='2026-03-11'`가 남지 않는다.
+  - 사람 검증(비개발자): 3/10 기사에서 `change_1d_pct`가 장중에는 비어 있고 `ohlc_date`가 3/10으로만 보인다.
+  - 흔한 문제/주의: 오늘 bar 저장만 막고 기존 bar purge를 안 하면 과거에 들어간 partial row가 계속 참조된다.
+- `3-5` 목적: 운영 문서와 로그를 코드 상태에 맞추기. 설명: spec과 plan/log에 같은 규칙이 적히면 완료다.
+  - 완료 조건(눈으로 확인): plan, agent_log, backend_prompt에 ET close 규칙과 progress 99 규칙이 모두 있다.
+  - 사람 검증(비개발자): 문서 검색으로 `16:00`과 `99`가 함께 나온다.
+  - 흔한 문제/주의: plan만 바꾸고 backend_prompt를 안 바꾸면 이후 운영자가 API semantics를 잘못 이해한다.
+
+검증 훅:
+```powershell
+cd c:\github_coding\terminal_sec\terminal
+npm run build
+npm run test -- --runInBand
+Invoke-RestMethod -UseBasicParsing -Uri http://localhost:8080/api/jobs/<jobId>
+```
+사용자 확인 필요: **예**
+
 #### ⏳ Step 10 — RTPR 전용 Full Text Backfill 버튼
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
@@ -450,8 +500,8 @@ Invoke-RestMethod -Uri "http://localhost:8080/api/news?source_type=press_release
 | 6-2 | `pull-rtpr` recent 모드 → per-ticker 증분 (anchor + confirmed-empty skip) | `server.ts` | tsc 통과 + 런타임 per-ticker 로그 확인 | ⏳ |
 | 6-3 | `pull-rtpr` 양쪽 mode에 change% merge 추가 | `server.ts` | job 완료 시 changeMerged > 0 확인 | ⏳ |
 | 6-4 | Frontend 버튼 설명 텍스트 업데이트 | `FinnhubNewsWindow.tsx` | vite build 통과 | ⏳ |
-| 6-5 | 같은 날 기사에서 당일 bar 미확정/과거 anchor 사용 시 change 비우기 | `newsChangeMerger.ts` | 장중 3/11 기사 API 응답에서 `ohlc_date < published_at 날짜`면 change 컬럼이 null인지 확인 | ⏳ |
-| 6-6 | 장마감 후/과거 backfill change 재계산 경로 확정 | `newsChangeMerger.ts` (6-5와 동일 gating) | `POST /api/news/change/update-recent` 또는 `POST /api/news/change/update-custom` 실행 후 기사일과 `ohlc_date`가 같을 때만 change가 채워지는지 확인 | ⏳ |
+| 6-5 | 같은 날 기사에서 장종료 전 당일 bar / 과거 anchor 사용 시 change 비우기 | `newsChangeMerger.ts` | 장중 3/11 기사 API 응답에서 `published_at` 날짜가 3/11이면 change 컬럼이 null인지 확인 | ⏳ |
+| 6-6 | 장마감 후/과거 backfill change 재계산 경로 확정 | `newsChangeMerger.ts` (6-5와 동일 gating) | `POST /api/news/change/update-recent` 또는 `POST /api/news/change/update-custom` 실행 후 ET 16:00 이후에만 same-day change가 채워지는지 확인 | ⏳ |
 
 - `6-1` 목적: RTPR anchor map을 조회할 수 있도록 `getTickerAnchorMap(sourceType, source)` 확장.
   - 기존 `getTickerAnchorMap('company_news')` / `getTickerAnchorMap('press_release')` 호출은 기본 source='FINNHUB'로 동작하므로 영향 없음.
@@ -463,31 +513,51 @@ Invoke-RestMethod -Uri "http://localhost:8080/api/news?source_type=press_release
   - `setLastSuccess('rtpr_press_release', ...)` — update status 기록
 - `6-4` 목적: UI 설명을 "Latest 100"에서 "Per-ticker incremental" 으로 갱신.
 - `6-5` 목적: 장중 기사나 OHLC 지연 상황에서 잘못된 과거 일봉 change가 보이지 않게 한다.
-  - 규칙 1: 기사 날짜와 같은 거래일의 일봉이 아직 확정되지 않았으면 `[][][]change_pct[][][]`, `[][][]change_from_open_pct[][][]`, `[][][]change_open_to_high_pct[][][]`, forward change 컬럼을 모두 비운다.
-  - 규칙 2: 계산에 사용된 `anchorDate`가 기사 날짜보다 과거면 same-day 기사로 간주하지 않고 change를 비운다.
-  - 규칙 3: 전일/과거 anchor fallback은 내부 디버깅 정보로는 남길 수 있지만, 사용자 API 응답에는 노출하지 않는다.
+  - 규칙 1: **정규장 종료 시각(기본 `16:00 America/New_York`) 이전에는 같은 날짜 기사에 대해 당일 `ohlc_date`가 있어도 저장하지 않는다.**
+  - 규칙 2: 기사 날짜와 같은 거래일의 일봉이 아직 확정되지 않았으면 `[][][]change_pct[][][]`, `[][][]change_from_open_pct[][][]`, `[][][]change_open_to_high_pct[][][]`, forward change 컬럼을 모두 비운다.
+  - 규칙 3: 계산에 사용된 `anchorDate`가 기사 날짜보다 과거면 same-day 기사로 간주하지 않고 change를 비운다.
+  - 규칙 4: 전일/과거 anchor fallback은 내부 디버깅 정보로는 남길 수 있지만, 사용자 API 응답에는 노출하지 않는다.
+  - 규칙 5: IBKR가 장중에도 `barSizeSetting='1 day'` 응답으로 당일 partial daily bar를 줄 수 있으므로, `anchorDate === 기사 날짜`만으로는 저장 조건이 충분하지 않다.
   - rollout 주의: 규칙 적용 전 이미 저장된 RTPR 잘못된 change metric은 1회 정리해야 한다. 기준은 `published_at` 날짜 > `ohlc_date` 인 기존 행이다.
-  - 완료 조건(눈으로 확인): 2026-03-11 장중 RTPR 기사에서 `published_at=2026-03-11...` 이고 `ohlc_date=2026-03-06` 또는 `2026-03-10` 같은 과거 값이면 모든 change 컬럼이 null이다.
+  - 완료 조건(눈으로 확인): 2026-03-11 장중 RTPR 기사에서 `published_at=2026-03-11...` 이고 `ohlc_date=2026-03-11` 이어도 모든 change 컬럼이 null이다. 과거 값이어도 역시 null이어야 한다.
   - 사람 검증(비개발자): News API 결과 또는 UI에서 오늘 기사인데 숫자가 뜨지 않는지 확인한다.
-  - 흔한 문제/주의: 장 마감 후 당일 bar가 확정됐는데도 null로 남으면 gating 조건이 과도한 것이다. 반대로 `ohlc_date`가 기사일보다 과거인데 숫자가 남아 있으면 현재 버그가 재발한 것이다.
+  - 흔한 문제/주의: 장 마감 후 당일 bar가 확정됐는데도 null로 남으면 gating 조건이 과도한 것이다. 반대로 장중인데 `ohlc_date=기사일` 숫자가 보이면 partial daily bar가 그대로 노출되는 버그다.
 - `6-6` 목적: change 데이터가 "언제 비고, 언제 다시 채워지는지"를 운영 절차로 고정한다.
-  - 정상 업데이트 원칙 1: **RTPR pull 시점**에는 기사 ingest와 초기 change merge를 수행하되, `anchorDate === 기사 날짜`를 만족할 때만 값을 저장한다. 그렇지 않으면 null 유지.
-  - 정상 업데이트 원칙 2: **같은 날 기사**는 장중에는 대부분 null이 정상이다. 일봉이 확정된 뒤에만 값을 채운다.
+  - 정상 업데이트 원칙 1: **RTPR pull 시점**에는 기사 ingest와 초기 change merge를 수행하되, `anchorDate === 기사 날짜`여도 현재 ET 시각이 정규장 종료(`16:00`) 이전이면 값을 저장하지 않는다.
+  - 정상 업데이트 원칙 2: **같은 날 기사**는 장중에는 null이 정상이다. 일봉이 확정된 뒤에만 값을 채운다.
   - 정상 업데이트 원칙 3: **장마감 후 재계산 경로**는 기존 endpoint를 사용한다.
     - 최근 7일 재계산: `POST /api/news/change/update-recent`
     - 임의 기간 재계산: `POST /api/news/change/update-custom` with `from`, `to`
   - 정상 업데이트 원칙 4: 재계산 전에 OHLC DB에 해당 거래일 바가 실제로 있어야 한다. 없으면 여전히 null이 정상이다.
+  - 정상 업데이트 원칙 5: **당일 기사**는 `오늘 ET >= 16:00` 이고 `anchorDate === 기사 날짜`일 때만 저장 가능하다. 그 전에는 IBKR fallback으로 당일 partial bar가 와도 무조건 null 유지.
   - 운영적 정의:
-    - 입력: `news_items.published_at` 날짜, `news_change_metrics` 계산용 OHLC anchor, `OHLC_data/ohlc_1d_watchlist.sqlite`의 일봉 데이터
-    - 허용 저장: `substr(published_at,1,10) == ohlc_date`
-    - 저장 금지: `substr(published_at,1,10) > ohlc_date`
+    - 입력: `news_items.published_at` 날짜, 현재 ET 시각, `news_change_metrics` 계산용 OHLC anchor, `OHLC_data/ohlc_1d_watchlist.sqlite`의 일봉 데이터
+    - 허용 저장 A: `substr(published_at,1,10) < 오늘 ET 날짜` 이고 `substr(published_at,1,10) == ohlc_date`
+    - 허용 저장 B: `substr(published_at,1,10) == 오늘 ET 날짜` 이고 `오늘 ET 시각 >= 16:00` 이며 `substr(published_at,1,10) == ohlc_date`
+    - 저장 금지 A: `substr(published_at,1,10) > ohlc_date`
+    - 저장 금지 B: `substr(published_at,1,10) == 오늘 ET 날짜` 이고 `오늘 ET 시각 < 16:00`
     - 장마감 후 값 채우기: 같은 날짜 바가 OHLC DB에 들어온 뒤 `update-recent` 또는 해당 일자 `update-custom` 재실행
   - 예시 1: 2026-03-11 10:01 기사 + OHLC 최신 바가 2026-03-10이면 change는 null 유지
-  - 예시 2: 2026-03-11 장마감 후 2026-03-11 바가 OHLC DB에 들어오고 `POST /api/news/change/update-custom` body `{"from":"2026-03-11","to":"2026-03-11"}` 실행 시, `ohlc_date=2026-03-11`인 기사만 change가 채워짐
-  - 예시 3: 과거 backfill 기사 2026-03-09 + OHLC 바가 이미 2026-03-09로 존재하면 재계산 시 change 저장 가능
+  - 예시 2: 2026-03-11 11:30 기사 + IBKR가 `ohlc_date=2026-03-11` partial daily bar를 반환해도 change는 null 유지
+  - 예시 3: 2026-03-11 16:10 ET 이후 2026-03-11 바가 OHLC DB에 있고 `POST /api/news/change/update-custom` body `{"from":"2026-03-11","to":"2026-03-11"}` 실행 시, `ohlc_date=2026-03-11`인 기사만 change가 채워짐
+  - 예시 4: 과거 backfill 기사 2026-03-09 + OHLC 바가 이미 2026-03-09로 존재하면 재계산 시 change 저장 가능
   - 완료 조건(눈으로 확인): 오늘 기사들은 장중에는 null이고, 장마감 후 재계산을 돌린 뒤 `ohlc_date == published_at 날짜`인 기사만 숫자가 생긴다.
   - 사람 검증(비개발자): 같은 날짜 기사 하나를 잡아서 장중에는 빈 값, 장마감 후 재계산 뒤에는 숫자가 채워지는지 본다.
-  - 흔한 문제/주의: OHLC DB가 늦게 갱신되면 재계산을 돌려도 null이 유지될 수 있다. 이 경우 change 로직 문제가 아니라 price source 타이밍 문제다.
+  - 흔한 문제/주의: OHLC DB가 늦게 갱신되면 재계산을 돌려도 null이 유지될 수 있다. 이 경우 change 로직 문제가 아니라 price source 타이밍 문제다. 또 반휴장(early close)은 현재 기본 `16:00 ET` 규칙으로는 엄밀히 처리되지 않으므로 향후 거래일 캘린더 연동이 필요할 수 있다.
+
+##### PLAN CHANGE (2026-03-11) — 장중 same-day change 금지 규칙 추가
+
+사용자 요청: "장 종료 시각 이후가 아니라면 당일 장중 change 는 반영 하면 안 되지"
+
+**추가 확인된 문제:**
+- `POST /api/news/change/update-recent` 가 IBKR fallback을 통해 당일 `1 day` bar를 받아오면, 장중에도 `ohlc_date=기사 날짜`가 성립할 수 있다.
+- 즉 기존 `anchorDate === 기사 날짜` 규칙만으로는 장중 partial daily bar 노출을 막지 못한다.
+
+**결정:**
+- same-day change 저장 조건에 **현재 ET 시각 >= 정규장 종료 시각(`16:00 America/New_York`)** 을 추가한다.
+- 장중에는 당일 `ohlc_date`가 있어도 null 유지가 정답이다.
+- 장마감 후 재계산 endpoint를 다시 돌릴 때만 당일 change를 채운다.
+- 기본 구현은 `16:00 ET` cutoff를 사용하고, half-day/holiday early close 정밀 처리는 후속 개선으로 남긴다.
 
 ##### PLAN CHANGE (2026-03-11) — same-day change gating 추가
 

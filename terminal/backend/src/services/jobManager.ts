@@ -79,10 +79,11 @@ export function updateProgress(id: string, completed: number, total?: number): v
     job.progress.total = total;
   }
   job.progress.completed = completed;
-  job.progress.pct =
+  const rawPct =
     job.progress.total > 0
       ? Math.round((completed / job.progress.total) * 100)
       : 0;
+  job.progress.pct = job.status === "running" ? Math.min(rawPct, 99) : rawPct;
   job.updatedAt = new Date().toISOString();
 }
 

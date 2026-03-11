@@ -259,6 +259,135 @@
    - update status / job result에 `tickerConcurrency` 포함
 2. `FinnhubNewsWindow.tsx`
 
+### 당일 change ET 장종료 규칙 + 조기 100% 표시 방지 구현 (2026-03-11 11:20)
+
+**작성 시각:** 2026-03-11 11:20 (local)
+
+**Status: awaiting user confirmation**
+
+#### PLAN CHANGE 사유
+- 사용자 요청: 당일 change는 장 종료 시각 이후에만 반영하고, change update View Log가 running 중 100%를 먼저 보여주지 않도록 수정.
+- 기존 구현은 `anchorDate === newsDate`만 만족하면 당일 metric 저장이 가능했고, job progress는 running 상태에서도 100%까지 올라갈 수 있었다.
+
+#### 작업 요약
+
+1. `terminal/backend/src/services/newsChangeMerger.ts`
+   - source별 `published_at`를 ET 시장일로 해석하는 helper 추가
+   - timezone-aware timestamp는 ET 변환, RTPR ET-naive timestamp는 ET 그대로 사용
+   - 현재 ET 시장일 뉴스는 ET `16:00:00` 전이면 same-day metric 저장 차단
+   - 이번 재계산에서 조건을 만족하지 못한 뉴스의 기존 standard metric 8개도 삭제해 stale 값을 제거
+2. `terminal/backend/src/services/jobManager.ts`
+   - `status=running` 동안 `progress.pct`를 최대 `99`로 제한
+   - `completeJob()` 이후에만 `100` 노출
+3. 테스트 추가
+   - `terminal/backend/tests/newsChangeMerger.test.ts`
+   - `terminal/backend/tests/jobManager.test.ts`
+4. 문서 동기화
+   - `terminal/backend_prompt.md`
+   - `ai_agent_plan/terminal_ui_ver4_ptpr/plan.md`
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ⏳ | 코드 수정 후 `get_errors`로 확인 예정 |
+| 빌드 | ⏳ | `npm run build` 예정 |
+| 자동 테스트 | ⏳ | `npm run test` 예정 |
+| 런타임 통합 | ⏳ | change update API + `/api/jobs/:jobId` 재검증 예정 |
+
+#### 리스크 / 완화
+
+1. **리스크:** Finnhub UTC timestamp와 RTPR ET-naive timestamp가 섞여 있어 날짜 판정이 다시 틀어질 수 있다.
+   - 완화 1: helper 테스트에 UTC/ET-naive 케이스를 모두 넣는다.
+   - 완화 2: 런타임 검증 시 3/11 기사 샘플의 `published_at`/`ohlc_date`를 다시 비교한다.
+2. **리스크:** progress 99 상한이 다른 job 화면에 부작용을 줄 수 있다.
+   - 완화 1: backend 공통 semantics로 정의하고 테스트로 보장한다.
+   - 완화 2: 완료 후 `completeJob()`이 100으로 올리는지 같이 검증한다.
+3. **리스크:** 장마감 후에도 same-day OHLC bar가 아직 DB에 없으면 값이 계속 비어 있을 수 있다.
+   - 완화 1: 기존 `anchorDate === newsDate` 조건은 유지해 잘못된 전일 anchor 저장을 계속 차단한다.
+   - 완화 2: 필요 시 장마감 이후 re-run 절차를 안내한다.
+
+### 당일 change ET 장종료 규칙 + 조기 100% 표시 방지 검증 완료 (2026-03-11 11:26)
+
+**작성 시각:** 2026-03-11 11:26 (local)
+
+**Status: awaiting user confirmation**
+
+#### 검증 요약
+
+1. 정적 분석
+   - 수정 파일 4개(`newsChangeMerger.ts`, `jobManager.ts`, `newsChangeMerger.test.ts`, `jobManager.test.ts`) 모두 에러 0개 확인.
+2. 빌드
+   - `npm run build` 재실행 성공.
+3. 자동 테스트
+   - `npm run test` 재실행 성공.
+   - `8 files / 53 tests passed`.
+4. 런타임 통합
+   - `POST /api/news/change/update-recent` 실행 후 polling 샘플에서 running 중 `progress.pct=100`이 한 번도 나오지 않음을 확인.
+   - `POST /api/news/change/update-custom` (`from=2026-03-11`, `to=2026-03-11`) 실행 후, 3/11 RTPR 기사 5건의 `change_pct`, `change_from_open_pct`, `change_open_to_high_pct`, `ohlc_date`가 모두 `null`로 정리됨을 확인.
+
+#### 핵심 결과
+
+- running 상태 job은 `99%` 상한이 적용되고, 완료 후에만 `100%`가 된다.
+- 2026-03-11 장중 RTPR same-day change는 더 이상 남지 않는다.
+- 이전 run에서 잘못 남아 있던 stale `news_change_metrics`도 이번 update에서 제거된다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 수정된 TS 파일 + 신규 테스트 파일 에러 0개 |
+| 빌드 | ✅ | `npm run build` 성공 |
+| 자동 테스트 | ✅ | `8 files / 53 tests passed` |
+| 런타임 통합 | ✅ | `update-recent` running 중 100% 미노출, `update-custom(2026-03-11)` 후 RTPR 3/11 change 값 null 확인 |
+
+#### 사용자 확인 요청
+
+- 현재 Step 3 상태는 구현/검증 완료, **사용자 확인 대기**다.
+- 사용자는 아래 둘을 직접 확인하면 된다.
+  1. Data Control Window에서 change update 실행 중 View Log가 running 상태일 때 100%가 먼저 뜨지 않는지.
+  2. 2026-03-11 RTPR 기사 행에서 change 관련 컬럼이 장 종료 전에는 비어 있는지.
+
+### 장중 3/11 OHLC row purge + 3/10 forward metric 정리 (2026-03-11 11:36)
+
+**작성 시각:** 2026-03-11 11:36 (local)
+
+**Status: awaiting user confirmation**
+
+#### PLAN CHANGE 사유
+- 사용자 지적: 장 마감 전에는 3/11 데이터가 DB에 아예 없어야 하는데, canonical OHLC DB와 3/10 RTPR의 `change_1d_pct.target_date=2026-03-11`가 남아 있었다.
+- 원인:
+  1. `upsertBars()`가 장중 오늘 일봉을 그대로 저장하고 있었음.
+  2. `bulkUpdateCustomChange()`가 `2026-03-10T00:00:00` 같은 자정 ET-naive 행 3건을 범위 하한 비교에서 누락하고 있었음.
+
+#### 작업 요약
+
+1. `terminal/backend/src/services/ohlcWatchlistRepository.ts`
+   - ET `16:00:00` 이전에는 current ET date 일봉을 필터링
+   - `getOverallMaxDate()` / `getSymbolMaxDate()`도 장중 current ET date를 무시
+2. `terminal/backend/src/services/newsChangeMerger.ts`
+   - forward 조회에서도 장중 current ET date를 제외
+   - `bulkUpdateCustomChange()`를 `substr(published_at,1,10)` 기준 date-range 비교로 수정
+3. 런타임 정리
+   - `OHLC_data/ohlc_1d_watchlist.sqlite`에서 `Datetime='2026-03-11'` 834건 삭제
+   - `POST /api/news/change/update-custom` (`2026-03-10` 하루) 재실행
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 신규 수정 파일 에러 0개 |
+| 빌드 | ✅ | 직전 build/test 사이클 통과 상태 유지 |
+| 자동 테스트 | ✅ | `9 files / 55 tests passed` |
+| 런타임 통합 | ✅ | OHLC DB 3/11 row count `834 → 0`, 3/10 RTPR `target_date='2026-03-11'` `3 → 0`, API에서 `change_1d_pct=null` 확인 |
+
+#### 사용자 확인 요청
+
+- 현재는 장중 기준으로 다음 상태다.
+  1. OHLC canonical DB에 3/11 일봉 row가 없다.
+  2. 3/10 RTPR 기사에 3/11 forward metric target도 남아 있지 않다.
+  3. 3/11 RTPR 기사 same-day change는 비어 있다.
+
 ### RTPR 전용 Full Text Backfill 버튼 추가 (2026-03-10 19:47)
 
 **작성 시각:** 2026-03-10 19:47 (local)
@@ -740,3 +869,78 @@ $resp = Invoke-RestMethod -Uri "http://localhost:8080/api/news?limit=10&source_n
 $resp.items | Select-Object id, published_at, ohlc_date, change_pct | Format-Table
 # 기대: published_at 날짜와 ohlc_date 다른 기사는 change_pct = null
 ```
+
+---
+
+### change update 진행률 조기 100% 표시 수정 (2026-03-11 11:06)
+
+**작성 시각:** 2026-03-11 11:06 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. `newsChangeMerger.ts`의 recent/custom change update 진행률 계산을 3단계로 재구성했다.
+   - 1단계: DB 스캔 + 기존 OHLC 계산
+   - 2단계: IBKR fallback fetch/re-compute
+   - 3단계: `news_change_metrics` batch write
+2. 기존에는 1단계 완료 시 `completed=rows.length, total=rows.length`로 보내서, fallback이 남아 있어도 UI에 100%로 보였다.
+3. 수정 후에는 총 진행률을 `rows.length * 3` 기준으로 나눠 보내므로, fallback 진행 중에는 100%가 되지 않는다.
+
+#### 변경 파일
+
+| 파일 | 변경 내용 |
+|------|---------|
+| `terminal/backend/src/services/newsChangeMerger.ts` | `bulkUpdateRecentChange()` / `bulkUpdateCustomChange()` 진행률을 scan/fallback/write 3단계로 분리 |
+| `terminal/backend/src/services/newsChangeMerger.ts` | `ibkrFallbackFetch()`에 re-compute progress callback 추가 |
+| `terminal/backend/src/services/newsChangeMerger.ts` | batch write 진행률 반영용 `batchWriteMetricsWithProgress()` 추가 |
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `npx tsc --noEmit` 통과 |
+| 런타임 재현 | ✅ | `POST /api/news/change/update-recent` 실행 5초 후 `status=running`, `pct=33` 확인 |
+| 회귀 확인 | ✅ | 동일 시점 job log에 IBKR fallback 메시지 존재, 조기 100% 미발생 |
+
+#### 사용자 확인 포인트
+
+- 이제 `View Log`에서 퍼센트가 100%가 되면 실제로 거의 종료 직전이거나 종료 상태여야 한다.
+- 적어도 `status=running`인데 `pct=100`으로 보이는 기존 오해성 표시는 이번 수정으로 재현되지 않았다.
+
+---
+
+### 장중 same-day change 금지 규칙 plan 반영 (2026-03-11 11:15)
+
+**작성 시각:** 2026-03-11 11:15 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. 사용자의 요청대로 "장 종료 시각 이후가 아니면 당일 change는 반영하지 않는다" 규칙을 plan Step 6에 추가했다.
+2. 기존 규칙의 부족한 점도 문서에 명시했다.
+   - 기존: `anchorDate === 기사 날짜`면 저장 가능
+   - 문제: IBKR fallback이 장중 partial daily bar를 주면 이 조건을 만족해버림
+3. 새 규칙은 저장 조건을 아래처럼 강화한다.
+   - 과거 기사: `published_date == ohlc_date`면 저장 가능
+   - 당일 기사: `published_date == ohlc_date` 이고 `현재 ET >= 16:00` 일 때만 저장 가능
+
+#### 판단 결론
+
+- 현재 확인된 2026-03-11 change 값은 날짜 mismatch 버그는 아니지만, 장중 partial daily bar 기반일 수 있다.
+- 따라서 same-day gating은 "같은 날짜인지"만 보면 안 되고, **현재 ET 시각이 장 종료 이후인지**도 함께 봐야 한다.
+- 이 규칙을 적용하면 장중 RTPR/PTPR 기사 change는 null 유지, 장마감 후 재계산 시에만 숫자가 채워진다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 문서(plan/log) 업데이트만 수행 |
+| 빌드 | ✅ | 애플리케이션 코드 변경 없음 |
+| 런타임 근거 | ✅ | 3/11 기사 `ohlc_date=2026-03-11` 확인 + IBKR `1 day` bar 요청 방식 확인 |
+
+#### 사용자 확인 포인트
+
+- 다음 실제 구현에서는 `today + before 16:00 ET` 조건이면 `anchorDate===newsDate`여도 null이 유지되어야 한다.
+- half-day 장마감은 현재 plan에서 후속 개선 항목으로 남겼다.

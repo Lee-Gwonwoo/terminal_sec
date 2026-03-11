@@ -5,7 +5,7 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { getDb } from "../db.js";
 import { fetchOhlcBatch } from "./ibkrOhlcBatchProvider.js";
-import { upsertBars } from "./ohlcWatchlistRepository.js";
+import { shouldExcludeCurrentEtDailyBar, upsertBars } from "./ohlcWatchlistRepository.js";
 
 /** Options for IBKR fallback when OHLC DB has no data for a ticker. */
 export interface IbkrFallbackOptions {
@@ -80,8 +80,11 @@ async function getOhlcAnchorAndForwards(
   date: string,
   maxForward = 22,
 ): Promise<{ anchor: OhlcRow; prev: OhlcRow | null; forwards: OhlcRow[] } | null> {
+  const currentEtDate = getCurrentEtParts().date;
+  const excludeCurrentEt = shouldExcludeCurrentEtDailyBar(currentEtDate);
   const anchor = await getOhlcCloseOnOrBefore(symbol, date);
   if (!anchor) return null;
+  if (excludeCurrentEt && anchor.Datetime === currentEtDate) return null;
 
   const db = await getOhlcConn();
   const prev = await db.get<OhlcRow>(
@@ -94,10 +97,12 @@ async function getOhlcAnchorAndForwards(
 
   const forwards = await db.all<OhlcRow[]>(
     `SELECT Symbol, Datetime, Open, High, Close FROM ohlc_1d
-     WHERE Symbol = ? AND Datetime > ?
+     WHERE Symbol = ? AND Datetime > ? ${excludeCurrentEt ? "AND Datetime < ?" : ""}
      ORDER BY Datetime ASC
      LIMIT ?`,
-    [symbol, anchor.Datetime, maxForward],
+    excludeCurrentEt
+      ? [symbol, anchor.Datetime, currentEtDate, maxForward]
+      : [symbol, anchor.Datetime, maxForward],
   );
 
   return { anchor, prev, forwards };
@@ -109,6 +114,67 @@ function pctChange(current: number, reference: number): number | null {
 }
 
 const now = () => new Date().toISOString();
+
+const ET_TIME_ZONE = "America/New_York";
+const ET_MARKET_CLOSE_TIME = "16:00:00";
+const ISO_WITH_TIMEZONE_RE = /(Z|[+-]\d{2}:\d{2})$/i;
+const ISO_NAIVE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
+
+export type EtDateTimeParts = {
+  date: string;
+  time: string;
+};
+
+function formatEtParts(value: Date): EtDateTimeParts {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: ET_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  const parts = formatter.formatToParts(value);
+  const partValue = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "00";
+  return {
+    date: `${partValue("year")}-${partValue("month")}-${partValue("day")}`,
+    time: `${partValue("hour")}:${partValue("minute")}:${partValue("second")}`,
+  };
+}
+
+export function getCurrentEtParts(nowDate = new Date()): EtDateTimeParts {
+  return formatEtParts(nowDate);
+}
+
+export function getPublishedAtEtParts(publishedAt: string): EtDateTimeParts {
+  if (ISO_NAIVE_RE.test(publishedAt) && !ISO_WITH_TIMEZONE_RE.test(publishedAt)) {
+    return {
+      date: publishedAt.slice(0, 10),
+      time: publishedAt.slice(11, 19),
+    };
+  }
+
+  const parsed = new Date(publishedAt);
+  if (!Number.isNaN(parsed.getTime())) {
+    return formatEtParts(parsed);
+  }
+
+  return {
+    date: publishedAt.slice(0, 10),
+    time: publishedAt.length >= 19 ? publishedAt.slice(11, 19) : "00:00:00",
+  };
+}
+
+export function shouldDeferSameDayChangeUntilMarketClose(
+  publishedAt: string,
+  nowDate = new Date(),
+): boolean {
+  const newsEt = getPublishedAtEtParts(publishedAt);
+  const currentEt = getCurrentEtParts(nowDate);
+  return newsEt.date === currentEt.date && currentEt.time < ET_MARKET_CLOSE_TIME;
+}
 
 // ---------- Concurrency pool for parallel item processing ----------
 
@@ -146,6 +212,17 @@ ON CONFLICT(news_id, metric_key) DO UPDATE SET
   target_date = excluded.target_date,
   forward_trading_days = excluded.forward_trading_days,
   computed_at = excluded.computed_at`;
+
+const STANDARD_METRIC_KEYS = [
+  "change_pct",
+  "change_from_open_pct",
+  "change_open_to_high_pct",
+  "change_1d_pct",
+  "change_3d_pct",
+  "change_7d_pct",
+  "change_14d_pct",
+  "change_30d_pct",
+] as const;
 
 // ---------- Standard metrics for one news item (forward-looking) ----------
 
@@ -194,7 +271,7 @@ async function computeMetricsForItem(
   ticker: string,
   publishedAt: string,
 ): Promise<ComputedMetrics | null> {
-  const newsDate = publishedAt.slice(0, 10);
+  const { date: newsDate } = getPublishedAtEtParts(publishedAt);
   const result = await getOhlcAnchorAndForwards(ticker, newsDate);
   if (!result) return null;
 
@@ -205,6 +282,9 @@ async function computeMetricsForItem(
   // If anchor is from a past date (e.g. weekend/holiday news, or today's bar not yet available),
   // return null so no misleading change data is written.
   if (anchorDate !== newsDate) return null;
+
+  // Same-day metrics remain empty until the ET market close has passed.
+  if (shouldDeferSameDayChangeUntilMarketClose(publishedAt)) return null;
 
   const prevClose = prev?.Close ?? null;
   const fwd1  = forwards[0]  ?? null;
@@ -242,6 +322,7 @@ async function ibkrFallbackFetch(
   missingItems: Array<{ newsId: string; ticker: string; publishedAt: string }>,
   ibkr: IbkrFallbackOptions,
   onLog?: (msg: string) => void,
+  onProgress?: (completed: number, total: number) => void,
 ): Promise<ComputedMetrics[]> {
   if (missingItems.length === 0) return [];
 
@@ -294,9 +375,12 @@ async function ibkrFallbackFetch(
 
   // Re-compute metrics for the missing items (now OHLC DB should have data)
   const recomputed: ComputedMetrics[] = [];
+  let recomputedCount = 0;
   for (const item of missingItems) {
     const m = await computeMetricsForItem(item.newsId, item.ticker, item.publishedAt);
     if (m) recomputed.push(m);
+    recomputedCount++;
+    onProgress?.(recomputedCount, missingItems.length);
   }
   onLog?.(`[IBKR fallback] re-computed ${recomputed.length}/${missingItems.length} items`);
   return recomputed;
@@ -322,6 +406,64 @@ async function batchWriteMetrics(metrics: ComputedMetrics[]): Promise<void> {
           m.newsId, "change_14d_pct", m.change14d, m.ticker, m.prevDate, m.fwd10Date, 10, ts,
           m.newsId, "change_30d_pct", m.change30d, m.ticker, m.prevDate, m.fwd22Date, 22, ts,
         ]);
+      }
+      await db.run("COMMIT");
+    } catch (e) {
+      await db.run("ROLLBACK");
+      throw e;
+    }
+  }
+}
+
+async function deleteMetricsForNewsIds(newsIds: string[]): Promise<void> {
+  if (newsIds.length === 0) return;
+
+  const db = getDb();
+  const NEWS_CHUNK_SIZE = 200;
+  const metricPlaceholders = STANDARD_METRIC_KEYS.map(() => "?").join(",");
+
+  for (let start = 0; start < newsIds.length; start += NEWS_CHUNK_SIZE) {
+    const chunk = newsIds.slice(start, start + NEWS_CHUNK_SIZE);
+    const newsPlaceholders = chunk.map(() => "?").join(",");
+    await db.run(
+      `DELETE FROM news_change_metrics
+       WHERE news_id IN (${newsPlaceholders})
+         AND metric_key IN (${metricPlaceholders})`,
+      [...chunk, ...STANDARD_METRIC_KEYS],
+    );
+  }
+}
+
+async function batchWriteMetricsWithProgress(
+  metrics: ComputedMetrics[],
+  onProgress?: (completed: number, total: number) => void,
+): Promise<void> {
+  if (metrics.length === 0) {
+    onProgress?.(0, 0);
+    return;
+  }
+
+  const db = getDb();
+  const ts = now();
+  let written = 0;
+
+  for (let start = 0; start < metrics.length; start += WRITE_CHUNK_SIZE) {
+    const chunk = metrics.slice(start, start + WRITE_CHUNK_SIZE);
+    await db.run("BEGIN IMMEDIATE");
+    try {
+      for (const m of chunk) {
+        await db.run(UPSERT_METRICS_SQL, [
+          m.newsId, "change_pct",              m.changePct,        m.ticker, m.prevDate,   m.anchorDate, 0,  ts,
+          m.newsId, "change_from_open_pct",    m.changeFromOpen,   m.ticker, m.anchorDate, m.anchorDate, 0,  ts,
+          m.newsId, "change_open_to_high_pct", m.changeOpenToHigh, m.ticker, m.anchorDate, m.anchorDate, 0,  ts,
+          m.newsId, "change_1d_pct",  m.change1d,  m.ticker, m.prevDate, m.fwd1Date,  1,  ts,
+          m.newsId, "change_3d_pct",  m.change3d,  m.ticker, m.prevDate, m.fwd3Date,  3,  ts,
+          m.newsId, "change_7d_pct",  m.change7d,  m.ticker, m.prevDate, m.fwd5Date,  5,  ts,
+          m.newsId, "change_14d_pct", m.change14d, m.ticker, m.prevDate, m.fwd10Date, 10, ts,
+          m.newsId, "change_30d_pct", m.change30d, m.ticker, m.prevDate, m.fwd22Date, 22, ts,
+        ]);
+        written++;
+        onProgress?.(written, metrics.length);
       }
       await db.run("COMMIT");
     } catch (e) {
@@ -384,31 +526,48 @@ export async function bulkUpdateRecentChange(
 
   const computed: ComputedMetrics[] = [];
   const missingItems: Array<{ newsId: string; ticker: string; publishedAt: string }> = [];
+  const invalidMetricNewsIds = new Set<string>();
   let skipped = 0;
   let completed = 0;
+  const totalUnits = Math.max(rows.length * 3, 1);
+  const scanPhaseUnits = rows.length;
+  const fallbackPhaseBase = scanPhaseUnits;
+  const writePhaseBase = scanPhaseUnits * 2;
 
   // Phase 1: parallel OHLC reads + compute from DB
   await poolRun(rows, concurrency, async (row) => {
     const tickers = row.tickers_csv.split(",").map(t => t.trim()).filter(Boolean);
     const ticker = tickers[0];
-    if (!ticker) { skipped++; } else {
+    if (!ticker) { skipped++; invalidMetricNewsIds.add(row.id); } else {
       const m = await computeMetricsForItem(row.id, ticker, row.published_at);
       if (m) { computed.push(m); } else {
+        invalidMetricNewsIds.add(row.id);
         missingItems.push({ newsId: row.id, ticker, publishedAt: row.published_at });
       }
     }
     completed++;
-    if (onProgress && completed % 50 === 0) onProgress(completed, rows.length);
+    if (onProgress && (completed % 50 === 0 || completed === rows.length)) {
+      onProgress(completed, totalUnits);
+    }
   }, isCancelled);
 
   if (isCancelled?.()) return { updated: computed.length, skipped };
 
   // Phase 1.5: IBKR fallback for missing tickers
   if (ibkrFallback?.enabled && missingItems.length > 0) {
+    onProgress?.(fallbackPhaseBase, totalUnits);
     onLog?.(`[change] ${missingItems.length} items missing OHLC, starting IBKR fallback...`);
     try {
-      const fallbackMetrics = await ibkrFallbackFetch(missingItems, ibkrFallback, onLog);
+      const fallbackMetrics = await ibkrFallbackFetch(missingItems, ibkrFallback, onLog, (fallbackDone, fallbackTotal) => {
+        const phaseProgress = fallbackTotal > 0
+          ? Math.floor((fallbackDone / fallbackTotal) * scanPhaseUnits)
+          : scanPhaseUnits;
+        onProgress?.(fallbackPhaseBase + phaseProgress, totalUnits);
+      });
       computed.push(...fallbackMetrics);
+      for (const metric of fallbackMetrics) {
+        invalidMetricNewsIds.delete(metric.newsId);
+      }
       skipped += missingItems.length - fallbackMetrics.length;
       onLog?.(`[change] IBKR fallback done: ${fallbackMetrics.length} computed, ${missingItems.length - fallbackMetrics.length} still missing`);
     } catch (err) {
@@ -419,12 +578,21 @@ export async function bulkUpdateRecentChange(
     skipped += missingItems.length;
   }
 
+  onProgress?.(writePhaseBase, totalUnits);
+
   if (isCancelled?.()) return { updated: computed.length, skipped };
 
-  // Phase 2: batch write
-  await batchWriteMetrics(computed);
+  await deleteMetricsForNewsIds([...invalidMetricNewsIds]);
 
-  if (onProgress) onProgress(rows.length, rows.length);
+  // Phase 2: batch write
+  await batchWriteMetricsWithProgress(computed, (written, total) => {
+    const phaseProgress = total > 0
+      ? Math.floor((written / total) * scanPhaseUnits)
+      : scanPhaseUnits;
+    onProgress?.(writePhaseBase + phaseProgress, totalUnits);
+  });
+
+  onProgress?.(totalUnits, totalUnits);
   return { updated: computed.length, skipped };
 }
 
@@ -442,43 +610,57 @@ export async function bulkUpdateCustomChange(
   ibkrFallback?: IbkrFallbackOptions,
   onLog?: (msg: string) => void,
 ): Promise<{ updated: number; skipped: number }> {
-  const fromIso = `${from}T00:00:00.000Z`;
-  const toIso = `${to}T23:59:59.999Z`;
-
   const rows = await getDb().all<{ id: string; tickers_csv: string; published_at: string }[]>(
     `SELECT id, tickers_csv, published_at FROM news_items
-     WHERE published_at >= ? AND published_at <= ?
+     WHERE substr(published_at, 1, 10) >= ? AND substr(published_at, 1, 10) <= ?
      ORDER BY published_at DESC`,
-    [fromIso, toIso],
+    [from, to],
   );
 
   const computed: ComputedMetrics[] = [];
   const missingItems: Array<{ newsId: string; ticker: string; publishedAt: string }> = [];
+  const invalidMetricNewsIds = new Set<string>();
   let skipped = 0;
   let completed = 0;
+  const totalUnits = Math.max(rows.length * 3, 1);
+  const scanPhaseUnits = rows.length;
+  const fallbackPhaseBase = scanPhaseUnits;
+  const writePhaseBase = scanPhaseUnits * 2;
 
   // Phase 1: parallel OHLC reads + compute from DB
   await poolRun(rows, concurrency, async (row) => {
     const tickers = row.tickers_csv.split(",").map(t => t.trim()).filter(Boolean);
     const ticker = tickers[0];
-    if (!ticker) { skipped++; } else {
+    if (!ticker) { skipped++; invalidMetricNewsIds.add(row.id); } else {
       const m = await computeMetricsForItem(row.id, ticker, row.published_at);
       if (m) { computed.push(m); } else {
+        invalidMetricNewsIds.add(row.id);
         missingItems.push({ newsId: row.id, ticker, publishedAt: row.published_at });
       }
     }
     completed++;
-    if (onProgress && completed % 50 === 0) onProgress(completed, rows.length);
+    if (onProgress && (completed % 50 === 0 || completed === rows.length)) {
+      onProgress(completed, totalUnits);
+    }
   }, isCancelled);
 
   if (isCancelled?.()) return { updated: computed.length, skipped };
 
   // Phase 1.5: IBKR fallback for missing tickers
   if (ibkrFallback?.enabled && missingItems.length > 0) {
+    onProgress?.(fallbackPhaseBase, totalUnits);
     onLog?.(`[change] ${missingItems.length} items missing OHLC, starting IBKR fallback...`);
     try {
-      const fallbackMetrics = await ibkrFallbackFetch(missingItems, ibkrFallback, onLog);
+      const fallbackMetrics = await ibkrFallbackFetch(missingItems, ibkrFallback, onLog, (fallbackDone, fallbackTotal) => {
+        const phaseProgress = fallbackTotal > 0
+          ? Math.floor((fallbackDone / fallbackTotal) * scanPhaseUnits)
+          : scanPhaseUnits;
+        onProgress?.(fallbackPhaseBase + phaseProgress, totalUnits);
+      });
       computed.push(...fallbackMetrics);
+      for (const metric of fallbackMetrics) {
+        invalidMetricNewsIds.delete(metric.newsId);
+      }
       skipped += missingItems.length - fallbackMetrics.length;
       onLog?.(`[change] IBKR fallback done: ${fallbackMetrics.length} computed, ${missingItems.length - fallbackMetrics.length} still missing`);
     } catch (err) {
@@ -489,11 +671,20 @@ export async function bulkUpdateCustomChange(
     skipped += missingItems.length;
   }
 
+  onProgress?.(writePhaseBase, totalUnits);
+
   if (isCancelled?.()) return { updated: computed.length, skipped };
 
-  // Phase 2: batch write
-  await batchWriteMetrics(computed);
+  await deleteMetricsForNewsIds([...invalidMetricNewsIds]);
 
-  if (onProgress) onProgress(rows.length, rows.length);
+  // Phase 2: batch write
+  await batchWriteMetricsWithProgress(computed, (written, total) => {
+    const phaseProgress = total > 0
+      ? Math.floor((written / total) * scanPhaseUnits)
+      : scanPhaseUnits;
+    onProgress?.(writePhaseBase + phaseProgress, totalUnits);
+  });
+
+  onProgress?.(totalUnits, totalUnits);
   return { updated: computed.length, skipped };
 }

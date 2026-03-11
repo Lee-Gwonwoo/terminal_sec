@@ -26,6 +26,42 @@ function resolveOhlcDbPath(): string {
 
 let ohlcDb: Database<sqlite3.Database, sqlite3.Statement> | null = null;
 
+const ET_TIME_ZONE = "America/New_York";
+const ET_MARKET_CLOSE_TIME = "16:00:00";
+
+type EtParts = {
+  date: string;
+  time: string;
+};
+
+function getEtParts(nowDate = new Date()): EtParts {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: ET_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  const parts = formatter.formatToParts(nowDate);
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "00";
+  return {
+    date: `${get("year")}-${get("month")}-${get("day")}`,
+    time: `${get("hour")}:${get("minute")}:${get("second")}`,
+  };
+}
+
+export function shouldExcludeCurrentEtDailyBar(date: string, nowDate = new Date()): boolean {
+  const etNow = getEtParts(nowDate);
+  return date === etNow.date && etNow.time < ET_MARKET_CLOSE_TIME;
+}
+
+export function filterStableDailyBars(bars: OhlcBar[], nowDate = new Date()): OhlcBar[] {
+  return bars.filter((bar) => !shouldExcludeCurrentEtDailyBar(bar.Datetime, nowDate));
+}
+
 export async function getOhlcDb(): Promise<Database<sqlite3.Database, sqlite3.Statement>> {
   if (ohlcDb) return ohlcDb;
   const dbPath = resolveOhlcDbPath();
@@ -43,8 +79,12 @@ export function getOhlcDbPath(): string {
 /** MAX(Datetime) across all symbols. Returns "YYYY-MM-DD" or null. */
 export async function getOverallMaxDate(): Promise<string | null> {
   const db = await getOhlcDb();
+  const etNow = getEtParts();
   const row = await db.get<{ maxDate: string | null }>(
-    `SELECT MAX(Datetime) AS maxDate FROM ohlc_1d`,
+    shouldExcludeCurrentEtDailyBar(etNow.date)
+      ? `SELECT MAX(Datetime) AS maxDate FROM ohlc_1d WHERE Datetime < ?`
+      : `SELECT MAX(Datetime) AS maxDate FROM ohlc_1d`,
+    shouldExcludeCurrentEtDailyBar(etNow.date) ? [etNow.date] : [],
   );
   return row?.maxDate ?? null;
 }
@@ -52,9 +92,12 @@ export async function getOverallMaxDate(): Promise<string | null> {
 /** MAX(Datetime) for a single symbol. */
 export async function getSymbolMaxDate(symbol: string): Promise<string | null> {
   const db = await getOhlcDb();
+  const etNow = getEtParts();
   const row = await db.get<{ maxDate: string | null }>(
-    `SELECT MAX(Datetime) AS maxDate FROM ohlc_1d WHERE Symbol = ?`,
-    [symbol],
+    shouldExcludeCurrentEtDailyBar(etNow.date)
+      ? `SELECT MAX(Datetime) AS maxDate FROM ohlc_1d WHERE Symbol = ? AND Datetime < ?`
+      : `SELECT MAX(Datetime) AS maxDate FROM ohlc_1d WHERE Symbol = ?`,
+    shouldExcludeCurrentEtDailyBar(etNow.date) ? [symbol, etNow.date] : [symbol],
   );
   return row?.maxDate ?? null;
 }
@@ -72,7 +115,8 @@ export interface OhlcBar {
 
 /** Upsert bars for one symbol. Returns count of rows affected. */
 export async function upsertBars(symbol: string, bars: OhlcBar[]): Promise<number> {
-  if (bars.length === 0) return 0;
+  const stableBars = filterStableDailyBars(bars);
+  if (stableBars.length === 0) return 0;
   const db = await getOhlcDb();
   let count = 0;
   await db.run("BEGIN");
@@ -87,7 +131,7 @@ export async function upsertBars(symbol: string, bars: OhlcBar[]): Promise<numbe
          Close = excluded.Close,
          Volume = excluded.Volume`,
     );
-    for (const bar of bars) {
+    for (const bar of stableBars) {
       await stmt.run(symbol, bar.Datetime, bar.Open, bar.High, bar.Low, bar.Close, bar.Volume);
       count++;
     }
@@ -98,6 +142,12 @@ export async function upsertBars(symbol: string, bars: OhlcBar[]): Promise<numbe
     throw e;
   }
   return count;
+}
+
+export async function deleteBarsForDate(date: string): Promise<number> {
+  const db = await getOhlcDb();
+  const result = await db.run(`DELETE FROM ohlc_1d WHERE Datetime = ?`, [date]);
+  return result.changes ?? 0;
 }
 
 // ---------- 7-2: ensureDerivedColumns() ----------

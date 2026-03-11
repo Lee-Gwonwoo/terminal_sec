@@ -543,6 +543,8 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - Phase 1: OHLC DB에서 데이터 읽기 → 있으면 바로 계산
 - Phase 1.5 (IBKR fallback): OHLC DB에 없는 티커는 IBKR에서 batch fetch → DB에 upsert → 재계산
 - Phase 2: 계산 결과 일괄 저장
+- 당일 뉴스는 **ET 시장일** 기준으로 판정하며, ET `16:00:00` 이전에는 `[][][]change_pct[][][]`, `[][][]change_from_open_pct[][][]`, `[][][]change_open_to_high_pct[][][]`를 비워 둔다.
+- 재계산 결과 조건을 만족하지 못한 뉴스는 기존 `news_change_metrics` 표준 8개 metric도 삭제하여 stale 값을 남기지 않는다.
 - 응답 컬럼: `[][][]jobId[][][]`
 
 ### `POST /api/news/change/update-custom`
@@ -1293,6 +1295,10 @@ query:
 
 - 최근 7일 뉴스 전체에 대해 표준 metric 재계산
 - OHLC DB에 데이터 없는 티커는 IBKR에서 batch fetch 후 계산 (Phase 1.5)
+- 뉴스 시각은 source별 원본 포맷과 무관하게 ET 시장일로 해석한다. timezone-aware timestamp는 ET로 변환하고, RTPR처럼 ET-naive timestamp는 이미 ET로 간주한다.
+- 현재 ET 시장일과 같은 뉴스는 ET `16:00:00` 이전이면 same-day change metric을 저장하지 않는다.
+- 이번 재계산에서 metric을 다시 계산하지 못한 뉴스는 기존 표준 metric도 함께 삭제한다.
+- ET `16:00:00` 이전에는 canonical OHLC DB(`OHLC_data/ohlc_1d_watchlist.sqlite`)에도 당일 일봉을 upsert하지 않는다. 따라서 전일 기사의 `[][][]change_1d_pct[][][]`도 장중에는 오늘 bar를 참조하지 않는다.
 - 즉시 `jobId` 반환
 - 완료 시 `update_status.news_change_recent` 갱신
 
@@ -1331,6 +1337,7 @@ query:
 
 - 메모리 기반이므로 서버 재시작 시 사라진다.
 - 30분 cleanup 정책이 적용된다.
+- `status=running` 동안 `[][][]progress.pct[][][]`는 최대 99까지만 올라간다. `100`은 `completeJob()`으로 최종 완료 처리된 뒤에만 노출된다.
 
 ## Ticker CSV API
 
