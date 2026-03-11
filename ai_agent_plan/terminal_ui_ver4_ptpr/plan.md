@@ -656,3 +656,127 @@ Invoke-RestMethod -Uri 'http://localhost:8080/api/news?limit=20&source_names=RTP
 Invoke-RestMethod -Uri 'http://localhost:8080/api/news/fulltext/<newsId>'
 ```
 사용자 확인 필요: **예**
+
+#### ⬜ Step 11 — RTPR HTML 저장 + plain text 표시 + 원문 링크 추출 (개정 2026-03-10)
+
+> **설계 원칙 (사용자 결정):**
+> - `body_html_raw` 같은 별도 필드/테이블은 만들지 않는다.
+> - **`news_fulltext.full_text`** 에 raw HTML을 저장한다 (기존 plain text는 교체).
+> - `news_items.body`는 plain text를 유지한다 (UI 리스트/검색용).
+> - UI에서 fulltext를 보여줄 때 서버 측에서 `htmlToPlainText()`로 변환 후 반환한다.
+> - 추출한 원문 링크는 `news_items.origin_url` 컬럼에 저장한다 (dedup용 `url`은 건드리지 않음).
+
+##### 저장 모델 요약
+
+| 테이블 | 컬럼 | 내용 | 변경 |
+|--------|------|------|------|
+| `news_items` | `body` | RTPR `article_body` (plain text) | 변경 없음 |
+| `news_items` | `url` | synthetic `rtpr://{TICKER}/{created}` (dedup 키) | 변경 없음 |
+| `news_items` | **`origin_url`** | 원문 사이트 링크 (publisher footer에서 추출) | **신규 컬럼** |
+| `news_fulltext` | `full_text` | RTPR `article_body_html` (raw HTML) | **기존 plain text → HTML 교체** |
+
+##### 데이터 흐름
+
+```
+RTPR API 응답
+  ├─ article_body       → news_items.body       (plain text, 기존과 동일)
+  ├─ article_body_html  → news_fulltext.full_text (raw HTML, 기존 plain text 대체)
+  └─ HTML footer 파싱   → news_items.origin_url  (원문 링크)
+
+UI 조회 시:
+  news list       → news_items.body (plain text 그대로)
+  fulltext detail → news_fulltext.full_text → htmlToPlainText() → 반환
+  origin link     → news_items.origin_url (있으면 표시)
+```
+
+##### 적용 범위 (모든 PTPR 버튼)
+
+| 버튼 | 경로 | HTML 저장 | 비고 |
+|------|------|-----------|------|
+| PTPR Update (recent) | `POST /api/news/pull-rtpr` mode=recent | ✅ ingest 시 즉시 | 새 기사 fetch 시 `article_body_html` 함께 저장 |
+| PTPR Update (custom) | `POST /api/news/pull-rtpr` mode=custom | ✅ ingest 시 즉시 | recent와 동일 |
+| FT RTPR (backfill) | `POST /api/news/fulltext/backfill-rtpr` | ✅ API 재호출로 HTML 확보 | 이미 저장된 RTPR 기사의 HTML 백필 |
+
+##### 세부 단계
+
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 11-1 | `news_items.origin_url TEXT` 컬럼 추가 (마이그레이션) | `db.ts` | `PRAGMA table_info(news_items)` 에 `origin_url` 확인 | ⬜ |
+| 11-2 | `mapArticle`에서 `article_body_html`도 반환하도록 provider 수정 | `ptprNewsProvider.ts` | `bodyHtml` 필드가 mapped item에 포함 확인 | ⬜ |
+| 11-3 | RTPR ingest(recent/custom)에서 `news_fulltext.full_text`에 HTML 저장 | `server.ts`, `fulltextRepository.ts` | ingest 후 `news_fulltext.full_text`에 HTML 태그 존재 확인 | ⬜ |
+| 11-4 | FT RTPR backfill → RTPR API 재호출로 HTML 확보 + fulltext 교체 | `fulltextUpdateService.ts`, `ptprNewsProvider.ts` | backfill 후 기존 plain text가 HTML로 교체 확인 | ⬜ |
+| 11-5 | fulltext 조회 API에서 RTPR HTML → plain text 변환 후 반환 | `server.ts` (fulltext GET 경로) | API 응답에 HTML 태그 없이 plain text만 오는지 확인 | ⬜ |
+| 11-6 | HTML footer에서 publisher별 원문 링크 추출 → `news_items.origin_url` 저장 | `ptprNewsProvider.ts` 또는 별도 extractor | origin_url 컬럼에 유효한 URL 확인 | ⬜ |
+
+- `11-1` 목적: 원문 링크를 저장할 컬럼을 만든다.
+  - `ensureColumn("news_items", "origin_url", "TEXT")` — 기존 `ensureColumn` 패턴 사용.
+  - `url`(synthetic dedup 키)과 `origin_url`(실제 뉴스 사이트 링크)은 역할이 다르므로 분리.
+  - 완료 조건: DB에 컬럼 존재, 기존 데이터 영향 없음.
+- `11-2` 목적: RTPR API 응답에서 `article_body_html`을 놓치지 않고 파이프라인에 전달한다.
+  - `FinnhubMappedItem` 타입에 `bodyHtml?: string` optional 추가 또는 별도 리턴 구조.
+  - `mapArticle`에서 `article.article_body_html`을 매핑.
+  - `article_body_html`이 API에서 빈 문자열/undefined인 경우 `body`(plain text) fallback.
+  - 완료 조건: mapped item에 `bodyHtml` 필드가 존재하고 HTML 태그를 포함.
+- `11-3` 목적: PTPR Update(recent/custom) 시 `news_fulltext.full_text`에 raw HTML을 즉시 저장한다.
+  - 현재 Step 9에서 `article_body`(plain text)를 fulltext에 넣고 있음 → **HTML 우선 저장으로 변경**.
+  - `bodyHtml`이 있으면 HTML 저장, 없으면 plain text fallback.
+  - `extraction_note = 'rtpr-html-ingest'`로 마킹.
+  - 완료 조건: `SELECT full_text FROM news_fulltext WHERE news_id = ?` → HTML 태그 포함.
+  - 흔한 문제: Step 9 기존 로직과 충돌 → Step 9의 plain text 저장을 HTML 저장으로 교체.
+- `11-4` 목적: 이미 DB에 있는 RTPR 기사의 fulltext를 HTML로 교체(백필)한다.
+  - 현재 `runRtprBodyBackfill`은 `news_items.body`(plain text)를 fulltext에 복사 → **API 재호출로 HTML 확보로 변경**.
+  - 재호출 흐름: RTPR 기사의 ticker로 `GET /articles/{ticker}?limit=100` → title+created 매칭 → `article_body_html` 확보 → `news_fulltext.full_text` upsert.
+  - API 매칭 실패 시(기사가 너무 오래됨 등): plain text body fallback, `extraction_note = 'rtpr-html-backfill-fallback'`.
+  - `extraction_note = 'rtpr-html-backfill'`로 마킹.
+  - 완료 조건: backfill 후 `full_text`에 HTML 태그 존재.
+  - 흔한 문제: RTPR API는 최근 100건만 반환 → 오래된 기사는 HTML 확보 불가 → fallback 처리.
+- `11-5` 목적: UI에서 fulltext를 볼 때 HTML 태그가 그대로 보이지 않게 한다.
+  - `GET /api/news/fulltext/:newsId` 응답에서 `full_text`가 HTML이면 `htmlToPlainText()` 적용.
+  - 또는 응답에 `full_text_plain`과 `full_text_raw` 둘 다 반환 (향후 HTML 뷰어 확장 가능).
+  - `dangerouslySetInnerHTML` 사용 금지 — XSS 방지.
+  - 완료 조건: API 응답의 텍스트에 `<div>`, `<p>` 같은 태그 없음.
+- `11-6` 목적: HTML에서 publisher별 원문 링크를 추출해 `news_items.origin_url`에 저장한다.
+  - 이전 분석(2026-03-10)에서 확인된 publisher별 패턴:
+    - ACCESSWIRE: `View the original press release on accesswire.com: <URL>` (14/120)
+    - PR Newswire: `SOURCE <Company>` 이후 `https://www.prnewswire.com/...` (15-19/120)
+    - Newsfile Corp: `To view the source version of this press release, please visit https://www.newsfilecorp.com/...` (6/120)
+    - Business Wire: `https://www.businesswire.com/news/home/...` (2/120)
+    - Globe Newswire: tracker 링크만 있음 — canonical URL 추출 어려움 (34/120)
+  - 추출 시점: ingest 시(11-3과 함께) + backfill 시(11-4와 함께).
+  - `origin_url`이 추출 안 되면 NULL 유지 (강제로 넣지 않음).
+  - 완료 조건: ACCESSWIRE/PR Newswire/Newsfile/BW publisher의 기사에 `origin_url` 값 존재.
+
+##### Step 9 연동 변경
+
+> Step 9(RTPR update 시 fulltext 즉시 저장)는 현재 plain text를 `news_fulltext`에 넣고 있다.
+> Step 11 적용 후: **HTML 우선 저장**으로 변경되며, Step 9의 upsert 로직이 11-3으로 대체/통합된다.
+> Step 9 자체를 삭제하지는 않으나, 저장 내용이 plain text → HTML로 바뀐다.
+
+##### Step 10 연동 변경
+
+> Step 10(FT RTPR backfill 버튼)은 현재 `news_items.body`(plain text)를 fulltext에 복사한다.
+> Step 11 적용 후: **API 재호출로 HTML 확보**로 변경되며, Step 10의 backfill 로직이 11-4로 대체/통합된다.
+> FT RTPR 메뉴 버튼은 그대로 유지하되, 실행 시 API를 호출해 HTML을 가져오는 방식으로 변경.
+
+검증 훅:
+```powershell
+# 11-1: origin_url 컬럼 확인
+sqlite3 terminal/backend/backend/data/app.db "PRAGMA table_info(news_items);" | Select-String "origin_url"
+
+# 11-3: ingest 후 HTML 저장 확인
+$body = @{ mode = 'recent'; tickerConcurrency = 2 } | ConvertTo-Json
+$resp = Invoke-RestMethod -Uri 'http://localhost:8080/api/news/pull-rtpr' -Method Post -ContentType 'application/json' -Body $body
+Start-Sleep 10
+# 최근 RTPR 기사 ID 조회 후 fulltext 확인
+sqlite3 terminal/backend/backend/data/app.db "SELECT nf.full_text FROM news_fulltext nf JOIN news_items ni ON ni.id = nf.news_id WHERE ni.source = 'RTPR' LIMIT 1;" | Select-String "<"
+
+# 11-5: API 응답에서 plain text 확인
+$items = Invoke-RestMethod -Uri 'http://localhost:8080/api/news?limit=5&source_names=RTPR'
+$ft = Invoke-RestMethod -Uri "http://localhost:8080/api/news/fulltext/$($items.items[0].id)"
+# full_text 에 HTML 태그가 없어야 함
+if ($ft.fullText -match '<(div|p|span|br|table|a )') { "FAIL: HTML in response" } else { "OK: plain text" }
+
+# 11-6: origin_url 확인
+sqlite3 terminal/backend/backend/data/app.db "SELECT id, origin_url FROM news_items WHERE source = 'RTPR' AND origin_url IS NOT NULL LIMIT 5;"
+```
+사용자 확인 필요: **예**

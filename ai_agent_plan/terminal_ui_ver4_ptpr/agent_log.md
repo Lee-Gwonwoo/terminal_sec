@@ -396,6 +396,74 @@
 
 - 이제 새로고침하면 News Feed의 search/ticker 입력 기본값은 빈 상태로 시작한다.
 - 사용자 확인 전까지 이 항목은 `⏳`로 유지한다.
+
+### RTPR raw HTML 저장 전략 검토용 plan 추가 (2026-03-10 20:10)
+
+**작성 시각:** 2026-03-10 20:10 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. 사용자가 요청한 방향에 맞춰 plan에 `Step 11 — RTPR raw HTML 저장 + UI plain text 표시 전략`을 추가했다.
+2. 설계 범위를 다음 4개로 분리했다.
+   - raw HTML 저장 위치 결정
+   - recent/custom 등 모든 PTPR update ingest 경로에 동일 저장 규칙 적용
+   - UI는 plain text만 표시
+   - publisher별 원문 링크 추출은 부가 메타데이터 단계로 분리
+3. 특히 기존 `news_items.url` synthetic dedup key는 유지하고, 원문 링크는 별도 필드로 저장해야 한다는 점을 plan에 명시했다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 문서 변경만 수행 |
+| 빌드 | ✅ | 코드 변경 없음 |
+| 자동 테스트 | ✅ | 코드 변경 없음 |
+| 런타임 통합 | ✅ | 현재 RTPR body/footer 패턴 조사 결과를 바탕으로 plan 반영 |
+
+#### 사용자 확인 요청
+
+- ~~현재는 설계/plan 단계만 추가했다.~~
+- ~~다음 구현 단계로 넘어가기 전, raw HTML 저장을 `body 대체`가 아니라 `body + raw_html 병행`으로 갈지 확인이 필요하다.~~
+- → **2026-03-10 20:25 사용자 결정 반영 완료** (아래 참고)
+
+### Step 11 plan 개정 — fulltext에 HTML 직접 저장 (2026-03-10 20:25)
+
+**작성 시각:** 2026-03-10 20:25 (local)
+
+**Status: awaiting user confirmation**
+
+#### 사용자 결정 사항
+
+1. `body_html_raw` 같은 별도 필드/테이블은 만들지 않는다.
+2. **`news_fulltext.full_text`에 raw HTML을 저장**한다 (기존 plain text 교체).
+3. `news_items.body`는 plain text 유지.
+4. UI fulltext 조회 시 서버에서 `htmlToPlainText()` 변환 후 반환.
+5. 추출한 원문 링크는 `news_items.origin_url` 신규 컬럼에 저장.
+6. PTPR Update(recent/custom) + FT RTPR(backfill) 모든 버튼에 동일 적용.
+
+#### 변경 내용
+
+- `plan.md` Step 11을 전면 개정:
+  - 기존 4단계(11-1~11-4) → 6단계(11-1~11-6)로 확장
+  - 저장 모델 요약 테이블 + 데이터 흐름 다이어그램 추가
+  - 적용 범위(모든 PTPR 버튼) 명시
+  - Step 9, Step 10 연동 변경 사항 명시
+  - publisher별 원문 링크 추출 패턴(ACCESSWIRE, PR Newswire, Newsfile, BW, Globe) 추가
+  - 검증 훅(PowerShell) 업데이트
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 문서 변경만 수행 |
+| 빌드 | ✅ | 코드 변경 없음 |
+
+#### 사용자 확인 요청
+
+- Step 11 plan이 사용자 결정(fulltext에 HTML 직접 저장, 별도 필드 불필요)을 반영했는지 확인 필요.
+- 확인 후 구현 단계(11-1부터) 진행 가능.
 3. `fetchNews()`와 `fetchMore()`의 query를 `FINNHUB,RTPR`로 변경하여 News Feed에서 RTPR도 함께 표시되도록 수정.
 
 #### 검증 결과
