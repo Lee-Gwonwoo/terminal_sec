@@ -277,7 +277,8 @@ Legend: `✅` 완료+사용자확인 완료 / `⏳` 완료, 사용자확인 대�
 | 3-2 | 현재 ET 시장일 기사에 대해 ET 16:00 이전에는 same-day metric 저장을 막고, 기존 stale metric도 삭제 | `terminal/backend/src/services/newsChangeMerger.ts` | Vitest + runtime에서 3/11 RTPR 행의 change 값이 null인지 확인 | ⏳ |
 | 3-3 | running 상태 job progress는 99% 상한, 완료 처리 후에만 100% 전환 | `terminal/backend/src/services/jobManager.ts` | Vitest `jobManager.test.ts`에서 running 99 → done 100 확인 | ⏳ |
 | 3-4 | ET 장중에는 canonical OHLC DB에도 당일 일봉을 저장/참조하지 않도록 보강 | `terminal/backend/src/services/ohlcWatchlistRepository.ts`, `terminal/backend/src/services/newsChangeMerger.ts` | Vitest `ohlcWatchlistRepository.test.ts` + runtime에서 `OHLC_data` 3/11 row count가 0인지 확인 | ⏳ |
-| 3-5 | backend spec 문서와 작업 로그에 새 규칙 반영 | `terminal/backend_prompt.md`, `ai_agent_plan/terminal_ui_ver4_ptpr/agent_log.md`, `ai_agent_plan/terminal_ui_ver4_ptpr/plan.md` | 문서 diff와 agent_log append 확인 | ⏳ |
+| 3-5 | API change date 필드를 의미별로 분리 (`ohlc_date`는 change_pct 기준일, `change_1d_target_date`는 forward 날짜) | `terminal/backend/src/services/newsRepository.ts`, `terminal/backend/src/types.ts`, `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | `/api/news` 샘플에서 `ohlc_date`와 `change_pct_ohlc_date`가 같고 `change_1d_target_date`가 별도 노출되는지 확인 | ⏳ |
+| 3-6 | backend spec 문서와 작업 로그에 새 규칙 반영 | `terminal/backend_prompt.md`, `ai_agent_plan/terminal_ui_ver4_ptpr/agent_log.md`, `ai_agent_plan/terminal_ui_ver4_ptpr/plan.md` | 문서 diff와 agent_log append 확인 | ⏳ |
 
 - `3-1` 목적: 소스별 timestamp 포맷이 달라도 같은 시장일 규칙으로 비교하게 만들기. 설명: UTC ISO는 ET로 변환하고, RTPR ET-naive는 그대로 ET로 간주하면 완료다.
   - 완료 조건(눈으로 확인): helper가 UTC 입력 `2026-03-11T00:30:00Z`를 ET 날짜 `2026-03-10`으로 바꾼다.
@@ -295,7 +296,11 @@ Legend: `✅` 완료+사용자확인 완료 / `⏳` 완료, 사용자확인 대�
   - 완료 조건(눈으로 확인): OHLC DB `Datetime='2026-03-11'` count가 0이고, 3/10 RTPR 기사에 `target_date='2026-03-11'`가 남지 않는다.
   - 사람 검증(비개발자): 3/10 기사에서 `change_1d_pct`가 장중에는 비어 있고 `ohlc_date`가 3/10으로만 보인다.
   - 흔한 문제/주의: 오늘 bar 저장만 막고 기존 bar purge를 안 하면 과거에 들어간 partial row가 계속 참조된다.
-- `3-5` 목적: 운영 문서와 로그를 코드 상태에 맞추기. 설명: spec과 plan/log에 같은 규칙이 적히면 완료다.
+- `3-5` 목적: API/UI에서 날짜 의미 혼동을 없앤다. 설명: `change_pct` 기준일과 `change_1d` forward 날짜를 분리해 내려주면 완료다.
+  - 완료 조건(눈으로 확인): `/api/news` 응답에 `ohlc_date`와 `change_pct_ohlc_date`는 당일 기준일로 같고, `change_1d_target_date`는 별도 필드로만 내려온다.
+  - 사람 검증(비개발자): 3/10 기사에서 `ohlc_date`가 3/10이고, 다음날 날짜가 필요하면 `change_1d_target_date`를 봐야 한다.
+  - 흔한 문제/주의: 기존 `ohlc_date` 의미를 바꾸면서 필드를 없애 버리면 프론트 호환성이 깨질 수 있다.
+- `3-6` 목적: 운영 문서와 로그를 코드 상태에 맞추기. 설명: spec과 plan/log에 같은 규칙이 적히면 완료다.
   - 완료 조건(눈으로 확인): plan, agent_log, backend_prompt에 ET close 규칙과 progress 99 규칙이 모두 있다.
   - 사람 검증(비개발자): 문서 검색으로 `16:00`과 `99`가 함께 나온다.
   - 흔한 문제/주의: plan만 바꾸고 backend_prompt를 안 바꾸면 이후 운영자가 API semantics를 잘못 이해한다.

@@ -101,6 +101,8 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `[][][]created_at[][][]`
 - `[][][]ohlc_ticker[][][]`
 - `[][][]ohlc_date[][][]`
+- `[][][]change_pct_ohlc_date[][][]`
+- `[][][]change_1d_target_date[][][]`
 - `[][][]change_1d_pct[][][]`
 - `[][][]change_from_open_pct[][][]`
 - `[][][]change_7d_pct[][][]`
@@ -155,6 +157,12 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `change_7d_pct`: 전일 종가 → 5거래일 후 종가
 - `change_14d_pct`: 전일 종가 → 10거래일 후 종가
 - `change_30d_pct`: 전일 종가 → 22거래일 후 종가
+
+조회 필드 의미:
+
+- `[][][]ohlc_date[][][]`: 현재 UI 호환용 기본 날짜 필드이며, `change_pct`가 계산된 기준일(`change_pct.target_date`)을 의미한다.
+- `[][][]change_pct_ohlc_date[][][]`: `change_pct`가 계산된 기준일을 명시적으로 노출한 필드다.
+- `[][][]change_1d_target_date[][][]`: `change_1d_pct`의 forward target date다. 이전에는 이 값이 `ohlc_date`로 잘못 보이던 구간이 있었다.
 
 주의:
 
@@ -432,6 +440,8 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `[][][]created_at[][][]`
 - `[][][]ohlc_ticker[][][]`
 - `[][][]ohlc_date[][][]`
+- `[][][]change_pct_ohlc_date[][][]`
+- `[][][]change_1d_target_date[][][]`
 - `[][][]change_pct[][][]`
 - `[][][]change_1d_pct[][][]`
 - `[][][]change_from_open_pct[][][]`
@@ -1015,6 +1025,8 @@ limit 정책:
       "created_at": "...",
       "ohlc_ticker": "AAPL",
       "ohlc_date": "2026-03-07",
+      "change_pct_ohlc_date": "2026-03-07",
+      "change_1d_target_date": "2026-03-10",
       "change_pct": -0.85,
       "change_1d_pct": 1.23,
       "change_from_open_pct": -0.42,

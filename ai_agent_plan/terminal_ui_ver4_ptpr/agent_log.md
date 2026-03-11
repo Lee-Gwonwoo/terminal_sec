@@ -388,6 +388,49 @@
   2. 3/10 RTPR 기사에 3/11 forward metric target도 남아 있지 않다.
   3. 3/11 RTPR 기사 same-day change는 비어 있다.
 
+### API change 날짜 필드 의미 분리 (2026-03-11 11:36)
+
+**작성 시각:** 2026-03-11 11:36 (local)
+
+**Status: awaiting user confirmation**
+
+#### PLAN CHANGE 사유
+- 사용자 요청: `ohlc_date`가 헷갈리니 바로 수정.
+- 기존 API는 `change_pct` 값과 함께 `change_1d_pct.target_date`를 `ohlc_date`로 내려 날짜 의미를 섞고 있었다.
+
+#### 작업 요약
+
+1. `terminal/backend/src/services/newsRepository.ts`
+   - `ohlc_date`를 `change_pct.target_date`로 변경
+   - `change_pct_ohlc_date`, `change_1d_target_date`를 별도 응답 필드로 추가
+2. `terminal/backend/src/types.ts`
+   - 새 필드 타입 추가
+3. `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+   - frontend 타입 동기화
+4. `terminal/backend_prompt.md`, `plan.md`
+   - 새 필드 의미 문서화
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `newsRepository.ts`, `types.ts`, `FinnhubNewsWindow.tsx` 에러 0개 |
+| 빌드 | ✅ | `npm run build` 성공 |
+| 자동 테스트 | ✅ | `9 files / 55 tests passed` |
+| 런타임 통합 | ✅ | `/api/news` raw JSON에서 `ohlc_date=change_pct_ohlc_date`, `change_1d_pct=null`일 때 `change_1d_target_date=null` 확인 |
+
+### API change 날짜 필드 의미 분리 검증 완료 (2026-03-11 11:43)
+
+**작성 시각:** 2026-03-11 11:43 (local)
+
+**Status: awaiting user confirmation**
+
+#### 핵심 결과
+
+- `[][][]ohlc_date[][][]`는 이제 `change_pct` 기준 날짜만 의미한다.
+- `[][][]change_pct_ohlc_date[][][]`는 같은 값을 명시적으로 다시 제공한다.
+- `[][][]change_1d_target_date[][][]`는 `change_1d_pct`가 실제로 있을 때만 채워지고, 값이 없으면 `null`이다.
+
 ### RTPR 전용 Full Text Backfill 버튼 추가 (2026-03-10 19:47)
 
 **작성 시각:** 2026-03-10 19:47 (local)

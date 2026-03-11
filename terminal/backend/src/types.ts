@@ -29,6 +29,8 @@ export type NewsItem = {
   // change% columns (Step 4)
   ohlc_ticker?: string | null;
   ohlc_date?: string | null;
+  change_pct_ohlc_date?: string | null;
+  change_1d_target_date?: string | null;
   change_pct?: number | null;
   change_1d_pct?: number | null;
   change_from_open_pct?: number | null;
