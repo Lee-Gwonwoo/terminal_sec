@@ -135,6 +135,7 @@ function mapArticle(article: RtprArticle): FinnhubMappedItem {
     providerTickers: ticker !== "UNKNOWN" ? [ticker] : [],
     tags: ["press_release"],
     publisher: article.author || undefined,
+    bodyHtml: article.article_body_html || undefined,
   };
 }
 

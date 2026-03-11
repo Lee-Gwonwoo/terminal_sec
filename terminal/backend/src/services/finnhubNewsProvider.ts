@@ -64,6 +64,8 @@ export type FinnhubMappedItem = {
   providerTickers: string[];
   tags: string[];
   publisher?: string;
+  /** Raw HTML body from provider (RTPR article_body_html). Undefined for non-HTML sources. */
+  bodyHtml?: string;
 };
 
 export interface MarketNewsBatchProgress {

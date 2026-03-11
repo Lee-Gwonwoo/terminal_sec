@@ -143,6 +143,9 @@ export async function initDb(): Promise<void> {
   // Step 10: publisher column on news_items
   await ensureColumn("news_items", "publisher", "TEXT");
 
+  // Step 11: origin_url column on news_items (original press release URL extracted from HTML footer)
+  await ensureColumn("news_items", "origin_url", "TEXT");
+
   // Step 10: news_fulltext table
   await db.exec(`
     CREATE TABLE IF NOT EXISTS news_fulltext (

@@ -101,6 +101,7 @@ interface BackendNewsItem {
   published_at: string;
   source: string;
   publisher?: string | null;
+  origin_url?: string | null;
   source_type: string;
   title: string;
   body: string;
@@ -143,6 +144,7 @@ interface DisplayItem {
   body: string;
   ticker: string;
   publisher: string | null;
+  originUrl: string | null;
   source: string;
   sourceType: string;
   url: string;
@@ -183,6 +185,7 @@ function mapBackendItem(item: BackendNewsItem): DisplayItem {
     body: item.body,
     ticker: item.tickers?.[0] ?? '',
     publisher: item.publisher ?? null,
+    originUrl: item.origin_url ?? null,
     source: item.source,
     sourceType: item.source_type,
     url: item.url,
@@ -1282,19 +1285,19 @@ export function FinnhubNewsWindow({
 
   // ─── Render cell by column id ───
   const renderCell = useCallback((colId: ColumnId, newsItem: DisplayItem, isExpanded: boolean) => {
-    const renderLinkCell = (label: string | null | undefined, fallbackClassName: string) => (
+    const renderLinkCell = (label: string | null | undefined, fallbackClassName: string, href?: string | null) => (
       <span
         className={`truncate cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 ${fallbackClassName}`}
-        title={newsItem.url ? 'Click to open link. Right click to copy URL.' : (label ?? '-')}
+        title={href ? 'Click to open link. Right click to copy URL.' : (label ?? '-')}
         onClick={(e) => {
           e.stopPropagation();
-          if (newsItem.url) openExternalUrl(newsItem.url);
+          if (href) openExternalUrl(href);
         }}
         onContextMenu={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          if (!newsItem.url) return;
-          setSourceCtxMenu({ x: e.clientX, y: e.clientY, url: newsItem.url });
+          if (!href) return;
+          setSourceCtxMenu({ x: e.clientX, y: e.clientY, url: href });
         }}
       >
         {label ?? '-'}
@@ -1351,12 +1354,14 @@ export function FinnhubNewsWindow({
             )}
           </div>
         );
-      case 'publisher':
-        return renderLinkCell(newsItem.publisher, 'text-gray-600 dark:text-gray-400');
+      case 'publisher': {
+        const pubHref = newsItem.originUrl || (newsItem.url?.startsWith('http') ? newsItem.url : null);
+        return renderLinkCell(newsItem.publisher, 'text-gray-600 dark:text-gray-400', pubHref);
+      }
       case 'industry':
         return <span className="truncate text-gray-600 dark:text-gray-400" title={newsItem.industry ?? undefined}>{newsItem.industry ?? '-'}</span>;
       case 'source':
-        return renderLinkCell(newsItem.source, 'text-gray-600 dark:text-gray-400');
+        return renderLinkCell(newsItem.source, 'text-gray-600 dark:text-gray-400', newsItem.url);
       case 'fulltext':
         return newsItem.hasFullText ? (
           <span

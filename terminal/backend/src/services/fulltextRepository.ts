@@ -24,6 +24,9 @@ export interface UnextractedNewsRow {
 export interface RtprBodyBackfillRow {
   id: string;
   body: string;
+  title: string;
+  tickers_csv: string;
+  published_at: string;
 }
 
 // ─── Queries ───
@@ -117,7 +120,7 @@ export async function getUnextractedNewsIds(
 
 export async function getRtprBodyBackfillRows(): Promise<RtprBodyBackfillRow[]> {
   return getDb().all<RtprBodyBackfillRow[]>(
-    `SELECT ni.id, ni.body
+    `SELECT ni.id, ni.body, ni.title, ni.tickers_csv, ni.published_at
      FROM news_items ni
      LEFT JOIN news_fulltext nf ON nf.news_id = ni.id
      WHERE ni.source = 'RTPR'
@@ -127,6 +130,7 @@ export async function getRtprBodyBackfillRows(): Promise<RtprBodyBackfillRow[]> 
          OR nf.extraction_status IN ('failed', 'unavailable')
          OR TRIM(COALESCE(nf.full_text, '')) = ''
          OR COALESCE(nf.word_count, 0) = 0
+         OR nf.extraction_note NOT LIKE '%-html%'
        )
      ORDER BY ni.published_at DESC`,
   );

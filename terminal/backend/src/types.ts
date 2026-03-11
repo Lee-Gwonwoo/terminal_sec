@@ -18,6 +18,7 @@ export type NewsItem = {
   published_at: string;
   source: string;
   publisher?: string | null;
+  origin_url?: string | null;
   source_type: string;
   title: string;
   body: string;

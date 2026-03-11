@@ -657,7 +657,7 @@ Invoke-RestMethod -Uri 'http://localhost:8080/api/news/fulltext/<newsId>'
 ```
 사용자 확인 필요: **예**
 
-#### ⬜ Step 11 — RTPR HTML 저장 + plain text 표시 + 원문 링크 추출 (개정 2026-03-10)
+#### ⏳ Step 11 — RTPR HTML 저장 + plain text 표시 + 원문 링크 추출 (개정 2026-03-10)
 
 > **설계 원칙 (사용자 결정):**
 > - `body_html_raw` 같은 별도 필드/테이블은 만들지 않는다.
@@ -701,12 +701,12 @@ UI 조회 시:
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 11-1 | `news_items.origin_url TEXT` 컬럼 추가 (마이그레이션) | `db.ts` | `PRAGMA table_info(news_items)` 에 `origin_url` 확인 | ⬜ |
-| 11-2 | `mapArticle`에서 `article_body_html`도 반환하도록 provider 수정 | `ptprNewsProvider.ts` | `bodyHtml` 필드가 mapped item에 포함 확인 | ⬜ |
-| 11-3 | RTPR ingest(recent/custom)에서 `news_fulltext.full_text`에 HTML 저장 | `server.ts`, `fulltextRepository.ts` | ingest 후 `news_fulltext.full_text`에 HTML 태그 존재 확인 | ⬜ |
-| 11-4 | FT RTPR backfill → RTPR API 재호출로 HTML 확보 + fulltext 교체 | `fulltextUpdateService.ts`, `ptprNewsProvider.ts` | backfill 후 기존 plain text가 HTML로 교체 확인 | ⬜ |
-| 11-5 | fulltext 조회 API에서 RTPR HTML → plain text 변환 후 반환 | `server.ts` (fulltext GET 경로) | API 응답에 HTML 태그 없이 plain text만 오는지 확인 | ⬜ |
-| 11-6 | HTML footer에서 publisher별 원문 링크 추출 → `news_items.origin_url` 저장 | `ptprNewsProvider.ts` 또는 별도 extractor | origin_url 컬럼에 유효한 URL 확인 | ⬜ |
+| 11-1 | `news_items.origin_url TEXT` 컬럼 추가 (마이그레이션) | `db.ts` | `PRAGMA table_info(news_items)` 에 `origin_url` 확인 | ⏳ |
+| 11-2 | `mapArticle`에서 `article_body_html`도 반환하도록 provider 수정 | `ptprNewsProvider.ts` | `bodyHtml` 필드가 mapped item에 포함 확인 | ⏳ |
+| 11-3 | RTPR ingest(recent/custom)에서 `news_fulltext.full_text`에 HTML 저장 | `server.ts`, `fulltextRepository.ts` | ingest 후 `news_fulltext.full_text`에 HTML 태그 존재 확인 | ⏳ |
+| 11-4 | FT RTPR backfill → RTPR API 재호출로 HTML 확보 + fulltext 교체 | `fulltextUpdateService.ts`, `ptprNewsProvider.ts` | backfill 후 기존 plain text가 HTML로 교체 확인 | ⏳ |
+| 11-5 | fulltext 조회 API에서 RTPR HTML → plain text 변환 후 반환 | `server.ts` (fulltext GET 경로) | API 응답에 HTML 태그 없이 plain text만 오는지 확인 | ⏳ |
+| 11-6 | HTML footer에서 publisher별 원문 링크 추출 → `news_items.origin_url` 저장 | `rtprOriginUrlExtractor.ts` | origin_url 컬럼에 유효한 URL 확인 | ⏳ |
 
 - `11-1` 목적: 원문 링크를 저장할 컬럼을 만든다.
   - `ensureColumn("news_items", "origin_url", "TEXT")` — 기존 `ensureColumn` 패턴 사용.
@@ -780,3 +780,57 @@ if ($ft.fullText -match '<(div|p|span|br|table|a )') { "FAIL: HTML in response" 
 sqlite3 terminal/backend/backend/data/app.db "SELECT id, origin_url FROM news_items WHERE source = 'RTPR' AND origin_url IS NOT NULL LIMIT 5;"
 ```
 사용자 확인 필요: **예**
+
+##### 11-6 origin_url 추출 패턴 조사 결과 (2026-03-10)
+
+**현황**: DB에 fulltext가 있는 RTPR 기사 664건 중 `origin_url`이 채워진 건은 29건(모두 Newsfile Corp). 나머지 publisher는 extractor가 `href="..."` 패턴만 탐색하기 때문에, 실제 HTML/plain text에 있는 URL을 잡지 못하고 있었음.
+
+**Publisher별 fulltext 건수 / 실제 URL 패턴**:
+
+| Publisher | fulltext 건수 | origin_url 추출 | 실제 URL 존재 형태 | 패턴 설명 |
+|---|---|---|---|---|
+| **Business Wire** | 133 | 0 ❌ | plain text URL | `View source version on businesswire.com:\nhttps://www.businesswire.com/news/home/{ID}/en/` 또는 같은 줄에 이어서 표기. 뒤에 `(https://www.businesswire.com/news/home/{ID}/en/)` 괄호 중복도 있음 |
+| **PR Newswire** | 133 | 0 ❌ | plain text URL | `View original content to download\nmultimedia:https://www.prnewswire.com/news-releases/{slug}-{ID}.html` 뒤에 `(https://...같은URL)` 괄호 중복 |
+| **ACCESSWIRE** | 132 | 0 ❌ | 괄호 안 plain text URL | 기존 regex는 `accesswire.com` 도메인 기대 → **실제 도메인이 `accessnewswire.com`으로 변경됨(132건 전부)**. 패턴: `View the original press release\n(https://www.accessnewswire.com/newsroom/en/{category}/{slug}-{ID})\non ACCESS Newswire` |
+| **Newsfile Corp** | 40 | 29 ✅ | plain text URL | `please visit https://www.newsfilecorp.com/release/{ID}` — 기존 regex 작동 중 |
+| **Globe Newswire** | 225 | 0 ❌ | tracker link만 | `globenewswire.com/Tracker?data=...` 형태의 암호화된 redirect만 존재. `globenewswire.com/news-release/` 같은 canonical URL 없음. **추출 불가** |
+| **Cision** | 1 | 0 ❌ | plain text URL | `https://news.cision.com/{company}/r/{slug}%2C{ID}` — 1건뿐이라 우선순위 낮음 |
+
+**핵심 문제**: 기존 extractor(`rtprOriginUrlExtractor.ts`)의 BusinessWire/PRNewswire/Cision 패턴 + fallback이 모두 `href="..."` 안의 URL만 매칭. 실제 RTPR 데이터에는 href 속성 없이 plain text로 URL 표기 → 전부 miss.
+
+**수정 방향**:
+1. **Business Wire**: `View source version on businesswire.com` 뒤의 bare URL 매칭 (`https://www.businesswire.com/news/home/...`)
+2. **PR Newswire**: `multimedia:` 접두어 뒤의 URL 매칭 (`https://www.prnewswire.com/news-releases/...`)
+3. **ACCESSWIRE**: 도메인을 `accessnewswire.com`으로 변경, 괄호 안 URL 매칭 (`(https://www.accessnewswire.com/newsroom/en/...)`)
+4. **Newsfile Corp**: 기존 유지 (작동 중)
+5. **Globe Newswire**: 추출 불가 — `origin_url = NULL` 유지
+6. **Cision**: `https://news.cision.com/` bare URL 매칭 추가
+7. **Fallback**: `href="..."` 전용 → bare URL 탐색으로 변경 (known wire service 도메인의 canonical path 패턴)
+
+##### 11-6 구현 결과 (2026-03-10)
+
+**변경 파일:**
+- `terminal/backend/src/services/rtprOriginUrlExtractor.ts` — publisher별 plain text URL 패턴으로 전면 교체
+- `terminal/backend/src/server.ts` — `persistRtprFulltext`에서 HTML뿐 아니라 plain text에서도 origin_url 추출, `POST /api/news/fulltext/backfill-origin-url` endpoint 추가
+- `terminal/backend/src/services/fulltextUpdateService.ts` — backfill fallback 경로에서도 origin_url 추출, `runOriginUrlBackfill()` 함수 추가
+
+**백필 실행 결과:**
+- 총 664건 중 **431건 origin_url 확보** (updated=402, skipped=29)
+- noMatch=233건 (Globe Newswire 225 + PRNewswire 8 = 본문에 canonical URL 없음)
+
+**DB 최종 현황:**
+
+| Publisher | 총 건수 | origin_url 확보 | 비율 |
+|---|---|---|---|
+| Business Wire | 133 | 133 | 100% |
+| ACCESSWIRE | 132 | 132 | 100% |
+| PR Newswire | 133 | 125 | 94% |
+| Newsfile Corp | 40 | 40 | 100% |
+| Cision | 1 | 1 | 100% |
+| Globe Newswire | 225 | 0 | 0% (tracker link만 존재, 추출 불가) |
+
+**추출 불가 사유:**
+- Globe Newswire: `globenewswire.com/Tracker?data=...` 형태의 opaque redirect만 존재, canonical URL 없음
+- PR Newswire 8건: 본문에 `prnewswire.com/news-releases/` 경로 URL 자체가 없음 (이미지 CDN + SOURCE만)
+
+**상태: ✅ 구현 완료**

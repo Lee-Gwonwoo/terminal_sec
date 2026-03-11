@@ -9,6 +9,8 @@ import { getRtprBodyBackfillRows, getUnextractedNewsIds, insertFulltext, upsertP
 import { extractByDomain, htmlToPlainText } from "./fulltextExtractors.js";
 import { updateProgress, appendLog, completeJob, failJob, isJobCancelled } from "./jobManager.js";
 import { getDb } from "../db.js";
+import { fetchRtprArticlesByTicker } from "./ptprNewsProvider.js";
+import { extractOriginUrl } from "./rtprOriginUrlExtractor.js";
 
 /** Default concurrency for full text extraction */
 const DEFAULT_CONCURRENCY = 10;
@@ -181,55 +183,118 @@ export async function runRtprBodyBackfill(
     const rows = await getRtprBodyBackfillRows();
     const total = rows.length;
 
-    appendLog(jobId, `Starting RTPR full text backfill: ${total} items, concurrency=${effectiveConcurrency}`);
+    appendLog(jobId, `Starting RTPR HTML backfill: ${total} items, concurrency=${effectiveConcurrency}`);
     updateProgress(jobId, 0);
 
     if (total === 0) {
-      appendLog(jobId, "No RTPR rows need body backfill — nothing to do");
-      completeJob(jobId, { processed: 0, success: 0, failed: 0, source: "RTPR" });
+      appendLog(jobId, "No RTPR rows need HTML backfill — nothing to do");
+      completeJob(jobId, { processed: 0, success: 0, failed: 0, fallback: 0, source: "RTPR" });
       return;
+    }
+
+    // Group rows by ticker for batch API fetch
+    const tickerRowsMap = new Map<string, typeof rows>();
+    for (const row of rows) {
+      // tickers_csv is like ",AAPL," — extract first ticker
+      const match = row.tickers_csv?.match(/,([^,]+),/);
+      const ticker = match?.[1] || "UNKNOWN";
+      if (!tickerRowsMap.has(ticker)) tickerRowsMap.set(ticker, []);
+      tickerRowsMap.get(ticker)!.push(row);
     }
 
     let processed = 0;
     let successCount = 0;
+    let fallbackCount = 0;
     let failedCount = 0;
     let lastLogAt = 0;
 
-    async function processOne(row: typeof rows[0]) {
+    const db = getDb();
+
+    // Process one ticker: fetch API articles, match by title, store HTML
+    async function processTicker(ticker: string, tickerRows: typeof rows) {
       if (isJobCancelled(jobId)) return;
+
+      // Fetch articles from RTPR API for this ticker
+      let apiArticles: Awaited<ReturnType<typeof fetchRtprArticlesByTicker>> = [];
       try {
-        const plainText = htmlToPlainText(row.body);
-        const fullText = plainText.trim().length > 0 ? plainText.trim() : row.body.trim();
-        await upsertProvidedFulltext(row.id, {
-          fullText,
-          extractionNote: "rtpr-body-backfill",
-          wordCount: countWords(fullText),
-        });
-        successCount++;
+        apiArticles = await fetchRtprArticlesByTicker(ticker, 100);
       } catch (err: any) {
-        failedCount++;
-        appendLog(jobId, `⚠ RTPR full text ${row.id}: ${err.message ?? "unknown error"}`);
+        appendLog(jobId, `  ⚠ RTPR API fetch failed for ${ticker}: ${err.message}`);
       }
 
-      processed++;
-      updateProgress(jobId, processed);
-      if (processed - lastLogAt >= 20 || processed === total) {
-        lastLogAt = processed;
-        appendLog(jobId, `[${processed}/${total}] ${successCount} ok, ${failedCount} fail`);
+      // Build a lookup: normalize title → bodyHtml
+      const htmlLookup = new Map<string, string>();
+      for (const article of apiArticles) {
+        if (article.bodyHtml) {
+          const key = article.title.trim().toLowerCase();
+          htmlLookup.set(key, article.bodyHtml);
+        }
+      }
+
+      for (const row of tickerRows) {
+        if (isJobCancelled(jobId)) break;
+
+        try {
+          const titleKey = row.title.trim().toLowerCase();
+          const html = htmlLookup.get(titleKey);
+
+          if (html) {
+            // HTML found from API — store raw HTML
+            await upsertProvidedFulltext(row.id, {
+              fullText: html,
+              extractionNote: "rtpr-html-backfill",
+              wordCount: countWords(htmlToPlainText(html)),
+            });
+            // Extract and store origin_url
+            const originUrl = extractOriginUrl(html);
+            if (originUrl) {
+              await db.run(`UPDATE news_items SET origin_url = ? WHERE id = ?`, [originUrl, row.id]);
+            }
+            successCount++;
+          } else {
+            // Fallback: use existing plain text body
+            const plainText = htmlToPlainText(row.body);
+            const fullText = plainText.trim().length > 0 ? plainText.trim() : row.body.trim();
+            await upsertProvidedFulltext(row.id, {
+              fullText,
+              extractionNote: "rtpr-html-backfill-fallback",
+              wordCount: countWords(fullText),
+            });
+            // Also try origin_url extraction from plain text
+            const fallbackOriginUrl = extractOriginUrl(row.body);
+            if (fallbackOriginUrl) {
+              await db.run(`UPDATE news_items SET origin_url = ? WHERE id = ?`, [fallbackOriginUrl, row.id]);
+            }
+            fallbackCount++;
+          }
+        } catch (err: any) {
+          failedCount++;
+          appendLog(jobId, `⚠ RTPR backfill ${row.id}: ${err.message ?? "unknown error"}`);
+        }
+
+        processed++;
+        updateProgress(jobId, processed);
+        if (processed - lastLogAt >= 20 || processed === total) {
+          lastLogAt = processed;
+          appendLog(jobId, `[${processed}/${total}] ${successCount} html, ${fallbackCount} fallback, ${failedCount} fail`);
+        }
       }
     }
 
+    // ── Concurrent worker pool over tickers ──
+    const tickerList = Array.from(tickerRowsMap.entries());
     let cursor = 0;
     async function worker() {
-      while (cursor < rows.length) {
+      while (cursor < tickerList.length) {
         if (isJobCancelled(jobId)) break;
         const index = cursor++;
-        if (index >= rows.length) break;
-        await processOne(rows[index]);
+        if (index >= tickerList.length) break;
+        const [ticker, tickerRows] = tickerList[index];
+        await processTicker(ticker, tickerRows);
       }
     }
 
-    const workerCount = Math.min(effectiveConcurrency, total);
+    const workerCount = Math.min(effectiveConcurrency, tickerList.length);
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
     if (isJobCancelled(jobId)) {
@@ -237,14 +302,68 @@ export async function runRtprBodyBackfill(
       return;
     }
 
-    appendLog(jobId, `RTPR full text backfill complete: ${successCount} success, ${failedCount} failed (total ${total})`);
+    appendLog(jobId, `RTPR HTML backfill complete: ${successCount} html, ${fallbackCount} fallback, ${failedCount} failed (total ${total})`);
     completeJob(jobId, {
       processed: total,
       success: successCount,
+      fallback: fallbackCount,
       failed: failedCount,
       source: "RTPR",
     });
   } catch (err: any) {
     failJob(jobId, err.message ?? "Unknown error in runRtprBodyBackfill");
+  }
+}
+
+/**
+ * Re-extract origin_url for ALL RTPR articles that have fulltext stored.
+ * Runs the updated extractOriginUrl on the stored full_text (HTML or plain text).
+ */
+export async function runOriginUrlBackfill(jobId: string): Promise<void> {
+  try {
+    const db = getDb();
+    const rows: { id: string; full_text: string; body: string; existing_url: string | null }[] = await db.all(
+      `SELECT ni.id, nf.full_text, ni.body, ni.origin_url AS existing_url
+       FROM news_items ni
+       JOIN news_fulltext nf ON ni.id = nf.news_id
+       WHERE ni.source = 'RTPR'`
+    );
+
+    const total = rows.length;
+    appendLog(jobId, `origin_url re-extraction: ${total} RTPR articles with fulltext`);
+    updateProgress(jobId, 0, total);
+
+    let updated = 0;
+    let skipped = 0;
+    let noMatch = 0;
+
+    for (let i = 0; i < rows.length; i++) {
+      if (isJobCancelled(jobId)) {
+        appendLog(jobId, "🛑 Cancelled");
+        return;
+      }
+      const row = rows[i];
+      // Try fulltext first, then plain text body
+      const url = extractOriginUrl(row.full_text) || extractOriginUrl(row.body);
+      if (url) {
+        if (row.existing_url !== url) {
+          await db.run(`UPDATE news_items SET origin_url = ? WHERE id = ?`, [url, row.id]);
+          updated++;
+        } else {
+          skipped++;
+        }
+      } else {
+        noMatch++;
+      }
+      updateProgress(jobId, i + 1);
+      if ((i + 1) % 100 === 0 || i + 1 === total) {
+        appendLog(jobId, `[${i + 1}/${total}] updated=${updated} skipped=${skipped} noMatch=${noMatch}`);
+      }
+    }
+
+    appendLog(jobId, `origin_url backfill complete: updated=${updated}, skipped=${skipped}, noMatch=${noMatch}`);
+    completeJob(jobId, { total, updated, skipped, noMatch });
+  } catch (err: any) {
+    failJob(jobId, err.message ?? "Unknown error in runOriginUrlBackfill");
   }
 }

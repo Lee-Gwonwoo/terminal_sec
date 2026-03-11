@@ -464,6 +464,39 @@
 
 - Step 11 plan이 사용자 결정(fulltext에 HTML 직접 저장, 별도 필드 불필요)을 반영했는지 확인 필요.
 - 확인 후 구현 단계(11-1부터) 진행 가능.
+
+### Step 11 구현 완료 — RTPR HTML 저장 + plain text 표시 + origin URL 추출 (2026-03-10 20:37)
+
+**작성 시각:** 2026-03-10 20:37 (local)
+
+**Status: awaiting user confirmation**
+
+#### 변경 파일
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `terminal/backend/src/db.ts` | `ensureColumn("news_items", "origin_url", "TEXT")` 추가 (11-1) |
+| `terminal/backend/src/services/finnhubNewsProvider.ts` | `FinnhubMappedItem` 타입에 `bodyHtml?: string` 추가 (11-2) |
+| `terminal/backend/src/services/ptprNewsProvider.ts` | `mapArticle`에서 `article.article_body_html` → `bodyHtml` 매핑 추가 (11-2) |
+| `terminal/backend/src/services/rtprOriginUrlExtractor.ts` | **신규** — publisher별 origin URL 추출기 (ACCESSWIRE, PR Newswire, Newsfile, BW, Cision) (11-6) |
+| `terminal/backend/src/server.ts` | `persistRtprFulltext()` 신규 함수: HTML 우선 저장 + origin_url 추출/저장 (11-3) |
+| `terminal/backend/src/server.ts` | recent/custom RTPR ingest에서 `persistRtprFulltext()` 사용으로 변경 (11-3) |
+| `terminal/backend/src/server.ts` | fulltext GET에서 HTML 감지 시 `htmlToPlainText()` 변환 후 반환 (11-5) |
+| `terminal/backend/src/services/fulltextRepository.ts` | `RtprBodyBackfillRow` 인터페이스에 `title`, `tickers_csv`, `published_at` 추가 + 쿼리에 `NOT LIKE '%-html%'` 조건 추가 (11-4) |
+| `terminal/backend/src/services/fulltextUpdateService.ts` | `runRtprBodyBackfill` 전면 재작성: ticker별 API 재호출 → title 매칭 → HTML 저장 + origin_url 추출, 매칭 실패 시 plain text fallback (11-4) |
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| tsc --noEmit | ✅ | 타입 에러 0 |
+| npm run build | ✅ | backend 빌드 성공 |
+| npm run test | ✅ | 48/48 테스트 통과 |
+| 정적 분석 | ✅ | 변경된 7개 파일 모두 에러 0 |
+
+#### 사용자 확인 요청
+
+- 런타임 검증 필요: backend 재시작 후 RTPR update(recent) 실행 → fulltext에 HTML 저장 확인, origin_url 값 확인, fulltext GET API 응답에 plain text만 오는지 확인.
 3. `fetchNews()`와 `fetchMore()`의 query를 `FINNHUB,RTPR`로 변경하여 News Feed에서 RTPR도 함께 표시되도록 수정.
 
 #### 검증 결과

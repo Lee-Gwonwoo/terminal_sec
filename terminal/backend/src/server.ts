@@ -41,7 +41,9 @@ import type { FinnhubMappedItem } from "./services/finnhubNewsProvider.js";
 import { mergeChangeForNewItems, bulkUpdateRecentChange, bulkUpdateCustomChange, type IbkrFallbackOptions } from "./services/newsChangeMerger.js";
 import { createJob, getJob, updateProgress, appendLog, completeJob, failJob, cancelJob, isJobCancelled } from "./services/jobManager.js";
 import { getFulltext, getUnextractedNewsIds, deleteFailedFulltextRows, getFulltextStats, upsertProvidedFulltext } from "./services/fulltextRepository.js";
-import { runFulltextUpdate, runFulltextPlainTextBackfill, runRtprBodyBackfill } from "./services/fulltextUpdateService.js";
+import { runFulltextUpdate, runFulltextPlainTextBackfill, runRtprBodyBackfill, runOriginUrlBackfill } from "./services/fulltextUpdateService.js";
+import { extractOriginUrl } from "./services/rtprOriginUrlExtractor.js";
+import { htmlToPlainText } from "./services/fulltextExtractors.js";
 import { backfillPublisher } from "./services/finnhubNewsProvider.js";
 import { validateAnalysisCompleteness } from "./services/aiAnalysisRepository.js";
 import {
@@ -532,6 +534,27 @@ async function persistProviderPlainTextFulltext(newsId: string | null, fullText:
   });
 }
 
+/**
+ * Persist RTPR fulltext: prefer raw HTML (article_body_html), fallback to plain text body.
+ * Also extracts origin_url from HTML footer and updates news_items.
+ */
+async function persistRtprFulltext(newsId: string | null, bodyHtml: string | undefined, bodyPlain: string, extractionNote: string): Promise<void> {
+  if (!newsId) return;
+  const content = bodyHtml?.trim() || bodyPlain.trim();
+  if (!content) return;
+  const note = bodyHtml?.trim() ? `${extractionNote}-html` : `${extractionNote}-plain`;
+  await upsertProvidedFulltext(newsId, {
+    fullText: content,
+    extractionNote: note,
+    wordCount: countWords(htmlToPlainText(content)),
+  });
+  // Extract and store origin_url from body (HTML preferred, plain text fallback)
+  const originUrl = extractOriginUrl(content);
+  if (originUrl) {
+    await getDb().run(`UPDATE news_items SET origin_url = ? WHERE id = ?`, [originUrl, newsId]);
+  }
+}
+
 // ── Preflight check for Recent Update ──
 app.get("/api/news/pull-finhub/preflight", async (req, res, next) => {
   try {
@@ -1015,7 +1038,7 @@ app.post("/api/news/pull-rtpr", async (req, res, next) => {
                   publisher: rawItem.publisher,
                 });
                 const newsId = inserted?.id ?? await getNewsIdBySourceUrl(rawItem.source, rawItem.url);
-                await persistProviderPlainTextFulltext(newsId, rawItem.body, "rtpr-article_body");
+                await persistRtprFulltext(newsId, rawItem.bodyHtml, rawItem.body, "rtpr-ingest");
                 if (inserted) {
                   counters.totalInserted++;
                   newItems.push({
@@ -1064,7 +1087,7 @@ app.post("/api/news/pull-rtpr", async (req, res, next) => {
                   publisher: rawItem.publisher,
                 });
                 const newsId = inserted?.id ?? await getNewsIdBySourceUrl(rawItem.source, rawItem.url);
-                await persistProviderPlainTextFulltext(newsId, rawItem.body, "rtpr-article_body");
+                await persistRtprFulltext(newsId, rawItem.bodyHtml, rawItem.body, "rtpr-ingest");
                 if (inserted) {
                   counters.totalInserted++;
                   newItems.push({
@@ -1213,6 +1236,18 @@ app.post("/api/news/fulltext/backfill-rtpr", async (req, res, next) => {
   }
 });
 
+app.post("/api/news/fulltext/backfill-origin-url", async (req, res, next) => {
+  try {
+    const jobId = createJob(0);
+    runOriginUrlBackfill(jobId).catch((err) => {
+      console.error("[backfill-origin-url] unhandled:", err);
+    });
+    res.json({ jobId });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // ── Full text: stats & reset failed ──
 // NOTE: these must be before :newsId to avoid Express treating "stats" as a param
 
@@ -1241,9 +1276,12 @@ app.get("/api/news/fulltext/:newsId", async (req, res, next) => {
       res.status(404).json({ error: "Full text not found" });
       return;
     }
+    // If stored text contains HTML tags, convert to plain text for UI display
+    const isHtml = /<[a-z][\s\S]*>/i.test(row.full_text);
+    const displayText = isHtml ? htmlToPlainText(row.full_text) : row.full_text;
     res.json({
       newsId: row.news_id,
-      fullText: row.full_text,
+      fullText: displayText,
       extractionStatus: row.extraction_status,
       extractionNote: row.extraction_note,
       wordCount: row.word_count,

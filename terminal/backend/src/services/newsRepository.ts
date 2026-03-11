@@ -119,7 +119,7 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
 
   const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
   const sql = `
-    SELECT ni.id, ni.published_at, ni.source, ni.publisher, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
+    SELECT ni.id, ni.published_at, ni.source, ni.publisher, ni.origin_url, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
            cm_1d.ohlc_ticker,
            cm_1d.target_date AS ohlc_date,
            cm_chg.value_pct AS change_pct,
@@ -253,7 +253,7 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
 
 export async function getNewsById(id: string): Promise<NewsItem | null> {
   const row = await getDb().get<any>(
-    `SELECT ni.id, ni.published_at, ni.source, ni.publisher, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
+    `SELECT ni.id, ni.published_at, ni.source, ni.publisher, ni.origin_url, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
             cm_1d.ohlc_ticker,
             cm_1d.target_date AS ohlc_date,
             cm_chg.value_pct AS change_pct,
@@ -410,6 +410,7 @@ function mapNewsRow(
     published_at: row.published_at,
     source: row.source,
     publisher: row.publisher ?? null,
+    origin_url: row.origin_url ?? null,
     source_type: row.source_type,
     title: row.title,
     body: row.body,
