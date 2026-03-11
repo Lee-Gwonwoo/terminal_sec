@@ -519,6 +519,52 @@
 
 **작성 시각:** 2026-03-10 23:35 (local)
 
+### same-day change gating 분석 + plan 반영 (2026-03-11 10:20)
+
+**작성 시각:** 2026-03-11 10:20 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. RTPR recent update 직후 붙는 change 값의 계산 경로를 코드 기준으로 재확인했다.
+   - `server.ts`에서 `mergeChangeForNewItems(newItems)`를 즉시 호출함.
+   - `newsChangeMerger.ts`는 `getOhlcCloseOnOrBefore()`로 기사일 이하의 가장 최근 일봉을 anchor로 사용함.
+2. 실제 API 응답으로 2026-03-11 기사와 2026-03-10 기사의 `ohlc_date`를 점검했다.
+   - 3/11 기사: `published_at=2026-03-11...`, `ohlc_date=2026-03-06` 케이스 다수 확인
+   - 3/10 기사: 일부 `ohlc_date=2026-03-09`, 다수 `ohlc_date=2026-03-06` 확인
+3. 결론적으로 현재 change 값은 "기사일 확정 일봉 기준"이 아니라 "OHLC DB에 있는 가장 최근 과거 일봉 기준"일 수 있음을 확인했다.
+4. 사용자 요청에 따라 plan에 후속 단계 `6-5 same-day change gating`을 추가했다.
+
+#### 판단 결론
+
+- 2026-03-11 장중 기사 change는 현재 의미가 맞지 않는다.
+- 2026-03-10 기사 change도 전부 맞다고 볼 수 없다. 기사일과 같은 `ohlc_date`가 보장되지 않았기 때문이다.
+- 후속 수정에서는 "기사일과 같은 trading day bar가 확정되기 전", 또는 "anchor가 기사일보다 과거일 때" change를 API/UI에서 null 처리해야 한다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 코드 읽기 + 문서(plan/log) 반영만 수행 |
+| 빌드 | ✅ | 코드 변경 없음 |
+| 자동 테스트 | ✅ | 코드 변경 없음 |
+| 런타임 통합 | ✅ | `GET /api/news?...source_names=RTPR...`로 3/11, 3/10 기사들의 `published_at`, `ohlc_date`, `change_*`를 직접 확인 |
+
+#### 리스크 / 완화
+
+1. **리스크:** same-day gating을 넣어도 장 마감 뒤 재계산 트리거가 없으면 null이 오래 남을 수 있다.
+   - 완화 1: existing recent/custom change update job 또는 RTPR pull 후 재merge 시 same-day 조건이 해제되도록 구현한다.
+   - 완화 2: 필요하면 EOD 이후 별도 change backfill job을 둔다.
+2. **리스크:** API에서 `ohlc_date`를 계속 노출하면 사용자가 과거 anchor fallback을 내부 구현 detail로 보게 된다.
+   - 완화 1: 디버그용 유지 여부를 별도 결정한다.
+   - 완화 2: 사용자 UI는 null gating 기준만 신뢰하게 만든다.
+
+#### 사용자 확인 요청
+
+- plan에 `6-5 same-day change gating`을 추가했다.
+- 다음 실제 코드 수정은 이 규칙대로 `newsChangeMerger` 또는 API 노출 로직에서 same-day gating을 구현하는 것이다.
+
 **Status: awaiting user confirmation**
 
 #### 작업 요약
@@ -561,3 +607,136 @@ TXN / T / LMT / ETN / APP 기사들 → hasFullText=true
 
 - 현재는 RTPR update 버튼만 눌러도 fetch된 RTPR 기사의 plain text body가 `news_fulltext`에 바로 저장된다.
 - 과거에 이미 저장돼 있었지만 아직 안 채워진 RTPR row는, 해당 ticker가 다시 fetch되면 보강된다.
+
+### RTPR 기존 잘못된 change metric 정리 (2026-03-11 10:29)
+
+**작성 시각:** 2026-03-11 10:29 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. 2026-03-09 기사도 추가 확인했다.
+   - API 표본에서 `published_at=2026-03-09...`, `ohlc_date=2026-03-06` 인 RTPR 기사가 실제로 존재했다.
+   - 즉 문제는 3/11 장중만이 아니라 기존 데이터에도 이미 누적돼 있었다.
+2. 잘못된 RTPR change metric의 삭제 기준을 확정했다.
+   - 대상: `source='RTPR'`, `source_type='press_release'`
+   - 조건: `substr(published_at, 1, 10) > ohlc_date`
+   - 의미: 기사 날짜보다 과거 trading day anchor로 계산된 기존 change row
+3. 삭제 전에 app DB 백업을 생성했다.
+   - 백업 파일: `tmp/app_before_rtpr_change_cleanup_20260311_1020.db`
+4. 기존 잘못된 RTPR change metric을 DB에서 삭제했다.
+
+#### 정리 결과
+
+- 삭제 전: invalid news 341건, invalid metric rows 2728건
+- 삭제 후: invalid news 0건, invalid metric rows 0건
+- API 표본 재확인 결과: 3/11 RTPR 기사들의 `ohlc_date`, `change_pct`, `change_from_open_pct`, `change_open_to_high_pct` 가 모두 null로 내려옴
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 임시 cleanup 스크립트로 집계/삭제 후 제거 예정 |
+| 빌드 | ✅ | 애플리케이션 코드 변경 없음 |
+| 자동 테스트 | ✅ | 애플리케이션 코드 변경 없음 |
+| 런타임 통합 | ✅ | 3/9 API 표본 확인 + cleanup 전후 집계 + `/api/news?source_names=RTPR` 재확인 |
+
+#### 리스크 / 완화
+
+1. **리스크:** 기존 잘못된 row를 삭제했기 때문에, 코드 수정 전 다시 RTPR pull/change merge를 돌리면 같은 문제가 재주입될 수 있다.
+   - 완화 1: 다음 단계로 `6-5 same-day change gating` 구현을 바로 진행한다.
+   - 완화 2: 그 전까지는 RTPR change 값은 비어 있는 상태를 정상으로 본다.
+2. **리스크:** 삭제 기준이 RTPR에만 적용됐기 때문에 다른 source에도 같은 패턴이 있는지는 아직 미확인이다.
+   - 완화 1: 현재 사용자 요청 범위는 RTPR만 처리한다.
+   - 완화 2: 필요하면 후속으로 FINNHUB도 같은 audit 기준으로 점검한다.
+
+#### 사용자 확인 요청
+
+- 3/9까지 포함한 기존 RTPR 잘못된 change metric 정리는 완료했다.
+- 다음 작업은 code path 자체에서 같은 오류가 다시 들어오지 않게 same-day gating을 구현하는 것이다.
+
+### change 데이터 정상 업데이트 절차 plan 반영 (2026-03-11 10:33)
+
+**작성 시각:** 2026-03-11 10:33 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. 사용자의 질문 "change 데이터가 제대로 업데이트 되려면 어떻게"에 맞춰 plan Step 6을 보강했다.
+2. 기존 `6-5 same-day change gating`에 더해 `6-6 장마감 후/과거 backfill 재계산 경로`를 추가했다.
+3. 정상 업데이트 규칙을 운영 절차로 명시했다.
+    - RTPR pull 직후: `anchorDate === 기사 날짜` 일 때만 change 저장
+    - 장중 same-day 기사: null 유지 정상
+    - 장마감 후 또는 과거 일자 backfill: `POST /api/news/change/update-recent` 또는 `POST /api/news/change/update-custom` 으로 재계산
+    - 재계산 전제: OHLC DB에 해당 거래일 바가 실제로 존재해야 함
+
+#### 판단 결론
+
+- change 데이터가 제대로 업데이트되려면, 단순히 RTPR pull을 다시 누르는 것만으로는 부족하다.
+- 핵심 조건은 **기사 날짜와 같은 OHLC 일봉이 존재하는지** 이고, 값 채우기는 그 뒤에 change update endpoint 재실행으로 일어나야 한다.
+- 따라서 운영상 의미는 다음과 같다.
+   - 장중: null 정상
+   - EOD 이후 OHLC 확보 + 재계산: 숫자 채움 정상
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 문서(plan/log) 업데이트만 수행 |
+| 빌드 | ✅ | 애플리케이션 코드 변경 없음 |
+| 자동 테스트 | ✅ | 애플리케이션 코드 변경 없음 |
+| 런타임 통합 | ✅ | 기존 백엔드 endpoint `/api/news/change/update-recent`, `/api/news/change/update-custom` 존재 확인 |
+
+#### 사용자 확인 요청
+
+- plan에 "언제 비우고, 언제 다시 채우는지"까지 반영했다.
+- 다음 실제 구현은 `6-5/6-6`대로 same-day gating을 코드에 넣고, EOD 재계산 후 값이 채워지는지 검증하는 것이다.
+
+---
+
+### 6-5/6-6 same-day change gating 코드 구현 (2026-03-11 10:40)
+
+**작성 시각:** 2026-03-11 10:40 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. `newsChangeMerger.ts`의 `computeMetricsForItem()` 함수에 same-day gating 1줄 추가.
+2. 핵심 로직: `anchorDate !== newsDate`이면 `null` 반환 → change metric 미저장.
+3. 이 함수는 아래 3개 공개 함수에서 공통 호출되므로, 한 곳 수정으로 모든 경로에 적용됨:
+   - `mergeChangeForNewItems()` — RTPR/Finnhub pull 시 초기 change merge
+   - `bulkUpdateRecentChange()` — 최근 7일 재계산 endpoint
+   - `bulkUpdateCustomChange()` — 임의 기간 재계산 endpoint
+
+#### 변경 파일
+
+| 파일 | 변경 내용 |
+|------|---------|
+| `terminal/backend/src/services/newsChangeMerger.ts` | `computeMetricsForItem()` 내 `anchorDate !== newsDate` 체크 추가 (약 line 205) |
+
+#### 6-6은 별도 코드 변경 불필요한 이유
+
+- `computeMetricsForItem()`의 gating이 재계산 경로에도 동일하게 적용됨.
+- 장마감 후 당일 바가 OHLC DB에 추가되면, `anchorDate === newsDate`가 성립하여 change가 자연스럽게 채워짐.
+- 기존 `update-recent`/`update-custom` endpoint는 코드 변경 없이 그대로 동작.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `npx tsc --noEmit` 통과, 에러 0 |
+| 빌드 | ✅ | TypeScript 컴파일 성공 |
+| 런타임 | ⏳ | 백엔드 재시작 후 RTPR pull → change null 확인 필요 |
+
+#### 사용자 검증 방법
+
+```powershell
+# 1. 백엔드 재시작 (dev task 재실행)
+# 2. RTPR pull 실행 (또는 이미 데이터가 있으면 change 재계산)
+$resp = Invoke-RestMethod -Uri "http://localhost:8080/api/news?limit=10&source_names=RTPR&source_type=press_release" -Method Get
+$resp.items | Select-Object id, published_at, ohlc_date, change_pct | Format-Table
+# 기대: published_at 날짜와 ohlc_date 다른 기사는 change_pct = null
+```

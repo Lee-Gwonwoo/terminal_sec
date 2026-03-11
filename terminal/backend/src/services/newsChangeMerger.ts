@@ -200,6 +200,12 @@ async function computeMetricsForItem(
 
   const { anchor, prev, forwards } = result;
   const anchorDate = anchor.Datetime;
+
+  // 6-5 same-day gating: only store change when OHLC bar date matches news date.
+  // If anchor is from a past date (e.g. weekend/holiday news, or today's bar not yet available),
+  // return null so no misleading change data is written.
+  if (anchorDate !== newsDate) return null;
+
   const prevClose = prev?.Close ?? null;
   const fwd1  = forwards[0]  ?? null;
   const fwd3  = forwards[2]  ?? null;

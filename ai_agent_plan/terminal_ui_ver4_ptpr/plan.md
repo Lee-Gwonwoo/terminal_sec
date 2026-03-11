@@ -450,6 +450,8 @@ Invoke-RestMethod -Uri "http://localhost:8080/api/news?source_type=press_release
 | 6-2 | `pull-rtpr` recent 모드 → per-ticker 증분 (anchor + confirmed-empty skip) | `server.ts` | tsc 통과 + 런타임 per-ticker 로그 확인 | ⏳ |
 | 6-3 | `pull-rtpr` 양쪽 mode에 change% merge 추가 | `server.ts` | job 완료 시 changeMerged > 0 확인 | ⏳ |
 | 6-4 | Frontend 버튼 설명 텍스트 업데이트 | `FinnhubNewsWindow.tsx` | vite build 통과 | ⏳ |
+| 6-5 | 같은 날 기사에서 당일 bar 미확정/과거 anchor 사용 시 change 비우기 | `newsChangeMerger.ts` | 장중 3/11 기사 API 응답에서 `ohlc_date < published_at 날짜`면 change 컬럼이 null인지 확인 | ⏳ |
+| 6-6 | 장마감 후/과거 backfill change 재계산 경로 확정 | `newsChangeMerger.ts` (6-5와 동일 gating) | `POST /api/news/change/update-recent` 또는 `POST /api/news/change/update-custom` 실행 후 기사일과 `ohlc_date`가 같을 때만 change가 채워지는지 확인 | ⏳ |
 
 - `6-1` 목적: RTPR anchor map을 조회할 수 있도록 `getTickerAnchorMap(sourceType, source)` 확장.
   - 기존 `getTickerAnchorMap('company_news')` / `getTickerAnchorMap('press_release')` 호출은 기본 source='FINNHUB'로 동작하므로 영향 없음.
@@ -460,6 +462,47 @@ Invoke-RestMethod -Uri "http://localhost:8080/api/news?source_type=press_release
   - `mergeChangeForNewItems(newItems)` — job 종료 직전 실행
   - `setLastSuccess('rtpr_press_release', ...)` — update status 기록
 - `6-4` 목적: UI 설명을 "Latest 100"에서 "Per-ticker incremental" 으로 갱신.
+- `6-5` 목적: 장중 기사나 OHLC 지연 상황에서 잘못된 과거 일봉 change가 보이지 않게 한다.
+  - 규칙 1: 기사 날짜와 같은 거래일의 일봉이 아직 확정되지 않았으면 `[][][]change_pct[][][]`, `[][][]change_from_open_pct[][][]`, `[][][]change_open_to_high_pct[][][]`, forward change 컬럼을 모두 비운다.
+  - 규칙 2: 계산에 사용된 `anchorDate`가 기사 날짜보다 과거면 same-day 기사로 간주하지 않고 change를 비운다.
+  - 규칙 3: 전일/과거 anchor fallback은 내부 디버깅 정보로는 남길 수 있지만, 사용자 API 응답에는 노출하지 않는다.
+  - rollout 주의: 규칙 적용 전 이미 저장된 RTPR 잘못된 change metric은 1회 정리해야 한다. 기준은 `published_at` 날짜 > `ohlc_date` 인 기존 행이다.
+  - 완료 조건(눈으로 확인): 2026-03-11 장중 RTPR 기사에서 `published_at=2026-03-11...` 이고 `ohlc_date=2026-03-06` 또는 `2026-03-10` 같은 과거 값이면 모든 change 컬럼이 null이다.
+  - 사람 검증(비개발자): News API 결과 또는 UI에서 오늘 기사인데 숫자가 뜨지 않는지 확인한다.
+  - 흔한 문제/주의: 장 마감 후 당일 bar가 확정됐는데도 null로 남으면 gating 조건이 과도한 것이다. 반대로 `ohlc_date`가 기사일보다 과거인데 숫자가 남아 있으면 현재 버그가 재발한 것이다.
+- `6-6` 목적: change 데이터가 "언제 비고, 언제 다시 채워지는지"를 운영 절차로 고정한다.
+  - 정상 업데이트 원칙 1: **RTPR pull 시점**에는 기사 ingest와 초기 change merge를 수행하되, `anchorDate === 기사 날짜`를 만족할 때만 값을 저장한다. 그렇지 않으면 null 유지.
+  - 정상 업데이트 원칙 2: **같은 날 기사**는 장중에는 대부분 null이 정상이다. 일봉이 확정된 뒤에만 값을 채운다.
+  - 정상 업데이트 원칙 3: **장마감 후 재계산 경로**는 기존 endpoint를 사용한다.
+    - 최근 7일 재계산: `POST /api/news/change/update-recent`
+    - 임의 기간 재계산: `POST /api/news/change/update-custom` with `from`, `to`
+  - 정상 업데이트 원칙 4: 재계산 전에 OHLC DB에 해당 거래일 바가 실제로 있어야 한다. 없으면 여전히 null이 정상이다.
+  - 운영적 정의:
+    - 입력: `news_items.published_at` 날짜, `news_change_metrics` 계산용 OHLC anchor, `OHLC_data/ohlc_1d_watchlist.sqlite`의 일봉 데이터
+    - 허용 저장: `substr(published_at,1,10) == ohlc_date`
+    - 저장 금지: `substr(published_at,1,10) > ohlc_date`
+    - 장마감 후 값 채우기: 같은 날짜 바가 OHLC DB에 들어온 뒤 `update-recent` 또는 해당 일자 `update-custom` 재실행
+  - 예시 1: 2026-03-11 10:01 기사 + OHLC 최신 바가 2026-03-10이면 change는 null 유지
+  - 예시 2: 2026-03-11 장마감 후 2026-03-11 바가 OHLC DB에 들어오고 `POST /api/news/change/update-custom` body `{"from":"2026-03-11","to":"2026-03-11"}` 실행 시, `ohlc_date=2026-03-11`인 기사만 change가 채워짐
+  - 예시 3: 과거 backfill 기사 2026-03-09 + OHLC 바가 이미 2026-03-09로 존재하면 재계산 시 change 저장 가능
+  - 완료 조건(눈으로 확인): 오늘 기사들은 장중에는 null이고, 장마감 후 재계산을 돌린 뒤 `ohlc_date == published_at 날짜`인 기사만 숫자가 생긴다.
+  - 사람 검증(비개발자): 같은 날짜 기사 하나를 잡아서 장중에는 빈 값, 장마감 후 재계산 뒤에는 숫자가 채워지는지 본다.
+  - 흔한 문제/주의: OHLC DB가 늦게 갱신되면 재계산을 돌려도 null이 유지될 수 있다. 이 경우 change 로직 문제가 아니라 price source 타이밍 문제다.
+
+##### PLAN CHANGE (2026-03-11) — same-day change gating 추가
+
+사용자 요청: "같은 날 기사에는 당일 바가 확정되기 전까지 change 를 비우기"
+
+**확인된 문제:**
+- 2026-03-11 RTPR recent 기사에서 `published_at`은 3/11인데 `ohlc_date`는 3/06으로 내려오는 케이스가 확인됐다.
+- 2026-03-10 RTPR 기사도 일부는 `ohlc_date=3/09`, 다수는 `ohlc_date=3/06`이라 3/10 확정 bar 기준이라고 신뢰할 수 없었다.
+- 원인: `newsChangeMerger`가 `getOhlcCloseOnOrBefore()`로 기사일 이하의 가장 최근 일봉을 anchor로 잡기 때문.
+
+**결정:**
+- 기사일과 같은 trading day bar가 확정되지 않았거나, anchor가 기사일보다 과거면 사용자에게 보여주는 change는 채우지 않는다.
+- 즉 "값이 있으면 최소한 기사일 anchor 기준으로 계산된 값"이라는 의미를 보장한다.
+- 기존 DB에 이미 들어간 RTPR 잘못된 change metric은 별도 cleanup으로 삭제한다.
+- 장마감 후 또는 과거 일자 backfill 시에는 기존 change update endpoint로 재계산하여 값을 채운다.
 
 검증 훅:
 ```powershell
@@ -469,6 +512,16 @@ Start-Sleep 20
 $job = Invoke-RestMethod -Uri "http://localhost:8080/api/jobs/$($resp.jobId)"
 $job.logs | Select-Object -First 5
 # confirmed-empty 동작 확인: 2차 run에서 fallback 수 감소
+
+# 6-5: 같은 날 기사 change gating 확인
+$items = Invoke-RestMethod -Uri "http://localhost:8080/api/news?limit=20&source_names=RTPR&source_type=press_release"
+$items.items | Select-Object -First 10 id,published_at,ohlc_date,change_pct,change_from_open_pct,change_open_to_high_pct
+# 기대: published_at 날짜와 ohlc_date가 다르면 change 컬럼은 null
+
+# 6-6: 장마감 후 재계산 경로 확인
+Invoke-RestMethod -UseBasicParsing -Method Post -ContentType 'application/json' -Body '{}' http://localhost:8080/api/news/change/update-recent
+Invoke-RestMethod -UseBasicParsing -Method Post -ContentType 'application/json' -Body '{"from":"2026-03-11","to":"2026-03-11"}' http://localhost:8080/api/news/change/update-custom
+# 기대: 같은 날짜 OHLC 바가 존재하는 기사만 change가 다시 채워짐
 ```
 사용자 확인 필요: **예**
 
@@ -502,6 +555,8 @@ Legend: `✅` 완료+사용자확인 / `⏳` 완료, 사용자확인 대기 / `�
     ⏳ 6-2 pull-rtpr recent → per-ticker 증분
     ⏳ 6-3 change% merge 추가
     ⏳ 6-4 Frontend 버튼 설명 업데이트
+    ⏳ 6-5 same-day change gating 추가
+    ⏳ 6-6 EOD remerge 경로 확정
 ```
 
 병렬 트랙 요약:
