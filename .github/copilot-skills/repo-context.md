@@ -75,6 +75,7 @@
 		- `GET /api/news`는 company data enrich 단계에서 `[][][]marketCap[][][]`, `[][][]peers[][][]`, `[][][]companyDescription[][][]`, `[][][]ipoDate[][][]`를 대표 ticker 기준으로 보강한다.
 		- `GET /api/tickers`의 default-universe row도 `[][][]ipoDate[][][]`와 `[][][]marketCap[][][]`를 함께 반환한다.
 		- `company_profiles`의 핵심 company data 컬럼은 `[][][]description[][][]`, `[][][]ipo_date[][][]`, `[][][]market_cap[][][]`, `[][][]peers_json[][][]`다. `POST /api/company-profiles/pull-fmp`, `pull-peers`, `pull-market-cap`, `pull-ipo-date`가 모두 이 테이블을 갱신한다.
+		- Finnhub company data 경로(`pull-peers`, `pull-market-cap`, `pull-ipo-date`)는 2026-03-12 기준 **프로세스 전역 throttle**을 공유한다. 기본값은 `[][][]tickerConcurrency[][][]=1`, `[][][]requestIntervalMs[][][]=1500`이며, 서로 다른 job이 동시에 돌아도 실제 Finnhub 요청 burst는 합산 제한된다.
 		- `update_status` live source_key 예시는 `company_profiles`, `company_profiles_ipo_date`, `company_profiles_market_cap`, `finhub_news`, `ibkr_calendar`, `ibkr_ohlc_1d`, `news_change_custom`, `news_change_recent`, `rtpr_press_release`, `tickers_csv`다.
 		- `/api/news` change 날짜 필드는 분리되어 있다.
 		  - `[][][]ohlc_date[][][]` / `[][][]change_pct_ohlc_date[][][]` = `change_pct.target_date`

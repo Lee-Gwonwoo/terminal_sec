@@ -1,4 +1,9 @@
 import { config } from "../config.js";
+import {
+  acquireFinnhubCompanyDataSlot,
+  clampFinnhubCompanyDataConcurrency,
+  clampFinnhubCompanyDataIntervalMs,
+} from "./finnhubCompanyDataThrottle.js";
 
 const FINNHUB_BASE = "https://finnhub.io/api/v1";
 const MAX_RETRIES = 10;
@@ -18,8 +23,9 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function fetchWithRetry(url: string): Promise<any> {
+async function fetchWithRetry(url: string, requestIntervalMs: number): Promise<any> {
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    await acquireFinnhubCompanyDataSlot(requestIntervalMs);
     try {
       const res = await fetch(url);
       if (res.status === 429) {
@@ -46,7 +52,7 @@ async function fetchWithRetry(url: string): Promise<any> {
 
 export async function fetchFinnhubProfile2(symbol: string): Promise<FinnhubProfile2 | null> {
   const url = `${FINNHUB_BASE}/stock/profile2?symbol=${encodeURIComponent(symbol)}&token=${config.finnhubApiKey}`;
-  const data = await fetchWithRetry(url);
+  const data = await fetchWithRetry(url, clampFinnhubCompanyDataIntervalMs(undefined));
   if (!data || typeof data !== "object") {
     return null;
   }
@@ -69,78 +75,58 @@ export async function fetchFinnhubProfile2(symbol: string): Promise<FinnhubProfi
   };
 }
 
-/**
- * Simple token-bucket rate limiter.
- * Allows `maxTokens` requests per `intervalMs` window.
- */
-class RateLimiter {
-  private tokens: number;
-  private readonly maxTokens: number;
-  private readonly intervalMs: number;
-  private lastRefill: number;
-
-  constructor(maxTokens: number, intervalMs: number) {
-    this.maxTokens = maxTokens;
-    this.tokens = maxTokens;
-    this.intervalMs = intervalMs;
-    this.lastRefill = Date.now();
-  }
-
-  async acquire(): Promise<void> {
-    while (true) {
-      const now = Date.now();
-      const elapsed = now - this.lastRefill;
-      if (elapsed >= this.intervalMs) {
-        this.tokens = this.maxTokens;
-        this.lastRefill = now;
-      } else {
-        const partial = Math.floor((elapsed / this.intervalMs) * this.maxTokens);
-        this.tokens = Math.min(this.maxTokens, partial);
-      }
-      if (this.tokens > 0) {
-        this.tokens--;
-        return;
-      }
-      // Wait until next token available
-      const waitMs = Math.ceil(this.intervalMs / this.maxTokens);
-      await sleep(waitMs);
-    }
-  }
+export interface FinnhubProfilesBatchOptions {
+  concurrency?: number;
+  requestIntervalMs?: number;
+  onProgress?: (done: number, total: number) => void;
+  shouldCancel?: () => boolean;
 }
-
-/** Concurrency for parallel market-cap fetching (Finnhub free tier ≈ 60/min) */
-const PROFILE_CONCURRENCY = 3;
-const PROFILE_RATE_LIMIT = 55; // requests per minute (margin below 60)
 
 export async function fetchFinnhubProfilesBatch(
   tickers: string[],
-  _delayMs = 1050, // kept for API compat, ignored — rate limiter controls pacing
-  onProgress?: (done: number, total: number) => void,
-  shouldCancel?: () => boolean,
+  options: FinnhubProfilesBatchOptions = {},
 ): Promise<{ results: Map<string, FinnhubProfile2>; errors: Map<string, string>; cancelled: boolean }> {
   const results = new Map<string, FinnhubProfile2>();
   const errors = new Map<string, string>();
+  const effectiveConcurrency = clampFinnhubCompanyDataConcurrency(options.concurrency);
+  const effectiveIntervalMs = clampFinnhubCompanyDataIntervalMs(options.requestIntervalMs);
 
   if (tickers.length === 0) {
     return { results, errors, cancelled: false };
   }
 
-  const limiter = new RateLimiter(PROFILE_RATE_LIMIT, 60_000);
   let doneCount = 0;
   let cancelled = false;
 
   const processTicker = async (ticker: string): Promise<void> => {
-    if (cancelled || shouldCancel?.()) {
+    if (cancelled || options.shouldCancel?.()) {
       cancelled = true;
       return;
     }
-    await limiter.acquire();
-    if (cancelled || shouldCancel?.()) {
+    if (cancelled || options.shouldCancel?.()) {
       cancelled = true;
       return;
     }
     try {
-      const profile = await fetchFinnhubProfile2(ticker);
+      const url = `${FINNHUB_BASE}/stock/profile2?symbol=${encodeURIComponent(ticker)}&token=${config.finnhubApiKey}`;
+      const data = await fetchWithRetry(url, effectiveIntervalMs);
+      const profile = !data || typeof data !== "object"
+        ? null
+        : {
+            ticker: ticker.toUpperCase(),
+            name: typeof data.name === "string" && data.name.trim() ? data.name.trim() : null,
+            exchange: typeof data.exchange === "string" && data.exchange.trim() ? data.exchange.trim() : null,
+            finnhubIndustry:
+              typeof data.finnhubIndustry === "string" && data.finnhubIndustry.trim()
+                ? data.finnhubIndustry.trim()
+                : null,
+            ipoDate: typeof data.ipo === "string" && data.ipo.trim() ? data.ipo.trim() : null,
+            marketCapitalization:
+              typeof data.marketCapitalization === "number" && Number.isFinite(data.marketCapitalization)
+                ? data.marketCapitalization * 1_000_000
+                : null,
+            raw: data as Record<string, unknown>,
+          } satisfies FinnhubProfile2 | null;
       if (profile) {
         results.set(ticker.toUpperCase(), profile);
       }
@@ -148,7 +134,7 @@ export async function fetchFinnhubProfilesBatch(
       errors.set(ticker.toUpperCase(), error instanceof Error ? error.message : String(error));
     }
     doneCount++;
-    onProgress?.(doneCount, tickers.length);
+    options.onProgress?.(doneCount, tickers.length);
   };
 
   // Worker pool: N concurrent workers pulling from a shared queue
@@ -161,7 +147,7 @@ export async function fetchFinnhubProfilesBatch(
     }
   };
 
-  const workers = Array.from({ length: Math.min(PROFILE_CONCURRENCY, tickers.length) }, () => worker());
+  const workers = Array.from({ length: Math.min(effectiveConcurrency, tickers.length) }, () => worker());
   await Promise.all(workers);
 
   return { results, errors, cancelled };

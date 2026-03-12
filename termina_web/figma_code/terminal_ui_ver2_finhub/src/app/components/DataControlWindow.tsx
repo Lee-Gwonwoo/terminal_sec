@@ -145,6 +145,65 @@ export function DataControlWindow({
     try { localStorage.setItem('finnhub-request-interval-sec', String(v)); } catch { /* SSR */ }
   };
 
+  // ─── FMP Concurrency ───
+  const [fmpConcurrency, setFmpConcurrency] = useState(() => {
+    try {
+      const v = parseInt(localStorage.getItem('fmp-concurrency') ?? '', 10);
+      return v >= 1 && v <= 20 ? v : 5;
+    } catch { return 5; }
+  });
+  const saveFmpConcurrency = (n: number) => {
+    const v = Math.max(1, Math.min(20, n));
+    setFmpConcurrency(v);
+    try { localStorage.setItem('fmp-concurrency', String(v)); } catch { /* SSR */ }
+  };
+
+  // ─── FMP Request Interval ───
+  const [fmpRequestIntervalMs, setFmpRequestIntervalMs] = useState(() => {
+    try {
+      const v = parseInt(localStorage.getItem('fmp-request-interval-ms') ?? '', 10);
+      return Number.isFinite(v) && v >= 0 && v <= 5000 ? v : 250;
+    } catch { return 250; }
+  });
+  const saveFmpRequestIntervalMs = (n: number) => {
+    const v = Math.max(0, Math.min(5000, Math.round(n)));
+    setFmpRequestIntervalMs(v);
+    try { localStorage.setItem('fmp-request-interval-ms', String(v)); } catch { /* SSR */ }
+  };
+
+  // ─── FMP skip-existing toggle ───
+  const [fmpSkipExisting, setFmpSkipExisting] = useState(() => {
+    try {
+      return localStorage.getItem('fmp-skip-existing') !== 'false';
+    } catch { return true; }
+  });
+  const saveFmpSkipExisting = (v: boolean) => {
+    setFmpSkipExisting(v);
+    try { localStorage.setItem('fmp-skip-existing', String(v)); } catch { /* SSR */ }
+  };
+
+  // ─── Peers skip-existing toggle ───
+  const [peersSkipExisting, setPeersSkipExisting] = useState(() => {
+    try {
+      return localStorage.getItem('peers-skip-existing') !== 'false';
+    } catch { return true; }
+  });
+  const savePeersSkipExisting = (v: boolean) => {
+    setPeersSkipExisting(v);
+    try { localStorage.setItem('peers-skip-existing', String(v)); } catch { /* SSR */ }
+  };
+
+  // ─── IPO skip-existing toggle ───
+  const [ipoSkipExisting, setIpoSkipExisting] = useState(() => {
+    try {
+      return localStorage.getItem('ipo-skip-existing') !== 'false';
+    } catch { return true; }
+  });
+  const saveIpoSkipExisting = (v: boolean) => {
+    setIpoSkipExisting(v);
+    try { localStorage.setItem('ipo-skip-existing', String(v)); } catch { /* SSR */ }
+  };
+
   // ─── Custom Change date range input ───
   const [customChangeFrom, setCustomChangeFrom] = useState('');
   const [customChangeTo, setCustomChangeTo] = useState(() => new Date().toISOString().slice(0, 10));
@@ -283,12 +342,30 @@ export function DataControlWindow({
           break;
         case 'companyDesc':
           url = `${API_BASE}/api/company-profiles/pull-fmp`;
+          headers['Content-Type'] = 'application/json';
+          body = JSON.stringify({
+            concurrency: fmpConcurrency,
+            requestIntervalMs: fmpRequestIntervalMs,
+            skipExisting: fmpSkipExisting,
+          });
           break;
         case 'peersPull':
           url = `${API_BASE}/api/company-profiles/pull-peers`;
+          headers['Content-Type'] = 'application/json';
+          body = JSON.stringify({
+            tickerConcurrency: finnhubTickerConcurrency,
+            requestIntervalMs: Math.round(finnhubRequestIntervalSec * 1000),
+            skipExisting: peersSkipExisting,
+          });
           break;
         case 'ipoDate':
           url = `${API_BASE}/api/company-profiles/pull-ipo-date`;
+          headers['Content-Type'] = 'application/json';
+          body = JSON.stringify({
+            tickerConcurrency: finnhubTickerConcurrency,
+            requestIntervalMs: Math.round(finnhubRequestIntervalSec * 1000),
+            skipExisting: ipoSkipExisting,
+          });
           break;
         case 'recent':
           url = `${API_BASE}/api/news/change/update-recent`;
@@ -407,21 +484,21 @@ export function DataControlWindow({
       label: 'Company Description Update',
       statusKey: 'company_profiles',
       group: 'Company Data',
-      description: 'ticker_universes/default 기준으로 FMP 회사 설명을 일괄 수집합니다.',
+      description: `ticker_universes/default 기준으로 FMP 회사 설명을 일괄 수집합니다. (${fmpSkipExisting ? 'Skip Existing' : 'Overwrite All'}, concurrency=${fmpConcurrency}, interval=${fmpRequestIntervalMs}ms)`,
     },
     {
       key: 'peersPull',
       label: 'Peers Data Update',
       statusKey: 'company_profiles',
       group: 'Company Data',
-      description: 'ticker_universes/default 기준으로 Finnhub 관련 종목(peers)을 수집합니다.',
+      description: `ticker_universes/default 기준으로 Finnhub 관련 종목(peers)을 수집합니다. (${peersSkipExisting ? 'Skip Existing' : 'Overwrite All'})`,
     },
     {
       key: 'ipoDate',
       label: 'IPO Date Update',
       statusKey: 'company_profiles_ipo_date',
       group: 'Company Data',
-      description: 'ticker_universes/default 기준으로 Finnhub profile2의 IPO date를 수집합니다.',
+      description: `ticker_universes/default 기준으로 Finnhub profile2의 IPO date를 수집합니다. (${ipoSkipExisting ? 'Skip Existing' : 'Overwrite All'})`,
     },
 
     {
@@ -669,7 +746,7 @@ export function DataControlWindow({
           <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">
             <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">Finnhub Ticker Concurrency</h3>
             <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3">
-              Press Release / Company News 업데이트에서 ticker를 한 번에 몇 개씩 병렬 처리할지 정합니다. 현재 값으로 먼저 시도하고, 실패 ticker는 backend가 자동으로 더 낮은 병렬도까지 줄여 재시도합니다.
+              Finnhub Company News / Press Release 뿐 아니라 Peers / IPO Date 같은 company data 업데이트에도 적용됩니다. 값이 클수록 대기 중 worker는 늘어나지만 실제 Finnhub 요청은 backend 전역 throttle 안에서만 진행됩니다.
             </p>
             <div className="flex gap-2 mb-3 flex-wrap">
               {[1, 3, 5, 10].map(preset => (
@@ -704,7 +781,7 @@ export function DataControlWindow({
           <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">
             <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">Finnhub Request Interval</h3>
             <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3">
-              Finnhub 업데이트에서 병렬 chunk 한 묶음을 처리한 뒤 다음 묶음을 보내기 전 대기할 시간을 초 단위로 정합니다. 값이 클수록 요청 burst는 줄지만 전체 소요 시간은 길어집니다.
+              Finnhub company-data 요청 사이 최소 간격입니다. Peers / IPO Date / Market Cap / News pull이 같은 프로세스에서 동시에 돌아도 이 간격을 공유해서 429 burst를 줄입니다.
             </p>
             <div className="flex gap-2 mb-3 flex-wrap">
               {[0, 0.1, 0.5, 1, 2].map(preset => (
@@ -754,6 +831,160 @@ export function DataControlWindow({
                 className="w-24 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200"
               />
               <span className="text-[11px] text-gray-500 dark:text-gray-400">seconds</span>
+            </div>
+          </div>
+          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">
+            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">FMP Concurrency</h3>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3">
+              FMP Company Description 다운로드 시 병렬 요청 수. 높을수록 빠르지만 API rate limit 위험. 프로세스 전역 throttle로 실제 요청 간격을 제어합니다.
+            </p>
+            <div className="flex gap-2 mb-3 flex-wrap">
+              {[1, 3, 5, 10].map(preset => (
+                <button
+                  key={`fmp-c-${preset}`}
+                  onClick={() => saveFmpConcurrency(preset)}
+                  className={`px-3 py-1 rounded border text-xs font-medium transition-colors ${
+                    fmpConcurrency === preset
+                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+                      : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200'
+                  }`}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-[11px] text-gray-500 w-6">1</span>
+              <input
+                type="range"
+                min={1}
+                max={20}
+                step={1}
+                value={fmpConcurrency}
+                onChange={e => saveFmpConcurrency(parseInt(e.target.value, 10))}
+                className="flex-1 accent-blue-500"
+              />
+              <span className="text-[11px] text-gray-500 w-8 text-right">20</span>
+              <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300 w-10 text-right">{fmpConcurrency}</span>
+            </div>
+          </div>
+          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">
+            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">FMP Request Interval</h3>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3">
+              FMP 요청 사이 최소 간격(ms). 기본 250ms. 프로세스 전역 throttle이 걸립니다.
+            </p>
+            <div className="flex gap-2 mb-3 flex-wrap">
+              {[0, 100, 250, 500, 1000].map(preset => (
+                <button
+                  key={`fmp-interval-${preset}`}
+                  onClick={() => saveFmpRequestIntervalMs(preset)}
+                  className={`px-3 py-1 rounded border text-xs font-medium transition-colors ${
+                    fmpRequestIntervalMs === preset
+                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+                      : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200'
+                  }`}
+                >
+                  {preset}ms
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-[11px] text-gray-500 w-6">0</span>
+              <input
+                type="range"
+                min={0}
+                max={5000}
+                step={50}
+                value={fmpRequestIntervalMs}
+                onChange={e => saveFmpRequestIntervalMs(parseInt(e.target.value, 10))}
+                className="flex-1 accent-blue-500"
+              />
+              <span className="text-[11px] text-gray-500 w-10 text-right">5000</span>
+              <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300 w-14 text-right">{fmpRequestIntervalMs}ms</span>
+            </div>
+          </div>
+          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">
+            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">FMP Skip Existing</h3>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3">
+              이미 FMP description이 저장된 ticker는 건너뛸지 선택합니다. Off로 바꾸면 전체 덮어쓰기(overwrite) 모드.
+            </p>
+            <div className="flex gap-2 flex-wrap">
+              <button
+                onClick={() => saveFmpSkipExisting(true)}
+                className={`px-3 py-1 rounded border text-xs font-medium transition-colors ${
+                  fmpSkipExisting
+                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+                    : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200'
+                }`}
+              >
+                Skip Existing
+              </button>
+              <button
+                onClick={() => saveFmpSkipExisting(false)}
+                className={`px-3 py-1 rounded border text-xs font-medium transition-colors ${
+                  !fmpSkipExisting
+                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+                    : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200'
+                }`}
+              >
+                Overwrite All
+              </button>
+            </div>
+          </div>
+          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">
+            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">Peers Skip Existing</h3>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3">
+              이미 Finnhub peers가 저장된 ticker는 건너뛸지 선택합니다. Off로 바꾸면 전체 덮어쓰기(overwrite) 모드.
+            </p>
+            <div className="flex gap-2 flex-wrap">
+              <button
+                onClick={() => savePeersSkipExisting(true)}
+                className={`px-3 py-1 rounded border text-xs font-medium transition-colors ${
+                  peersSkipExisting
+                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+                    : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200'
+                }`}
+              >
+                Skip Existing
+              </button>
+              <button
+                onClick={() => savePeersSkipExisting(false)}
+                className={`px-3 py-1 rounded border text-xs font-medium transition-colors ${
+                  !peersSkipExisting
+                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+                    : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200'
+                }`}
+              >
+                Overwrite All
+              </button>
+            </div>
+          </div>
+          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">
+            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">IPO Date Skip Existing</h3>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3">
+              이미 Finnhub IPO date가 저장된 ticker는 건너뛸지 선택합니다. Off로 바꾸면 전체 덮어쓰기(overwrite) 모드.
+            </p>
+            <div className="flex gap-2 flex-wrap">
+              <button
+                onClick={() => saveIpoSkipExisting(true)}
+                className={`px-3 py-1 rounded border text-xs font-medium transition-colors ${
+                  ipoSkipExisting
+                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+                    : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200'
+                }`}
+              >
+                Skip Existing
+              </button>
+              <button
+                onClick={() => saveIpoSkipExisting(false)}
+                className={`px-3 py-1 rounded border text-xs font-medium transition-colors ${
+                  !ipoSkipExisting
+                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+                    : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200'
+                }`}
+              >
+                Overwrite All
+              </button>
             </div>
           </div>
         </div>

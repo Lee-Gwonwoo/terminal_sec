@@ -142,6 +142,42 @@ export async function getTickersWithRecentMarketCap(maxAgeHours = 24): Promise<S
   return new Set((rows as { ticker: string }[]).map((r) => r.ticker.toUpperCase()));
 }
 
+/**
+ * Return ticker symbols that already have a non-null description from FMP source.
+ */
+export async function getTickersWithFmpProfile(): Promise<Set<string>> {
+  const rows = await getDb().all<{ ticker: string }[]>(
+    `SELECT s.ticker FROM company_profiles cp
+     JOIN securities s ON s.id = cp.security_id
+     WHERE cp.source = 'fmp' AND cp.description IS NOT NULL AND cp.description != ''`,
+  );
+  return new Set((rows as { ticker: string }[]).map((r) => r.ticker.toUpperCase()));
+}
+
+/**
+ * Return ticker symbols that already have non-null peers_json from Finnhub source.
+ */
+export async function getTickersWithExistingPeers(): Promise<Set<string>> {
+  const rows = await getDb().all<{ ticker: string }[]>(
+    `SELECT s.ticker FROM company_profiles cp
+     JOIN securities s ON s.id = cp.security_id
+     WHERE cp.source = 'finnhub' AND cp.peers_json IS NOT NULL AND cp.peers_json != '[]'`,
+  );
+  return new Set((rows as { ticker: string }[]).map((r) => r.ticker.toUpperCase()));
+}
+
+/**
+ * Return ticker symbols that already have a non-null ipo_date from Finnhub source.
+ */
+export async function getTickersWithExistingIpoDate(): Promise<Set<string>> {
+  const rows = await getDb().all<{ ticker: string }[]>(
+    `SELECT s.ticker FROM company_profiles cp
+     JOIN securities s ON s.id = cp.security_id
+     WHERE cp.source = 'finnhub' AND cp.ipo_date IS NOT NULL AND cp.ipo_date != ''`,
+  );
+  return new Set((rows as { ticker: string }[]).map((r) => r.ticker.toUpperCase()));
+}
+
 export async function getPeersByTicker(ticker: string): Promise<string[] | null> {
   const row = await getDb().get<{ peers_json: string | null }>(
     `SELECT cp.peers_json FROM company_profiles cp

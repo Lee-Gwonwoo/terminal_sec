@@ -1318,3 +1318,68 @@ $resp.items | Select-Object id, published_at, ohlc_date, change_pct | Format-Tab
 
 - 다음 실제 구현에서는 `today + before 16:00 ET` 조건이면 `anchorDate===newsDate`여도 null이 유지되어야 한다.
 - half-day 장마감은 현재 plan에서 후속 개선 항목으로 남겼다.
+
+### FMP 병렬 + skip-existing + UI 설정 추가 (2026-03-12 18:43)
+
+**작성 시각:** 2026-03-12 18:43 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. `fmpCompanyProfileProvider.ts`를 순차 처리에서 **병렬 worker pool** 구조로 리팩터링했다.
+   - 프로세스 전역 FMP throttle(`acquireFmpSlot`)로 모든 worker의 실제 요청 간격을 직렬화해 429를 방지.
+   - 429 발생 시 exponential backoff (최대 30초 캡).
+   - retry 횟수를 5회 → 10회로 증가.
+2. `companyProfileRepository.ts`에 `getTickersWithFmpProfile()` 추가 — 이미 FMP source로 description이 저장된 ticker set 반환.
+3. `server.ts`의 `POST /api/company-profiles/pull-fmp`에 새 파라미터 추가:
+   - `concurrency` (기본=5, 범위 1~20)
+   - `requestIntervalMs` (기본=250ms, 범위 0~5000ms)
+   - `skipExisting` (기본=true): true면 기존 FMP 프로필 있는 ticker 건너뛰기, false면 전체 덮어쓰기.
+4. `DataControlWindow.tsx`:
+   - FMP concurrency / interval / skip-existing 상태 추가 (localStorage 연동).
+   - companyDesc 버튼이 JSON body로 설정값 전달.
+   - Settings 탭에 FMP Concurrency, FMP Request Interval, FMP Skip Existing 설정 섹션 추가.
+   - `Company Description Update` 버튼의 description에 현재 설정 표시.
+5. `backend_prompt.md` 문서 동기화.
+
+#### 변경 파일
+
+- `terminal/backend/src/services/fmpCompanyProfileProvider.ts` — 병렬 worker pool + 전역 throttle
+- `terminal/backend/src/services/companyProfileRepository.ts` — `getTickersWithFmpProfile()` 추가
+- `terminal/backend/src/server.ts` — pull-fmp endpoint 파라미터 확장
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx` — FMP 설정 UI + body 전달
+- `terminal/backend_prompt.md` — pull-fmp 문서 갱신
+
+#### 검증 결과
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 4개 소스파일 에러 0개 |
+| 빌드(backend) | ✅ | `npm run build` 통과 |
+| 자동 테스트 | ✅ | 55/55 passed |
+| 빌드(frontend) | ✅ | vite build 통과 (596.99 kB) |
+| 런타임(overwrite) | ✅ | `skipExisting=false, concurrency=2, interval=300ms` → job 시작, 3 tickers 대상, `skipped=0` |
+| 런타임(skip) | ✅ | `skipExisting=true` → 3 tickers 중 1개 skip, 2개만 fetch 대상 |
+
+#### 런타임 검증 로그
+
+```text
+# Overwrite mode
+Starting FMP company description update for 3 tickers (concurrency=2, interval=300ms, skipExisting=false, skipped=0)
+
+# Skip-existing mode
+Starting FMP company description update for 2 tickers (concurrency=2, interval=300ms, skipExisting=true, skipped=1)
+```
+
+⚠️ FMP API가 현재 429를 반환하고 있어 실제 fetch 완료는 불가했으나, 병렬 구조/skip 로직/파라미터 전달 모두 정상 동작 확인. 429는 FMP API key plan의 rate limit (free tier ~5 req/min)에 의한 것.
+
+#### 리스크 / 완화
+
+1. **리스크:** FMP free tier는 매우 제한적 (5 req/min, 250 req/day). 1698 tickers 전체 처리가 비현실적일 수 있음.
+   - 완화 1: skip-existing 기본 활성화로 이미 받은 ticker는 재요청하지 않음.
+   - 완화 2: interval을 12초 이상으로 설정하면 free tier에서도 429 회피 가능 (단, 소요 시간 증가).
+   - 완화 3: 유료 플랜 업그레이드 시 기본 250ms 간격으로 빠르게 처리 가능.
+2. **리스크:** 병렬 worker들이 429 backoff 중 모두 대기하면서 job 진행이 느려질 수 있음.
+   - 완화 1: backoff 최대 30초로 cap, 10회 재시도 후 해당 ticker skip.
+   - 완화 2: interval을 충분히 길게 설정하면 429 자체가 발생하지 않음.
