@@ -964,3 +964,57 @@ sqlite3 terminal/backend/backend/data/app.db "SELECT id, origin_url FROM news_it
 - PR Newswire 8건: 본문에 `prnewswire.com/news-releases/` 경로 URL 자체가 없음 (이미지 CDN + SOURCE만)
 
 **상태: ✅ 구현 완료**
+
+---
+
+### PLAN CHANGE (2026-03-12) — FMP 회사 설명 Data Control 버튼 + ticker 마스터 저장 경로 반영
+
+- 배경: 사용자가 FMP로 회사 설명 데이터를 받는 버튼을 Data Control Window에서 실행하고, DB 저장은 뉴스 row가 아니라 ticker가 저장된 마스터 테이블 쪽으로 유지하길 요청했다.
+- 확인 결과:
+  - frontend에는 이미 `Company Description Update` 버튼이 존재한다.
+  - backend에는 이미 `POST /api/company-profiles/pull-fmp` endpoint가 존재한다.
+  - 저장은 `company_profiles.security_id` 기준이며, `security_id`는 `securities` ticker 마스터를 참조한다.
+- 이번 반영 목적: 현재 코드 기준으로 이 요구사항을 plan 문서에도 명시해, 이후 작업자가 “아직 미구현”으로 오해하지 않게 한다.
+
+#### ⏳ Step 12 — FMP 회사 설명 버튼 + ticker 마스터 저장 경로 확인
+
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 12-1 | Data Control Window에 FMP company description 실행 버튼이 존재하는지 확인하고 plan에 반영 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx`, `ai_agent_plan/terminal_ui_ver4_ptpr/plan.md` | 코드에서 `Company Description Update`와 `/api/company-profiles/pull-fmp` 연결 확인 | ⏳ |
+| 12-2 | backend FMP pull 경로가 default ticker universe를 기본 대상으로 사용하는지 확인 | `terminal/backend/src/server.ts`, `terminal/backend/src/services/fmpCompanyProfileProvider.ts` | ticker 미지정 request에서 `getDefaultUniverseTickers()` 경유 확인 | ⏳ |
+| 12-3 | 회사 설명 저장 경로가 ticker 마스터(`securities`)에 연결된 `company_profiles`인지 확인 | `terminal/backend/src/db.ts`, `terminal/backend/src/services/companyProfileRepository.ts` | `company_profiles.security_id REFERENCES securities(id)` 및 upsert 경로 확인 | ⏳ |
+| 12-4 | 사용자가 직접 확인할 수 있는 검증 절차를 정리 | `ai_agent_plan/terminal_ui_ver4_ptpr/plan.md` | build/API/DB 확인 절차가 plan에 포함 | ⏳ |
+
+- `12-1` 목적: 운영 UI에서 FMP 회사 설명 수집을 직접 실행할 수 있는지 plan 기준으로 고정한다. 설명: Data Control `Updates` 탭에 `Company Description Update` 버튼이 있고, 클릭 시 `/api/company-profiles/pull-fmp`를 호출하는 연결이 확인되면 완료다.
+  - 완료 조건(눈으로 확인): 코드에 `Company Description Update` 라벨과 `companyDesc` → `/api/company-profiles/pull-fmp` 분기가 함께 보인다.
+  - 사람 검증(비개발자): Data Control을 열었을 때 `Company Description Update` 버튼이 보인다.
+  - 흔한 문제/주의: plan 문서에는 버튼이 있다고 적혀 있는데 실제 코드에서는 라벨만 있고 endpoint 연결이 빠져 있을 수 있다.
+- `12-2` 목적: 버튼이 호출하는 backend가 임의 ticker 입력 없이도 기본 종목셋을 대상으로 동작하는지 고정한다. 설명: `POST /api/company-profiles/pull-fmp`가 ticker 미지정 시 `ticker_universes/default`를 기준으로 FMP profile batch pull을 수행하면 완료다.
+  - 완료 조건(눈으로 확인): route 내부에 ticker 미지정 시 `getDefaultUniverseTickers()`를 쓰는 분기가 있다.
+  - 사람 검증(비개발자): ticker를 따로 입력하지 않아도 “기본 종목셋 기준 업데이트”라는 설명으로 이해할 수 있다.
+  - 흔한 문제/주의: 원본 CSV 직접 읽기와 DB universe 조회가 섞이면 source of truth가 다시 흐려질 수 있다.
+- `12-3` 목적: 회사 설명이 뉴스 단위가 아니라 ticker 마스터 엔터티에 저장된다는 점을 명확히 한다. 설명: 저장 테이블은 `company_profiles`이고, 이 테이블은 `security_id`로 `securities`를 참조해야 한다.
+  - 완료 조건(눈으로 확인): schema에 `company_profiles.security_id REFERENCES securities(id)`가 보이고, upsert 함수가 `securityId`를 입력으로 받는다.
+  - 사람 검증(비개발자): 특정 ticker의 회사 설명을 다시 받아도 같은 ticker 엔터티에 덮어써진다.
+  - 흔한 문제/주의: `news_id`나 별도 flat file에 저장하면 같은 회사 설명이 기사 수만큼 중복된다.
+- `12-4` 목적: 구현 여부를 사용자가 직접 재확인할 수 있는 절차를 남긴다. 설명: frontend build, backend route, DB 샘플 조회까지 한 번에 확인할 수 있는 체크리스트가 있으면 완료다.
+  - 완료 조건(눈으로 확인): plan 안에 실행 명령과 기대 결과가 같이 적혀 있다.
+  - 사람 검증(비개발자): 버튼 클릭 후 App DB에서 `company_profiles` row 증가 여부를 확인할 수 있다.
+  - 흔한 문제/주의: UI 버튼만 보고 저장 경로까지 확인하지 않으면, 실제로는 다른 테이블에 저장되는 드리프트를 놓칠 수 있다.
+
+검증 훅:
+```powershell
+cd c:\github_coding\terminal_sec\terminal
+npm run build
+
+cd c:\github_coding\terminal_sec\termina_web\figma_code\terminal_ui_ver2_finhub
+npm run build
+
+# backend dev 서버 실행 후
+Invoke-RestMethod -UseBasicParsing -Method Post -ContentType 'application/json' -Body '{}' http://127.0.0.1:4000/api/company-profiles/pull-fmp
+
+# App DB 확인
+sqlite3 c:\github_coding\terminal_sec\terminal\backend\backend\data\app.db "SELECT COUNT(*) AS cnt FROM company_profiles;"
+sqlite3 c:\github_coding\terminal_sec\terminal\backend\backend\data\app.db "SELECT s.ticker, cp.source, substr(cp.description,1,120) FROM company_profiles cp JOIN securities s ON s.id = cp.security_id ORDER BY cp.fetched_at DESC LIMIT 5;"
+```
+사용자 확인 필요: **예**
