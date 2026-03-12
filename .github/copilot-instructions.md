@@ -11,6 +11,7 @@
 **작업 수행 규율(필수):**
 - 작업 시작 전에 목차를 보고 이번 작업과 가장 연관된 섹션(들)을 먼저 확인하고, 해당 지침사항을 우선적으로 따른다.
 - 구현/수정 작업을 시작하기 전에, 이번 작업에 적용할 `.github/copilot-skills/*.md` 문서가 무엇인지 판단한 뒤 채팅에 먼저 명시한다(예: “참고: planning.md + remote-vm-web-ui.md”). 그 다음 작업을 시작한다.
+- 사용자가 채팅에서 `ai research`, `AI research`, `ai news research` 관련 작업이라고 말하면, 구현/분석 전에 `.github/copilot-skills/ai-news-research.md`를 먼저 확인하고 그 규칙을 우선 적용한다.
 - 구현에 들어가기 전에 항상 “세부화된 계획”을 채팅에 먼저 명시한다.
 - 계획의 각 단계마다 다음을 반드시 수행한다:
   - 해당 단계를 구현한다.
@@ -137,6 +138,7 @@
 ## 스킬 지침(상황별)
 아래 규칙들은 특정 상황에서만 적용됩니다. 자세한 내용은 `.github/copilot-skills/`를 참고하세요:
 - [플랜 & 에이전트 로그](copilot-skills/planning.md)
+- [AI 뉴스 리서치](copilot-skills/ai-news-research.md)
 - [Wrapper + base 패턴 (momentum)](copilot-skills/momentum-wrapper-base.md)
 - [Indicator calculators](copilot-skills/indicator-calculators.md)
 - [딥러닝 트레이너](copilot-skills/deep-learning-trainers.md)

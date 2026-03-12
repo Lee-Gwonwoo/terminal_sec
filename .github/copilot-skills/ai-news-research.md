@@ -1,12 +1,13 @@
-# AI News Analysis
+# AI News Research
 
 ### 언제 쓰나
+- 채팅에서 `ai research`, `AI research`, `ai news research`처럼 AI 리서치 관련 작업을 말했고, 뉴스/종목 영향 해석이나 사례 분류가 포함될 때.
 - 뉴스 본문 또는 headline/summary를 읽고, 해당 뉴스가 개별 종목 주가에 미칠 가능성 있는 영향을 사람이 읽을 수 있는 형태로 정리해야 할 때.
 - `Score`, `Score Evidence`, `Keywords` 같은 AI 후처리 컬럼의 생성 규칙을 고정해야 할 때.
 - UI/DB/API에서 AI 뉴스 분석 결과를 같은 의미로 다뤄야 할 때.
 
 ### 목적
-이 지침은 AI 뉴스 분석을 아래 3개 모델로 나눠서 정의한다.
+이 지침은 AI 뉴스 리서치/분석 작업을 아래 3개 모델로 나눠서 정의한다.
 
 1. `🟦 Model_1_new news analysis`
 2. `🟧 Model_2_case analysis`
