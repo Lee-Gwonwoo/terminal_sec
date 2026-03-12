@@ -218,6 +218,90 @@
 4. `mergeChangeForNewItems(newItems)` — OHLC change% 자동 계산
 5. `setLastSuccess('rtpr_press_release', ...)` — 상태 기록
 
+## 2026-03-12
+
+### Company Description / Peers Update job 로그 연동 (2026-03-12)
+
+**작성 시각:** 2026-03-12 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. Data Control의 `Company Description Update`, `Peers Data Update`는 UI에 Log panel이 있었지만 backend `pull-fmp`, `pull-peers`가 즉시 완료형 응답이라 실제 진행률/로그가 비어 있었다.
+2. `terminal/backend/src/server.ts`를 수정해 두 endpoint를 모두 background job 기반으로 전환했다. 이제 route는 즉시 `{ jobId }`를 반환하고 backend worker가 진행률과 로그를 채운다.
+3. `terminal/backend/src/services/fmpCompanyProfileProvider.ts`, `terminal/backend/src/services/finnhubPeersProvider.ts`를 수정해 취소 여부와 진행 callback을 받을 수 있게 했다.
+4. `DataControlWindow.tsx` 완료 summary를 보강해 company data job도 `requested/updated/failed/rows` 요약을 표시하게 했다.
+5. plan/spec 문서를 새 job 계약 기준으로 갱신했다.
+
+#### 변경 파일
+
+- `terminal/backend/src/server.ts`
+- `terminal/backend/src/services/fmpCompanyProfileProvider.ts`
+- `terminal/backend/src/services/finnhubPeersProvider.ts`
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx`
+- `terminal/backend_prompt.md`
+- `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+- `ai_agent_plan/terminal_ui_ver4_ptpr/plan.md`
+
+#### 기대 동작
+
+- `POST /api/company-profiles/pull-fmp` → `{ jobId }`
+- `POST /api/company-profiles/pull-peers` → `{ jobId }`
+- `GET /api/jobs/:jobId`에서 progress, logs, result 확인 가능
+- Data Control `View Log` 패널에서 회사 설명/peers update의 ticker별 로그와 완료 summary 확인 가능
+
+#### 검증 계획
+
+1. backend build/test 실행
+2. frontend build 실행
+3. dev server 대상 `pull-fmp`, `pull-peers` 호출 후 `/api/jobs/:jobId` polling 확인
+4. 필요 시 UI에서 버튼 클릭 후 Log panel 수동 확인
+
+#### 리스크 / 완화
+
+1. **리스크:** job route로 바뀌면서 기존 즉시 응답을 기대하던 코드가 있으면 깨질 수 있다.
+   - 완화 1: Data Control 호출 경로와 prompt 문서를 함께 갱신했다.
+   - 완화 2: runtime으로 `{ jobId }` 반환을 다시 확인한다.
+2. **리스크:** backend dev 서버 hot reload 타이밍에 따라 이전 코드가 잠시 남아 있을 수 있다.
+   - 완화 1: build와 실제 API 재호출로 계약을 검증한다.
+   - 완화 2: 필요 시 dev server output을 점검한다.
+3. **리스크:** cancellation은 지원하지만 provider 루프가 너무 늦게 취소를 반영하면 UX가 둔할 수 있다.
+   - 완화 1: batch loop마다 cancel check를 넣었다.
+   - 완화 2: 장시간 universe 기준으로 추가 체감 검증을 한다.
+
+#### 사용자 확인 요청
+
+- 다음으로 build/runtime 검증을 진행한다.
+- 검증 후 실제 Data Control 화면에서 보이는 로그 형태까지 함께 확인해달라고 요청할 예정이다.
+
+### Company Description / Peers 기본 maxTickers 제거 (2026-03-12)
+
+**작성 시각:** 2026-03-12 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. 사용자 확인 결과, `Company Description Update`와 `Peers Data Update`는 기본적으로 50개가 아니라 default universe 전체를 처리해야 했다.
+2. 원인을 확인했다.
+   - frontend는 두 버튼에서 `tickers`, `maxTickers`를 보내지 않는다.
+   - backend `pull-fmp`, `pull-peers`는 `maxTickers ?? 50`로 기본 제한을 걸고 있었다.
+3. 이를 `maxTickers ?? tickers.length`로 변경해, body에서 제한을 주지 않으면 default universe 전체가 대상이 되도록 수정했다.
+4. backend prompt와 plan 문서도 같은 계약으로 갱신했다.
+
+#### 기대 동작
+
+- `POST /api/company-profiles/pull-fmp` body 없음 → default universe 전체 대상
+- `POST /api/company-profiles/pull-peers` body 없음 → default universe 전체 대상
+- `maxTickers`를 명시한 경우에만 앞에서부터 제한
+
+#### 검증 계획
+
+1. backend build 확인
+2. body 없이 endpoint 호출
+3. 생성된 job의 `requested`가 50이 아니라 default universe 전체 길이와 일치하는지 확인
+
 #### 검증 결과
 
 | 검증 계층 | 결과 | 비고 |

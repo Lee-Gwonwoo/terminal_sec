@@ -1027,7 +1027,10 @@ export function DataControlWindow({
           {activeLog.status === 'done' && activeLog.result && (
             <div className="px-3 py-2 border-t border-gray-200 dark:border-gray-700 bg-green-50 dark:bg-green-900/20 text-xs text-green-700 dark:text-green-300 shrink-0">
               ✓ Completed
-              {activeLog.result.tickersUpdated !== undefined && (
+              {activeLog.result.requested !== undefined && activeLog.result.totalRowsUpserted !== undefined && activeLog.result.tickersUpdated !== undefined && (
+                <span> — requested {String(activeLog.result.requested)}, updated {String(activeLog.result.tickersUpdated)}, failed {String(activeLog.result.tickersFailed ?? 0)}, rows {String(activeLog.result.totalRowsUpserted)}</span>
+              )}
+              {activeLog.result.tickersUpdated !== undefined && activeLog.result.requested === undefined && (
                 <span> — {String(activeLog.result.tickersUpdated)} tickers updated, {String(activeLog.result.tickersFailed)} failed, {String(activeLog.result.totalRowsUpserted)} rows</span>
               )}
               {activeLog.result.merged !== undefined && (

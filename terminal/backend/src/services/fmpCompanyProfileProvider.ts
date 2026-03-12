@@ -93,16 +93,29 @@ export async function fetchFmpProfile(ticker: string): Promise<FmpProfile | null
 export async function fetchFmpProfilesBatch(
   tickers: string[],
   delayMs = 250,
-): Promise<Map<string, FmpProfile>> {
+  onProgress?: (done: number, total: number) => void,
+  shouldCancel?: () => boolean,
+): Promise<{ results: Map<string, FmpProfile>; errors: Map<string, string>; cancelled: boolean }> {
   const results = new Map<string, FmpProfile>();
-  for (const ticker of tickers) {
+  const errors = new Map<string, string>();
+  let cancelled = false;
+
+  for (let i = 0; i < tickers.length; i++) {
+    if (shouldCancel?.()) {
+      cancelled = true;
+      break;
+    }
+    const ticker = tickers[i];
     const profile = await fetchFmpProfile(ticker);
     if (profile) {
       results.set(ticker.toUpperCase(), profile);
+    } else {
+      errors.set(ticker.toUpperCase(), "No profile returned from FMP");
     }
-    if (delayMs > 0) {
+    onProgress?.(i + 1, tickers.length);
+    if (i < tickers.length - 1 && delayMs > 0) {
       await sleep(delayMs);
     }
   }
-  return results;
+  return { results, errors, cancelled };
 }

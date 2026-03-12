@@ -2178,60 +2178,110 @@ app.post("/api/company-profiles/pull-fmp", async (req, res) => {
     if (!tickers || tickers.length === 0) {
       tickers = await getDefaultUniverseTickers();
     }
-    const max = body.maxTickers ?? 50;
+    const max = body.maxTickers ?? tickers.length;
     const target = tickers.slice(0, max);
 
-    const profiles = await fetchFmpProfilesBatch(target);
-    let upserted = 0;
+    const jobId = createJob(target.length);
+    appendLog(jobId, `Starting FMP company description update for ${target.length} tickers`);
+    res.json({ jobId });
 
-    for (const [ticker, fmp] of profiles) {
-      // Find existing security by ticker only to avoid duplicates
-      const existingSec = await getDb().get<{ id: number }>(
-        "SELECT id FROM securities WHERE ticker = ? ORDER BY id ASC LIMIT 1",
-        [ticker.toUpperCase()],
-      );
-      let secId: number;
-      if (existingSec) {
-        secId = existingSec.id;
-        const sets: string[] = [];
-        const params: unknown[] = [];
-        if (fmp.exchangeShortName) { sets.push("exchange = ?"); params.push(fmp.exchangeShortName); }
-        if (fmp.companyName) { sets.push("name = ?"); params.push(fmp.companyName); }
-        if (fmp.sector) { sets.push("sector = ?"); params.push(fmp.sector); }
-        if (fmp.industry) { sets.push("industry = ?"); params.push(fmp.industry); }
-        if (sets.length > 0) {
-          params.push(secId);
-          await getDb().run(`UPDATE securities SET ${sets.join(", ")} WHERE id = ?`, params);
+    void (async () => {
+      try {
+        if (target.length === 0) {
+          appendLog(jobId, "No tickers requested — nothing to do");
+          await setLastSuccess("company_profiles", new Date().toISOString(), {
+            source: "fmp",
+            requested: 0,
+            fetched: 0,
+            updated: 0,
+            errors: 0,
+          });
+          completeJob(jobId, { requested: 0, tickersUpdated: 0, tickersFailed: 0, totalRowsUpserted: 0 });
+          return;
         }
-      } else {
-        secId = await upsertSecurity(
-          ticker,
-          fmp.exchangeShortName || null,
-          fmp.companyName || null,
-          fmp.sector || null,
-          fmp.industry || null,
-        );
-      }
-      await upsertCompanyProfile(
-        secId,
-        "fmp",
-        fmp.description || null,
-        fmp.ceo || null,
-        fmp.fullTimeEmployees ? parseInt(fmp.fullTimeEmployees, 10) || null : null,
-        fmp.website || null,
-        fmp.ipoDate || null,
-        fmp.mktCap || null,
-        JSON.stringify(fmp.raw),
-      );
-      upserted++;
-    }
 
-    res.json({
-      requested: target.length,
-      fetched: profiles.size,
-      upserted,
-      totalProfiles: await countCompanyProfiles(),
-    });
+        const { results, errors, cancelled } = await fetchFmpProfilesBatch(
+          target,
+          250,
+          (done, total) => { updateProgress(jobId, done, total); },
+          () => isJobCancelled(jobId),
+        );
+
+        if (cancelled || isJobCancelled(jobId)) {
+          appendLog(jobId, `🛑 Cancelled — processed ${results.size + errors.size}/${target.length} tickers`);
+          return;
+        }
+
+        let updated = 0;
+        for (const [ticker, fmp] of results) {
+          const existingSec = await getDb().get<{ id: number }>(
+            "SELECT id FROM securities WHERE ticker = ? ORDER BY id ASC LIMIT 1",
+            [ticker.toUpperCase()],
+          );
+          let secId: number;
+          if (existingSec) {
+            secId = existingSec.id;
+            const sets: string[] = [];
+            const params: unknown[] = [];
+            if (fmp.exchangeShortName) { sets.push("exchange = ?"); params.push(fmp.exchangeShortName); }
+            if (fmp.companyName) { sets.push("name = ?"); params.push(fmp.companyName); }
+            if (fmp.sector) { sets.push("sector = ?"); params.push(fmp.sector); }
+            if (fmp.industry) { sets.push("industry = ?"); params.push(fmp.industry); }
+            if (sets.length > 0) {
+              params.push(secId);
+              await getDb().run(`UPDATE securities SET ${sets.join(", ")} WHERE id = ?`, params);
+            }
+          } else {
+            secId = await upsertSecurity(
+              ticker,
+              fmp.exchangeShortName || null,
+              fmp.companyName || null,
+              fmp.sector || null,
+              fmp.industry || null,
+            );
+          }
+          await upsertCompanyProfile(
+            secId,
+            "fmp",
+            fmp.description || null,
+            fmp.ceo || null,
+            fmp.fullTimeEmployees ? parseInt(fmp.fullTimeEmployees, 10) || null : null,
+            fmp.website || null,
+            fmp.ipoDate || null,
+            fmp.mktCap || null,
+            JSON.stringify(fmp.raw),
+          );
+          updated++;
+          appendLog(jobId, `${ticker}: description ${fmp.description ? `updated (${fmp.description.length} chars)` : "missing"}`);
+        }
+
+        for (const [ticker, message] of errors) {
+          appendLog(jobId, `${ticker}: error - ${message}`);
+        }
+
+        const totalProfiles = await countCompanyProfiles();
+        await setLastSuccess("company_profiles", new Date().toISOString(), {
+          source: "fmp",
+          requested: target.length,
+          fetched: results.size,
+          updated,
+          errors: errors.size,
+          totalProfiles,
+        });
+
+        completeJob(jobId, {
+          requested: target.length,
+          fetched: results.size,
+          tickersUpdated: updated,
+          tickersFailed: errors.size,
+          totalRowsUpserted: updated,
+          totalProfiles,
+          source: "fmp",
+        });
+      } catch (error) {
+        failJob(jobId, error instanceof Error ? error.message : String(error));
+      }
+    })();
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : "Unknown error" });
   }
@@ -2245,25 +2295,73 @@ app.post("/api/company-profiles/pull-peers", async (req, res) => {
     if (!tickers || tickers.length === 0) {
       tickers = await getDefaultUniverseTickers();
     }
-    const max = body.maxTickers ?? 50;
+    const max = body.maxTickers ?? tickers.length;
     const target = tickers.slice(0, max);
 
-    const { results, errors: fetchErrors } = await fetchFinnhubPeersBatch(target);
+    const jobId = createJob(target.length);
+    appendLog(jobId, `Starting Finnhub peers update for ${target.length} tickers`);
+    res.json({ jobId });
 
-    let upserted = 0;
-    for (const [ticker, peers] of results) {
-      const secId = await upsertSecurity(ticker, null, null, null, null);
-      await upsertPeers(secId, "finnhub", JSON.stringify(peers));
-      upserted++;
-    }
+    void (async () => {
+      try {
+        if (target.length === 0) {
+          appendLog(jobId, "No tickers requested — nothing to do");
+          await setLastSuccess("company_profiles", new Date().toISOString(), {
+            source: "finnhub-peers",
+            requested: 0,
+            fetched: 0,
+            updated: 0,
+            errors: 0,
+          });
+          completeJob(jobId, { requested: 0, tickersUpdated: 0, tickersFailed: 0, totalRowsUpserted: 0 });
+          return;
+        }
 
-    res.json({
-      requested: target.length,
-      fetched: results.size,
-      upserted,
-      errors: fetchErrors.size,
-      errorDetails: fetchErrors.size > 0 ? Object.fromEntries(fetchErrors) : undefined,
-    });
+        const { results, errors: fetchErrors, cancelled } = await fetchFinnhubPeersBatch(
+          target,
+          120,
+          (done, total) => { updateProgress(jobId, done, total); },
+          () => isJobCancelled(jobId),
+        );
+
+        if (cancelled || isJobCancelled(jobId)) {
+          appendLog(jobId, `🛑 Cancelled — processed ${results.size + fetchErrors.size}/${target.length} tickers`);
+          return;
+        }
+
+        let updated = 0;
+        for (const [ticker, peers] of results) {
+          const secId = await upsertSecurity(ticker, null, null, null, null);
+          await upsertPeers(secId, "finnhub", JSON.stringify(peers));
+          updated++;
+          appendLog(jobId, `${ticker}: ${peers.length} peers saved`);
+        }
+
+        for (const [ticker, message] of fetchErrors) {
+          appendLog(jobId, `${ticker}: error - ${message}`);
+        }
+
+        await setLastSuccess("company_profiles", new Date().toISOString(), {
+          source: "finnhub-peers",
+          requested: target.length,
+          fetched: results.size,
+          updated,
+          errors: fetchErrors.size,
+        });
+
+        completeJob(jobId, {
+          requested: target.length,
+          fetched: results.size,
+          tickersUpdated: updated,
+          tickersFailed: fetchErrors.size,
+          totalRowsUpserted: updated,
+          errors: fetchErrors.size,
+          source: "finnhub-peers",
+        });
+      } catch (error) {
+        failJob(jobId, error instanceof Error ? error.message : String(error));
+      }
+    })();
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : "Unknown error" });
   }

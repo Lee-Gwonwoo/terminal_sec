@@ -1018,3 +1018,72 @@ sqlite3 c:\github_coding\terminal_sec\terminal\backend\backend\data\app.db "SELE
 sqlite3 c:\github_coding\terminal_sec\terminal\backend\backend\data\app.db "SELECT s.ticker, cp.source, substr(cp.description,1,120) FROM company_profiles cp JOIN securities s ON s.id = cp.security_id ORDER BY cp.fetched_at DESC LIMIT 5;"
 ```
 사용자 확인 필요: **예**
+
+---
+
+### PLAN CHANGE (2026-03-12) — Company Data job/log 연동 추가
+
+- 배경: Data Control의 `Company Description Update`, `Peers Data Update`는 UI에 `Running`/`Log` 버튼이 있었지만, backend가 즉시 완료형 JSON만 반환해서 실제 진행률/로그 패널과 맞지 않았다.
+- 변경 목표:
+  - 두 endpoint를 모두 background job 기반으로 전환한다.
+  - `View Log` 패널에서 진행률, 로그 라인, 완료 요약을 볼 수 있게 한다.
+  - 저장 경로는 기존대로 `company_profiles.security_id` → `securities.id` 구조를 유지한다.
+
+#### ⏳ Step 13 — Company Description / Peers job 기반 로그 연동
+
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 13-1 | `pull-fmp`를 background job 기반으로 전환하고 per-ticker 로그/진행률을 기록 | `terminal/backend/src/server.ts`, `terminal/backend/src/services/fmpCompanyProfileProvider.ts` | `POST /api/company-profiles/pull-fmp` → `{jobId}` 반환, `/api/jobs/:jobId`에 progress/logs 존재 | ⏳ |
+| 13-2 | `pull-peers`를 background job 기반으로 전환하고 per-ticker 로그/진행률을 기록 | `terminal/backend/src/server.ts`, `terminal/backend/src/services/finnhubPeersProvider.ts` | `POST /api/company-profiles/pull-peers` → `{jobId}` 반환, `/api/jobs/:jobId`에 progress/logs 존재 | ⏳ |
+| 13-3 | Data Control Log panel 완료 요약이 company data job 결과도 읽기 쉽게 보이도록 보강 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx` | 완료 후 requested/updated/failed/rows summary 표시 확인 | ⏳ |
+| 13-4 | plan/log/spec 문서를 새 job 계약 기준으로 갱신 | `ai_agent_plan/terminal_ui_ver4_ptpr/plan.md`, `ai_agent_plan/terminal_ui_ver4_ptpr/agent_log.md`, `terminal/backend_prompt.md`, `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md` | 문서 diff와 실제 계약 일치 확인 | ⏳ |
+
+- `13-1` 목적: FMP 회사 설명 update도 다른 장시간 작업처럼 상세 로그를 남기게 만든다. 설명: route가 즉시 `{jobId}`를 반환하고, 백그라운드에서 ticker별 `description updated/missing/error` 로그와 진행률을 갱신하면 완료다.
+  - 완료 조건(눈으로 확인): Log 패널에 FMP ticker별 로그가 쌓이고 진행률 바가 움직인다.
+  - 사람 검증(비개발자): `Company Description Update` 실행 후 `Log`를 누르면 몇 개 ticker를 처리했는지 보인다.
+  - 흔한 문제/주의: jobId만 반환하고 실제 로그 append를 안 하면 패널이 비어 보인다.
+- `13-2` 목적: Finnhub peers update도 동일한 job UX로 맞춘다. 설명: ticker별 `N peers saved` 또는 error 로그와 진행률을 job 상태에 반영하면 완료다.
+  - 완료 조건(눈으로 확인): `Peers Data Update` 실행 후 `Log` 패널에서 ticker별 peers 저장 로그가 보인다.
+  - 사람 검증(비개발자): 진행률 퍼센트와 완료 후 요약 숫자를 볼 수 있다.
+  - 흔한 문제/주의: cancellation을 UI에서 누를 수 있는데 backend 루프가 이를 전혀 보지 않으면 stop 버튼이 의미 없어질 수 있다.
+- `13-3` 목적: 완료 후에도 회사 데이터 job 결과를 한눈에 읽게 한다. 설명: Log 패널 하단 summary에서 requested/updated/failed/rows가 나타나면 완료다.
+  - 완료 조건(눈으로 확인): Done 상태에서 녹색 summary 영역에 숫자 요약이 나온다.
+  - 사람 검증(비개발자): job이 끝난 뒤 몇 개 성공/실패했는지 텍스트로 확인할 수 있다.
+  - 흔한 문제/주의: 기존 summary가 change update 전용 키만 읽으면 company data job은 완료돼도 정보가 비어 보일 수 있다.
+- `13-4` 목적: 실제 계약이 바뀐 만큼 문서도 즉시 맞춘다. 설명: backend prompt와 frontend prompt가 더 이상 즉시 숫자 응답 구조가 아니라 `{jobId}` + `/api/jobs/:jobId` polling 구조라고 적히면 완료다.
+  - 완료 조건(눈으로 확인): 문서에 `{jobId}` 반환과 Log panel polling이 반영된다.
+  - 사람 검증(비개발자): 문서만 읽어도 “버튼 클릭 → job 시작 → Log에서 진행 확인” 흐름을 이해할 수 있다.
+  - 흔한 문제/주의: 코드만 바꾸고 문서를 안 바꾸면 API 사용자가 예전 즉시 응답 구조를 기대하게 된다.
+
+### PLAN CHANGE (2026-03-12) — Company Description / Peers 기본 대상 전체 universe로 변경
+
+- 배경: 두 update 버튼은 `tickers`를 body에 넣지 않고 호출한다. 이때 backend 기본 `maxTickers`가 50이면 사용자는 default universe 전체가 아니라 앞 50개만 처리하게 된다.
+- 변경 목표:
+  - `Company Description Update`와 `Peers Data Update`의 기본 동작을 `ticker_universes/default` 전체 대상으로 바꾼다.
+  - 선택적으로 `maxTickers`를 보낸 경우에만 제한이 걸리게 유지한다.
+
+#### ⏳ Step 14 — Company data 기본 대상 전체 universe
+
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 14-1 | `pull-fmp`에서 `maxTickers` 미지정 시 default universe 전체를 사용하도록 변경 | `terminal/backend/src/server.ts` | body 없이 호출한 job의 `requested`가 default universe 길이와 일치 | ⏳ |
+| 14-2 | `pull-peers`에서 `maxTickers` 미지정 시 default universe 전체를 사용하도록 변경 | `terminal/backend/src/server.ts` | body 없이 호출한 job의 `requested`가 default universe 길이와 일치 | ⏳ |
+| 14-3 | spec/plan 문서의 기본값 설명을 전체 universe 기준으로 갱신 | `terminal/backend_prompt.md`, `ai_agent_plan/terminal_ui_ver4_ptpr/plan.md` | 문서와 실제 런타임 계약 일치 | ⏳ |
+
+검증 훅:
+```powershell
+cd c:\github_coding\terminal_sec\terminal
+npm run build
+npm run test
+
+cd c:\github_coding\terminal_sec\termina_web\figma_code\terminal_ui_ver2_finhub
+npm run build
+
+# backend dev 서버 실행 후
+$resp = Invoke-RestMethod -UseBasicParsing -Method Post -ContentType 'application/json' -Body '{"tickers":["AAPL"],"maxTickers":1}' http://127.0.0.1:8080/api/company-profiles/pull-fmp
+Invoke-RestMethod -UseBasicParsing http://127.0.0.1:8080/api/jobs/$($resp.jobId)
+
+$resp2 = Invoke-RestMethod -UseBasicParsing -Method Post -ContentType 'application/json' -Body '{"tickers":["AAPL"],"maxTickers":1}' http://127.0.0.1:8080/api/company-profiles/pull-peers
+Invoke-RestMethod -UseBasicParsing http://127.0.0.1:8080/api/jobs/$($resp2.jobId)
+```
+사용자 확인 필요: **예**

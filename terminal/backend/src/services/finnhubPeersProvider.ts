@@ -26,11 +26,17 @@ export async function fetchFinnhubPeersBatch(
   tickers: string[],
   delayMs = 120,
   onProgress?: (done: number, total: number) => void,
-): Promise<{ results: Map<string, string[]>; errors: Map<string, string> }> {
+  shouldCancel?: () => boolean,
+): Promise<{ results: Map<string, string[]>; errors: Map<string, string>; cancelled: boolean }> {
   const results = new Map<string, string[]>();
   const errors = new Map<string, string>();
+  let cancelled = false;
 
   for (let i = 0; i < tickers.length; i++) {
+    if (shouldCancel?.()) {
+      cancelled = true;
+      break;
+    }
     const ticker = tickers[i];
     try {
       const peers = await fetchFinnhubPeers(ticker);
@@ -44,5 +50,5 @@ export async function fetchFinnhubPeersBatch(
     }
   }
 
-  return { results, errors };
+  return { results, errors, cancelled };
 }

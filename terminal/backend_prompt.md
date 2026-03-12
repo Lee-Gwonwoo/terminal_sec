@@ -609,20 +609,13 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 응답 컬럼:
 
-- `[][][]requested[][][]`
-- `[][][]fetched[][][]`
-- `[][][]upserted[][][]`
-- `[][][]totalProfiles[][][]`
+- `[][][]jobId[][][]`
 
 ### `POST /api/company-profiles/pull-peers`
 
 응답 컬럼:
 
-- `[][][]requested[][][]`
-- `[][][]fetched[][][]`
-- `[][][]upserted[][][]`
-- `[][][]errors[][][]`
-- `[][][]errorDetails[][][]`
+- `[][][]jobId[][][]`
 
 ### `GET /api/db/inspect`
 
@@ -1667,7 +1660,7 @@ folder와 연관 bookmark_items가 함께 삭제된다.
 
 ### `POST /api/company-profiles/pull-fmp`
 
-FMP(Financial Modeling Prep)에서 회사 설명을 가져와 `company_profiles`에 저장한다.
+FMP(Financial Modeling Prep)에서 회사 설명을 가져와 `company_profiles`에 저장한다. 이 API는 즉시 집계 숫자를 반환하지 않고 background job을 생성한 뒤 `{ jobId }`를 반환한다.
 
 요청 body:
 
@@ -1675,9 +1668,28 @@ FMP(Financial Modeling Prep)에서 회사 설명을 가져와 `company_profiles`
 { "maxTickers": 50 }
 ```
 
+- `tickers`를 직접 넘기면 그 목록만 사용한다.
+- `tickers`를 생략하면 `ticker_universes/default` 기준으로 대상을 결정한다.
+- `maxTickers`를 생략하면 `ticker_universes/default` 전체를 사용한다.
+- `maxTickers`를 명시하면 그 수만큼 앞에서부터 제한한다.
+
+응답:
+
+```json
+{ "jobId": "..." }
+```
+
+job 로그 동작:
+
+1. route는 즉시 job을 생성한다.
+2. background worker가 ticker별로 FMP profile을 조회한다.
+3. 각 ticker마다 `description updated`, `description missing`, `error` 로그를 job log에 append한다.
+4. 진행률은 처리 ticker 수 기준으로 갱신한다.
+5. 완료 후 result summary에는 `[][][]requested[][][]`, `[][][]tickersUpdated[][][]`, `[][][]tickersFailed[][][]`, `[][][]totalRowsUpserted[][][]`, `[][][]errors[][][]`, `[][][]cancelled[][][]`가 들어간다.
+
 ### `POST /api/company-profiles/pull-peers`
 
-Finnhub `/stock/peers` API로 관련 종목 데이터를 수집해 `company_profiles.peers_json`에 저장한다.
+Finnhub `/stock/peers` API로 관련 종목 데이터를 수집해 `company_profiles.peers_json`에 저장한다. 이 API도 background job 기반이며 `{ jobId }`를 반환한다.
 
 요청 body:
 
@@ -1686,22 +1698,23 @@ Finnhub `/stock/peers` API로 관련 종목 데이터를 수집해 `company_prof
 ```
 
 - `tickers` 생략 시 `ticker_universes/default` 기준으로 대상을 결정한다.
-- `maxTickers` 기본값: 50
+- `maxTickers`를 생략하면 `ticker_universes/default` 전체를 사용한다.
+- `maxTickers`를 명시하면 그 수만큼 앞에서부터 제한한다.
 
-응답 출력 컬럼:
+응답:
 
-- `[][][]requested[][][]`
-- `[][][]fetched[][][]`
-- `[][][]upserted[][][]`
-- `[][][]errors[][][]`
-- `[][][]errorDetails[][][]`
+```json
+{ "jobId": "..." }
+```
 
 동작:
 
 1. 대상 ticker 목록을 결정한다 (body에서 지정 또는 default universe).
-2. Finnhub `/stock/peers?symbol=X`를 ticker당 120ms 간격으로 호출한다.
-3. 결과를 `company_profiles`에 `source = 'finnhub'`로 upsert한다.
-4. 동일 security_id + source 조합이 이미 있으면 UPDATE, 없으면 INSERT.
+2. job을 생성하고 즉시 `{ jobId }`를 반환한다.
+3. background worker가 Finnhub `/stock/peers?symbol=X`를 ticker당 120ms 간격으로 호출한다.
+4. 결과를 `company_profiles`에 `source = 'finnhub'`로 upsert한다.
+5. ticker별 `N peers saved` 또는 error 로그를 job log에 append한다.
+6. 완료 후 result summary에는 `[][][]requested[][][]`, `[][][]tickersUpdated[][][]`, `[][][]tickersFailed[][][]`, `[][][]totalRowsUpserted[][][]`, `[][][]errors[][][]`, `[][][]cancelled[][][]`가 들어간다.
 
 ### `POST /api/company-profiles/pull-market-cap`
 

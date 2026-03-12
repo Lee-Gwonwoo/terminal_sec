@@ -502,6 +502,12 @@ localStorage 사용:
 - `GET /api/jobs/:jobId`
 - `GET /api/db/inspect`
 
+company data job contract:
+
+- `POST /api/company-profiles/pull-fmp` → `{ jobId }`
+- `POST /api/company-profiles/pull-peers` → `{ jobId }`
+- 완료 summary는 `requested`, `tickersUpdated`, `tickersFailed`, `totalRowsUpserted` 기준으로 표시된다
+
 ### 로그 패널
 
 - 한 번에 한 섹션 로그만 표시
@@ -509,10 +515,11 @@ localStorage 사용:
 - 자동 스크롤
 - `Esc`로 닫기 가능
 - 완료 result는 ticker/row 수 또는 merged/skipped 수를 summary로 표시
+- `Company Description Update`, `Peers Data Update`도 실제 background job을 사용하므로 progress/log/result summary가 채워진다
 
 주의:
 
-- 프론트는 calendar update도 job처럼 polling UI를 기대하지만, 현재 backend `POST /api/ibkr/calendar/update`는 즉시 완료형 response다. 즉 `jobId`를 반환하지 않으므로 이 섹션의 현재 UI 기대와 backend 계약 사이에 불일치가 있다.
+- 현재 불일치는 calendar update 섹션에만 남아 있다. `Company Description Update`와 `Peers Data Update`는 `{jobId}` 반환 + `GET /api/jobs/:jobId` polling 계약으로 맞춰졌다.
 
 ### Settings 탭
 
