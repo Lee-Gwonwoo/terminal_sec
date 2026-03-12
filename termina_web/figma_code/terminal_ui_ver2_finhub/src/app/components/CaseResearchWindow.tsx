@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, Search, Trash2, Copy, FileText, FolderOpen, Check, RefreshCw } from 'lucide-react';
+import { Plus, Search, Trash2, Copy, FileText, FolderOpen, Check, RefreshCw, RotateCcw, X } from 'lucide-react';
 
 const API_BASE = '';
 
@@ -33,6 +33,21 @@ interface ContextMenuState {
   y: number;
 }
 
+interface TrashedResearchTab extends ResearchTab {
+  deleted_at: string;
+}
+
+interface TrashedResearchPage extends ResearchPage {
+  deleted_at: string;
+  tab_name: string | null;
+  tab_deleted_at: string | null;
+}
+
+interface ResearchTrashResponse {
+  tabs: TrashedResearchTab[];
+  pages: TrashedResearchPage[];
+}
+
 // ── Component ──
 
 export function CaseResearchWindow() {
@@ -55,6 +70,12 @@ export function CaseResearchWindow() {
   const [copiedId, setCopiedId] = useState(false);
   const [draggedPageId, setDraggedPageId] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [showRestorePanel, setShowRestorePanel] = useState(false);
+  const [isLoadingTrash, setIsLoadingTrash] = useState(false);
+  const [trashedTabs, setTrashedTabs] = useState<TrashedResearchTab[]>([]);
+  const [trashedPages, setTrashedPages] = useState<TrashedResearchPage[]>([]);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [restoringKey, setRestoringKey] = useState<string | null>(null);
 
   const titleRef = useRef<HTMLInputElement>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
@@ -126,6 +147,25 @@ export function CaseResearchWindow() {
       setPages(prev => prev.map(page => page.id === data.id ? data : page));
     } catch (err) {
       console.error('Failed to fetch research page detail', err);
+    }
+  }, []);
+
+  const fetchTrash = useCallback(async () => {
+    setIsLoadingTrash(true);
+    setRestoreError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/research/trash`);
+      if (!res.ok) {
+        throw new Error(`Trash fetch failed with status ${res.status}`);
+      }
+      const data: ResearchTrashResponse = await res.json();
+      setTrashedTabs(data.tabs);
+      setTrashedPages(data.pages);
+    } catch (err) {
+      console.error('Failed to fetch research trash', err);
+      setRestoreError('Failed to load deleted items.');
+    } finally {
+      setIsLoadingTrash(false);
     }
   }, []);
 
@@ -412,6 +452,57 @@ export function CaseResearchWindow() {
     }
   }, [activePageId, activeTabId]);
 
+  const handleOpenRestorePanel = useCallback(async () => {
+    setShowRestorePanel(true);
+    await fetchTrash();
+  }, [fetchTrash]);
+
+  const handleRestoreTab = async (tabId: string) => {
+    setRestoringKey(`tab:${tabId}`);
+    setRestoreError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/research/tabs/${tabId}/restore`, { method: 'POST' });
+      if (!res.ok) {
+        throw new Error(`Restore tab failed with status ${res.status}`);
+      }
+      const restoredTab: ResearchTab = await res.json();
+      setShowRestorePanel(false);
+      await fetchTabs();
+      setActiveTabId(restoredTab.id);
+      await fetchPages(restoredTab.id);
+    } catch (err) {
+      console.error('Tab restore failed', err);
+      setRestoreError('Failed to restore the deleted section.');
+      await fetchTrash();
+    } finally {
+      setRestoringKey(null);
+    }
+  };
+
+  const handleRestorePage = async (pageId: string) => {
+    setRestoringKey(`page:${pageId}`);
+    setRestoreError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/research/pages/${pageId}/restore`, { method: 'POST' });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => null);
+        throw new Error(payload?.error ?? `Restore page failed with status ${res.status}`);
+      }
+      const restoredPage: ResearchPage = await res.json();
+      setShowRestorePanel(false);
+      setActiveTabId(restoredPage.tab_id);
+      await fetchTabs();
+      await fetchPages(restoredPage.tab_id, restoredPage.id);
+      await fetchPageDetail(restoredPage.id);
+    } catch (err) {
+      console.error('Page restore failed', err);
+      setRestoreError(err instanceof Error ? err.message : 'Failed to restore the deleted page.');
+      await fetchTrash();
+    } finally {
+      setRestoringKey(null);
+    }
+  };
+
   const persistPageOrder = useCallback(async (tabId: string, nextPages: ResearchPage[]) => {
     try {
       const res = await fetch(`${API_BASE}/api/research/tabs/${tabId}/pages/reorder`, {
@@ -479,6 +570,15 @@ export function CaseResearchWindow() {
         >
           <RefreshCw size={12} className={isRefreshing ? 'animate-spin' : ''} />
           Refresh
+        </button>
+        <button
+          onClick={() => { void handleOpenRestorePanel(); }}
+          disabled={isLoadingTrash}
+          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:border-emerald-400 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-emerald-500 dark:hover:text-emerald-400"
+          title="Show deleted tabs and pages that can be restored"
+        >
+          <RotateCcw size={12} className={isLoadingTrash ? 'animate-spin' : ''} />
+          Restore
         </button>
         {searchQuery && (
           <button onClick={() => { setSearchQuery(''); setIsSearching(false); setSearchResults([]); }} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">
@@ -709,6 +809,97 @@ export function CaseResearchWindow() {
           >
             Delete (24h hold)
           </button>
+        </div>
+      )}
+
+      {showRestorePanel && (
+        <div className="absolute inset-0 z-[65] flex items-start justify-end bg-slate-950/20 backdrop-blur-[1px] dark:bg-black/40">
+          <div className="mt-12 mr-4 flex max-h-[75vh] w-[28rem] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-700">
+              <div>
+                <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">Restore Deleted Items</div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400">Soft-deleted items stay recoverable for up to 24 hours.</div>
+              </div>
+              <button
+                onClick={() => setShowRestorePanel(false)}
+                className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                title="Close restore panel"
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-4 py-3">
+              {restoreError && (
+                <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+                  {restoreError}
+                </div>
+              )}
+
+              <div className="mb-4">
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">Deleted Sections</div>
+                {trashedTabs.length === 0 ? (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400">No deleted sections waiting for restore.</div>
+                ) : (
+                  <div className="space-y-2">
+                    {trashedTabs.map(tab => (
+                      <div key={tab.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-slate-800/60">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{tab.name}</div>
+                            <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Deleted: {formatDate(tab.deleted_at)}</div>
+                          </div>
+                          <button
+                            onClick={() => { void handleRestoreTab(tab.id); }}
+                            disabled={restoringKey === `tab:${tab.id}`}
+                            className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-700 hover:border-emerald-400 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300 dark:hover:border-emerald-700 dark:hover:bg-emerald-950/50"
+                          >
+                            <RotateCcw size={11} className={restoringKey === `tab:${tab.id}` ? 'animate-spin' : ''} />
+                            Restore
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">Deleted Pages</div>
+                {trashedPages.length === 0 ? (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400">No deleted pages waiting for restore.</div>
+                ) : (
+                  <div className="space-y-2">
+                    {trashedPages.map(page => {
+                      const isBlocked = Boolean(page.tab_deleted_at);
+                      return (
+                        <div key={page.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-slate-800/60">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{page.title || '(Untitled)'}</div>
+                              <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Section: {page.tab_name ?? 'Unknown section'}</div>
+                              <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Deleted: {formatDate(page.deleted_at)}</div>
+                              {isBlocked && (
+                                <div className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">Restore the deleted section first.</div>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => { void handleRestorePage(page.id); }}
+                              disabled={isBlocked || restoringKey === `page:${page.id}`}
+                              className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-700 hover:border-emerald-400 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300 dark:hover:border-emerald-700 dark:hover:bg-emerald-950/50"
+                            >
+                              <RotateCcw size={11} className={restoringKey === `page:${page.id}` ? 'animate-spin' : ''} />
+                              Restore
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

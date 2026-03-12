@@ -21,6 +21,16 @@ export interface ResearchPage {
   updated_at: string;
 }
 
+export interface TrashedResearchTab extends ResearchTab {
+  deleted_at: string;
+}
+
+export interface TrashedResearchPage extends ResearchPage {
+  deleted_at: string;
+  tab_name: string | null;
+  tab_deleted_at: string | null;
+}
+
 const RESEARCH_TRASH_RETENTION_SQL = "-24 hours";
 
 // ── Tabs ──
@@ -93,6 +103,42 @@ export async function deleteResearchTab(id: string): Promise<void> {
       id,
     );
     await db.run("COMMIT");
+  } catch (error) {
+    await db.run("ROLLBACK");
+    throw error;
+  }
+}
+
+export async function listTrashedResearchTabs(userId: string): Promise<TrashedResearchTab[]> {
+  const db = getDb();
+  return db.all<TrashedResearchTab[]>(
+    `SELECT id, user_id, name, sort_order, created_at, deleted_at
+     FROM research_tabs
+     WHERE user_id = ?
+       AND deleted_at IS NOT NULL
+     ORDER BY deleted_at DESC, created_at DESC`,
+    userId,
+  );
+}
+
+export async function restoreResearchTab(id: string): Promise<ResearchTab | null> {
+  const db = getDb();
+  await db.run("BEGIN TRANSACTION");
+  try {
+    await db.run(
+      "UPDATE research_tabs SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL",
+      id,
+    );
+    await db.run(
+      "UPDATE research_pages SET deleted_at = NULL WHERE tab_id = ? AND deleted_at IS NOT NULL",
+      id,
+    );
+    const restored = await db.get<ResearchTab>(
+      "SELECT * FROM research_tabs WHERE id = ? AND deleted_at IS NULL",
+      id,
+    );
+    await db.run("COMMIT");
+    return restored ?? null;
   } catch (error) {
     await db.run("ROLLBACK");
     throw error;
@@ -175,6 +221,52 @@ export async function deleteResearchPage(id: string): Promise<void> {
     new Date().toISOString(),
     id,
   );
+}
+
+export async function listTrashedResearchPages(userId: string): Promise<TrashedResearchPage[]> {
+  const db = getDb();
+  return db.all<TrashedResearchPage[]>(
+    `SELECT
+       p.id,
+       p.tab_id,
+       p.title,
+       p.body,
+       p.sort_order,
+       p.created_at,
+       p.updated_at,
+       p.deleted_at,
+       t.name AS tab_name,
+       t.deleted_at AS tab_deleted_at
+     FROM research_pages p
+     JOIN research_tabs t ON t.id = p.tab_id
+     WHERE t.user_id = ?
+       AND p.deleted_at IS NOT NULL
+     ORDER BY p.deleted_at DESC, p.updated_at DESC`,
+    userId,
+  );
+}
+
+export async function restoreResearchPage(id: string): Promise<ResearchPage | null> {
+  const db = getDb();
+  const row = await db.get<{ parent_deleted_at: string | null }>(
+    `SELECT t.deleted_at AS parent_deleted_at
+     FROM research_pages p
+     JOIN research_tabs t ON t.id = p.tab_id
+     WHERE p.id = ?
+       AND p.deleted_at IS NOT NULL`,
+    id,
+  );
+  if (!row) {
+    return null;
+  }
+  if (row.parent_deleted_at) {
+    throw new Error("PARENT_TAB_DELETED");
+  }
+  await db.run(
+    "UPDATE research_pages SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL",
+    id,
+  );
+  return getResearchPage(id);
 }
 
 export async function reorderResearchPages(tabId: string, pageIds: string[]): Promise<ResearchPage[]> {

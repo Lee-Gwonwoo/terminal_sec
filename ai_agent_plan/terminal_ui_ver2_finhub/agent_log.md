@@ -1645,6 +1645,63 @@
    완화: key를 고정(`finnhub-ticker-concurrency`)했고, 기본값 `5` fallback을 두었음.
 3. webui dev 프록시에는 기존 `ECONNREFUSED` 잡음이 있어 브라우저 시각 검증이 불안정할 수 있음.
    완화: backend 직통 API 런타임 검증으로 기능 반영을 확인했고, 최종 시각 확인은 사용자 화면에서 수행 가능.
+
+---
+
+## 2026-03-12
+
+**작성 시각:** 2026-03-12 08:06 (local)
+
+### AI Research Window Restore 버튼 + Trash 복구 패널
+
+| 항목 | 내용 |
+|------|------|
+| 시점 | 2026-03-12 08:06 |
+| 상태 | 확인 대기(awaiting user confirmation) |
+| 관련 요청 | `Refresh` 오른쪽에 `Restore` 버튼 추가, 삭제한 page를 선택해 복구 가능하게 하고 soft delete된 tab도 복구 가능하게 만들기 |
+
+#### 변경 파일
+
+| 파일 | 변경 내용 |
+|------|------|
+| `terminal/backend/src/services/researchRepository.ts` | trash 조회(`listTrashedResearchTabs`, `listTrashedResearchPages`)와 restore(`restoreResearchTab`, `restoreResearchPage`) 함수 추가 |
+| `terminal/backend/src/server.ts` | `GET /api/research/trash`, `POST /api/research/tabs/:id/restore`, `POST /api/research/pages/:id/restore` endpoint 추가 |
+| `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CaseResearchWindow.tsx` | `Refresh` 오른쪽 `Restore` 버튼, trash 패널, tab/page restore 버튼, restore 상태/에러 처리 추가 |
+| `terminal/backend_prompt.md` | trash/restore API와 restore 제약(부모 tab deleted 시 409) 문서화 |
+| `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md` | Restore 버튼/패널 동작 문서화 |
+| `ai_agent_plan/terminal_ui_ver2_finhub/plan.md` | PLAN CHANGE (`#AI-research-restore-panel`) append |
+
+#### 구현 메모
+
+- `GET /api/research/trash`는 아직 purge되지 않은 deleted tab/page를 반환한다.
+- tab restore는 tab과 그 하위 deleted page를 함께 복구한다.
+- page restore는 부모 tab이 active일 때만 허용된다. 부모 tab도 deleted면 먼저 tab restore가 필요하다.
+- Restore 패널은 deleted section/page를 분리해서 보여 준다.
+
+#### 사용자가 직접 확인하는 방법
+
+1. AI Research Window 상단에서 `Refresh` 오른쪽 `Restore` 버튼을 클릭한다.
+2. deleted section/page 목록이 패널에 보이는지 확인한다.
+3. deleted page 하나를 골라 `Restore`를 누른 뒤 원래 section의 페이지 목록에 다시 나타나는지 확인한다.
+4. deleted tab을 복구하면 그 안의 page도 함께 복구되는지 확인한다.
+
+#### 검증 결과
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `researchRepository.ts`, `server.ts`, `CaseResearchWindow.tsx` diagnostics 0 errors |
+| 빌드 | ✅ | backend `npm run build` 성공, frontend `npm run build` 성공 |
+| 자동 테스트 | ✅ | backend `vitest run` 55/55 pass |
+| 런타임 통합 | ✅ | API로 temp tab/page 생성 → page delete → `GET /api/research/trash`에서 page 확인 → page restore 성공 → page 목록 재등장 확인. 별도 temp tab delete → `GET /api/research/trash`에서 tab+child page 확인 → tab restore 성공 → child page까지 함께 재등장 확인. 브라우저 시각 확인은 사용자 위임 |
+
+#### 발견된 문제 / 리스크 + 완화안
+
+1. Restore 패널은 현재 deleted item 수가 많아지면 길어질 수 있다.
+   완화: 후속으로 search/filter 또는 retention countdown 표시를 추가할 수 있다.
+2. page restore는 부모 tab deleted 상태에서 막혀 있다.
+   완화: 패널에 `Restore the deleted section first.` 안내를 추가했고, tab restore 버튼을 별도로 제공한다.
+3. 패널은 현재 우측 고정 오버레이 형태라 화면이 좁으면 본문을 일부 가릴 수 있다.
+   완화: 필요 시 후속으로 modal 폭/반응형 레이아웃 조정 가능.
 |------|------|
 | `terminal/backend/src/services/jobManager.ts` | **신규 생성** — 메모리 기반 잡 관리 모듈. `createJob`, `getJob`, `updateProgress`, `appendLog`, `completeJob`, `failJob` 내보내기. 30분 후 완료 잡 자동 정리, 최대 500줄 로그 |
 | `terminal/backend/src/server.ts` | (1) `jobManager` import 추가 (2) `POST /api/news/pull-finhub` → `{ jobId }` 즉시 반환 + fire-and-forget async IIFE로 백그라운드 수집 (3) `GET /api/jobs/:jobId` 폴링 엔드포인트 추가 |

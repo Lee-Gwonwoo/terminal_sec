@@ -636,6 +636,7 @@ API:
 - 섹션(tab) + 페이지(page) 구조의 OneNote 스타일 편집 UI다.
 - 상단 검색창은 `GET /api/research/search?q=...` 를 300ms debounce로 호출한다.
 - 상단 검색창 오른쪽의 `Refresh` 버튼은 현재 backend DB 상태를 기준으로 탭 목록, 페이지 목록, 현재 페이지 본문을 다시 fetch 한다.
+- `Refresh` 오른쪽의 `Restore` 버튼은 deleted tab/page 목록 패널을 열고 복구를 수행한다.
 - 새 섹션/페이지 생성, 이름 변경, 삭제, 페이지 순서 재정렬, 본문 자동 저장이 구현되어 있다.
 - tab/page 항목은 우클릭 컨텍스트 메뉴로 `Rename`, `Delete (24h hold)`를 연다.
 - 본문/제목 변경은 500ms debounce 후 `PATCH /api/research/pages/:id`로 자동 저장된다.
@@ -646,13 +647,16 @@ API:
 - `POST /api/research/tabs`
 - `PATCH /api/research/tabs/:id`
 - `DELETE /api/research/tabs/:id`
+- `POST /api/research/tabs/:id/restore`
 - `GET /api/research/tabs/:tabId/pages`
 - `POST /api/research/tabs/:tabId/pages`
 - `POST /api/research/tabs/:tabId/pages/reorder`
 - `GET /api/research/pages/:id`
 - `PATCH /api/research/pages/:id`
 - `DELETE /api/research/pages/:id`
+- `POST /api/research/pages/:id/restore`
 - `GET /api/research/search`
+- `GET /api/research/trash`
 
 저장 성격:
 
@@ -661,6 +665,7 @@ API:
 - 외부 스크립트나 다른 창이 같은 page를 갱신한 경우, 사용자는 `Refresh` 버튼으로 현재 창 내용을 수동 재조회할 수 있다.
 - 삭제는 즉시 화면에서 숨기지만 backend DB에는 24시간 soft delete 상태로 남는다.
 - 24시간이 지난 soft delete row는 다음 `research` API 접근 시 backend가 정리한다. 별도 polling timer는 사용하지 않는다.
+- Restore 패널은 deleted section/page를 분리해서 보여 주고, page의 부모 section도 deleted 상태면 먼저 section을 복구해야 한다.
 
 ## Brave News Window
 

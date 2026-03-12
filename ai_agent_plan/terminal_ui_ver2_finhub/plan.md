@@ -247,6 +247,18 @@ PLAN CHANGE (2026-03-12 #AI-research-context-menu-soft-delete)
 ```
 
 ```
+PLAN CHANGE (2026-03-12 #AI-research-restore-panel)
+- 왜: 사용자가 `Refresh` 오른쪽에 `Restore` 버튼을 두고, 삭제한 페이지를 목록에서 골라 복구할 수 있게 해 달라고 요청함.
+- 무엇이 바뀌었나:
+  - backend에 `GET /api/research/trash`, `POST /api/research/tabs/:id/restore`, `POST /api/research/pages/:id/restore` 추가
+  - frontend 상단 바에 `Restore` 버튼 추가
+  - `Restore` 버튼 클릭 시 deleted section/page를 보여 주는 패널 추가
+  - deleted tab restore 시 하위 page도 함께 복구
+  - deleted page restore는 부모 tab이 살아 있을 때만 허용하고, 부모도 deleted면 먼저 tab restore를 유도
+- 영향: 사용자는 24시간 보존 구간 안의 research trash를 UI에서 직접 되살릴 수 있고, accidental delete 복구가 쉬워진다.
+```
+
+```
 PLAN CHANGE (2026-03-10 #finnhub-request-interval)
 - 왜: 사용자가 Finnhub 뉴스 update에서 "몇 초 간격으로 요청할지"도 Control Window에서 조절할 수 있게 해 달라고 요청함.
 - 무엇이 바뀌었나:

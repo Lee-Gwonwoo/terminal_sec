@@ -655,13 +655,16 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `POST /api/research/tabs`
 - `PATCH /api/research/tabs/:id`
 - `DELETE /api/research/tabs/:id`
+- `POST /api/research/tabs/:id/restore`
 - `GET /api/research/tabs/:tabId/pages`
 - `POST /api/research/tabs/:tabId/pages`
 - `POST /api/research/tabs/:tabId/pages/reorder`
 - `GET /api/research/pages/:id`
 - `PATCH /api/research/pages/:id`
 - `DELETE /api/research/pages/:id`
+- `POST /api/research/pages/:id/restore`
 - `GET /api/research/search?q=...`
+- `GET /api/research/trash`
 
 동작 규칙:
 
@@ -672,6 +675,9 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `DELETE /api/research/tabs/:id`, `DELETE /api/research/pages/:id`는 즉시 hard delete 하지 않고 `deleted_at`을 기록하는 soft delete다.
 - soft delete된 tab/page는 일반 조회와 검색에서 즉시 숨겨지며, 다음 research API 접근 시 `deleted_at <= now - 24h` 인 row만 완전 삭제된다.
 - tab soft delete 시 그 아래 page도 같은 시각으로 함께 soft delete된다.
+- `GET /api/research/trash`는 아직 24시간이 지나지 않은 deleted tab/page 목록을 반환한다.
+- `POST /api/research/tabs/:id/restore`는 deleted tab과 그 하위 deleted page를 함께 복구한다.
+- `POST /api/research/pages/:id/restore`는 부모 tab이 살아 있을 때만 page를 복구한다. 부모 tab도 deleted 상태면 409를 반환한다.
 
 ## 제약과 주의사항
 

@@ -73,11 +73,15 @@ import {
   createResearchTab,
   renameResearchTab,
   deleteResearchTab,
+  listTrashedResearchTabs,
+  restoreResearchTab,
   listResearchPages,
   getResearchPage,
   createResearchPage,
   updateResearchPage,
   deleteResearchPage,
+  listTrashedResearchPages,
+  restoreResearchPage,
   reorderResearchPages,
   searchResearch,
   purgeExpiredResearchTrash,
@@ -2526,6 +2530,26 @@ app.delete("/api/research/tabs/:id", async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+app.get("/api/research/trash", async (_req, res, next) => {
+  try {
+    await runResearchMaintenance();
+    const [tabs, pages] = await Promise.all([
+      listTrashedResearchTabs(DEMO_USER_ID),
+      listTrashedResearchPages(DEMO_USER_ID),
+    ]);
+    res.json({ tabs, pages });
+  } catch (err) { next(err); }
+});
+
+app.post("/api/research/tabs/:id/restore", async (req, res, next) => {
+  try {
+    await runResearchMaintenance();
+    const tab = await restoreResearchTab(req.params.id);
+    if (!tab) { res.status(404).json({ error: "Tab not found" }); return; }
+    res.json(tab);
+  } catch (err) { next(err); }
+});
+
 // ── Case Research: pages ──
 
 app.get("/api/research/tabs/:tabId/pages", async (req, res, next) => {
@@ -2582,6 +2606,21 @@ app.delete("/api/research/pages/:id", async (req, res, next) => {
     await deleteResearchPage(req.params.id);
     res.json({ ok: true });
   } catch (err) { next(err); }
+});
+
+app.post("/api/research/pages/:id/restore", async (req, res, next) => {
+  try {
+    await runResearchMaintenance();
+    const page = await restoreResearchPage(req.params.id);
+    if (!page) { res.status(404).json({ error: "Page not found" }); return; }
+    res.json(page);
+  } catch (err) {
+    if (err instanceof Error && err.message === "PARENT_TAB_DELETED") {
+      res.status(409).json({ error: "Parent tab is still deleted. Restore the tab first." });
+      return;
+    }
+    next(err);
+  }
 });
 
 // ── Case Research: search ──
