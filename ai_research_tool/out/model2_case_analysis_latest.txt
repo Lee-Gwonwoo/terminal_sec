@@ -1,13 +1,13 @@
-since=2024-01-01
-until=2026-03-10
+since=2023-01-01
+until=2025-12-31
 scope=press_release_only
-note_title=model 2 test gpt5.4
-evidence_path=ai_research_tool\model_2_source\model 2 test gpt5.4.md
+note_title=model 2/version 2/long short residual
+evidence_path=ai_research_tool\model_2_source\model 2version 2long short residual.md
 impact_formula=overall=max(immediate,short,medium)
 immediate=max(abs(change_from_open_pct),abs(change_open_to_high_pct),abs(change_pct))
 short=max(abs(change_1d_pct),abs(change_3d_pct))
 medium=max(abs(change_7d_pct),abs(change_14d_pct),abs(change_30d_pct))
 market_cap_buckets=$300M-<$1B|$1B-<$100B|>=100B|<$300M or Unknown
-total_rows=102855
-analyzable_rows=91886
-top_case_types=['earnings_guidance_positive', 'clinical_regulatory_positive', 'clinical_regulatory_negative', 'financing_offering', 'litigation_investigation', 'commercial_launch_expansion', 'general_corporate_pr', 'strategic_deal_policy', 'listing_capital_markets', 'analyst_rating_target']
+total_rows=137037
+analyzable_rows=114522
+top_case_types=['earnings_guidance_positive', 'clinical_regulatory_positive', 'litigation_investigation', 'clinical_regulatory_negative', 'financing_offering', 'commercial_launch_expansion', 'general_corporate_pr', 'strategic_deal_policy', 'strategic_review_restructuring', 'analyst_rating_target']

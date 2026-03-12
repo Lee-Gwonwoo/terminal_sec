@@ -297,6 +297,135 @@ def category_meta(name: str) -> tuple[str, str]:
     return ("일반 corporate PR", "conference, publication, appointment, facility update 등 일반 PR성 공지")
 
 
+CASE_TYPE_GUIDANCE: dict[str, dict[str, object]] = {
+    "earnings_guidance_positive": {
+        "top_level": "long",
+        "definition": "실적 호조, 수익성 개선, 가이던스 상향처럼 기업가치 상방 경로를 직접 시사하는 실적성 공지",
+        "value_path": "실적/전망 개선이 밸류에이션 상향과 추정치 상향으로 연결된다.",
+        "include_signals": ["beat", "raises guidance", "record revenue", "strong outlook"],
+        "exclude_signals": ["단순 실적 발표이지만 miss 또는 guidance cut인 경우", "실적 언급 없이 일반 홍보만 있는 경우"],
+        "boundary_case": "실적 발표와 계약 공지가 함께 있으면 headline/lead의 중심 사건이 실적인지 먼저 본다.",
+        "quick_questions": ["실적 beat 또는 guidance raise가 핵심인가?", "headline만 읽어도 숫자 개선이 메인 메시지인가?"],
+    },
+    "clinical_regulatory_positive": {
+        "top_level": "long",
+        "definition": "임상 성공, 규제 승인, NDA/BLA acceptance처럼 바이오 가치 상방을 직접 시사하는 공지",
+        "value_path": "개발자산 성공 확률 상승과 상업화 기대 확대로 연결된다.",
+        "include_signals": ["positive topline", "approval", "FDA acceptance", "pivotal data"],
+        "exclude_signals": ["trial 언급이 있어도 실패/미충족인 경우", "연구 개시만 있고 결과가 없는 경우"],
+        "boundary_case": "trial/result 단어만으로 분류하지 말고 결과 방향이 positive인지 확인한다.",
+        "quick_questions": ["결과가 성공/승인/수용인가?", "핵심 자산 가치가 올라가는 메시지인가?"],
+    },
+    "clinical_regulatory_negative": {
+        "top_level": "short",
+        "definition": "임상 실패, CRL, endpoint 미충족, 중단 등 바이오 가치 훼손을 직접 시사하는 공지",
+        "value_path": "핵심 자산 성공 확률 하락과 상업화 지연으로 연결된다.",
+        "include_signals": ["CRL", "failed to meet", "did not meet", "clinical hold", "discontinued"],
+        "exclude_signals": ["trial 결과가 positive인 경우", "단순 등록/개시 announcement인 경우"],
+        "boundary_case": "같은 trial 관련 기사라도 결과 방향이 negative일 때만 이 유형이다.",
+        "quick_questions": ["핵심 endpoint 실패나 규제 setback인가?", "기사 핵심이 개발 리스크 확대인가?"],
+    },
+    "earnings_guidance_negative": {
+        "top_level": "short",
+        "definition": "실적 miss, 성장 둔화, 가이던스 하향처럼 펀더멘털 하방을 직접 시사하는 실적성 공지",
+        "value_path": "추정치 하향과 multiple 압박으로 연결된다.",
+        "include_signals": ["missed", "lowered guidance", "cuts guidance", "weak outlook"],
+        "exclude_signals": ["실적 발표이지만 beat/record revenue인 경우", "일회성 PR인 경우"],
+        "boundary_case": "실적 발표 자체가 아니라 내용의 방향이 하향인지 본다.",
+        "quick_questions": ["가이던스 cut 또는 miss가 핵심인가?", "숫자/전망 악화가 headline에 드러나는가?"],
+    },
+    "financing_offering": {
+        "top_level": "short",
+        "definition": "희석성 자금조달, 공모/사모, warrants, notes offering 등 주주가치 희석 가능성이 큰 공지",
+        "value_path": "지분 희석 또는 자본비용 증가 우려로 연결된다.",
+        "include_signals": ["public offering", "private placement", "registered direct", "warrant", "notes offering"],
+        "exclude_signals": ["비희석성 grant/contract funding", "단순 refinancing 안내"],
+        "boundary_case": "자금조달이라도 non-dilutive 성격이 강하면 strategic_deal_policy나 residual을 검토한다.",
+        "quick_questions": ["주식/워런트/전환증권 발행이 핵심인가?", "기존 주주 희석 가능성이 직접 언급되는가?"],
+    },
+    "litigation_investigation": {
+        "top_level": "short",
+        "definition": "소송, 조사, 회계 문제, fraud allegation처럼 법률/신뢰 리스크를 직접 시사하는 공지",
+        "value_path": "규제/법률 비용 상승과 사업 불확실성 확대에 연결된다.",
+        "include_signals": ["lawsuit", "subpoena", "investigation", "restatement", "fraud"],
+        "exclude_signals": ["단순 합의 완료 또는 리스크 해소 공지", "일반 법무 업데이트"],
+        "boundary_case": "리스크 해소 기사라면 long 가능성도 다시 본다.",
+        "quick_questions": ["핵심 메시지가 법적/회계 리스크 발생인가?", "사업보다 조사/소송 자체가 메인인가?"],
+    },
+    "strategic_review_restructuring": {
+        "top_level": "short",
+        "definition": "구조조정, 생존성 이슈, strategic alternatives, going concern처럼 사업 지속성 리스크를 시사하는 공지",
+        "value_path": "현금 압박, 생존성 우려, 구조조정 비용 확대에 연결된다.",
+        "include_signals": ["strategic alternatives", "restructuring", "layoff", "going concern", "bankruptcy"],
+        "exclude_signals": ["성장 투자 목적의 조직 개편", "일반 비용 관리 코멘트"],
+        "boundary_case": "효율화 표현이 있어도 생존성 우려가 핵심인지 아닌지 구분한다.",
+        "quick_questions": ["회사가 버티기/정리 모드에 들어갔다는 신호인가?", "핵심이 성장보다 생존인가?"],
+    },
+    "strategic_deal_policy": {
+        "top_level": "long",
+        "definition": "대형 계약, 제휴, 라이선스, 정부지원, 인수 등 외부 자원 결합으로 가치 상방을 시사하는 공지",
+        "value_path": "수주/파트너십/외부자금 유입이 매출 가시성과 전략 가치를 높인다.",
+        "include_signals": ["partnership", "collaboration", "license", "award", "contract", "grant"],
+        "exclude_signals": ["형식적 MOU만 있고 경제 조건이 빈약한 경우", "희석성 financing이 핵심인 경우"],
+        "boundary_case": "agreement라는 단어만으로 분류하지 말고 실제 경제적 연결이 있는지 본다.",
+        "quick_questions": ["외부 계약/제휴/지원이 실질 경제 이벤트인가?", "매출 또는 전략 자산 가치 증가 경로가 보이는가?"],
+    },
+    "listing_capital_markets": {
+        "top_level": "long",
+        "definition": "상장, 업리스트, 거래 재개 등 자본시장 접근성 변화가 핵심인 공지",
+        "value_path": "유동성 확대와 투자자 접근성 개선으로 연결된다.",
+        "include_signals": ["uplisting", "listed on", "market debut", "trade resumption"],
+        "exclude_signals": ["상장 유지 실패/비준수 공지", "자금조달 공지가 핵심인 경우"],
+        "boundary_case": "listing 관련 기사라도 non-compliance나 delisting risk면 short 쪽을 본다.",
+        "quick_questions": ["핵심이 거래소 접근성 개선인가?", "자본시장 구조 변화가 중심 사건인가?"],
+    },
+    "commercial_launch_expansion": {
+        "top_level": "long",
+        "definition": "제품 launch, 시설 확장, 생산/상업화 확대처럼 사업 확장 이벤트가 중심인 공지",
+        "value_path": "매출 기반 확장과 운영 레버리지 개선 기대에 연결된다.",
+        "include_signals": ["launch", "facility", "expansion", "commercial", "production"],
+        "exclude_signals": ["단순 행사 발표", "기술 소개 수준의 PR"],
+        "boundary_case": "확장 표현이 있어도 실제 사업 확장인지, 홍보성 소개인지 구분한다.",
+        "quick_questions": ["실제 상업화/생산/시설 확장이 핵심인가?", "운영 규모 확대가 직접 보이는가?"],
+    },
+    "analyst_rating_target": {
+        "top_level": "residual",
+        "definition": "애널리스트 rating/target 변화처럼 외부 해석이 중심인 기사",
+        "value_path": "직접 기업 이벤트보다는 해석/coverage 변화에 따른 수급 반응으로 연결된다.",
+        "include_signals": ["upgrade", "downgrade", "price target", "coverage initiated"],
+        "exclude_signals": ["회사 자체 PR 본문이 중심인 경우", "실적/계약 등 직접 이벤트가 중심인 경우"],
+        "boundary_case": "회사 이벤트를 인용하더라도 sell-side 의견 변화가 메인이면 이 유형이다.",
+        "quick_questions": ["기사의 주체가 회사가 아니라 애널리스트인가?", "핵심이 rating/target 변화인가?"],
+    },
+    "macro_policy_sector": {
+        "top_level": "residual",
+        "definition": "정책, 관세, 금리, 지정학 등 회사 고유 이벤트가 아닌 외부 매크로/섹터 기사",
+        "value_path": "기업 개별 이슈보다 외부 환경 변화에 따른 재평가로 연결된다.",
+        "include_signals": ["tariff", "policy", "interest rates", "inflation", "sanction"],
+        "exclude_signals": ["회사 개별 계약/실적/임상 공지", "기업 내부 이벤트가 중심인 경우"],
+        "boundary_case": "정책 기사라도 특정 회사 계약/승인이 핵심이면 다른 유형으로 보낸다.",
+        "quick_questions": ["회사 내부 사건보다 외부 정책/매크로가 중심인가?", "같은 문장을 여러 종목에 붙여도 의미가 통하는가?"],
+    },
+    "general_corporate_pr": {
+        "top_level": "residual",
+        "definition": "일반 corporate PR, 홍보성 공지, 경계가 흐린 업데이트를 담는 잔여 유형",
+        "value_path": "직접 경제 이벤트가 약하거나 반복 패턴이 불안정해 residual로 남긴다.",
+        "include_signals": ["appointment", "conference participation", "certification", "general update"],
+        "exclude_signals": ["실적/계약/오퍼링/임상처럼 명확한 경제 사건이 있는 경우"],
+        "boundary_case": "같은 단어가 있어도 실질 계약, 승인, financing이면 해당 독립 유형으로 보낸다.",
+        "quick_questions": ["핵심 경제 이벤트가 불분명한가?", "반복성은 있으나 독립 유형으로 설명력이 약한가?"],
+    },
+}
+
+
+def case_type_guidance(case_type: str) -> dict[str, object]:
+    return CASE_TYPE_GUIDANCE.get(case_type, CASE_TYPE_GUIDANCE["general_corporate_pr"])
+
+
+def top_level_group_for_case(case_type: str) -> str:
+    return str(case_type_guidance(case_type).get("top_level") or "residual")
+
+
 def load_latest_market_caps(conn: sqlite3.Connection) -> dict[str, float]:
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
@@ -318,7 +447,7 @@ def load_latest_market_caps(conn: sqlite3.Connection) -> dict[str, float]:
     return {str(row["ticker"]).upper(): float(row["market_cap"]) for row in rows}
 
 
-def fetch_news_rows(conn: sqlite3.Connection, since: str) -> list[dict]:
+def fetch_news_rows(conn: sqlite3.Connection, since: str, until: str) -> list[dict]:
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
     rows = cur.execute(
@@ -341,11 +470,12 @@ def fetch_news_rows(conn: sqlite3.Connection, since: str) -> list[dict]:
         FROM news_items ni
         LEFT JOIN news_fulltext nf ON nf.news_id = ni.id
         LEFT JOIN news_change_metrics m ON m.news_id = ni.id
-        WHERE ni.published_at >= ?
+                WHERE ni.published_at >= ?
+                    AND ni.published_at < datetime(?, '+1 day')
           AND ni.source_type = 'press_release'
         GROUP BY ni.id
         """,
-        (since,),
+                (since, until),
     ).fetchall()
     return [dict(row) for row in rows]
 
@@ -451,6 +581,7 @@ def summarize_cases(rows: list[dict]) -> list[dict]:
         positive = sum(1 for item in impacted_items if item["direction"] == "up")
         negative = sum(1 for item in impacted_items if item["direction"] == "down")
         label_ko, description_ko = category_meta(case_type)
+        guidance = case_type_guidance(case_type)
         bucket_breakdown: dict[str, dict[str, int]] = defaultdict(lambda: {"total": 0, "impacted": 0})
         source_breakdown: dict[str, dict[str, int]] = defaultdict(lambda: {"total": 0, "impacted": 0})
         for item in items:
@@ -472,8 +603,15 @@ def summarize_cases(rows: list[dict]) -> list[dict]:
         case_summaries.append(
             {
                 "case_type": case_type,
+                "top_level": top_level_group_for_case(case_type),
                 "label_ko": label_ko,
                 "description_ko": description_ko,
+                "definition": guidance.get("definition"),
+                "value_path": guidance.get("value_path"),
+                "include_signals": guidance.get("include_signals"),
+                "exclude_signals": guidance.get("exclude_signals"),
+                "boundary_case": guidance.get("boundary_case"),
+                "quick_questions": guidance.get("quick_questions"),
                 "total": total,
                 "impacted": impacted,
                 "not_impacted": total - impacted,
@@ -574,6 +712,7 @@ def build_analysis(rows: list[dict], market_caps: dict[str, float]) -> dict:
         row["direction_metric"] = direction_metric
         row["direction_value"] = direction_value
         row["case_type"] = classify_case(row.get("title") or "", row.get("body") or "", row.get("full_text") or "")
+        row["top_level"] = top_level_group_for_case(row["case_type"])
         row["has_fulltext"] = bool(row.get("full_text"))
 
         source_counts[row["source_type"]] += 1
@@ -674,14 +813,15 @@ def write_evidence_markdown(evidence_path: Path, rows: list[dict]) -> None:
         "- 각 행은 유형 분류 또는 대표/반례 판단의 근거로 사용된 뉴스 1건이다.",
         "- 같은 note 제목 기준 파일이며, note 본문에서 이 경로를 그대로 참조해야 한다.",
         "",
-        "| case_type | reaction_tag | news_id | published_at | source_type | ticker | market_cap | market_cap_bucket | change_pct | change_from_open_pct | change_open_to_high_pct | change_1d_pct | change_3d_pct | change_7d_pct | change_14d_pct | change_30d_pct | immediate_reaction_score | short_followthrough_score | medium_persistence_score | overall_impact_score | title |",
-        "|-----------|--------------|---------|--------------|-------------|--------|------------|-------------------|------------|----------------------|--------------------------|---------------|---------------|---------------|----------------|----------------|--------------------------|---------------------------|--------------------------|----------------------|-------|",
+        "| top_level | case_type | reaction_tag | news_id | published_at | source_type | ticker | market_cap | market_cap_bucket | change_pct | change_from_open_pct | change_open_to_high_pct | change_1d_pct | change_3d_pct | change_7d_pct | change_14d_pct | change_30d_pct | immediate_reaction_score | short_followthrough_score | medium_persistence_score | overall_impact_score | title |",
+        "|-----------|-----------|--------------|---------|--------------|-------------|--------|------------|-------------------|------------|----------------------|--------------------------|---------------|---------------|---------------|----------------|----------------|--------------------------|---------------------------|--------------------------|----------------------|-------|",
     ]
     for row in rows:
         title = (row.get("title") or "").replace("|", "\\|").replace("\n", " ")
         market_cap = row.get("market_cap")
         lines.append(
-            "| {case_type} | {reaction_tag} | {news_id} | {published_at} | {source_type} | {ticker} | {market_cap} | {market_cap_bucket} | {change_pct} | {change_from_open_pct} | {change_open_to_high_pct} | {change_1d_pct} | {change_3d_pct} | {change_7d_pct} | {change_14d_pct} | {change_30d_pct} | {immediate_reaction_score} | {short_followthrough_score} | {medium_persistence_score} | {impact_score} | {title} |".format(
+            "| {top_level} | {case_type} | {reaction_tag} | {news_id} | {published_at} | {source_type} | {ticker} | {market_cap} | {market_cap_bucket} | {change_pct} | {change_from_open_pct} | {change_open_to_high_pct} | {change_1d_pct} | {change_3d_pct} | {change_7d_pct} | {change_14d_pct} | {change_30d_pct} | {immediate_reaction_score} | {short_followthrough_score} | {medium_persistence_score} | {impact_score} | {title} |".format(
+                top_level=row.get("top_level") or "residual",
                 case_type=row.get("case_type") or "",
                 reaction_tag=row.get("reaction_tag") or "",
                 news_id=row.get("id") or "",
@@ -710,6 +850,10 @@ def write_evidence_markdown(evidence_path: Path, rows: list[dict]) -> None:
 
 def make_markdown(since: str, until: str, analysis: dict, evidence_path: Path, note_title: str) -> str:
     lines: list[str] = []
+    grouped_summaries: dict[str, list[dict]] = {"long": [], "short": [], "residual": []}
+    for summary in analysis["case_summaries"]:
+        grouped_summaries.setdefault(summary.get("top_level") or "residual", []).append(summary)
+
     lines.append(f"# {note_title}")
     lines.append("")
     lines.append(f"- 생성 시각: {datetime.now().strftime('%Y-%m-%d %H:%M')} (local)")
@@ -725,10 +869,37 @@ def make_markdown(since: str, until: str, analysis: dict, evidence_path: Path, n
     lines.append("")
     lines.append("## 유형 분류 기준")
     lines.append("")
-    lines.append("- `title/body/full_text`에서 반복되는 표현을 기준으로 case 유형을 묶었다.")
+    lines.append("- 먼저 `title/body/full_text`의 언어적 의미를 기준으로 `long / short / residual` 상위 분류를 정했다.")
+    lines.append("- 그 다음 반복되는 사건 패턴을 기준으로 세부 `case_type`을 묶었다.")
     lines.append("- 의미가 크게 다른 바이오 positive / negative, financing, litigation, earnings, strategic deal 등은 분리했다.")
     lines.append("- 애매한 표현은 대표 사례와 반례를 비교해 가장 설명력이 높은 유형으로 귀속했다.")
+    lines.append("- 가격 데이터는 유형 생성 기준이 아니라, 유형별 영향 빈도 평가에만 사용했다.")
     lines.append("")
+    lines.append("## 유형별 정의 요약")
+    lines.append("")
+    for top_level in ("long", "short", "residual"):
+        summaries = grouped_summaries.get(top_level) or []
+        lines.append(f"### {top_level}")
+        lines.append("")
+        if not summaries:
+            lines.append("- 해당 상위 분류에 집계된 유형이 없다.")
+            lines.append("")
+            continue
+        for summary in summaries:
+            lines.append(f"#### {summary['label_ko']} (`{summary['case_type']}`)")
+            lines.append(f"- 상위 분류: `{summary['top_level']}`")
+            lines.append(f"- 한 줄 정의: {summary['definition']}")
+            lines.append(f"- 핵심 가치 경로: {summary['value_path']}")
+            lines.append(f"- 포함 신호: {', '.join(summary['include_signals'])}")
+            lines.append(f"- 제외 신호: {', '.join(summary['exclude_signals'])}")
+            lines.append(f"- 경계 사례: {summary['boundary_case']}")
+            lines.append(f"- 빠른 판별 질문: {' / '.join(summary['quick_questions'])}")
+            if summary["top_examples"]:
+                example = summary["top_examples"][0]
+                lines.append(f"- 대표 뉴스 id / ticker / title: {example['news_id']} / {example['ticker']} / {example['title']}")
+            lines.append(f"- 집계: impacted={summary['impacted']:,} / total={summary['total']:,}, ratio={summary['impact_ratio']:.3f}")
+            lines.append("")
+
     lines.append("## 영향 판정 기준")
     lines.append("")
     lines.append("- 사용한 전체 change vector: `change_from_open_pct`, `change_open_to_high_pct`, `change_pct`, `change_1d_pct`, `change_3d_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct`")
@@ -802,30 +973,36 @@ def make_markdown(since: str, until: str, analysis: dict, evidence_path: Path, n
     lines.append("")
     lines.append("## 전체 유형 분류 결과")
     lines.append("")
-    for index, summary in enumerate(analysis["case_summaries"][:12], start=1):
-        lines.append(f"### {index}. {summary['label_ko']}")
-        lines.append(f"- 설명: {summary['description_ko']}")
-        lines.append(f"- 총 건수: {summary['total']:,}")
-        lines.append(f"- 영향 미침: {summary['impacted']:,}")
-        lines.append(f"- 영향 안 미침: {summary['not_impacted']:,}")
-        lines.append(f"- 영향 비율: {summary['impact_ratio']:.3f}")
-        lines.append(f"- 보수적 순위 점수(Wilson LB): {summary['impact_ratio_wilson_lb']:.3f}")
-        lines.append(f"- 방향 분해: positive {summary['positive_impacted']:,} / negative {summary['negative_impacted']:,}")
-        lines.append(f"- median impact score: {summary['median_impact_score']:.2f}")
-        lines.append(f"- market cap breakdown: {json.dumps(summary['bucket_breakdown'], ensure_ascii=False)}")
-        lines.append(f"- source breakdown: {json.dumps(summary['source_breakdown'], ensure_ascii=False)}")
-        lines.append("- 대표 사례:")
-        for example in summary["top_examples"][:3]:
-            lines.append(
-                f"  - {example['news_id']} | {example['date']} | {example['source_type']} | {example['ticker']} | {example['title']} | change={example['change_pct']} | change_1d={example['change_1d_pct']} | change_3d={example['change_3d_pct']} | change_7d={example['change_7d_pct']} | intraday={example['change_from_open_pct']} | tag={example['reaction_tag']} | cap={example['market_cap_bucket']}"
-            )
-        if summary["counter_examples"]:
-            lines.append("- 반례/영향 약한 사례:")
-            for example in summary["counter_examples"][:2]:
+    for top_level in ("long", "short", "residual"):
+        summaries = grouped_summaries.get(top_level) or []
+        if not summaries:
+            continue
+        lines.append(f"### {top_level} 그룹")
+        lines.append("")
+        for index, summary in enumerate(summaries, start=1):
+            lines.append(f"#### {top_level}-{index}. {summary['label_ko']}")
+            lines.append(f"- 설명: {summary['description_ko']}")
+            lines.append(f"- 총 건수: {summary['total']:,}")
+            lines.append(f"- 영향 미침: {summary['impacted']:,}")
+            lines.append(f"- 영향 안 미침: {summary['not_impacted']:,}")
+            lines.append(f"- 영향 비율: {summary['impact_ratio']:.3f}")
+            lines.append(f"- 보수적 순위 점수(Wilson LB): {summary['impact_ratio_wilson_lb']:.3f}")
+            lines.append(f"- 방향 분해: positive {summary['positive_impacted']:,} / negative {summary['negative_impacted']:,}")
+            lines.append(f"- median impact score: {summary['median_impact_score']:.2f}")
+            lines.append(f"- market cap breakdown: {json.dumps(summary['bucket_breakdown'], ensure_ascii=False)}")
+            lines.append(f"- source breakdown: {json.dumps(summary['source_breakdown'], ensure_ascii=False)}")
+            lines.append("- 대표 사례:")
+            for example in summary["top_examples"][:3]:
                 lines.append(
                     f"  - {example['news_id']} | {example['date']} | {example['source_type']} | {example['ticker']} | {example['title']} | change={example['change_pct']} | change_1d={example['change_1d_pct']} | change_3d={example['change_3d_pct']} | change_7d={example['change_7d_pct']} | intraday={example['change_from_open_pct']} | tag={example['reaction_tag']} | cap={example['market_cap_bucket']}"
                 )
-        lines.append("")
+            if summary["counter_examples"]:
+                lines.append("- 반례/영향 약한 사례:")
+                for example in summary["counter_examples"][:2]:
+                    lines.append(
+                        f"  - {example['news_id']} | {example['date']} | {example['source_type']} | {example['ticker']} | {example['title']} | change={example['change_pct']} | change_1d={example['change_1d_pct']} | change_3d={example['change_3d_pct']} | change_7d={example['change_7d_pct']} | intraday={example['change_from_open_pct']} | tag={example['reaction_tag']} | cap={example['market_cap_bucket']}"
+                    )
+            lines.append("")
     for bucket in ("cap_300m_1b", "cap_1b_100b", "cap_100b_plus"):
         summaries = analysis["bucket_case_summaries"].get(bucket) or []
         lines.append(f"## {cap_bucket_label(bucket)} 상위 case")
@@ -865,6 +1042,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--db", default=r"terminal/backend/backend/data/app.db")
     parser.add_argument("--since", default="2024-01-01")
+    parser.add_argument("--until", default="")
     parser.add_argument("--out-dir", default=r"ai_research_tool\out")
     parser.add_argument("--source-dir", default=r"ai_research_tool\model_2_source")
     parser.add_argument("--page-id", default="")
@@ -879,9 +1057,9 @@ def main() -> None:
     conn = sqlite3.connect(args.db)
     note_title = resolve_note_title(conn, args.page_id, args.note_title)
     market_caps = load_latest_market_caps(conn)
-    news_rows = fetch_news_rows(conn, args.since)
+    until = args.until or datetime.now().strftime("%Y-%m-%d")
+    news_rows = fetch_news_rows(conn, args.since, until)
     analysis = build_analysis(news_rows, market_caps)
-    until = datetime.now().strftime("%Y-%m-%d")
     evidence_path = source_dir / f"{slugify_note_title(note_title)}.md"
     analyzable_rows = []
     for case_summary in analysis["case_summaries"]:
