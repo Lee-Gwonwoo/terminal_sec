@@ -669,6 +669,9 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - 페이지 제목/본문 수정은 일반 form submit이 아니라 프론트의 debounce autosave 호출을 전제로 한다.
 - `POST /api/research/tabs/:tabId/pages/reorder`는 정렬된 `pageIds` 배열을 받아 `sort_order`를 재기록한다.
 - `GET /api/research/search`는 제목과 본문을 함께 검색하고 `tab_name`을 포함한 결과를 반환한다.
+- `DELETE /api/research/tabs/:id`, `DELETE /api/research/pages/:id`는 즉시 hard delete 하지 않고 `deleted_at`을 기록하는 soft delete다.
+- soft delete된 tab/page는 일반 조회와 검색에서 즉시 숨겨지며, 다음 research API 접근 시 `deleted_at <= now - 24h` 인 row만 완전 삭제된다.
+- tab soft delete 시 그 아래 page도 같은 시각으로 함께 soft delete된다.
 
 ## 제약과 주의사항
 

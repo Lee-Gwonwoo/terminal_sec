@@ -637,6 +637,7 @@ API:
 - 상단 검색창은 `GET /api/research/search?q=...` 를 300ms debounce로 호출한다.
 - 상단 검색창 오른쪽의 `Refresh` 버튼은 현재 backend DB 상태를 기준으로 탭 목록, 페이지 목록, 현재 페이지 본문을 다시 fetch 한다.
 - 새 섹션/페이지 생성, 이름 변경, 삭제, 페이지 순서 재정렬, 본문 자동 저장이 구현되어 있다.
+- tab/page 항목은 우클릭 컨텍스트 메뉴로 `Rename`, `Delete (24h hold)`를 연다.
 - 본문/제목 변경은 500ms debounce 후 `PATCH /api/research/pages/:id`로 자동 저장된다.
 
 현재 사용하는 핵심 API:
@@ -658,6 +659,8 @@ API:
 - UI state를 localStorage에 저장하지 않고 backend `app.db`의 `research_tabs`, `research_pages`를 source of truth로 사용한다.
 - 프론트 새로고침 후에도 연구 노트 데이터는 DB에서 다시 로드된다.
 - 외부 스크립트나 다른 창이 같은 page를 갱신한 경우, 사용자는 `Refresh` 버튼으로 현재 창 내용을 수동 재조회할 수 있다.
+- 삭제는 즉시 화면에서 숨기지만 backend DB에는 24시간 soft delete 상태로 남는다.
+- 24시간이 지난 soft delete row는 다음 `research` API 접근 시 backend가 정리한다. 별도 polling timer는 사용하지 않는다.
 
 ## Brave News Window
 

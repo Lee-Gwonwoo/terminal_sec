@@ -26,6 +26,13 @@ interface SearchResult extends ResearchPage {
   tab_name: string;
 }
 
+interface ContextMenuState {
+  type: 'tab' | 'page';
+  id: string;
+  x: number;
+  y: number;
+}
+
 // ── Component ──
 
 export function CaseResearchWindow() {
@@ -42,6 +49,9 @@ export function CaseResearchWindow() {
 
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
   const [editingTabName, setEditingTabName] = useState('');
+  const [editingPageId, setEditingPageId] = useState<string | null>(null);
+  const [editingPageTitle, setEditingPageTitle] = useState('');
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [copiedId, setCopiedId] = useState(false);
   const [draggedPageId, setDraggedPageId] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -125,6 +135,24 @@ export function CaseResearchWindow() {
     return () => clearTimeout(timer);
   }, [searchQuery, doSearch]);
 
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handleClose = () => setContextMenu(null);
+    const handleEsc = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setContextMenu(null);
+      }
+    };
+    window.addEventListener('click', handleClose);
+    window.addEventListener('contextmenu', handleClose);
+    window.addEventListener('keydown', handleEsc);
+    return () => {
+      window.removeEventListener('click', handleClose);
+      window.removeEventListener('contextmenu', handleClose);
+      window.removeEventListener('keydown', handleEsc);
+    };
+  }, [contextMenu]);
+
   // ─── Auto-save with debounce ───
   const scheduleSave = useCallback((pageId: string, title: string, body: string) => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -135,6 +163,9 @@ export function CaseResearchWindow() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ title, body }),
         });
+        if (!res.ok) {
+          throw new Error(`Auto-save failed with status ${res.status}`);
+        }
         const updated: ResearchPage = await res.json();
         setActivePage(updated);
         // Update page title in sidebar list
@@ -148,6 +179,7 @@ export function CaseResearchWindow() {
   // ─── Handlers ───
   const handleCreateTab = async () => {
     try {
+      setContextMenu(null);
       const res = await fetch(`${API_BASE}/api/research/tabs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -174,23 +206,37 @@ export function CaseResearchWindow() {
       console.error('Tab rename failed', err);
     }
     setEditingTabId(null);
+    setContextMenu(null);
   };
 
   const handleDeleteTab = async (id: string) => {
     try {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
       await fetch(`${API_BASE}/api/research/tabs/${id}`, { method: 'DELETE' });
-      setTabs(prev => prev.filter(t => t.id !== id));
+      const remainingTabs = tabs.filter(t => t.id !== id);
+      setTabs(remainingTabs);
       if (activeTabId === id) {
-        setActiveTabId(tabs.find(t => t.id !== id)?.id ?? null);
+        const nextTabId = remainingTabs[0]?.id ?? null;
+        setActiveTabId(nextTabId);
+        if (!nextTabId) {
+          setPages([]);
+          setActivePageId(null);
+          setActivePage(null);
+        }
       }
     } catch (err) {
       console.error('Tab deletion failed', err);
     }
+    setContextMenu(null);
   };
 
   const handleCreatePage = async () => {
     if (!activeTabId) return;
     try {
+      setContextMenu(null);
       const res = await fetch(`${API_BASE}/api/research/tabs/${activeTabId}/pages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -206,18 +252,50 @@ export function CaseResearchWindow() {
     }
   };
 
+  const handleRenamePage = async (id: string) => {
+    const nextTitle = editingPageTitle.trim();
+    if (!nextTitle) {
+      setEditingPageId(null);
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/api/research/pages/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: nextTitle }),
+      });
+      if (!res.ok) {
+        throw new Error(`Page rename failed with status ${res.status}`);
+      }
+      const updated: ResearchPage = await res.json();
+      setPages(prev => prev.map(p => p.id === id ? updated : p));
+      if (activePageId === id) {
+        setActivePage(prev => prev ? { ...prev, title: updated.title, updated_at: updated.updated_at } : prev);
+      }
+    } catch (err) {
+      console.error('Page rename failed', err);
+    }
+    setEditingPageId(null);
+    setContextMenu(null);
+  };
+
   const handleDeletePage = async (id: string) => {
     try {
+      if (activePageId === id && saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
       await fetch(`${API_BASE}/api/research/pages/${id}`, { method: 'DELETE' });
-      setPages(prev => prev.filter(p => p.id !== id));
+      const remainingPages = pages.filter(p => p.id !== id);
+      setPages(remainingPages);
       if (activePageId === id) {
-        const remaining = pages.filter(p => p.id !== id);
-        setActivePageId(remaining[0]?.id ?? null);
-        setActivePage(remaining[0] ?? null);
+        setActivePageId(remainingPages[0]?.id ?? null);
+        setActivePage(remainingPages[0] ?? null);
       }
     } catch (err) {
       console.error('Page deletion failed', err);
     }
+    setContextMenu(null);
   };
 
   const handleTitleChange = (value: string) => {
@@ -252,6 +330,46 @@ export function CaseResearchWindow() {
   const handleSelectPage = (page: ResearchPage) => {
     setActivePageId(page.id);
     setActivePage(page);
+    setEditingPageId(null);
+  };
+
+  const openContextMenu = (event: React.MouseEvent, type: 'tab' | 'page', id: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (type === 'page') {
+      const targetPage = pages.find(page => page.id === id);
+      if (targetPage) {
+        setActivePageId(targetPage.id);
+        setActivePage(targetPage);
+      }
+    }
+    setContextMenu({ type, id, x: event.clientX, y: event.clientY });
+  };
+
+  const handleContextRename = () => {
+    if (!contextMenu) return;
+    if (contextMenu.type === 'tab') {
+      const targetTab = tabs.find(tab => tab.id === contextMenu.id);
+      if (!targetTab) return;
+      setEditingTabId(targetTab.id);
+      setEditingTabName(targetTab.name);
+      setContextMenu(null);
+      return;
+    }
+    const targetPage = pages.find(page => page.id === contextMenu.id);
+    if (!targetPage) return;
+    setEditingPageId(targetPage.id);
+    setEditingPageTitle(targetPage.title || '');
+    setContextMenu(null);
+  };
+
+  const handleContextDelete = () => {
+    if (!contextMenu) return;
+    if (contextMenu.type === 'tab') {
+      void handleDeleteTab(contextMenu.id);
+      return;
+    }
+    void handleDeletePage(contextMenu.id);
   };
 
   const handleRefresh = useCallback(async () => {
@@ -386,6 +504,7 @@ export function CaseResearchWindow() {
               <button
                 onClick={() => setActiveTabId(tab.id)}
                 onDoubleClick={() => { setEditingTabId(tab.id); setEditingTabName(tab.name); }}
+                onContextMenu={event => openContextMenu(event, 'tab', tab.id)}
                 className={`min-w-44 rounded-t-xl border border-b-0 px-4 py-2.5 text-sm text-left transition-colors ${
                   activeTabId === tab.id
                     ? 'border-slate-300 bg-white text-slate-900 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100'
@@ -398,7 +517,7 @@ export function CaseResearchWindow() {
             <button
               onClick={() => handleDeleteTab(tab.id)}
               className="absolute right-2 top-2 opacity-0 transition-opacity group-hover:opacity-100 text-slate-400 hover:text-red-500 dark:text-slate-500"
-              title="Delete section"
+              title="Soft delete section (permanent after 24 hours)"
             >
               <Trash2 size={12} />
             </button>
@@ -456,14 +575,34 @@ export function CaseResearchWindow() {
                 onDragOver={e => e.preventDefault()}
                 onDrop={() => handlePageDrop(page.id)}
                 onClick={() => handleSelectPage(page)}
+                onContextMenu={event => openContextMenu(event, 'page', page.id)}
                 className={`w-full text-left px-3 py-3 border-b border-slate-200/80 group cursor-grab active:cursor-grabbing dark:border-slate-800/80 ${draggedPageId === page.id ? 'opacity-50' : ''} ${activePageId === page.id ? 'bg-white dark:bg-slate-800' : 'hover:bg-slate-100 dark:hover:bg-slate-800/70'}`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-xs truncate flex-1 text-slate-800 dark:text-slate-100">{page.title || '(Untitled)'}</span>
+                  {editingPageId === page.id ? (
+                    <input
+                      autoFocus
+                      value={editingPageTitle}
+                      onChange={e => setEditingPageTitle(e.target.value)}
+                      onBlur={() => { void handleRenamePage(page.id); }}
+                      onClick={event => event.stopPropagation()}
+                      onKeyDown={event => {
+                        if (event.key === 'Enter') {
+                          void handleRenamePage(page.id);
+                        }
+                        if (event.key === 'Escape') {
+                          setEditingPageId(null);
+                        }
+                      }}
+                      className="mr-2 flex-1 rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-900 outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                    />
+                  ) : (
+                    <span className="text-xs truncate flex-1 text-slate-800 dark:text-slate-100">{page.title || '(Untitled)'}</span>
+                  )}
                   <button
                     onClick={e => { e.stopPropagation(); handleDeletePage(page.id); }}
                     className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-500 transition-opacity ml-1"
-                    title="Delete page"
+                    title="Soft delete page (permanent after 24 hours)"
                   >
                     <Trash2 size={10} />
                   </button>
@@ -551,6 +690,27 @@ export function CaseResearchWindow() {
           )}
         </div>
       </div>
+
+      {contextMenu && (
+        <div
+          className="fixed z-[70] min-w-40 rounded-lg border border-slate-200 bg-white py-1 shadow-xl dark:border-slate-700 dark:bg-slate-900"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={event => event.stopPropagation()}
+        >
+          <button
+            onClick={handleContextRename}
+            className="block w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+          >
+            Rename
+          </button>
+          <button
+            onClick={handleContextDelete}
+            className="block w-full px-3 py-2 text-left text-xs text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+          >
+            Delete (24h hold)
+          </button>
+        </div>
+      )}
     </div>
   );
 }

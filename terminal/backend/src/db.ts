@@ -301,7 +301,8 @@ export async function initDb(): Promise<void> {
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       name TEXT NOT NULL DEFAULT 'New Section',
       sort_order INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      deleted_at TEXT
     );
   `);
 
@@ -313,10 +314,16 @@ export async function initDb(): Promise<void> {
       body TEXT NOT NULL DEFAULT '',
       sort_order INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      deleted_at TEXT
     );
   `);
+  await ensureColumn("research_tabs", "deleted_at", "TEXT");
+  await ensureColumn("research_pages", "deleted_at", "TEXT");
+  await db.exec("CREATE INDEX IF NOT EXISTS idx_research_tabs_active ON research_tabs(user_id, deleted_at, sort_order, created_at);");
   await db.exec("CREATE INDEX IF NOT EXISTS idx_research_pages_tab ON research_pages(tab_id);");
+  await db.exec("CREATE INDEX IF NOT EXISTS idx_research_pages_active ON research_pages(tab_id, deleted_at, sort_order, created_at);");
+  await db.exec("CREATE INDEX IF NOT EXISTS idx_research_pages_deleted_at ON research_pages(deleted_at);");
   await db.exec("CREATE INDEX IF NOT EXISTS idx_research_pages_fts ON research_pages(title, body);");
 }
 

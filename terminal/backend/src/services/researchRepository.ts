@@ -21,12 +21,34 @@ export interface ResearchPage {
   updated_at: string;
 }
 
+const RESEARCH_TRASH_RETENTION_SQL = "-24 hours";
+
 // ── Tabs ──
+
+export async function purgeExpiredResearchTrash(): Promise<void> {
+  const db = getDb();
+  await db.run(
+    `DELETE FROM research_pages
+     WHERE deleted_at IS NOT NULL
+       AND deleted_at <= datetime('now', ?)`,
+    RESEARCH_TRASH_RETENTION_SQL,
+  );
+  await db.run(
+    `DELETE FROM research_tabs
+     WHERE deleted_at IS NOT NULL
+       AND deleted_at <= datetime('now', ?)`,
+    RESEARCH_TRASH_RETENTION_SQL,
+  );
+}
 
 export async function listResearchTabs(userId: string): Promise<ResearchTab[]> {
   const db = getDb();
   return db.all<ResearchTab[]>(
-    "SELECT * FROM research_tabs WHERE user_id = ? ORDER BY sort_order, created_at",
+    `SELECT *
+     FROM research_tabs
+     WHERE user_id = ?
+       AND deleted_at IS NULL
+     ORDER BY sort_order, created_at`,
     userId,
   );
 }
@@ -35,7 +57,7 @@ export async function createResearchTab(userId: string, name?: string): Promise<
   const db = getDb();
   const id = randomUUID();
   const maxOrder = await db.get<{ m: number | null }>(
-    "SELECT MAX(sort_order) AS m FROM research_tabs WHERE user_id = ?",
+    "SELECT MAX(sort_order) AS m FROM research_tabs WHERE user_id = ? AND deleted_at IS NULL",
     userId,
   );
   const sortOrder = (maxOrder?.m ?? -1) + 1;
@@ -51,13 +73,30 @@ export async function createResearchTab(userId: string, name?: string): Promise<
 
 export async function renameResearchTab(id: string, name: string): Promise<ResearchTab | null> {
   const db = getDb();
-  await db.run("UPDATE research_tabs SET name = ? WHERE id = ?", name, id);
-  return (await db.get<ResearchTab>("SELECT * FROM research_tabs WHERE id = ?", id)) ?? null;
+  await db.run("UPDATE research_tabs SET name = ? WHERE id = ? AND deleted_at IS NULL", name, id);
+  return (await db.get<ResearchTab>("SELECT * FROM research_tabs WHERE id = ? AND deleted_at IS NULL", id)) ?? null;
 }
 
 export async function deleteResearchTab(id: string): Promise<void> {
   const db = getDb();
-  await db.run("DELETE FROM research_tabs WHERE id = ?", id);
+  await db.run("BEGIN TRANSACTION");
+  try {
+    const deletedAt = new Date().toISOString();
+    await db.run(
+      "UPDATE research_tabs SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL",
+      deletedAt,
+      id,
+    );
+    await db.run(
+      "UPDATE research_pages SET deleted_at = ? WHERE tab_id = ? AND deleted_at IS NULL",
+      deletedAt,
+      id,
+    );
+    await db.run("COMMIT");
+  } catch (error) {
+    await db.run("ROLLBACK");
+    throw error;
+  }
 }
 
 // ── Pages ──
@@ -65,21 +104,35 @@ export async function deleteResearchTab(id: string): Promise<void> {
 export async function listResearchPages(tabId: string): Promise<ResearchPage[]> {
   const db = getDb();
   return db.all<ResearchPage[]>(
-    "SELECT * FROM research_pages WHERE tab_id = ? ORDER BY sort_order, created_at",
+    `SELECT p.*
+     FROM research_pages p
+     JOIN research_tabs t ON t.id = p.tab_id
+     WHERE p.tab_id = ?
+       AND p.deleted_at IS NULL
+       AND t.deleted_at IS NULL
+     ORDER BY p.sort_order, p.created_at`,
     tabId,
   );
 }
 
 export async function getResearchPage(id: string): Promise<ResearchPage | null> {
   const db = getDb();
-  return (await db.get<ResearchPage>("SELECT * FROM research_pages WHERE id = ?", id)) ?? null;
+  return (await db.get<ResearchPage>(
+    `SELECT p.*
+     FROM research_pages p
+     JOIN research_tabs t ON t.id = p.tab_id
+     WHERE p.id = ?
+       AND p.deleted_at IS NULL
+       AND t.deleted_at IS NULL`,
+    id,
+  )) ?? null;
 }
 
 export async function createResearchPage(tabId: string, title?: string): Promise<ResearchPage> {
   const db = getDb();
   const id = randomUUID();
   const maxOrder = await db.get<{ m: number | null }>(
-    "SELECT MAX(sort_order) AS m FROM research_pages WHERE tab_id = ?",
+    "SELECT MAX(sort_order) AS m FROM research_pages WHERE tab_id = ? AND deleted_at IS NULL",
     tabId,
   );
   const sortOrder = (maxOrder?.m ?? -1) + 1;
@@ -111,13 +164,17 @@ export async function updateResearchPage(
   if (sets.length === 0) return getResearchPage(id);
   sets.push("updated_at = datetime('now')");
   params.push(id);
-  await db.run(`UPDATE research_pages SET ${sets.join(", ")} WHERE id = ?`, ...params);
+  await db.run(`UPDATE research_pages SET ${sets.join(", ")} WHERE id = ? AND deleted_at IS NULL`, ...params);
   return getResearchPage(id);
 }
 
 export async function deleteResearchPage(id: string): Promise<void> {
   const db = getDb();
-  await db.run("DELETE FROM research_pages WHERE id = ?", id);
+  await db.run(
+    "UPDATE research_pages SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL",
+    new Date().toISOString(),
+    id,
+  );
 }
 
 export async function reorderResearchPages(tabId: string, pageIds: string[]): Promise<ResearchPage[]> {
@@ -126,7 +183,7 @@ export async function reorderResearchPages(tabId: string, pageIds: string[]): Pr
   try {
     for (let index = 0; index < pageIds.length; index++) {
       await db.run(
-        "UPDATE research_pages SET sort_order = ? WHERE id = ? AND tab_id = ?",
+        "UPDATE research_pages SET sort_order = ? WHERE id = ? AND tab_id = ? AND deleted_at IS NULL",
         index,
         pageIds[index],
         tabId,
@@ -152,7 +209,10 @@ export async function searchResearch(
     `SELECT p.*, t.name AS tab_name
      FROM research_pages p
      JOIN research_tabs t ON t.id = p.tab_id
-     WHERE t.user_id = ? AND (p.title LIKE ? OR p.body LIKE ?)
+     WHERE t.user_id = ?
+       AND t.deleted_at IS NULL
+       AND p.deleted_at IS NULL
+       AND (p.title LIKE ? OR p.body LIKE ?)
      ORDER BY p.updated_at DESC
      LIMIT 100`,
     userId,

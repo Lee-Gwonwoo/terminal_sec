@@ -235,6 +235,18 @@ PLAN CHANGE (2026-03-10 #AI-research-refresh)
 ```
 
 ```
+PLAN CHANGE (2026-03-12 #AI-research-context-menu-soft-delete)
+- 왜: 사용자가 AI Research Window에서 더블클릭 대신 우클릭 `Rename` 버튼으로 탭/페이지 이름을 바꾸고, 탭/페이지 삭제는 즉시 hard delete 하지 말고 24시간 후 완전 삭제되게 요청함.
+- 무엇이 바뀌었나:
+  - `CaseResearchWindow`에 tab/page 우클릭 컨텍스트 메뉴(`Rename`, `Delete (24h hold)`) 추가
+  - research tab/page 삭제를 `deleted_at` soft delete로 전환
+  - 다음 `research` API 접근 시 `deleted_at <= now - 24h` 인 row만 purge 하는 backend maintenance 추가
+  - tab soft delete 시 하위 page도 함께 soft delete
+  - backend/frontend spec 문서에 soft delete semantics 반영
+- 영향: 사용자는 삭제 직후 UI에서는 즉시 항목이 사라지지만, DB에는 24시간 보관되며 그 이후 첫 research API 접근 때 정리된다. 별도 polling/background timer가 없어 CPU 낭비를 늘리지 않는다.
+```
+
+```
 PLAN CHANGE (2026-03-10 #finnhub-request-interval)
 - 왜: 사용자가 Finnhub 뉴스 update에서 "몇 초 간격으로 요청할지"도 Control Window에서 조절할 수 있게 해 달라고 요청함.
 - 무엇이 바뀌었나:

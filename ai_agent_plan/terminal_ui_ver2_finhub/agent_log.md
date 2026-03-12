@@ -1583,6 +1583,65 @@
 1. 너무 높은 값은 Finnhub rate limit과 충돌할 수 있음.
    완화: UI 범위를 `1~20`으로 제한했고, backend는 자동 강등 재시도 유지.
 2. News Window와 Data Control Window가 localStorage로만 값을 공유함.
+
+---
+
+## 2026-03-12
+
+**작성 시각:** 2026-03-12 07:56 (local)
+
+### AI Research Window 우클릭 Rename + 24시간 Soft Delete
+
+| 항목 | 내용 |
+|------|------|
+| 시점 | 2026-03-12 07:56 |
+| 상태 | 확인 대기(awaiting user confirmation) |
+| 관련 요청 | AI Research Window에서 탭/페이지 우클릭 메뉴로 Rename/Delete를 열고, 탭/페이지 삭제는 24시간 soft delete 후 다음 research API 접근 시 purge |
+
+#### 변경 파일
+
+| 파일 | 변경 내용 |
+|------|------|
+| `terminal/backend/src/db.ts` | `research_tabs`, `research_pages`에 `deleted_at` 컬럼 및 active/deleted 조회용 index 추가 |
+| `terminal/backend/src/services/researchRepository.ts` | tab/page 조회·검색에서 `deleted_at IS NULL` 필터 적용, `DELETE`를 soft delete로 전환, `purgeExpiredResearchTrash()` 추가 |
+| `terminal/backend/src/server.ts` | 모든 `/api/research/*` 진입 전에 maintenance로 24시간 지난 soft delete row purge |
+| `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CaseResearchWindow.tsx` | tab/page 우클릭 컨텍스트 메뉴(`Rename`, `Delete (24h hold)`) 추가, inline rename 입력 추가, delete 시 local state 즉시 제거 |
+| `terminal/backend_prompt.md` | research API의 soft delete + purge-on-access semantics 문서화 |
+| `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md` | AI Research Window 우클릭 메뉴와 24시간 soft delete 동작 문서화 |
+| `ai_agent_plan/terminal_ui_ver2_finhub/plan.md` | PLAN CHANGE (`#AI-research-context-menu-soft-delete`) append |
+
+#### 구현 메모
+
+- 탭 삭제 시 하위 페이지도 같은 `deleted_at` 시각으로 함께 soft delete.
+- 별도 background timer/polling 없이, 다음 `research` API 접근 시에만 purge 수행.
+- purge 기준은 backend 서버 시각이며 `deleted_at <= now - 24h` 인 row만 완전 삭제.
+- page 제목은 우측 본문 title input 외에, 페이지 리스트에서도 우클릭 `Rename` 후 inline edit 가능.
+
+#### 사용자가 직접 확인하는 방법
+
+1. AI Research Window에서 탭 또는 페이지를 우클릭한다.
+2. 메뉴에 `Rename`, `Delete (24h hold)`가 보이는지 확인한다.
+3. `Rename` 클릭 후 inline 입력으로 이름 수정이 저장되는지 확인한다.
+4. `Delete (24h hold)` 클릭 후 UI에서 즉시 사라지는지 확인한다.
+5. 필요하면 backend DB에서 `deleted_at`이 채워졌는지, 24시간 경과 후 첫 research API 접근에서 실제 row가 사라지는지 확인한다.
+
+#### 검증 결과
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `db.ts`, `researchRepository.ts`, `server.ts`, `CaseResearchWindow.tsx` diagnostics 0 errors |
+| 빌드 | ✅ | backend `npm run build` 성공, frontend `npm run build` 성공 |
+| 자동 테스트 | ✅ | backend `vitest run` 55/55 pass |
+| 런타임 통합 | ✅ | 실제 API로 temp tab/page 생성 → page delete 후 목록에서 즉시 숨김 확인 → tab delete 후 탭 목록에서 숨김 확인 → DB에서 `deleted_at` 존재 확인 → `deleted_at`를 25시간 전으로 조정 후 `GET /api/research/tabs` 호출 시 tab/page row count 모두 0 확인. 브라우저 시각 확인은 사용자 위임 |
+
+#### 발견된 문제 / 리스크 + 완화안
+
+1. 현재는 soft delete 후 restore 기능이 없다.
+   완화: 필요 시 후속으로 `trash` 조회 + restore endpoint를 별도 추가.
+2. purge는 research API 접근 시점에만 실행된다.
+   완화: 사용자가 research 기능을 다시 열거나 refresh/search를 수행하면 즉시 정리되며, background polling보다 CPU 낭비가 적다.
+3. 브라우저에서 우클릭 메뉴 위치는 화면 끝 경계에서 잘릴 수 있다.
+   완화: 필요 시 후속으로 viewport clamp를 넣어 메뉴 위치를 보정.
    완화: key를 고정(`finnhub-ticker-concurrency`)했고, 기본값 `5` fallback을 두었음.
 3. webui dev 프록시에는 기존 `ECONNREFUSED` 잡음이 있어 브라우저 시각 검증이 불안정할 수 있음.
    완화: backend 직통 API 런타임 검증으로 기능 반영을 확인했고, 최종 시각 확인은 사용자 화면에서 수행 가능.

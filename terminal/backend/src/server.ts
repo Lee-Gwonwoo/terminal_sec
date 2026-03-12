@@ -80,6 +80,7 @@ import {
   deleteResearchPage,
   reorderResearchPages,
   searchResearch,
+  purgeExpiredResearchTrash,
 } from "./services/researchRepository.js";
 import { fetchFinnhubProfilesBatch } from "./services/finnhubProfile2Provider.js";
 import { fetchRtprArticles, fetchRtprArticlesByTicker } from "./services/ptprNewsProvider.js";
@@ -2488,8 +2489,13 @@ app.get("/api/db/inspect", async (_req, res, next) => {
 
 // ── Case Research: tabs ──
 
+async function runResearchMaintenance(): Promise<void> {
+  await purgeExpiredResearchTrash();
+}
+
 app.get("/api/research/tabs", async (_req, res, next) => {
   try {
+    await runResearchMaintenance();
     const tabs = await listResearchTabs(DEMO_USER_ID);
     res.json(tabs);
   } catch (err) { next(err); }
@@ -2497,6 +2503,7 @@ app.get("/api/research/tabs", async (_req, res, next) => {
 
 app.post("/api/research/tabs", async (req, res, next) => {
   try {
+    await runResearchMaintenance();
     const tab = await createResearchTab(DEMO_USER_ID, req.body?.name);
     res.status(201).json(tab);
   } catch (err) { next(err); }
@@ -2504,6 +2511,7 @@ app.post("/api/research/tabs", async (req, res, next) => {
 
 app.patch("/api/research/tabs/:id", async (req, res, next) => {
   try {
+    await runResearchMaintenance();
     const tab = await renameResearchTab(req.params.id, req.body.name);
     if (!tab) { res.status(404).json({ error: "Tab not found" }); return; }
     res.json(tab);
@@ -2512,6 +2520,7 @@ app.patch("/api/research/tabs/:id", async (req, res, next) => {
 
 app.delete("/api/research/tabs/:id", async (req, res, next) => {
   try {
+    await runResearchMaintenance();
     await deleteResearchTab(req.params.id);
     res.json({ ok: true });
   } catch (err) { next(err); }
@@ -2521,6 +2530,7 @@ app.delete("/api/research/tabs/:id", async (req, res, next) => {
 
 app.get("/api/research/tabs/:tabId/pages", async (req, res, next) => {
   try {
+    await runResearchMaintenance();
     const pages = await listResearchPages(req.params.tabId);
     res.json(pages);
   } catch (err) { next(err); }
@@ -2528,6 +2538,7 @@ app.get("/api/research/tabs/:tabId/pages", async (req, res, next) => {
 
 app.post("/api/research/tabs/:tabId/pages", async (req, res, next) => {
   try {
+    await runResearchMaintenance();
     const page = await createResearchPage(req.params.tabId, req.body?.title);
     res.status(201).json(page);
   } catch (err) { next(err); }
@@ -2535,6 +2546,7 @@ app.post("/api/research/tabs/:tabId/pages", async (req, res, next) => {
 
 app.post("/api/research/tabs/:tabId/pages/reorder", async (req, res, next) => {
   try {
+    await runResearchMaintenance();
     const pageIds = Array.isArray(req.body?.pageIds)
       ? req.body.pageIds.filter((value: unknown): value is string => typeof value === "string")
       : [];
@@ -2545,6 +2557,7 @@ app.post("/api/research/tabs/:tabId/pages/reorder", async (req, res, next) => {
 
 app.get("/api/research/pages/:id", async (req, res, next) => {
   try {
+    await runResearchMaintenance();
     const page = await getResearchPage(req.params.id);
     if (!page) { res.status(404).json({ error: "Page not found" }); return; }
     res.json(page);
@@ -2553,6 +2566,7 @@ app.get("/api/research/pages/:id", async (req, res, next) => {
 
 app.patch("/api/research/pages/:id", async (req, res, next) => {
   try {
+    await runResearchMaintenance();
     const page = await updateResearchPage(req.params.id, {
       title: req.body.title,
       body: req.body.body,
@@ -2564,6 +2578,7 @@ app.patch("/api/research/pages/:id", async (req, res, next) => {
 
 app.delete("/api/research/pages/:id", async (req, res, next) => {
   try {
+    await runResearchMaintenance();
     await deleteResearchPage(req.params.id);
     res.json({ ok: true });
   } catch (err) { next(err); }
@@ -2573,6 +2588,7 @@ app.delete("/api/research/pages/:id", async (req, res, next) => {
 
 app.get("/api/research/search", async (req, res, next) => {
   try {
+    await runResearchMaintenance();
     const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
     if (!q) { res.json([]); return; }
     const results = await searchResearch(DEMO_USER_ID, q);
