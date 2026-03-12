@@ -9,6 +9,7 @@ export interface FinnhubProfile2 {
   name: string | null;
   exchange: string | null;
   finnhubIndustry: string | null;
+  ipoDate: string | null;
   marketCapitalization: number | null;
   raw: Record<string, unknown>;
 }
@@ -59,6 +60,7 @@ export async function fetchFinnhubProfile2(symbol: string): Promise<FinnhubProfi
       typeof obj.finnhubIndustry === "string" && obj.finnhubIndustry.trim()
         ? obj.finnhubIndustry.trim()
         : null,
+    ipoDate: typeof obj.ipo === "string" && obj.ipo.trim() ? obj.ipo.trim() : null,
     marketCapitalization:
       typeof obj.marketCapitalization === "number" && Number.isFinite(obj.marketCapitalization)
         ? obj.marketCapitalization * 1_000_000

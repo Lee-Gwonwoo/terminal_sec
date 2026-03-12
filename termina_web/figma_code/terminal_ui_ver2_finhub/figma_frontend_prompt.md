@@ -170,6 +170,7 @@ GET /api/news?source_names=FINNHUB&limit=500
 - `[][][]title[][][]`
 - `[][][]publisher[][][]`
 - `[][][]industry[][][]`
+- `[][][]ipoDate[][][]`
 - `[][][]marketCap[][][]`
 - `[][][]source[][][]`
 - `[][][]fulltext[][][]`
@@ -474,6 +475,7 @@ localStorage 사용:
 - `Custom Calendar Update`
 - `Company Description Update`
 - `Peers Data Update`
+- `IPO Date Update`
 - `Recent Change% Update`
 - `Custom Change% Update`
 
@@ -497,6 +499,7 @@ localStorage 사용:
 - `POST /api/ibkr/calendar/update-custom`
 - `POST /api/company-profiles/pull-fmp`
 - `POST /api/company-profiles/pull-peers`
+- `POST /api/company-profiles/pull-ipo-date`
 - `POST /api/news/change/update-recent`
 - `POST /api/news/change/update-custom`
 - `GET /api/jobs/:jobId`
@@ -506,6 +509,7 @@ company data job contract:
 
 - `POST /api/company-profiles/pull-fmp` → `{ jobId }`
 - `POST /api/company-profiles/pull-peers` → `{ jobId }`
+- `POST /api/company-profiles/pull-ipo-date` → `{ jobId }`
 - 완료 summary는 `requested`, `tickersUpdated`, `tickersFailed`, `totalRowsUpserted` 기준으로 표시된다
 
 ### 로그 패널
@@ -515,11 +519,11 @@ company data job contract:
 - 자동 스크롤
 - `Esc`로 닫기 가능
 - 완료 result는 ticker/row 수 또는 merged/skipped 수를 summary로 표시
-- `Company Description Update`, `Peers Data Update`도 실제 background job을 사용하므로 progress/log/result summary가 채워진다
+- `Company Description Update`, `Peers Data Update`, `IPO Date Update`도 실제 background job을 사용하므로 progress/log/result summary가 채워진다
 
 주의:
 
-- 현재 불일치는 calendar update 섹션에만 남아 있다. `Company Description Update`와 `Peers Data Update`는 `{jobId}` 반환 + `GET /api/jobs/:jobId` polling 계약으로 맞춰졌다.
+- 현재 불일치는 calendar update 섹션에만 남아 있다. `Company Description Update`, `Peers Data Update`, `IPO Date Update`는 `{jobId}` 반환 + `GET /api/jobs/:jobId` polling 계약으로 맞춰졌다.
 
 ### Settings 탭
 
@@ -563,7 +567,7 @@ company data job contract:
   - 이미 24시간 내 market_cap이 있는 ticker는 서버에서 자동 skip
 - ticker 추가
 - filter 입력
-- table 표시: `Ticker | Name | Exchange | Industry | Market Cap | Del`
+- table 표시: `Ticker | Name | Exchange | Industry | IPO Date | Market Cap | Del`
 - ticker 클릭 시 상위 `onTickerClick` 전달
 - 삭제 버튼으로 default universe에서 ticker 제거
 
@@ -582,6 +586,7 @@ API:
 - `[][][]name[][][]`
 - `[][][]sector[][][]`
 - `[][][]industry[][][]`
+- `[][][]ipoDate[][][]`
 - `[][][]marketCap[][][]`
 
 현재 제약:

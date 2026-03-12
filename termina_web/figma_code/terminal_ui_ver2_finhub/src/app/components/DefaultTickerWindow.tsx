@@ -14,6 +14,7 @@ interface TickerRow {
   name: string | null;
   sector: string | null;
   industry: string | null;
+  ipoDate: string | null;
   marketCap: number | null;
 }
 
@@ -32,6 +33,7 @@ function fallbackRowsFromTickers(tickers: string[] | undefined): TickerRow[] {
     name: null,
     sector: null,
     industry: null,
+    ipoDate: null,
     marketCap: null,
   }));
 }
@@ -44,6 +46,7 @@ function normalizeRows(data: any): TickerRow[] {
       name: row.name ?? null,
       sector: row.sector ?? null,
       industry: row.industry ?? null,
+      ipoDate: typeof row.ipoDate === "string" && row.ipoDate ? row.ipoDate : null,
       marketCap: typeof row.marketCap === "number" ? row.marketCap : null,
     }));
   }
@@ -253,6 +256,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
       row.ticker.includes(needle)
       || (row.name ?? "").toUpperCase().includes(needle)
       || (row.industry ?? "").toUpperCase().includes(needle)
+      || (row.ipoDate ?? "").toUpperCase().includes(needle)
       || (row.exchange ?? "").toUpperCase().includes(needle),
     );
   }, [rows, filterText]);
@@ -401,6 +405,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
                 <th className="text-left font-semibold px-3 py-2">Name</th>
                 <th className="text-left font-semibold px-3 py-2 w-28">Exchange</th>
                 <th className="text-left font-semibold px-3 py-2 w-36">Industry</th>
+                <th className="text-left font-semibold px-3 py-2 w-28">IPO Date</th>
                 <th className="text-right font-semibold px-3 py-2 w-28">Market Cap</th>
                 <th className="text-center font-semibold px-3 py-2 w-14">Del</th>
               </tr>
@@ -421,6 +426,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
                   <td className="px-3 py-2 truncate text-gray-700 dark:text-gray-200" title={row.name ?? undefined}>{row.name ?? "-"}</td>
                   <td className="px-3 py-2 truncate text-gray-500 dark:text-gray-400" title={row.exchange ?? undefined}>{row.exchange ?? "-"}</td>
                   <td className="px-3 py-2 truncate text-gray-500 dark:text-gray-400" title={row.industry ?? undefined}>{row.industry ?? "-"}</td>
+                  <td className="px-3 py-2 truncate text-gray-500 dark:text-gray-400" title={row.ipoDate ?? undefined}>{row.ipoDate ?? "-"}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-200">{formatMarketCap(row.marketCap)}</td>
                   <td className="px-3 py-2 text-center">
                     <button

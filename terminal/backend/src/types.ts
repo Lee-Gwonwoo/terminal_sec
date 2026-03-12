@@ -46,6 +46,7 @@ export type NewsItem = {
   keywordsStatus?: string | null;
   // industry (Step 5-22)
   industry?: string | null;
+  ipoDate?: string | null;
   marketCap?: number | null;
   // ver3: AI analysis
   score?: number | null;

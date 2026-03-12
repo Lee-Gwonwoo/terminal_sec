@@ -17,7 +17,7 @@
 - Finnhub API 키는 서버 시작 시 필수다. 없으면 서버가 시작되지 않는다.
 - FMP API 키는 선택 사항이다. 없으면 company profile FMP pull만 제한된다.
 - EODHD 토큰은 `POST /api/news/pull-eodhd` 호출 시 파일에서 읽는다.
-- `GET /api/news`는 `news_items` 단독 조회가 아니라 `news_change_metrics`, `news_fulltext`, `news_ai_analysis`, sentiment snapshot, peers, company description을 join/병합해서 내려준다.
+- `GET /api/news`는 `news_items` 단독 조회가 아니라 `news_change_metrics`, `news_fulltext`, `news_ai_analysis`, sentiment snapshot, peers, company description, IPO date를 join/병합해서 내려준다.
 - `news_change_metrics`는 `CREATE TABLE IF NOT EXISTS`로 유지되는 영구 테이블이며, change update 작업이 metric 단위로 UPSERT 한다.
 - background job 상태와 로그는 메모리 기반이라 서버 재시작 시 유지되지 않는다.
 - default ticker universe는 서버 시작 시 CSV를 읽어 `securities`, `ticker_universes`, `ticker_universe_items`를 upsert하며, 이후 기본 경로 조회/수정은 DB-primary로 동작하고 CSV는 backup sync 성격이다.
@@ -464,6 +464,7 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `[][][]companyNewsScore[][][]`
 - `[][][]peers[][][]`
 - `[][][]companyDescription[][][]`
+- `[][][]ipoDate[][][]`
 
 추가 규칙:
 
@@ -1106,6 +1107,12 @@ peers 규칙:
 - 해당 ticker에 peers가 없으면 빈 배열 `[]`이다.
 - peers pull을 하지 않은 ticker는 항상 빈 배열이다.
 
+ipoDate 규칙:
+
+- `ipoDate`는 `company_profiles.ipo_date`에서 가져온다. 뉴스 row의 대표 ticker(tickers 배열의 첫 번째)를 기준으로 최신 non-null 값을 lookup한다.
+- 해당 ticker에 IPO date가 없으면 `null`이다.
+- Finnhub `pull-ipo-date` 또는 FMP company profile pull을 하지 않은 ticker는 `null`일 수 있다.
+
 - `analysis_status`가 `null` 또는 `not_started`이면 score/scoreEvidence도 `null`이 정상이다 (아직 분석 안 됨).
 - `analysis_status=completed`인데 score나 scoreEvidence가 `null`이면 유실(lost)로 간주한다.
 
@@ -1376,6 +1383,7 @@ query:
       "name": "Apple Inc.",
       "sector": "Technology",
       "industry": "Consumer Electronics",
+      "ipoDate": "1980-12-12",
       "marketCap": 3560000000000
     }
   ]
@@ -1385,8 +1393,9 @@ query:
 운영적 정의:
 
 1. 기본 CSV path일 때는 `ticker_universes/default` + `ticker_universe_items` + `securities` + 최신 `company_profiles`를 조회해 canonical default universe를 반환한다.
-2. 다른 CSV path일 때는 CSV를 직접 읽어 `rows`를 만든다. 이 경우 `marketCap`은 CSV 자체에는 없으므로 보통 `null`이다.
-3. `tickers`는 legacy 호환용 단순 배열이고, 신규 UI는 `rows`를 우선 사용한다.
+2. `rows`의 각 원소는 `[][][]ticker[][][]`, `[][][]exchange[][][]`, `[][][]name[][][]`, `[][][]sector[][][]`, `[][][]industry[][][]`, `[][][]ipoDate[][][]`, `[][][]marketCap[][][]`를 포함한다.
+3. 다른 CSV path일 때는 CSV를 직접 읽어 `rows`를 만든다. 이 경우 `marketCap`과 `ipoDate`는 CSV 자체에는 없으므로 보통 `null`이다.
+4. `tickers`는 legacy 호환용 단순 배열이고, 신규 UI는 `rows`를 우선 사용한다.
 
 ### `POST /api/tickers/import-default`
 
@@ -1751,9 +1760,31 @@ job 완료 result 예시:
 3. 남은 ticker에 대해 Finnhub `/stock/profile2?symbol=X`를 1050ms 간격으로 순차 호출한다.
 4. 매 반복마다 job 취소 여부를 확인하고, 취소 시 즉시 중단한다.
 5. `securities`의 `name`, `exchange`, `industry`를 best-effort로 upsert한다.
-6. `company_profiles`에 `source='finnhub'` row를 upsert하면서 `[][][]market_cap[][][]`에 USD 절대값을 저장한다.
+6. `company_profiles`에 `source='finnhub'` row를 upsert하면서 `[][][]market_cap[][][]`에 USD 절대값을 저장한다. 같은 응답에 `ipo`가 있으면 `[][][]ipo_date[][][]`도 함께 보강한다.
 7. `update_status.company_profiles_market_cap`에 최근 실행 정보와 요약을 기록한다.
 8. background job 로그에는 ticker별 성공/실패와 진행률이 남는다.
+
+### `POST /api/company-profiles/pull-ipo-date`
+
+Finnhub `/stock/profile2` API에서 IPO date와 기본 회사 메타데이터를 가져와 `company_profiles.ipo_date`를 갱신한다. 이 API도 background job 기반이며 `{ jobId }`를 반환한다.
+
+요청 body:
+
+```json
+{ "tickers": ["AAPL", "MSFT"], "maxTickers": 100 }
+```
+
+- `tickers` 생략 시 `ticker_universes/default` 전체를 대상으로 한다.
+- `maxTickers`를 생략하면 전체 대상을 처리한다.
+
+동작:
+
+1. 대상 ticker 목록을 결정한다.
+2. Finnhub `/stock/profile2?symbol=X`를 호출한다.
+3. `securities`의 `name`, `exchange`, `industry`를 best-effort로 upsert한다.
+4. `company_profiles`에 `source='finnhub'` row를 upsert하면서 `[][][]ipo_date[][][]`를 저장한다.
+5. 진행률/로그/결과는 `GET /api/jobs/:jobId`로 확인한다.
+6. `update_status.company_profiles_ipo_date`에 최근 실행 정보와 요약을 기록한다.
 
 ## AI Analysis API
 

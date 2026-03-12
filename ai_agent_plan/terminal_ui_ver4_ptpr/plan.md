@@ -365,6 +365,64 @@ Invoke-WebRequest -UseBasicParsing -Method Post -ContentType 'application/json' 
   3. press 관련 endpoint 최소 1개 성공 probe
   4. 실제 응답 기반 데이터 타입 카탈로그 작성
 
+---
+
+### PLAN CHANGE (2026-03-12) — IPO Date Update 버튼 + 컬럼 추가
+
+사용자 요청: "control window 에 버튼 만들어라 . 로그도 확인할 수 있도록 하고 진행과정 확인할 수 있도록./ 컬럼 추가"
+
+**결정 확정:**
+- IPO date 수집은 Finnhub `profile2`를 사용한다. live 확인된 `ipo` 필드를 `company_profiles.ipo_date`에 저장한다.
+- Data Control에는 `IPO Date Update` 버튼을 추가하고 기존 job polling/log panel을 재사용한다.
+- News Feed와 Default Ticker는 backend가 내려주는 `ipoDate` 컬럼을 그대로 표시한다.
+- Finnhub source row는 partial upsert로 처리해 market cap update와 IPO update가 서로 값을 지우지 않게 한다.
+
+#### ⏳ Step 15 — IPO date end-to-end 연결
+
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 15-1 | Finnhub profile2 provider와 company profile upsert를 보강해 `ipo_date`가 partial update로 안전하게 저장되도록 수정 | `terminal/backend/src/services/finnhubProfile2Provider.ts`, `terminal/backend/src/services/companyProfileRepository.ts` | backend build 후 `pull-market-cap` 또는 `pull-ipo-date` 실행 시 기존 값이 지워지지 않는지 확인 | ⏳ |
+| 15-2 | `POST /api/company-profiles/pull-ipo-date` job endpoint 추가 | `terminal/backend/src/server.ts` | `POST /api/company-profiles/pull-ipo-date` → `{jobId}` 반환, `/api/jobs/:jobId` progress/log 확인 | ⏳ |
+| 15-3 | `GET /api/news`와 `GET /api/tickers` 응답에 `ipoDate`를 추가 | `terminal/backend/src/services/newsRepository.ts`, `terminal/backend/src/types.ts`, `terminal/backend/src/server.ts` | `/api/news?limit=1`와 `/api/tickers` 응답에 `ipoDate` 필드 존재 확인 | ⏳ |
+| 15-4 | Data Control, Finnhub News, Default Ticker UI에 IPO date 버튼/컬럼 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx`, `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`, `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DefaultTickerWindow.tsx` | frontend build 후 버튼/컬럼 렌더링 코드 확인 | ⏳ |
+| 15-5 | backend/frontend prompt와 agent log에 새 계약 반영 | `terminal/backend_prompt.md`, `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`, `ai_agent_plan/terminal_ui_ver4_ptpr/agent_log.md` | 문서 diff + 검증 결과 반영 확인 | ⏳ |
+
+- `15-1` 목적: market cap update와 IPO update가 같은 `source='finnhub'` row를 공유해도 기존 값을 덮어쓰지 않도록 하기 위함. 설명: null 인자는 기존 값을 유지하는 partial upsert면 완료다.
+  - 완료 조건(눈으로 확인): Finnhub route가 한 번 더 돌아도 `ipo_date`나 `market_cap`이 null로 돌아가지 않는다.
+  - 사람 검증(비개발자): API 응답에서 값이 한 번 들어간 뒤 다시 사라지지 않는지 본다.
+  - 흔한 문제/주의: 별도 endpoint만 추가하고 upsert를 그대로 두면 다른 job이 저장값을 다시 지운다.
+- `15-2` 목적: 사용자가 Data Control에서 IPO date만 독립적으로 돌릴 수 있게 하기 위함. 설명: 버튼 클릭 시 `{jobId}`가 생성되고 log panel에 진행률이 보이면 완료다.
+  - 완료 조건(눈으로 확인): `/api/jobs/:jobId`에 ticker별 `ipo date updated` 로그가 쌓인다.
+  - 사람 검증(비개발자): Data Control에서 `IPO Date Update` 버튼과 `Log` 버튼이 보인다.
+  - 흔한 문제/주의: backend는 job인데 frontend가 즉시 완료형으로 처리하면 진행률 표시가 비어 버린다.
+- `15-3` 목적: 저장된 IPO date를 실제 UI에서 쓸 수 있게 하기 위함. 설명: 뉴스와 기본 ticker 응답 모두 `ipoDate`를 내려주면 완료다.
+  - 완료 조건(눈으로 확인): API JSON에 `ipoDate`가 포함된다.
+  - 사람 검증(비개발자): 개발자도구 network 응답에서 `ipoDate` 문자열을 볼 수 있다.
+  - 흔한 문제/주의: 최신 row만 보고 non-null older row를 놓치면 값이 있는데도 UI에 비어 보일 수 있다.
+- `15-4` 목적: 사용자가 바로 보게 만들기 위함. 설명: News Feed와 Default Ticker table에 IPO date 컬럼이 렌더링되면 완료다.
+  - 완료 조건(눈으로 확인): News Feed columns 메뉴/테이블과 Default Ticker table에 `IPO Date`가 나타난다.
+  - 사람 검증(비개발자): 브라우저에서 컬럼 헤더와 값이 보인다.
+  - 흔한 문제/주의: 타입만 추가하고 render/sort 분기를 빠뜨리면 컬럼이 깨지거나 빈 셀이 된다.
+- `15-5` 목적: spec과 작업 로그를 코드와 맞추기 위함. 설명: 새 endpoint와 컬럼 계약이 문서에 반영되면 완료다.
+  - 완료 조건(눈으로 확인): prompt 문서와 agent log에 `pull-ipo-date`, `ipoDate`, `IPO Date Update`가 나온다.
+  - 사람 검증(비개발자): 문서 검색으로 새 기능 이름이 확인된다.
+  - 흔한 문제/주의: 코드만 바꾸고 문서를 안 바꾸면 다음 작업자가 API 계약을 오해한다.
+
+검증 훅:
+```powershell
+cd c:\github_coding\terminal_sec\terminal
+npm run build
+npm run test
+
+cd c:\github_coding\terminal_sec\termina_web\figma_code\terminal_ui_ver2_finhub
+npm run build
+
+Invoke-RestMethod -Method Post -ContentType 'application/json' -Body '{"tickers":["AAPL"]}' http://localhost:8080/api/company-profiles/pull-ipo-date
+Invoke-RestMethod http://localhost:8080/api/tickers
+Invoke-RestMethod 'http://localhost:8080/api/news?source_names=FINNHUB&tickers=AAPL&limit=1'
+```
+사용자 확인 필요: **예**
+
 ### 확인된 데이터 타입 카탈로그 (2026-03-10)
 - REST envelope
   - `[][][]count[][][]`: 반환 article 개수

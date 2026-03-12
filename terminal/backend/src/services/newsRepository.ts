@@ -245,7 +245,26 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
     }
   }
 
-  const mapped = rows.map((row) => mapNewsRow(row, sentimentMap, peersMap, descMap, marketCapMap));
+  const ipoMap = new Map<string, string | null>();
+  if (tickerSet.size > 0) {
+    const tickerArr = Array.from(tickerSet);
+    const placeholders = tickerArr.map(() => "?").join(",");
+    const ipoRows = await getDb().all<any[]>(
+      `SELECT s.ticker, cp.ipo_date
+       FROM company_profiles cp
+       JOIN securities s ON s.id = cp.security_id
+       WHERE s.ticker IN (${placeholders}) AND cp.ipo_date IS NOT NULL AND cp.ipo_date != ''
+       ORDER BY cp.fetched_at DESC`,
+      tickerArr,
+    );
+    for (const ir of ipoRows) {
+      if (!ipoMap.has(ir.ticker)) {
+        ipoMap.set(ir.ticker, ir.ipo_date ?? null);
+      }
+    }
+  }
+
+  const mapped = rows.map((row) => mapNewsRow(row, sentimentMap, peersMap, descMap, marketCapMap, ipoMap));
   const hasMore = mapped.length > limit;
   const items = hasMore ? mapped.slice(0, limit) : mapped;
   const nextCursor = hasMore ? encodeCursor(items[items.length - 1]) : undefined;
@@ -326,7 +345,22 @@ export async function getNewsById(id: string): Promise<NewsItem | null> {
     }
   }
 
-  return mapNewsRow(row, sentimentMap, undefined, undefined, marketCapMap);
+  const ipoMap = new Map<string, string | null>();
+  if (tickers.length > 0) {
+    const ipoRow = await getDb().get<any>(
+      `SELECT cp.ipo_date
+       FROM company_profiles cp
+       JOIN securities s ON s.id = cp.security_id
+       WHERE s.ticker = ? AND cp.ipo_date IS NOT NULL AND cp.ipo_date != ''
+       ORDER BY cp.fetched_at DESC LIMIT 1`,
+      [tickers[0]],
+    );
+    if (ipoRow) {
+      ipoMap.set(tickers[0], ipoRow.ipo_date ?? null);
+    }
+  }
+
+  return mapNewsRow(row, sentimentMap, undefined, undefined, marketCapMap, ipoMap);
 }
 
 export async function insertNewsItem(params: {
@@ -397,6 +431,7 @@ function mapNewsRow(
   peersMap?: Map<string, string[]>,
   descMap?: Map<string, string>,
   marketCapMap?: Map<string, number | null>,
+  ipoMap?: Map<string, string | null>,
 ): NewsItem {
   const tickers = splitCsvEnvelope(row.tickers_csv);
 
@@ -442,6 +477,7 @@ function mapNewsRow(
       for (const t of tickers) { const ind = getIndustry(t); if (ind) return ind; }
       return null;
     })(),
+    ipoDate: (primaryTicker && ipoMap ? ipoMap.get(primaryTicker) : undefined) ?? null,
     marketCap: (primaryTicker && marketCapMap ? marketCapMap.get(primaryTicker) : undefined) ?? null,
     // AI analysis
     score: row.ai_score ?? null,

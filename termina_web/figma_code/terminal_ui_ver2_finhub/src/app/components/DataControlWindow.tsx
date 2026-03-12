@@ -22,7 +22,7 @@ interface JobStatus {
   result?: Record<string, unknown>;
 }
 
-type SectionKey = 'price' | 'calendarBackfill' | 'calendarRefresh' | 'calendarCustom' | 'companyDesc' | 'peersPull' | 'recent' | 'custom';
+type SectionKey = 'price' | 'calendarBackfill' | 'calendarRefresh' | 'calendarCustom' | 'companyDesc' | 'peersPull' | 'ipoDate' | 'recent' | 'custom';
 
 interface DataControlWindowProps {
   fontScale?: number;
@@ -62,19 +62,19 @@ export function DataControlWindow({
 
   // ─── Per-section job state ───
   const [jobIds, setJobIds] = useState<Record<SectionKey, string | null>>({
-    price: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, peersPull: null, 'recent': null, custom: null,
+    price: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, peersPull: null, ipoDate: null, 'recent': null, custom: null,
   });
   const [updating, setUpdating] = useState<Record<SectionKey, boolean>>({
-    price: false, calendarBackfill: false, calendarRefresh: false, calendarCustom: false, companyDesc: false, peersPull: false, 'recent': false, custom: false,
+    price: false, calendarBackfill: false, calendarRefresh: false, calendarCustom: false, companyDesc: false, peersPull: false, ipoDate: false, 'recent': false, custom: false,
   });
   const [errors, setErrors] = useState<Record<SectionKey, string | null>>({
-    price: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, peersPull: null, 'recent': null, custom: null,
+    price: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, peersPull: null, ipoDate: null, 'recent': null, custom: null,
   });
 
   // ─── View Log state (only one section's log at a time) ───
   const [logSection, setLogSection] = useState<SectionKey | null>(null);
   const [jobStatuses, setJobStatuses] = useState<Record<SectionKey, JobStatus | null>>({
-    price: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, peersPull: null, 'recent': null, custom: null,
+    price: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, peersPull: null, ipoDate: null, 'recent': null, custom: null,
   });
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -287,6 +287,9 @@ export function DataControlWindow({
         case 'peersPull':
           url = `${API_BASE}/api/company-profiles/pull-peers`;
           break;
+        case 'ipoDate':
+          url = `${API_BASE}/api/company-profiles/pull-ipo-date`;
+          break;
         case 'recent':
           url = `${API_BASE}/api/news/change/update-recent`;
           headers['Content-Type'] = 'application/json';
@@ -412,6 +415,13 @@ export function DataControlWindow({
       statusKey: 'company_profiles',
       group: 'Company Data',
       description: 'ticker_universes/default 기준으로 Finnhub 관련 종목(peers)을 수집합니다.',
+    },
+    {
+      key: 'ipoDate',
+      label: 'IPO Date Update',
+      statusKey: 'company_profiles_ipo_date',
+      group: 'Company Data',
+      description: 'ticker_universes/default 기준으로 Finnhub profile2의 IPO date를 수집합니다.',
     },
 
     {

@@ -45,33 +45,37 @@
 - **앱 런타임 SQLite (terminal 백엔드 기본 DB)**
 	- 경로: `terminal/backend/backend/data/app.db`
 	- 용도: terminal 앱의 기본 영속 데이터
-	- **전체 테이블 목록 (2026-03 기준)**:
+	- **전체 테이블 목록 (2026-03-12 live inspect 기준)**:
 		| 테이블 | 용도 | 비고 |
 		|--------|------|------|
-		| `news_items` | 뉴스 메타데이터 (134K rows) | PK: `id` (UUID). legacy inline change 컬럼 잔존 (사용 안 함) |
-		| `news_change_metrics` | 뉴스별 change% 파생값 (900K rows) | PK: `(news_id, metric_key)`. **영구 보존** (`CREATE TABLE IF NOT EXISTS`). metric_key: `change_pct`, `change_1d_pct`, `change_from_open_pct`, `change_open_to_high_pct`, `change_3d_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct` |
-		| `news_fulltext` | full text 추출/키워드 (101K rows) | PK: `news_id`. keywords_json/keywords_status 포함 |
+		| `news_items` | 뉴스 메타데이터 (226K rows) | PK: `id` (UUID). live schema에는 `publisher`, `origin_url`, 일부 legacy inline change 컬럼이 남아 있다 |
+		| `news_change_metrics` | 뉴스별 change% 파생값 (1.43M rows) | PK: `(news_id, metric_key)`. **영구 보존** (`CREATE TABLE IF NOT EXISTS`). metric_key: `change_pct`, `change_1d_pct`, `change_from_open_pct`, `change_open_to_high_pct`, `change_3d_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct` |
+		| `news_fulltext` | full text 추출/키워드 (136K rows) | PK: `news_id`. keywords_json/keywords_status 포함 |
 		| `news_ai_analysis` | AI 스코어/증거 (0 rows) | PK: `news_id`. score, score_evidence, analysis_status |
 		| `news_sentiment_snapshots` | 종목별 sentiment (683 rows) | UNIQUE: `(ticker, asof_date)`. Finnhub sentiment API 기반 |
 		| `news_saved_views` | 저장된 뉴스 필터 뷰 (0 rows) | |
 		| `bookmark_folders` | 북마크 폴더 트리 (3 rows) | parent_id 자기참조로 트리 구조 |
 		| `bookmark_items` | 북마크된 뉴스 (3 rows) | PK: `(folder_id, news_id)` |
-		| `confirmed_empty_ranges` | 빈 뉴스 구간 확정 (334 rows) | PK: `(ticker, source_type)` |
+		| `confirmed_empty_ranges` | 빈 뉴스 구간 확정 (2.3K rows) | PK: `(ticker, source_type)` |
 		| `securities` | ticker 마스터 (1,698 rows) | UNIQUE: `(ticker, exchange)`. 서버 시작 시 CSV에서 upsert |
 		| `company_profiles` | 기업 프로필 (1,734 rows) | UNIQUE: `(security_id, source)`. market_cap, peers_json 포함 |
 		| `ticker_universes` | ticker 유니버스 정의 (1 row) | |
 		| `ticker_universe_items` | 유니버스 소속 ticker (1,698 rows) | |
 		| `calendar_events` | 캘린더 이벤트 (0 rows) | |
-		| `update_status` | 업데이트 상태 추적 (8 rows) | PK: `source_key` |
-		| `research_tabs` | Case Research 탭 (2 rows) | |
-		| `research_pages` | Case Research 페이지 (3 rows) | |
+		| `update_status` | 업데이트 상태 추적 (11 rows) | PK: `source_key`. `company_profiles_ipo_date` 포함 |
+		| `research_tabs` | Case Research 탭 (5 rows) | `deleted_at` soft delete 포함 |
+		| `research_pages` | Case Research 페이지 (7 rows) | `deleted_at` soft delete 포함 |
 		| `users` | 사용자 (1 row) | |
-		| `watchlists` / `watchlist_items` | 관심종목 (0 rows) | |
+		| `watchlists` / `watchlist_items` | 관심종목 (0 rows) | `watchlist_items.security_id` FK 컬럼 포함 |
 		| `alert_rules` | 알림 규칙 (0 rows) | |
 	- 현재 코드 기준 주의:
 		- `news_change_metrics`는 **영구 테이블**이다 (`CREATE TABLE IF NOT EXISTS`). 서버 재시작 시 삭제/재생성되지 않는다.
-		- `news_items`에는 legacy inline change 컬럼(`change_1d_pct`, `change_from_open_pct` 등)이 남아 있지만, `newsChangeMerger`는 이 컬럼에 쓰지 않고 `news_change_metrics` 테이블에만 UPSERT한다.
-		- 실제 조회(`GET /api/news`)는 `news_items`에 `news_change_metrics` 8개 metric_key를 각각 LEFT JOIN + `news_fulltext` + `news_ai_analysis` + `news_sentiment_snapshots` + `company_profiles` + `securities`를 join해서 응답한다.
+		- `news_items` live schema에는 `[][][]ohlc_ticker[][][]`, `[][][]ohlc_date[][][]`, `[][][]change_1d_pct[][][]`, `[][][]change_from_open_pct[][][]`, `[][][]change_7d_pct[][][]`, `[][][]change_14d_pct[][][]`, `[][][]change_30d_pct[][][]`, `[][][]change_computed_at[][][]`, `[][][]publisher[][][]`, `[][][]origin_url[][][]`가 존재한다. 하지만 `newsChangeMerger`의 canonical 결과는 `news_change_metrics` 쪽을 사용한다.
+		- 실제 조회(`GET /api/news`)는 `news_items`에 `news_change_metrics` 8개 metric_key를 각각 LEFT JOIN + `news_fulltext` + `news_ai_analysis` + `news_sentiment_snapshots` + `company_profiles`/`securities`를 join해서 응답한다.
+		- `GET /api/news`는 company data enrich 단계에서 `[][][]marketCap[][][]`, `[][][]peers[][][]`, `[][][]companyDescription[][][]`, `[][][]ipoDate[][][]`를 대표 ticker 기준으로 보강한다.
+		- `GET /api/tickers`의 default-universe row도 `[][][]ipoDate[][][]`와 `[][][]marketCap[][][]`를 함께 반환한다.
+		- `company_profiles`의 핵심 company data 컬럼은 `[][][]description[][][]`, `[][][]ipo_date[][][]`, `[][][]market_cap[][][]`, `[][][]peers_json[][][]`다. `POST /api/company-profiles/pull-fmp`, `pull-peers`, `pull-market-cap`, `pull-ipo-date`가 모두 이 테이블을 갱신한다.
+		- `update_status` live source_key 예시는 `company_profiles`, `company_profiles_ipo_date`, `company_profiles_market_cap`, `finhub_news`, `ibkr_calendar`, `ibkr_ohlc_1d`, `news_change_custom`, `news_change_recent`, `rtpr_press_release`, `tickers_csv`다.
 		- `/api/news` change 날짜 필드는 분리되어 있다.
 		  - `[][][]ohlc_date[][][]` / `[][][]change_pct_ohlc_date[][][]` = `change_pct.target_date`
 		  - `[][][]change_1d_target_date[][][]` = `change_1d_pct.target_date`
@@ -81,8 +85,9 @@
 	- 경로: `OHLC_data/ohlc_1d_watchlist.sqlite`
 	- 용도: 일봉 OHLCV canonical 저장소 (EODHD 기반 + IBKR fallback upsert)
 	- 테이블:
-		- `ohlc_1d` (4M rows): `Symbol, Datetime, Open, High, Low, Close, Volume, Change_1d_Pct, Change_From_Open_Pct, Change_7d_Pct, Change_14d_Pct, Change_30d_Pct, Derived_Updated_At`
+		- `ohlc_1d` (4.06M rows): `Symbol, Datetime, Open, High, Low, Close, Volume, Change_1d_Pct, Change_From_Open_Pct, Change_7d_Pct, Change_14d_Pct, Change_30d_Pct, Derived_Updated_At`
 		- `symbols` (1,188 rows): `Symbol, Industry`
+	- 2026-03-12 live inspect 기준으로 OHLC DB의 user table은 `ohlc_1d`, `symbols` 두 개뿐이며, 추가 hidden business table은 없다.
 	- Change% 파생 컬럼은 `ohlcDerivedMetrics.ts`가 계산해서 같은 테이블에 업데이트
 	- **IBKR fallback**: `newsChangeMerger`가 change 계산 시 로컬 OHLC DB에 해당 종목이 없으면 IBKR TWS에서 배치 조회 후 이 DB에 upsert (Phase 1.5)
 	- 현재 운영 규칙: ET `16:00:00` 이전에는 current ET date 일봉을 canonical OHLC DB에 저장하지 않는다. 이미 장중 row가 들어간 경우 purge 후 재계산으로 정리한다.
@@ -111,8 +116,15 @@
 - **프론트엔드 런타임 상태 저장**
 	- 현재 상태: `termina_web/figma_code/terminal_ui_ver2_finhub` 프론트는 앱 전체 workspace/tabs/theme를 영속 저장하지 않는다.
 	- localStorage 사용 항목:
+		- `terminal-workspace-v1`: 탭/창 레이아웃, dark mode, global font scale, linked ticker, 뉴스 폰트 크기
+		- `finhub-news-ui-state`: News Feed 컬럼 표시, display mode, 검색어, 날짜 범위, 북마크 선택, market cap filter 등
 		- `finnhub-last-update-config`: FinnhubNews 마지막 업데이트 설정
+		- `data-control-active-tab`: Data Control 현재 탭
+		- `ft-concurrency`: full text concurrency
 		- `ibkr-concurrency`: IBKR Fetch Concurrency 설정 (기본값 30, 범위 1~100)
+		- `finnhub-ticker-concurrency`: Finnhub ticker pull concurrency
+		- `finnhub-request-interval-sec`: Finnhub request interval
+		- `rtpr-ticker-concurrency`: RTPR ticker pull concurrency
 	- 의미: “앱을 껐다 켜도 마지막 상태 유지”, “탭 상태 유지”, “전역 글자 크기 유지” 같은 기능은 아직 canonical 저장 구조가 구현되지 않은 상태다.
 	- 향후 원칙: 프론트 전용 UI state는 1차로 `localStorage`를 사용하고, runtime 데이터 source of truth(`app.db`)와 혼동하지 않는다.
 

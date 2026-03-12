@@ -33,18 +33,26 @@ export async function upsertCompanyProfile(
   const db = getDb();
   const now = new Date().toISOString();
 
-  const existing = await db.get<{ id: number }>(
-    "SELECT id FROM company_profiles WHERE security_id = ? AND source = ?",
+  const existing = await db.get<CompanyProfileRow>(
+    "SELECT * FROM company_profiles WHERE security_id = ? AND source = ?",
     [securityId, source],
   );
 
   if (existing) {
+    const nextDescription = description ?? existing.description;
+    const nextCeo = ceo ?? existing.ceo;
+    const nextEmployees = employees ?? existing.employees;
+    const nextWebsite = website ?? existing.website;
+    const nextIpoDate = ipoDate ?? existing.ipo_date;
+    const nextMarketCap = marketCap ?? existing.market_cap;
+    const nextRawJson = rawJson ?? existing.raw_json;
+
     await db.run(
       `UPDATE company_profiles SET
         description = ?, ceo = ?, employees = ?, website = ?,
         ipo_date = ?, market_cap = ?, raw_json = ?, fetched_at = ?
        WHERE id = ?`,
-      [description, ceo, employees, website, ipoDate, marketCap, rawJson, now, existing.id],
+      [nextDescription, nextCeo, nextEmployees, nextWebsite, nextIpoDate, nextMarketCap, nextRawJson, now, existing.id],
     );
     return existing.id;
   }

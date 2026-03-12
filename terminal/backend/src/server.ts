@@ -116,6 +116,7 @@ type TickerListRow = {
   name: string | null;
   sector: string | null;
   industry: string | null;
+  ipoDate: string | null;
   marketCap: number | null;
 };
 
@@ -342,6 +343,7 @@ function mapCsvTickerRowsToListRows(rows: Array<{ ticker: string; name: string |
     name: row.name,
     sector: row.sector,
     industry: row.industry,
+    ipoDate: null,
     marketCap: null,
   }));
 }
@@ -377,9 +379,17 @@ async function getDefaultUniverseRows(): Promise<TickerListRow[]> {
         name: string | null;
         sector: string | null;
         industry: string | null;
+        ipo_date: string | null;
         market_cap: number | null;
       }>>(
         `SELECT s.ticker, s.exchange, s.name, s.sector, s.industry,
+                (
+                  SELECT cp.ipo_date
+                  FROM company_profiles cp
+                  WHERE cp.security_id = s.id AND cp.ipo_date IS NOT NULL AND cp.ipo_date != ''
+                  ORDER BY cp.fetched_at DESC
+                  LIMIT 1
+                ) AS ipo_date,
                 (
                   SELECT cp.market_cap
                   FROM company_profiles cp
@@ -400,6 +410,7 @@ async function getDefaultUniverseRows(): Promise<TickerListRow[]> {
           name: row.name ?? null,
           sector: row.sector ?? null,
           industry: row.industry ?? null,
+          ipoDate: row.ipo_date ?? null,
           marketCap: row.market_cap ?? null,
         }));
       }
@@ -418,6 +429,7 @@ async function getDefaultUniverseRows(): Promise<TickerListRow[]> {
       name: null,
       sector: null,
       industry: null,
+      ipoDate: null,
       marketCap: null,
     }));
   }
@@ -2440,7 +2452,7 @@ app.post("/api/company-profiles/pull-market-cap", async (req, res) => {
             null,
             null,
             null,
-            null,
+            profile.ipoDate,
             profile.marketCapitalization,
             JSON.stringify(profile.raw),
           );
@@ -2476,6 +2488,120 @@ app.post("/api/company-profiles/pull-market-cap", async (req, res) => {
   }
 });
 
+// ── Pull Finnhub IPO Date ──────────────────────────────────────────────────
+app.post("/api/company-profiles/pull-ipo-date", async (req, res) => {
+  try {
+    const body = req.body as { tickers?: string[]; maxTickers?: number };
+    let tickers = body.tickers;
+    if (!tickers || tickers.length === 0) {
+      tickers = await getDefaultUniverseTickers();
+    }
+    const max = body.maxTickers ?? tickers.length;
+    const target = tickers.slice(0, max);
+
+    const jobId = createJob(target.length);
+    appendLog(jobId, `Starting Finnhub IPO date update for ${target.length} tickers`);
+    res.json({ jobId });
+
+    void (async () => {
+      try {
+        if (target.length === 0) {
+          appendLog(jobId, "No tickers requested — nothing to do");
+          await setLastSuccess("company_profiles_ipo_date", new Date().toISOString(), {
+            source: "finnhub-profile2-ipo",
+            requested: 0,
+            fetched: 0,
+            updated: 0,
+            errors: 0,
+          });
+          completeJob(jobId, { requested: 0, tickersUpdated: 0, tickersFailed: 0, totalRowsUpserted: 0, source: "finnhub-profile2-ipo" });
+          return;
+        }
+
+        const { results, errors, cancelled } = await fetchFinnhubProfilesBatch(
+          target,
+          1050,
+          (done, total) => { updateProgress(jobId, done, total); },
+          () => isJobCancelled(jobId),
+        );
+
+        if (cancelled || isJobCancelled(jobId)) {
+          appendLog(jobId, `Job cancelled by user after ${results.size} tickers`);
+          return;
+        }
+
+        let updated = 0;
+        for (const [ticker, profile] of results) {
+          const existingSec = await getDb().get<{ id: number }>(
+            "SELECT id FROM securities WHERE ticker = ? ORDER BY id ASC LIMIT 1",
+            [ticker.toUpperCase()],
+          );
+          let secId: number;
+          if (existingSec) {
+            secId = existingSec.id;
+            const sets: string[] = [];
+            const params: unknown[] = [];
+            if (profile.exchange) { sets.push("exchange = ?"); params.push(profile.exchange); }
+            if (profile.name) { sets.push("name = ?"); params.push(profile.name); }
+            if (profile.finnhubIndustry) { sets.push("industry = ?"); params.push(profile.finnhubIndustry); }
+            if (sets.length > 0) {
+              params.push(secId);
+              await getDb().run(`UPDATE securities SET ${sets.join(", ")} WHERE id = ?`, params);
+            }
+          } else {
+            secId = await upsertSecurity(
+              ticker,
+              profile.exchange,
+              profile.name,
+              null,
+              profile.finnhubIndustry,
+            );
+          }
+
+          await upsertCompanyProfile(
+            secId,
+            "finnhub",
+            null,
+            null,
+            null,
+            null,
+            profile.ipoDate,
+            null,
+            JSON.stringify(profile.raw),
+          );
+          updated++;
+          appendLog(jobId, `${ticker}: ipo date ${profile.ipoDate ? `updated (${profile.ipoDate})` : "missing"}`);
+        }
+
+        for (const [ticker, message] of errors) {
+          appendLog(jobId, `${ticker}: error - ${message}`);
+        }
+
+        await setLastSuccess("company_profiles_ipo_date", new Date().toISOString(), {
+          requested: target.length,
+          fetched: results.size,
+          updated,
+          errors: errors.size,
+          source: "finnhub-profile2-ipo",
+        });
+
+        completeJob(jobId, {
+          requested: target.length,
+          fetched: results.size,
+          tickersUpdated: updated,
+          tickersFailed: errors.size,
+          totalRowsUpserted: updated,
+          source: "finnhub-profile2-ipo",
+        });
+      } catch (error) {
+        failJob(jobId, error instanceof Error ? error.message : String(error));
+      }
+    })();
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Unknown error" });
+  }
+});
+
 // ── App DB Inspection ────────────────────────────────────────────────────────
 const TABLE_UI_USAGE: Record<string, string[]> = {
   securities: [
@@ -2487,6 +2613,7 @@ const TABLE_UI_USAGE: Record<string, string[]> = {
     "POST /api/company-profiles/pull-fmp (FMP 회사 설명 저장)",
     "POST /api/company-profiles/pull-peers (Finnhub peers 수집)",
     "POST /api/company-profiles/pull-market-cap (Finnhub market cap 수집)",
+    "POST /api/company-profiles/pull-ipo-date (Finnhub IPO date 수집)",
     "GET /api/company-profiles/:ticker",
   ],
   ticker_universes: [

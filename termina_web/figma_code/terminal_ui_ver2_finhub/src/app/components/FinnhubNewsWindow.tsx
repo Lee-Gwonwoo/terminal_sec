@@ -14,7 +14,7 @@ const ROW_HEIGHT_WITH_ABSTRACT = 140;
 type DisplayMode = 'title-only' | 'title-abstract';
 
 // ─── Column definition ───
-type ColumnId = 'date' | 'ticker' | 'time' | 'title' | 'publisher' | 'industry' | 'source' | 'changes' | 'fulltext' | 'keywords' | 'score' | 'scoreEvidence' | 'sentiment' | 'peers' | 'companyDesc';
+type ColumnId = 'date' | 'ticker' | 'time' | 'title' | 'publisher' | 'industry' | 'ipoDate' | 'source' | 'changes' | 'fulltext' | 'keywords' | 'score' | 'scoreEvidence' | 'sentiment' | 'peers' | 'companyDesc';
 
 interface ColumnDef {
   id: ColumnId;
@@ -31,6 +31,7 @@ const DEFAULT_COLUMNS: ColumnDef[] = [
   { id: 'title',        label: 'Title',      defaultWidth: 300, minWidth: 100, flex: true },
   { id: 'publisher',    label: 'Publisher',  defaultWidth: 96,  minWidth: 60 },
   { id: 'industry',     label: 'Industry',   defaultWidth: 110, minWidth: 60 },
+  { id: 'ipoDate',      label: 'IPO Date',   defaultWidth: 96,  minWidth: 76 },
   { id: 'source',       label: 'Sources',    defaultWidth: 90,  minWidth: 50 },
   { id: 'fulltext',     label: 'Full Text',  defaultWidth: 60,  minWidth: 40 },
   { id: 'changes',      label: 'Changes %',  defaultWidth: 280, minWidth: 160 },
@@ -126,6 +127,7 @@ interface BackendNewsItem {
   keywords?: string[];
   keywordsStatus?: string | null;
   industry?: string | null;
+  ipoDate?: string | null;
   score?: number | null;
   scoreEvidence?: string | null;
   analysisStatus?: string | null;
@@ -162,6 +164,7 @@ interface DisplayItem {
   keywords: string[];
   keywordsStatus: string | null;
   industry: string | null;
+  ipoDate: string | null;
   score: number | null;
   scoreEvidence: string | null;
   sentiment: number | null;
@@ -203,6 +206,7 @@ function mapBackendItem(item: BackendNewsItem): DisplayItem {
     keywords: item.keywords ?? [],
     keywordsStatus: item.keywordsStatus ?? null,
     industry: item.industry ?? null,
+    ipoDate: item.ipoDate ?? null,
     score: item.score ?? null,
     scoreEvidence: item.scoreEvidence ?? null,
     sentiment: item.sentimentBullishPct ?? null,
@@ -1107,6 +1111,7 @@ export function FinnhubNewsWindow({
       case 'title': return item.title.toLowerCase();
       case 'publisher': return (item.publisher ?? '').toLowerCase();
       case 'industry': return (item.industry ?? '').toLowerCase();
+      case 'ipoDate': return item.ipoDate ?? '';
       case 'source': return item.source.toLowerCase();
       case 'fulltext': return item.hasFullText ? 1 : 0;
       case 'changes': return item.changeFromOpenPct ?? 0;
@@ -1362,6 +1367,8 @@ export function FinnhubNewsWindow({
       }
       case 'industry':
         return <span className="truncate text-gray-600 dark:text-gray-400" title={newsItem.industry ?? undefined}>{newsItem.industry ?? '-'}</span>;
+      case 'ipoDate':
+        return <span className="truncate text-gray-600 dark:text-gray-400" title={newsItem.ipoDate ?? undefined}>{newsItem.ipoDate ?? '-'}</span>;
       case 'source':
         return renderLinkCell(newsItem.source, 'text-gray-600 dark:text-gray-400', newsItem.url);
       case 'fulltext':

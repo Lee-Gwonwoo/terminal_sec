@@ -1,5 +1,40 @@
 # Agent Log — terminal_ui_ver4_ptpr
 
+## 시간순 전체 요약
+
+아래는 현재 파일에 기록된 작업을 시간순으로 한 번 더 압축 정리한 요약이다. 상세 내용은 각 날짜 섹션에 그대로 유지한다.
+
+| 일시 | 작업 | 핵심 결과 |
+|------|------|-----------|
+| 2026-03-10 17:23 | PTPR 1차 조사 시작 | 키 존재 확인, base URL / 공식 문서 미확정 상태를 plan/repo-context에 고정 |
+| 2026-03-10 17:35 | RTPR 공식 문서 확보 + 실 probe | REST/WebSocket auth, base URL, rate limit 확인. `/articles` 및 WS subscribe 실제 성공 |
+| 2026-03-10 17:55 | RTPR ET canonical 규칙 정리 | RTPR를 `press_release` provider로 고정, 내부 표준 시각을 ET로 정리 |
+| 2026-03-10 19:47 | RTPR Full Text Backfill 버튼 추가 | 저장된 RTPR body를 `news_fulltext`에 backfill하는 전용 job/button 추가 |
+| 2026-03-10 20:03 | News Feed 새로고침 기본 입력 공란화 | refresh 후 ticker/search 기본값 자동 복원 제거 |
+| 2026-03-10 20:10 | RTPR raw HTML 저장 전략 plan 추가 | raw HTML 저장/표시 전략을 설계 단계로 분리 |
+| 2026-03-10 20:25 | Step 11 plan 개정 | `news_fulltext.full_text`에 HTML 저장, `news_items.body`는 plain text 유지로 방향 확정 |
+| 2026-03-10 20:37 | Step 11 구현 완료 | RTPR HTML 저장, plain text 반환, `origin_url` 추출/저장 구현 |
+| 2026-03-10 22:10 | RTPR backend/frontend 전체 구현 | RTPR pull job, UI 버튼, source filter까지 end-to-end 동작 확인 |
+| 2026-03-10 22:40 | RTPR recent 증분 구조 리팩터 | universe ticker + anchor + confirmed-empty skip + change merge 구조로 전환 |
+| 2026-03-10 23:13 | RTPR concurrency 5 + Control Window 설정 | RTPR 병렬도 설정과 UI control 추가, runtime log로 concurrency 반영 확인 |
+| 2026-03-10 23:24 | News Feed RTPR 표시 누락 수정 | source filter가 `FINNHUB,RTPR`를 보도록 수정 |
+| 2026-03-10 23:35 | RTPR plain text fulltext 즉시 저장 | RTPR update 시 기사 body를 `news_fulltext`에 즉시 저장하도록 보강 |
+| 2026-03-11 10:20 | same-day change gating 분석 | 기사 날짜보다 과거 OHLC anchor로 계산된 change 문제 확인, 후속 plan 반영 |
+| 2026-03-11 10:29 | 기존 잘못된 RTPR change metric 정리 | invalid RTPR metric rows 삭제 후 API에서 null 확인 |
+| 2026-03-11 10:33 | change 정상 업데이트 절차 문서화 | 장중 null 유지, EOD 후 재계산으로 값 채움 절차를 plan에 반영 |
+| 2026-03-11 10:40 | 6-5/6-6 gating 구현 | `anchorDate !== newsDate`면 metric 미저장하도록 공통 경로 수정 |
+| 2026-03-11 11:06 | change progress 조기 100% 수정 | running 중 100% 오표시를 방지하도록 3단계 progress로 재구성 |
+| 2026-03-11 11:15 | 장중 same-day ET 장종료 규칙 반영 | 당일 change는 ET 16:00 이후에만 허용하도록 plan 강화 |
+| 2026-03-11 11:20 | ET 장종료 규칙 + job 99% 상한 구현 | 장중 same-day change 차단, running job progress 99% 상한 적용 |
+| 2026-03-11 11:26 | 위 규칙 검증 완료 | build/test/runtime으로 same-day null, running<100 확인 |
+| 2026-03-11 11:36 | 장중 3/11 OHLC purge + 3/10 forward 정리 | current day OHLC row 제거, 과거 잘못된 forward target 정리 |
+| 2026-03-11 11:36 | API change 날짜 필드 의미 분리 | `ohlc_date`, `change_pct_ohlc_date`, `change_1d_target_date` 의미를 분리 |
+| 2026-03-11 11:43 | 날짜 필드 분리 검증 완료 | `/api/news` raw JSON으로 날짜 필드 의미 검증 |
+| 2026-03-11 11:46 | repo/front/back spec 문서 동기화 | skill/spec 문서를 실제 API 계약과 일치시킴 |
+| 2026-03-12 | Company Description / Peers job 로그 연동 | `pull-fmp`, `pull-peers`를 job 기반으로 전환하고 Data Control Log panel과 연결 |
+| 2026-03-12 | Company Description / Peers 기본 대상 전체화 | 기본 50개 제한 제거, body 미지정 시 default universe 전체 대상으로 변경 |
+| 2026-03-12 | FMP/Finnhub IPO date 확인 | Finnhub 공식 문서에서 `ipo` 확인, FMP stable live 응답에서 `ipoDate` 확인 |
+
 ## 2026-03-10
 
 ### PTPR API 1차 조사 시작 + plan/repo-context 반영 (2026-03-10 17:23)
@@ -251,12 +286,27 @@
 - `GET /api/jobs/:jobId`에서 progress, logs, result 확인 가능
 - Data Control `View Log` 패널에서 회사 설명/peers update의 ticker별 로그와 완료 summary 확인 가능
 
-#### 검증 계획
+#### 검증 결과
 
-1. backend build/test 실행
-2. frontend build 실행
-3. dev server 대상 `pull-fmp`, `pull-peers` 호출 후 `/api/jobs/:jobId` polling 확인
-4. 필요 시 UI에서 버튼 클릭 후 Log panel 수동 확인
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `server.ts`, `fmpCompanyProfileProvider.ts`, `finnhubPeersProvider.ts`, `DataControlWindow.tsx` 에러 0개 |
+| 빌드(backend) | ✅ | `npm run build` 통과 |
+| 자동 테스트(backend) | ✅ | `vitest run` 9 files / 55 tests passed |
+| 빌드(frontend) | ✅ | `vite build` 통과 |
+| 런타임 통합 | ✅ | `pull-fmp` / `pull-peers` 호출 시 `{jobId}` 반환, `/api/jobs/:jobId`에서 progress/logs/result 확인 |
+
+#### 런타임 검증 샘플
+
+```text
+FMP_JOB_ID=373988b5-d4a0-4efd-9ce0-29ee5ea87998
+[21:31:33] Starting FMP company description update for 1 tickers
+[21:31:34] AAPL: description updated (1665 chars)
+
+PEERS_JOB_ID=c232655d-ec3b-417b-9414-7a267246406a
+[21:31:35] Starting Finnhub peers update for 1 tickers
+[21:31:35] AAPL: 12 peers saved
+```
 
 #### 리스크 / 완화
 
@@ -306,22 +356,193 @@
 
 | 검증 계층 | 결과 | 비고 |
 |-----------|------|------|
-| 정적 분석 | ✅ | backend tsc --noEmit 0 errors |
-| 빌드 | ✅ | backend tsc + frontend vite build 모두 통과 |
-| 런타임 1차 pull | ✅ | "Starting RTPR recent pull — 1698 tickers", "1673 tickers have no prior RTPR data → 7d fallback", per-ticker 로그 정상 (예: "RTPR BSX: 14 new (14 fetched)") |
-| 런타임 2차 pull | ✅ | fallback count 1673 → 1645 감소 (28개 ticker에 anchor 생성), confirmed-empty skip 동작 확인 |
-| DB 상태 | ✅ | RTPR total: 190건, unique tickers: 113 (증분 수집 정상) |
-| change% merge | ⚠️ | 두 테스트 모두 cancel로 종료해서 merge 미실행. 완전 run 시 정상 실행 예상 |
+| 정적 분석 | ✅ | `server.ts` 에러 0개 |
+| 빌드 | ✅ | backend build 통과 |
+| 런타임(FMP) | ✅ | body 없이 `pull-fmp` 호출 시 job `requested=1698`, `status=running` 확인 후 cancel |
+| 런타임(Peers) | ✅ | body 없이 `pull-peers` 호출 시 job `requested=1698`, `status=running` 확인 후 cancel |
+
+#### 런타임 검증 샘플
+
+```text
+FMP jobId=4167c7b6-023e-4859-9ae5-c0081f27b816 requested=1698 completed=0 status=running
+PEERS jobId=2a1f31f1-b1ca-49fa-b9fa-7a2810d55b91 requested=1698 completed=2 status=running
+```
 
 #### 리스크 / 완화
 
-1. **리스크:** 1698 tickers × 60 rpm = ~31분 소요.
-   - 완화 1: confirmed-empty가 모이면 2차부터 대부분 skip → 속도 대폭 개선.
-   - 완화 2: 필요 시 RTPR 전용 concurrency(현재 1)를 rate limiter 범위 내에서 조절 가능.
-2. **리스크:** `getTickerAnchorMap` source 파라미터 추가가 기존 Finnhub 호출에 영향.
-   - 완화: 기본값 `'FINNHUB'`로 설정 → 기존 코드 무변경.
-3. **리스크:** confirmed-empty key `'rtpr_press_release'`가 `confirmed_empty_ranges` 테이블 source_type 컬럼에 새 값으로 들어감.
-   - 완화: `UNIQUE(ticker, source_type)` 제약으로 Finnhub `'press_release'`와 충돌 없음.
+1. **리스크:** default universe 전체를 기본으로 돌리면 FMP/Finnhub provider 호출 시간이 길어진다.
+   - 완화 1: job 기반 progress/log를 유지해 사용자가 진행 상태를 확인할 수 있게 했다.
+   - 완화 2: 필요 시 이후 UI에 `maxTickers` 입력을 추가해 부분 실행을 다시 허용할 수 있다.
+2. **리스크:** 실수로 버튼을 눌렀을 때 전체 universe job이 오래 돌 수 있다.
+   - 완화 1: `/api/jobs/:jobId/cancel`이 동작하도록 유지한다.
+   - 완화 2: 이번 검증도 long run 방지를 위해 즉시 cancel로 수행했다.
+
+### FMP / Finnhub IPO date 공식 문서 확인 (2026-03-12)
+
+**작성 시각:** 2026-03-12 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. 사용자의 질문에 따라 FMP와 Finnhub가 IPO date를 제공하는지 공식 문서 기준으로 재확인했다.
+2. Finnhub는 공식 문서에서 명시적으로 확인됐다.
+   - `Company Profile Premium` 응답 필드에 `ipo`
+   - `Company Profile 2` 응답 필드에 `ipo`
+3. FMP는 현재 fetch 가능한 공식 dataset 페이지에서 stable endpoint 자체는 확인되지만, 정적 페이지 응답에는 필드 목록이 충분히 노출되지 않았다.
+4. 대신 공식 stable endpoint `https://financialmodelingprep.com/stable/profile?symbol=AAPL`를 live로 호출해 `ipoDate` 필드가 실제 응답에 포함됨을 확인했다.
+5. 레포 코드도 이미 그 필드를 저장 경로에 연결하고 있음을 재확인했다.
+
+#### 확인 결과
+
+- Finnhub 공식 문서 필드명: `ipo`
+- FMP stable 응답 필드명: `ipoDate`
+- 현재 레포 저장 컬럼: `company_profiles.ipo_date`
+
+#### 검증 결과
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 공식 문서(Finnhub) | ✅ | `Company Profile` / `Company Profile 2` 응답 필드에 `ipo` 명시 |
+| 공식 문서(FMP) | ⚠️ | dataset 페이지에서 endpoint는 확인되지만 정적 fetch로 필드 목록 직접 확인은 제한적 |
+| 라이브 API(FMP) | ✅ | `stable/profile?symbol=AAPL` 응답에서 `ipoDate=1980-12-12` 확인 |
+| 레포 코드 | ✅ | provider 매핑, DB schema, repository 저장 경로 모두 `ipo_date` 연결 확인 |
+
+#### 관련 파일
+
+- `terminal/backend/src/services/fmpCompanyProfileProvider.ts`
+- `terminal/backend/src/server.ts`
+- `terminal/backend/src/db.ts`
+- `terminal/backend/src/services/companyProfileRepository.ts`
+
+#### 사용자 확인 요청
+
+- 현재 기준으로 IPO date는 두 provider 모두 사용 가능하다고 봐도 된다.
+
+### IPO Date Update 버튼 + News Feed / Default Ticker 컬럼 추가 (2026-03-12 17:52)
+
+**작성 시각:** 2026-03-12 17:52 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. Finnhub `profile2` provider에 `ipo` 매핑을 추가하고, `companyProfileRepository.upsertCompanyProfile()`를 partial upsert로 보강했다.
+   - 이제 `pull-market-cap`와 새 `pull-ipo-date`가 같은 `source='finnhub'` row를 공유해도 서로 `ipo_date`/`market_cap`를 null로 덮어쓰지 않는다.
+2. backend에 `POST /api/company-profiles/pull-ipo-date` background job endpoint를 추가했다.
+   - default universe 기준으로 Finnhub `ipo`를 수집하고 `GET /api/jobs/:jobId`에서 progress/log/result를 확인할 수 있다.
+3. `GET /api/news`와 `GET /api/tickers` 응답에 `ipoDate`를 추가했다.
+   - 뉴스는 대표 ticker 기준 최신 non-null `company_profiles.ipo_date`를 lookup한다.
+   - default ticker 목록은 `ticker_universes/default` 조회 시 `ipoDate`를 함께 내려준다.
+4. 프론트엔드에 아래 UI를 추가했다.
+   - Data Control → Company Data 그룹: `IPO Date Update`
+   - Finnhub News column: `IPO Date`
+   - Default Ticker column: `IPO Date`
+5. backend/frontend prompt와 plan 문서를 새 계약에 맞춰 갱신했다.
+
+#### 변경 파일
+
+- `terminal/backend/src/services/companyProfileRepository.ts`
+- `terminal/backend/src/services/finnhubProfile2Provider.ts`
+- `terminal/backend/src/services/newsRepository.ts`
+- `terminal/backend/src/types.ts`
+- `terminal/backend/src/server.ts`
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx`
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DefaultTickerWindow.tsx`
+- `terminal/backend_prompt.md`
+- `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+- `ai_agent_plan/terminal_ui_ver4_ptpr/plan.md`
+
+#### 기대 동작
+
+- `POST /api/company-profiles/pull-ipo-date` → `{ jobId }`
+- `GET /api/jobs/:jobId` → progress, logs, result 확인 가능
+- Data Control `IPO Date Update` 버튼으로 full-universe IPO date 수집 실행 가능
+- `GET /api/news` row에 `ipoDate` 포함
+- `GET /api/tickers` row에 `ipoDate` 포함
+- News Feed와 Default Ticker에서 IPO Date 컬럼 표시
+
+#### 검증 결과
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 변경한 backend/frontend 파일 `get_errors` 0개 |
+| 빌드 | ✅ | backend `npm run build`, frontend `vite build` 통과 |
+| 자동 테스트 | ✅ | backend `vitest run` 9 files / 55 tests passed |
+| 런타임 통합 | ✅ | `pull-ipo-date` 단일 ticker job 완료, `/api/tickers`와 `/api/news`에서 `ipoDate=1980-12-12` 확인 |
+
+#### 런타임 검증 샘플
+
+```text
+JOB_ID=e2b77676-172b-43b0-b1bb-582f07cb30c8
+[21:58:50] Starting Finnhub IPO date update for 1 tickers
+[21:58:51] AAPL: ipo date updated (1980-12-12)
+
+/api/tickers -> { ticker: "AAPL", ipoDate: "1980-12-12", marketCap: 3815334643520.9995 }
+/api/news?source_names=FINNHUB&tickers=AAPL&limit=1 -> { tickers:["AAPL"], ipoDate:"1980-12-12" }
+```
+
+#### 리스크 / 완화
+
+1. **리스크:** Finnhub free tier 속도로 full-universe IPO date job이 길게 돌 수 있다.
+   - 완화 1: 기존 job progress/log panel을 그대로 붙여 장시간 실행을 추적 가능하게 했다.
+   - 완화 2: 검증은 단일 ticker(`AAPL`)로 먼저 수행한다.
+2. **리스크:** `company_profiles` 최신 row만 보면 older non-null IPO date가 가려질 수 있다.
+   - 완화 1: 뉴스와 ticker 응답은 최신 non-null `ipo_date`를 조회하도록 구현했다.
+   - 완화 2: 필요하면 이후 market cap subquery도 같은 패턴으로 정리할 수 있다.
+3. **리스크:** Data Control 버튼만 붙이고 backend status key를 분리하지 않으면 Last Success가 다른 회사 데이터 job과 섞일 수 있다.
+   - 완화 1: `update_status.company_profiles_ipo_date`를 별도로 사용한다.
+
+#### 사용자 확인 요청
+
+- backend/API 기준 검증은 완료했다.
+- 브라우저에서 Data Control의 `IPO Date Update` 버튼, News Feed의 `IPO Date` 컬럼, Default Ticker의 `IPO Date` 컬럼이 보이는지 최종 시각 확인을 부탁한다.
+
+### repo-context DB 구조 감사 + repo skill 동기화 (2026-03-12 22:20)
+
+**작성 시각:** 2026-03-12 22:20 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. live app DB를 `/api/db/inspect`로 다시 점검해 repo skill 문서와 실제 schema/row count 차이를 확인했다.
+2. 결과적으로 **새 app DB 테이블 누락은 없었고**, repo-context의 설명 드리프트를 수정했다.
+3. 주요 반영 사항:
+    - `company_profiles.ipo_date`가 이제 `GET /api/news`, `GET /api/tickers`, `pull-ipo-date` 경로에서 실제로 사용된다는 점 추가
+    - `update_status` live row 수와 source_key 예시 갱신 (`company_profiles_ipo_date` 포함)
+    - `watchlist_items.security_id`, `research_tabs.deleted_at`, `research_pages.deleted_at`를 명시
+    - `news_items` live schema의 `publisher`, `origin_url`, 남아 있는 legacy inline change 컬럼을 더 구체적으로 명시
+    - 프론트 localStorage 키 목록을 실제 구현 기준으로 확장 (`terminal-workspace-v1`, `finhub-news-ui-state`, `data-control-active-tab`, `rtpr-ticker-concurrency` 등)
+4. OHLC DB는 현재 레포 기준으로 여전히 `ohlc_1d` + `symbols` 구조이며, derived 컬럼은 `ohlcWatchlistRepository.ts`에서 migration으로 관리됨을 재확인했다.
+
+#### 감사 결과 요약
+
+- **누락된 새 app DB 테이블:** 없음
+- **repo skill에서 보강이 필요했던 DB 데이터 타입/컬럼 설명:** 있음
+   - `company_profiles.ipo_date`
+   - `update_status`의 확장된 source_key 집합
+   - `watchlist_items.security_id`
+   - `research_tabs.deleted_at`, `research_pages.deleted_at`
+   - `news_items.publisher`, `news_items.origin_url`
+   - 프론트 localStorage 상태 키
+- **추가 점검 메모:** row count는 운영 데이터 누적에 따라 계속 변하므로, repo-context의 수치는 “2026-03-12 live inspect 예시”로 읽어야 한다.
+
+#### 검증 결과
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 문서 변경만 수행 |
+| 빌드 | ✅ | 코드 변경 없음 |
+| 자동 테스트 | ✅ | 코드 변경 없음 |
+| 런타임 통합 | ✅ | `/api/db/inspect`, `/api/updates/status` live 호출로 schema/source_key 확인 |
+
+#### 사용자 확인 요청
+
+- repo skill 기준 DB 구조 감사와 동기화는 끝났다.
+- 원하면 다음으로 `backend_prompt.md`와 `.github/copilot-skills/repo-context.md` 사이의 중복/불일치도 한 번 더 정리하겠다.
+- 차이는 필드명만 다르다: Finnhub `ipo`, FMP `ipoDate`.
 
 ### RTPR concurrency 5 기본 병렬 처리 + Control Window 설정 추가 (2026-03-10 23:13)
 
