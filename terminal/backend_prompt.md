@@ -1732,7 +1732,7 @@ Finnhub `/stock/peers` API로 관련 종목 데이터를 수집해 `company_prof
 
 1. 대상 ticker 목록을 결정한다 (body에서 지정 또는 default universe).
 2. job을 생성하고 즉시 `{ jobId }`를 반환한다.
-3. background worker가 Finnhub `/stock/peers?symbol=X`를 호출한다. 이 경로는 IPO/market-cap 경로와 **같은 전역 company-data throttle**을 공유하며, 기본값은 `[][][]tickerConcurrency[][][]=1`, `[][][]requestIntervalMs[][][]=1500`이다.
+3. background worker가 Finnhub `/stock/peers?symbol=X`를 호출한다. 이 경로는 IPO/market-cap 경로와 **같은 전역 company-data throttle**을 공유하며, 기본값은 `[][][]tickerConcurrency[][][]=1`이다. 별도 interval delay 없이 직렬화만 유지한다.
 4. 결과를 `company_profiles`에 `source = 'finnhub'`로 upsert한다.
 5. ticker별 `N peers saved` 또는 error 로그를 job log에 append한다.
 6. 완료 후 result summary에는 `[][][]requested[][][]`, `[][][]tickersUpdated[][][]`, `[][][]tickersFailed[][][]`, `[][][]totalRowsUpserted[][][]`, `[][][]errors[][][]`, `[][][]cancelled[][][]`가 들어간다.
@@ -1744,13 +1744,13 @@ Finnhub `/stock/profile2` API에서 시가총액과 기본 회사 메타데이�
 요청 body:
 
 ```json
-{ "tickers": ["AAPL", "MSFT"], "maxTickers": 100, "tickerConcurrency": 1, "requestIntervalMs": 1500 }
+{ "tickers": ["AAPL", "MSFT"], "maxTickers": 100, "tickerConcurrency": 1 }
 ```
 
 - `tickers` 생략 시 `ticker_universes/default` 전체를 대상으로 한다.
 - `[][][]tickerConcurrency[][][]`는 1~5 범위다. 기본값은 1이다.
-- `[][][]requestIntervalMs[][][]`는 1500~10000ms 범위다. 기본값은 1500ms다.
-- 호출 간격은 market-cap / IPO / peers가 공유하는 **전역 company-data throttle**로 제어된다.
+- 별도 `[][][]requestIntervalMs[][][]` body 값은 더 이상 사용하지 않는다.
+- 요청 직렬화는 market-cap / IPO / peers가 공유하는 **전역 company-data throttle**로 제어된다.
 - **Skip 로직**: 최근 24시간 내 market_cap이 이미 저장된 ticker는 자동 건너뛴다.
 - **취소 지원**: `POST /api/jobs/:jobId/cancel`로 중단 가능.
 
@@ -1784,14 +1784,14 @@ Finnhub `/stock/profile2` API에서 IPO date와 기본 회사 메타데이터를
 요청 body:
 
 ```json
-{ "tickers": ["AAPL", "MSFT"], "maxTickers": 100, "tickerConcurrency": 1, "requestIntervalMs": 1500 }
+{ "tickers": ["AAPL", "MSFT"], "maxTickers": 100, "tickerConcurrency": 1 }
 ```
 
 - `tickers` 생략 시 `ticker_universes/default` 전체를 대상으로 한다.
 - `maxTickers`를 생략하면 전체 대상을 처리한다.
 - `[][][]tickerConcurrency[][][]`는 1~5 범위다. 기본값은 1이다.
-- `[][][]requestIntervalMs[][][]`는 1500~10000ms 범위다. 기본값은 1500ms다.
-- IPO / peers / market-cap은 같은 전역 company-data throttle을 공유한다.
+- 별도 `[][][]requestIntervalMs[][][]` body 값은 더 이상 사용하지 않는다.
+- IPO / peers / market-cap은 같은 전역 company-data throttle을 공유하며 추가 delay 없이 직렬화된다.
 
 동작:
 

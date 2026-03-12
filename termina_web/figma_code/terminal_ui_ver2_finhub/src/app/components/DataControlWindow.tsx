@@ -38,15 +38,6 @@ interface DbForeignKey { id: number; seq: number; table: string; from: string; t
 interface DbResource { identifier: string; label: string; sourcePath: string | null; itemCount: number; sampleTickers: string[]; uiUsage: string[]; }
 interface DbTableInfo { name: string; columns: DbColumn[]; foreignKeys: DbForeignKey[]; rowCount: number; sampleRows: Record<string, unknown>[]; uiUsage: string[]; resources?: DbResource[]; }
 
-function formatSeconds(value: number): string {
-  return Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1);
-}
-
-function parseIntervalInput(value: string): number | null {
-  const parsed = Number.parseFloat(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
 export function DataControlWindow({
   fontScale = 1,
   onFontScaleChange,
@@ -130,19 +121,6 @@ export function DataControlWindow({
     const v = Math.max(1, Math.min(20, n));
     setFinnhubTickerConcurrency(v);
     try { localStorage.setItem('finnhub-ticker-concurrency', String(v)); } catch { /* SSR */ }
-  };
-
-  // ─── Finnhub Pull Request Interval ───
-  const [finnhubRequestIntervalSec, setFinnhubRequestIntervalSec] = useState(() => {
-    try {
-      const v = parseFloat(localStorage.getItem('finnhub-request-interval-sec') ?? '');
-      return Number.isFinite(v) && v >= 0 && v <= 10 ? v : 1;
-    } catch { return 1; }
-  });
-  const saveFinnhubRequestIntervalSec = (n: number) => {
-    const v = Math.round(Math.max(0, Math.min(10, n)) * 10) / 10;
-    setFinnhubRequestIntervalSec(v);
-    try { localStorage.setItem('finnhub-request-interval-sec', String(v)); } catch { /* SSR */ }
   };
 
   // ─── FMP Concurrency ───
@@ -354,7 +332,6 @@ export function DataControlWindow({
           headers['Content-Type'] = 'application/json';
           body = JSON.stringify({
             tickerConcurrency: finnhubTickerConcurrency,
-            requestIntervalMs: Math.round(finnhubRequestIntervalSec * 1000),
             skipExisting: peersSkipExisting,
           });
           break;
@@ -363,7 +340,6 @@ export function DataControlWindow({
           headers['Content-Type'] = 'application/json';
           body = JSON.stringify({
             tickerConcurrency: finnhubTickerConcurrency,
-            requestIntervalMs: Math.round(finnhubRequestIntervalSec * 1000),
             skipExisting: ipoSkipExisting,
           });
           break;
@@ -776,61 +752,6 @@ export function DataControlWindow({
               />
               <span className="text-[11px] text-gray-500 w-8 text-right">20</span>
               <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300 w-10 text-right">{finnhubTickerConcurrency}</span>
-            </div>
-          </div>
-          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">
-            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">Finnhub Request Interval</h3>
-            <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3">
-              Finnhub company-data 요청 사이 최소 간격입니다. Peers / IPO Date / Market Cap / News pull이 같은 프로세스에서 동시에 돌아도 이 간격을 공유해서 429 burst를 줄입니다.
-            </p>
-            <div className="flex gap-2 mb-3 flex-wrap">
-              {[0, 0.1, 0.5, 1, 2].map(preset => (
-                <button
-                  key={`finnhub-interval-${preset}`}
-                  onClick={() => saveFinnhubRequestIntervalSec(preset)}
-                  className={`px-3 py-1 rounded border text-xs font-medium transition-colors ${
-                    finnhubRequestIntervalSec === preset
-                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
-                      : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200'
-                  }`}
-                >
-                  {formatSeconds(preset)}s
-                </button>
-              ))}
-            </div>
-            <div className="flex items-center gap-3 mb-3">
-              <span className="text-[11px] text-gray-500 w-6">0</span>
-              <input
-                type="range"
-                min={0}
-                max={10}
-                step={0.1}
-                value={finnhubRequestIntervalSec}
-                onChange={e => saveFinnhubRequestIntervalSec(parseFloat(e.target.value))}
-                className="flex-1 accent-blue-500"
-              />
-              <span className="text-[11px] text-gray-500 w-8 text-right">10</span>
-              <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300 w-14 text-right">{formatSeconds(finnhubRequestIntervalSec)}s</span>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <label htmlFor="finnhub-request-interval-input" className="text-[11px] text-gray-500 dark:text-gray-400">
-                Direct Input:
-              </label>
-              <input
-                id="finnhub-request-interval-input"
-                type="number"
-                min={0}
-                max={10}
-                step={0.1}
-                inputMode="decimal"
-                value={finnhubRequestIntervalSec}
-                onChange={e => {
-                  const parsed = parseIntervalInput(e.target.value);
-                  if (parsed !== null) saveFinnhubRequestIntervalSec(parsed);
-                }}
-                className="w-24 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200"
-              />
-              <span className="text-[11px] text-gray-500 dark:text-gray-400">seconds</span>
             </div>
           </div>
           <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">

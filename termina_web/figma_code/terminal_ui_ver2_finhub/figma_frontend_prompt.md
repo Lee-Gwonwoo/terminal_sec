@@ -513,7 +513,7 @@ company data job contract:
   - backend는 프로세스 전역 FMP throttle을 사용해 병렬 worker 간 요청 간격을 직렬화한다.
 - `POST /api/company-profiles/pull-peers` → `{ jobId }`
 - `POST /api/company-profiles/pull-ipo-date` → `{ jobId }`
-- `pull-peers` / `pull-ipo-date`는 Control Window의 `Finnhub Pull Ticker Concurrency`, `Finnhub Request Interval (sec)` 값을 body로 함께 보낸다.
+- `pull-peers` / `pull-ipo-date`는 Control Window의 `Finnhub Pull Ticker Concurrency` 값만 body로 보낸다.
 - `pull-fmp`는 `FMP Concurrency`, `FMP Request Interval`, `FMP Skip Existing` 설정값을 body로 함께 보낸다.
 - backend는 Finnhub company-data job과 FMP job에 각각 별도의 전역 throttle을 사용한다.
 - 완료 summary는 `requested`, `tickersUpdated`, `tickersFailed`, `totalRowsUpserted`, `skippedExisting` 기준으로 표시된다
@@ -541,11 +541,10 @@ company data job contract:
   - `Full Text Concurrency`
   - `IBKR Fetch Concurrency`
   - `Finnhub Pull Ticker Concurrency`
-  - `Finnhub Request Interval (sec)`
   - `FMP Concurrency` (기본=5, 범위 1~20)
   - `FMP Request Interval` (기본=250ms, 범위 0~5000ms)
   - `FMP Skip Existing` (기본=Skip Existing, 토글로 Overwrite All 전환 가능)
-- Finnhub 두 설정은 News pull뿐 아니라 `Peers Data Update`, `IPO Date Update`에도 적용된다.
+- Finnhub concurrency 설정은 `Peers Data Update`, `IPO Date Update`에도 적용된다.
 - 위 두 값은 Control Window에서만 조정한다. News Feed 창 toolbar에는 별도 font size control이 없다.
 - 저장 위치는 `terminal-workspace-v1`이며 앱 재실행 후에도 유지된다.
 

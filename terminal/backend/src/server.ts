@@ -90,7 +90,6 @@ import { fetchFinnhubProfilesBatch } from "./services/finnhubProfile2Provider.js
 import { fetchRtprArticles, fetchRtprArticlesByTicker } from "./services/ptprNewsProvider.js";
 import {
   clampFinnhubCompanyDataConcurrency,
-  clampFinnhubCompanyDataIntervalMs,
   getFinnhubCompanyDataDefaults,
 } from "./services/finnhubCompanyDataThrottle.js";
 
@@ -2335,7 +2334,6 @@ app.post("/api/company-profiles/pull-peers", async (req, res) => {
       tickers?: string[];
       maxTickers?: number;
       tickerConcurrency?: number;
-      requestIntervalMs?: number;
       skipExisting?: boolean;
     };
     let tickers = body.tickers;
@@ -2345,7 +2343,6 @@ app.post("/api/company-profiles/pull-peers", async (req, res) => {
     const max = body.maxTickers ?? tickers.length;
     let target = tickers.slice(0, max);
     const tickerConcurrency = clampFinnhubCompanyDataConcurrency(body.tickerConcurrency);
-    const requestIntervalMs = clampFinnhubCompanyDataIntervalMs(body.requestIntervalMs);
     const skipExisting = body.skipExisting !== false; // default: true (skip)
 
     let skippedCount = 0;
@@ -2357,7 +2354,7 @@ app.post("/api/company-profiles/pull-peers", async (req, res) => {
     }
 
     const jobId = createJob(target.length);
-    appendLog(jobId, `Starting Finnhub peers update for ${target.length} tickers (concurrency=${tickerConcurrency}, interval=${requestIntervalMs}ms, skipExisting=${skipExisting}, skipped=${skippedCount})`);
+  appendLog(jobId, `Starting Finnhub peers update for ${target.length} tickers (concurrency=${tickerConcurrency}, skipExisting=${skipExisting}, skipped=${skippedCount})`);
     res.json({ jobId });
 
     void (async () => {
@@ -2379,7 +2376,6 @@ app.post("/api/company-profiles/pull-peers", async (req, res) => {
           target,
           {
             concurrency: tickerConcurrency,
-            requestIntervalMs,
             onProgress: (done, total) => { updateProgress(jobId, done, total); },
             shouldCancel: () => isJobCancelled(jobId),
           },
@@ -2437,7 +2433,6 @@ app.post("/api/company-profiles/pull-market-cap", async (req, res) => {
       tickers?: string[];
       maxTickers?: number;
       tickerConcurrency?: number;
-      requestIntervalMs?: number;
     };
     let tickers = body.tickers;
     if (!tickers || tickers.length === 0) {
@@ -2446,7 +2441,6 @@ app.post("/api/company-profiles/pull-market-cap", async (req, res) => {
     const max = body.maxTickers ?? tickers.length;
     const target = tickers.slice(0, max);
     const tickerConcurrency = clampFinnhubCompanyDataConcurrency(body.tickerConcurrency);
-    const requestIntervalMs = clampFinnhubCompanyDataIntervalMs(body.requestIntervalMs);
 
     // Skip tickers that already have recent market_cap (within 24h)
     const { getTickersWithRecentMarketCap } = await import("./services/companyProfileRepository.js");
@@ -2455,7 +2449,7 @@ app.post("/api/company-profiles/pull-market-cap", async (req, res) => {
     const skippedCount = target.length - filtered.length;
 
     const jobId = createJob(filtered.length);
-    appendLog(jobId, `Starting Finnhub market cap update: ${filtered.length} tickers to fetch (${skippedCount} skipped — already have recent data, concurrency=${tickerConcurrency}, interval=${requestIntervalMs}ms)`);
+  appendLog(jobId, `Starting Finnhub market cap update: ${filtered.length} tickers to fetch (${skippedCount} skipped — already have recent data, concurrency=${tickerConcurrency})`);
     res.json({ jobId });
 
     void (async () => {
@@ -2464,7 +2458,6 @@ app.post("/api/company-profiles/pull-market-cap", async (req, res) => {
           filtered,
           {
             concurrency: tickerConcurrency,
-            requestIntervalMs,
             onProgress: (done, total) => { updateProgress(jobId, done, total); },
             shouldCancel: () => isJobCancelled(jobId),
           },
@@ -2556,7 +2549,6 @@ app.post("/api/company-profiles/pull-ipo-date", async (req, res) => {
       tickers?: string[];
       maxTickers?: number;
       tickerConcurrency?: number;
-      requestIntervalMs?: number;
       skipExisting?: boolean;
     };
     let tickers = body.tickers;
@@ -2566,7 +2558,6 @@ app.post("/api/company-profiles/pull-ipo-date", async (req, res) => {
     const max = body.maxTickers ?? tickers.length;
     let target = tickers.slice(0, max);
     const tickerConcurrency = clampFinnhubCompanyDataConcurrency(body.tickerConcurrency);
-    const requestIntervalMs = clampFinnhubCompanyDataIntervalMs(body.requestIntervalMs);
     const skipExisting = body.skipExisting !== false; // default: true (skip)
 
     let skippedCount = 0;
@@ -2578,7 +2569,7 @@ app.post("/api/company-profiles/pull-ipo-date", async (req, res) => {
     }
 
     const jobId = createJob(target.length);
-    appendLog(jobId, `Starting Finnhub IPO date update for ${target.length} tickers (concurrency=${tickerConcurrency}, interval=${requestIntervalMs}ms, skipExisting=${skipExisting}, skipped=${skippedCount})`);
+  appendLog(jobId, `Starting Finnhub IPO date update for ${target.length} tickers (concurrency=${tickerConcurrency}, skipExisting=${skipExisting}, skipped=${skippedCount})`);
     res.json({ jobId });
 
     void (async () => {
@@ -2600,7 +2591,6 @@ app.post("/api/company-profiles/pull-ipo-date", async (req, res) => {
           target,
           {
             concurrency: tickerConcurrency,
-            requestIntervalMs,
             onProgress: (done, total) => { updateProgress(jobId, done, total); },
             shouldCancel: () => isJobCancelled(jobId),
           },

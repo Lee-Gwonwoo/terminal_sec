@@ -1,4 +1,4 @@
-const DEFAULT_FINNHUB_COMPANY_DATA_INTERVAL_MS = 1500;
+const DEFAULT_FINNHUB_COMPANY_DATA_INTERVAL_MS = 0;
 const MAX_FINNHUB_COMPANY_DATA_INTERVAL_MS = 10_000;
 const DEFAULT_FINNHUB_COMPANY_DATA_CONCURRENCY = 1;
 const MAX_FINNHUB_COMPANY_DATA_CONCURRENCY = 5;
@@ -12,7 +12,7 @@ export function clampFinnhubCompanyDataIntervalMs(value: number | undefined): nu
     return DEFAULT_FINNHUB_COMPANY_DATA_INTERVAL_MS;
   }
   return Math.max(
-    DEFAULT_FINNHUB_COMPANY_DATA_INTERVAL_MS,
+    0,
     Math.min(MAX_FINNHUB_COMPANY_DATA_INTERVAL_MS, Math.floor(value as number)),
   );
 }
