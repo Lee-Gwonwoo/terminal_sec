@@ -1145,3 +1145,45 @@ $resp2 = Invoke-RestMethod -UseBasicParsing -Method Post -ContentType 'applicati
 Invoke-RestMethod -UseBasicParsing http://127.0.0.1:8080/api/jobs/$($resp2.jobId)
 ```
 사용자 확인 필요: **예**
+
+---
+
+### PLAN CHANGE (2026-03-12) — Yahoo Company Description 연동
+
+> 배경: `yahoo-finance2` wrapper로 `quoteSummary(symbol, { modules: ["assetProfile"] })` 호출 시 `longBusinessSummary`(1800자 이상 상세 설명), `sector`, `industry`, `website` 등을 받을 수 있음이 AAPL/TSLA probe로 확인됐다.
+
+#### 목표
+- `yahoo-finance2`를 backend 의존성으로 추가
+- `yahooCompanyProfileProvider.ts` 생성 (FMP provider 패턴과 동일한 worker pool + 프로세스 전역 throttle)
+- `POST /api/company-profiles/pull-yahoo` 라우트 추가
+- DataControlWindow에 "Yahoo Description Update" 버튼 추가
+- Yahoo concurrency + interval + skipExisting 설정을 Settings 탭에서 조절 가능하게 구현
+- `company_profiles` 테이블에 `source='yahoo'`로 저장
+
+#### 병렬 한계 분석
+- `yahoo-finance2`는 비공식 Yahoo Finance API wrapper (cookie/crumb 자동 처리)
+- 공식 rate limit 명세 없음 → 너무 높으면 IP 차단/403 위험
+- 안전한 기본값: concurrency=5, interval=200ms (경험적으로 초당 ~5건 수준)
+- 사용자 설정 가능 범위: concurrency 1~20, interval 0~5000ms
+
+#### DB 저장 전략
+- `company_profiles` 테이블 `source='yahoo'` row로 저장
+- `[description]` ← `longBusinessSummary`
+- `[website]` ← `website`
+- `[raw_json]` ← 전체 `assetProfile` 응답
+- `securities` 테이블 `[sector]`, `[industry]`도 Yahoo 값으로 업데이트
+
+#### ⏳ Step 20 — Yahoo Company Description 연동 구현
+
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 20-1 | `yahoo-finance2` 의존성 설치 | `terminal/backend/package.json` | `npm ls yahoo-finance2` 성공 | ⬜ |
+| 20-2 | `yahooCompanyProfileProvider.ts` 생성 | `terminal/backend/src/services/yahooCompanyProfileProvider.ts` | TypeScript 컴파일 | ⬜ |
+| 20-3 | `companyProfileRepository.ts`에 Yahoo skip-existing 쿼리 추가 | `terminal/backend/src/services/companyProfileRepository.ts` | 빌드 통과 | ⬜ |
+| 20-4 | `POST /api/company-profiles/pull-yahoo` 라우트 추가 | `terminal/backend/src/server.ts` | 빌드 + API 호출 검증 | ⬜ |
+| 20-5 | DataControlWindow 'yahooDesc' 버튼 + 설정 추가 | `termina_web/.../DataControlWindow.tsx` | 프론트 빌드 + 코드 리뷰 | ⬜ |
+| 20-6 | 전체 검증 (build + test + runtime) | 전체 | 빌드/테스트/런타임 API 호출 | ⬜ |
+
+- Yahoo concurrency/interval/skipExisting 설정은 FMP 설정과 완전히 동일한 UI 패턴(프리셋 버튼 + 슬라이더 + 토글)으로 구현
+- `SectionKey` 타입에 `'yahooDesc'` 추가
+- localStorage 키: `yahoo-concurrency`, `yahoo-request-interval-ms`, `yahoo-skip-existing`

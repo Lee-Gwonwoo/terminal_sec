@@ -2173,7 +2173,8 @@ app.get("/api/universes/:id/items", async (req, res) => {
 // ── Step 5-3: company profile API ──
 
 import { fetchFmpProfile, fetchFmpProfilesBatch, clampFmpConcurrency, clampFmpIntervalMs } from "./services/fmpCompanyProfileProvider.js";
-import { upsertCompanyProfile, getCompanyProfileByTicker, countCompanyProfiles, upsertPeers, getPeersByTicker, getTickersWithFmpProfile, getTickersWithExistingPeers, getTickersWithExistingIpoDate } from "./services/companyProfileRepository.js";
+import { fetchYahooProfilesBatch, clampYahooConcurrency, clampYahooIntervalMs } from "./services/yahooCompanyProfileProvider.js";
+import { upsertCompanyProfile, getCompanyProfileByTicker, countCompanyProfiles, upsertPeers, getPeersByTicker, getTickersWithFmpProfile, getTickersWithYahooProfile, getTickersWithExistingPeers, getTickersWithExistingIpoDate } from "./services/companyProfileRepository.js";
 import { fetchFinnhubPeersBatch } from "./services/finnhubPeersProvider.js";
 
 app.get("/api/company-profiles/:ticker", async (req, res) => {
@@ -2317,6 +2318,145 @@ app.post("/api/company-profiles/pull-fmp", async (req, res) => {
           skippedExisting: skippedCount,
           totalProfiles,
           source: "fmp",
+        });
+      } catch (error) {
+        failJob(jobId, error instanceof Error ? error.message : String(error));
+      }
+    })();
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Unknown error" });
+  }
+});
+
+// ── Pull Yahoo Company Description ─────────────────────────────────────────
+app.post("/api/company-profiles/pull-yahoo", async (req, res) => {
+  try {
+    const body = req.body as {
+      tickers?: string[];
+      maxTickers?: number;
+      concurrency?: number;
+      requestIntervalMs?: number;
+      skipExisting?: boolean;
+    };
+    let tickers = body.tickers;
+
+    if (!tickers || tickers.length === 0) {
+      tickers = await getDefaultUniverseTickers();
+    }
+    const max = body.maxTickers ?? tickers.length;
+    let target = tickers.slice(0, max);
+
+    const concurrency = clampYahooConcurrency(body.concurrency);
+    const requestIntervalMs = clampYahooIntervalMs(body.requestIntervalMs);
+    const skipExisting = body.skipExisting !== false;
+
+    let skippedCount = 0;
+    if (skipExisting) {
+      const existingSet = await getTickersWithYahooProfile();
+      const before = target.length;
+      target = target.filter((t) => !existingSet.has(t.toUpperCase()));
+      skippedCount = before - target.length;
+    }
+
+    const jobId = createJob(target.length);
+    appendLog(jobId, `Starting Yahoo company description update for ${target.length} tickers (concurrency=${concurrency}, interval=${requestIntervalMs}ms, skipExisting=${skipExisting}, skipped=${skippedCount})`);
+    res.json({ jobId });
+
+    void (async () => {
+      try {
+        if (target.length === 0) {
+          appendLog(jobId, "No tickers requested — nothing to do");
+          await setLastSuccess("company_profiles_yahoo", new Date().toISOString(), {
+            source: "yahoo",
+            requested: 0,
+            fetched: 0,
+            updated: 0,
+            errors: 0,
+          });
+          completeJob(jobId, { requested: 0, tickersUpdated: 0, tickersFailed: 0, totalRowsUpserted: 0 });
+          return;
+        }
+
+        const { results, errors, cancelled } = await fetchYahooProfilesBatch(
+          target,
+          {
+            concurrency,
+            requestIntervalMs,
+            onProgress: (done, total) => { updateProgress(jobId, done, total); },
+            shouldCancel: () => isJobCancelled(jobId),
+          },
+        );
+
+        if (cancelled || isJobCancelled(jobId)) {
+          appendLog(jobId, `🛑 Cancelled — processed ${results.size + errors.size}/${target.length} tickers`);
+          return;
+        }
+
+        let updated = 0;
+        for (const [ticker, yp] of results) {
+          const existingSec = await getDb().get<{ id: number }>(
+            "SELECT id FROM securities WHERE ticker = ? ORDER BY id ASC LIMIT 1",
+            [ticker.toUpperCase()],
+          );
+          let secId: number;
+          if (existingSec) {
+            secId = existingSec.id;
+            const sets: string[] = [];
+            const params: unknown[] = [];
+            if (yp.sector) { sets.push("sector = ?"); params.push(yp.sector); }
+            if (yp.industry) { sets.push("industry = ?"); params.push(yp.industry); }
+            if (sets.length > 0) {
+              params.push(secId);
+              await getDb().run(`UPDATE securities SET ${sets.join(", ")} WHERE id = ?`, params);
+            }
+          } else {
+            secId = await upsertSecurity(
+              ticker,
+              null,
+              null,
+              yp.sector || null,
+              yp.industry || null,
+            );
+          }
+          await upsertCompanyProfile(
+            secId,
+            "yahoo",
+            yp.longBusinessSummary || null,
+            null,
+            null,
+            yp.website || null,
+            null,
+            null,
+            JSON.stringify(yp.raw),
+          );
+          updated++;
+          appendLog(jobId, `${ticker}: description ${yp.longBusinessSummary ? `updated (${yp.longBusinessSummary.length} chars)` : "missing"}`);
+        }
+
+        for (const [ticker, message] of errors) {
+          appendLog(jobId, `${ticker}: error - ${message}`);
+        }
+
+        const totalProfiles = await countCompanyProfiles();
+        await setLastSuccess("company_profiles_yahoo", new Date().toISOString(), {
+          source: "yahoo",
+          requested: target.length,
+          fetched: results.size,
+          updated,
+          errors: errors.size,
+          skippedExisting: skippedCount,
+          totalProfiles,
+        });
+
+        completeJob(jobId, {
+          requested: target.length,
+          fetched: results.size,
+          tickersUpdated: updated,
+          tickersFailed: errors.size,
+          totalRowsUpserted: updated,
+          skippedExisting: skippedCount,
+          totalProfiles,
+          source: "yahoo",
         });
       } catch (error) {
         failJob(jobId, error instanceof Error ? error.message : String(error));

@@ -22,7 +22,7 @@ interface JobStatus {
   result?: Record<string, unknown>;
 }
 
-type SectionKey = 'price' | 'calendarBackfill' | 'calendarRefresh' | 'calendarCustom' | 'companyDesc' | 'peersPull' | 'ipoDate' | 'recent' | 'custom';
+type SectionKey = 'price' | 'calendarBackfill' | 'calendarRefresh' | 'calendarCustom' | 'companyDesc' | 'yahooDesc' | 'peersPull' | 'ipoDate' | 'recent' | 'custom';
 
 interface DataControlWindowProps {
   fontScale?: number;
@@ -53,19 +53,19 @@ export function DataControlWindow({
 
   // ─── Per-section job state ───
   const [jobIds, setJobIds] = useState<Record<SectionKey, string | null>>({
-    price: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, peersPull: null, ipoDate: null, 'recent': null, custom: null,
+    price: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, yahooDesc: null, peersPull: null, ipoDate: null, 'recent': null, custom: null,
   });
   const [updating, setUpdating] = useState<Record<SectionKey, boolean>>({
-    price: false, calendarBackfill: false, calendarRefresh: false, calendarCustom: false, companyDesc: false, peersPull: false, ipoDate: false, 'recent': false, custom: false,
+    price: false, calendarBackfill: false, calendarRefresh: false, calendarCustom: false, companyDesc: false, yahooDesc: false, peersPull: false, ipoDate: false, 'recent': false, custom: false,
   });
   const [errors, setErrors] = useState<Record<SectionKey, string | null>>({
-    price: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, peersPull: null, ipoDate: null, 'recent': null, custom: null,
+    price: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, yahooDesc: null, peersPull: null, ipoDate: null, 'recent': null, custom: null,
   });
 
   // ─── View Log state (only one section's log at a time) ───
   const [logSection, setLogSection] = useState<SectionKey | null>(null);
   const [jobStatuses, setJobStatuses] = useState<Record<SectionKey, JobStatus | null>>({
-    price: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, peersPull: null, ipoDate: null, 'recent': null, custom: null,
+    price: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, yahooDesc: null, peersPull: null, ipoDate: null, 'recent': null, custom: null,
   });
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -180,6 +180,43 @@ export function DataControlWindow({
   const saveIpoSkipExisting = (v: boolean) => {
     setIpoSkipExisting(v);
     try { localStorage.setItem('ipo-skip-existing', String(v)); } catch { /* SSR */ }
+  };
+
+  // ─── Yahoo Concurrency ───
+  const [yahooConcurrency, setYahooConcurrency] = useState(() => {
+    try {
+      const v = parseInt(localStorage.getItem('yahoo-concurrency') ?? '', 10);
+      return v >= 1 && v <= 20 ? v : 5;
+    } catch { return 5; }
+  });
+  const saveYahooConcurrency = (n: number) => {
+    const v = Math.max(1, Math.min(20, n));
+    setYahooConcurrency(v);
+    try { localStorage.setItem('yahoo-concurrency', String(v)); } catch { /* SSR */ }
+  };
+
+  // ─── Yahoo Request Interval ───
+  const [yahooRequestIntervalMs, setYahooRequestIntervalMs] = useState(() => {
+    try {
+      const v = parseInt(localStorage.getItem('yahoo-request-interval-ms') ?? '', 10);
+      return Number.isFinite(v) && v >= 0 && v <= 5000 ? v : 200;
+    } catch { return 200; }
+  });
+  const saveYahooRequestIntervalMs = (n: number) => {
+    const v = Math.max(0, Math.min(5000, Math.round(n)));
+    setYahooRequestIntervalMs(v);
+    try { localStorage.setItem('yahoo-request-interval-ms', String(v)); } catch { /* SSR */ }
+  };
+
+  // ─── Yahoo skip-existing toggle ───
+  const [yahooSkipExisting, setYahooSkipExisting] = useState(() => {
+    try {
+      return localStorage.getItem('yahoo-skip-existing') !== 'false';
+    } catch { return true; }
+  });
+  const saveYahooSkipExisting = (v: boolean) => {
+    setYahooSkipExisting(v);
+    try { localStorage.setItem('yahoo-skip-existing', String(v)); } catch { /* SSR */ }
   };
 
   // ─── Custom Change date range input ───
@@ -327,6 +364,15 @@ export function DataControlWindow({
             skipExisting: fmpSkipExisting,
           });
           break;
+        case 'yahooDesc':
+          url = `${API_BASE}/api/company-profiles/pull-yahoo`;
+          headers['Content-Type'] = 'application/json';
+          body = JSON.stringify({
+            concurrency: yahooConcurrency,
+            requestIntervalMs: yahooRequestIntervalMs,
+            skipExisting: yahooSkipExisting,
+          });
+          break;
         case 'peersPull':
           url = `${API_BASE}/api/company-profiles/pull-peers`;
           headers['Content-Type'] = 'application/json';
@@ -461,6 +507,13 @@ export function DataControlWindow({
       statusKey: 'company_profiles',
       group: 'Company Data',
       description: `ticker_universes/default 기준으로 FMP 회사 설명을 일괄 수집합니다. (${fmpSkipExisting ? 'Skip Existing' : 'Overwrite All'}, concurrency=${fmpConcurrency}, interval=${fmpRequestIntervalMs}ms)`,
+    },
+    {
+      key: 'yahooDesc',
+      label: 'Yahoo Description Update',
+      statusKey: 'company_profiles_yahoo',
+      group: 'Company Data',
+      description: `ticker_universes/default 기준으로 Yahoo Finance 회사 설명을 일괄 수집합니다. (${yahooSkipExisting ? 'Skip Existing' : 'Overwrite All'}, concurrency=${yahooConcurrency}, interval=${yahooRequestIntervalMs}ms)`,
     },
     {
       key: 'peersPull',
@@ -900,6 +953,104 @@ export function DataControlWindow({
                 onClick={() => saveIpoSkipExisting(false)}
                 className={`px-3 py-1 rounded border text-xs font-medium transition-colors ${
                   !ipoSkipExisting
+                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+                    : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200'
+                }`}
+              >
+                Overwrite All
+              </button>
+            </div>
+          </div>
+          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">
+            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">Yahoo Concurrency</h3>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3">
+              Yahoo Finance Description 다운로드 시 병렬 요청 수. 비공식 API이므로 너무 높으면 IP 차단 위험. 기본 5.
+            </p>
+            <div className="flex gap-2 mb-3 flex-wrap">
+              {[1, 3, 5, 10].map(preset => (
+                <button
+                  key={`yahoo-c-${preset}`}
+                  onClick={() => saveYahooConcurrency(preset)}
+                  className={`px-3 py-1 rounded border text-xs font-medium transition-colors ${
+                    yahooConcurrency === preset
+                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+                      : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200'
+                  }`}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-[11px] text-gray-500 w-6">1</span>
+              <input
+                type="range"
+                min={1}
+                max={20}
+                step={1}
+                value={yahooConcurrency}
+                onChange={e => saveYahooConcurrency(parseInt(e.target.value, 10))}
+                className="flex-1 accent-blue-500"
+              />
+              <span className="text-[11px] text-gray-500 w-8 text-right">20</span>
+              <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300 w-10 text-right">{yahooConcurrency}</span>
+            </div>
+          </div>
+          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">
+            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">Yahoo Request Interval</h3>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3">
+              Yahoo 요청 사이 최소 간격(ms). 기본 200ms. 비공식 API이므로 0ms는 차단 위험.
+            </p>
+            <div className="flex gap-2 mb-3 flex-wrap">
+              {[0, 100, 200, 500, 1000].map(preset => (
+                <button
+                  key={`yahoo-interval-${preset}`}
+                  onClick={() => saveYahooRequestIntervalMs(preset)}
+                  className={`px-3 py-1 rounded border text-xs font-medium transition-colors ${
+                    yahooRequestIntervalMs === preset
+                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+                      : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200'
+                  }`}
+                >
+                  {preset}ms
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-[11px] text-gray-500 w-6">0</span>
+              <input
+                type="range"
+                min={0}
+                max={5000}
+                step={50}
+                value={yahooRequestIntervalMs}
+                onChange={e => saveYahooRequestIntervalMs(parseInt(e.target.value, 10))}
+                className="flex-1 accent-blue-500"
+              />
+              <span className="text-[11px] text-gray-500 w-10 text-right">5000</span>
+              <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300 w-14 text-right">{yahooRequestIntervalMs}ms</span>
+            </div>
+          </div>
+          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">
+            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">Yahoo Skip Existing</h3>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3">
+              이미 Yahoo description이 저장된 ticker는 건너뛸지 선택합니다. Off로 바꾸면 전체 덮어쓰기(overwrite) 모드.
+            </p>
+            <div className="flex gap-2 flex-wrap">
+              <button
+                onClick={() => saveYahooSkipExisting(true)}
+                className={`px-3 py-1 rounded border text-xs font-medium transition-colors ${
+                  yahooSkipExisting
+                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+                    : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200'
+                }`}
+              >
+                Skip Existing
+              </button>
+              <button
+                onClick={() => saveYahooSkipExisting(false)}
+                className={`px-3 py-1 rounded border text-xs font-medium transition-colors ${
+                  !yahooSkipExisting
                     ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
                     : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200'
                 }`}

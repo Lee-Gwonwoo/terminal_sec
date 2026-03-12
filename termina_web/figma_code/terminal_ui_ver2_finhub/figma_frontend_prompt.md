@@ -474,6 +474,7 @@ localStorage 사용:
 - `Refresh Upcoming Calendar`
 - `Custom Calendar Update`
 - `Company Description Update`
+- `Yahoo Description Update`
 - `Peers Data Update`
 - `IPO Date Update`
 - `Recent Change% Update`
@@ -525,11 +526,11 @@ company data job contract:
 - 자동 스크롤
 - `Esc`로 닫기 가능
 - 완료 result는 ticker/row 수 또는 merged/skipped 수를 summary로 표시
-- `Company Description Update`, `Peers Data Update`, `IPO Date Update`도 실제 background job을 사용하므로 progress/log/result summary가 채워진다
+- `Company Description Update`, `Yahoo Description Update`, `Peers Data Update`, `IPO Date Update`도 실제 background job을 사용하므로 progress/log/result summary가 채워진다
 
 주의:
 
-- 현재 불일치는 calendar update 섹션에만 남아 있다. `Company Description Update`, `Peers Data Update`, `IPO Date Update`는 `{jobId}` 반환 + `GET /api/jobs/:jobId` polling 계약으로 맞춰졌다.
+- 현재 불일치는 calendar update 섹션에만 남아 있다. `Company Description Update`, `Yahoo Description Update`, `Peers Data Update`, `IPO Date Update`는 `{jobId}` 반환 + `GET /api/jobs/:jobId` polling 계약으로 맞춰졌다.
 
 ### Settings 탭
 
@@ -544,6 +545,9 @@ company data job contract:
   - `FMP Concurrency` (기본=5, 범위 1~20)
   - `FMP Request Interval` (기본=250ms, 범위 0~5000ms)
   - `FMP Skip Existing` (기본=Skip Existing, 토글로 Overwrite All 전환 가능)
+  - `Yahoo Concurrency` (기본=5, 범위 1~20)
+  - `Yahoo Request Interval` (기본=200ms, 범위 0~5000ms)
+  - `Yahoo Skip Existing` (기본=Skip Existing, 토글로 Overwrite All 전환 가능)
 - Finnhub concurrency 설정은 `Peers Data Update`, `IPO Date Update`에도 적용된다.
 - 위 두 값은 Control Window에서만 조정한다. News Feed 창 toolbar에는 별도 font size control이 없다.
 - 저장 위치는 `terminal-workspace-v1`이며 앱 재실행 후에도 유지된다.

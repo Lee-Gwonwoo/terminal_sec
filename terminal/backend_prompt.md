@@ -614,6 +614,14 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 요청 body 옵션: `concurrency` (기본=5), `requestIntervalMs` (기본=250ms), `skipExisting` (기본=true)
 
+### `POST /api/company-profiles/pull-yahoo`
+
+응답 컬럼:
+
+- `[][][]jobId[][][]`
+
+요청 body 옵션: `concurrency` (기본=5), `requestIntervalMs` (기본=200ms), `skipExisting` (기본=true)
+
 ### `POST /api/company-profiles/pull-peers`
 
 응답 컬럼:
@@ -1707,6 +1715,34 @@ job 로그 동작:
 4. 각 ticker마다 `description updated`, `description missing`, `error` 로그를 job log에 append한다.
 5. 진행률은 처리 ticker 수 기준으로 갱신한다.
 6. 완료 후 result summary에는 `[][][]requested[][][]`, `[][][]tickersUpdated[][][]`, `[][][]tickersFailed[][][]`, `[][][]totalRowsUpserted[][][]`, `[][][]skippedExisting[][][]`, `[][][]errors[][][]`, `[][][]cancelled[][][]`가 들어간다.
+
+### `POST /api/company-profiles/pull-yahoo`
+
+Yahoo Finance (`yahoo-finance2` wrapper)에서 회사 설명을 가져와 `company_profiles`에 `source='yahoo'`로 저장한다. background job 기반이며 `{ jobId }`를 반환한다.
+
+요청 body:
+
+```json
+{
+  "tickers": ["AAPL", "MSFT"],
+  "maxTickers": 50,
+  "concurrency": 5,
+  "requestIntervalMs": 200,
+  "skipExisting": true
+}
+```
+
+- `tickers` 생략 시 `ticker_universes/default` 기준으로 대상을 결정한다.
+- `concurrency` (기본=5, 범위 1~20): 병렬 worker 수. 프로세스 전역 Yahoo throttle 공유.
+- `requestIntervalMs` (기본=200, 범위 0~5000): Yahoo 요청 사이 최소 간격(ms). 비공식 API이므로 0ms는 차단 위험.
+- `skipExisting` (기본=true): `true`이면 이미 Yahoo source로 description이 저장된 ticker를 건너뛴다.
+- Yahoo `assetProfile` 모듈에서 `[][][]longBusinessSummary[][][]`, `[][][]sector[][][]`, `[][][]industry[][][]`, `[][][]website[][][]`를 가져온다.
+
+응답:
+
+```json
+{ "jobId": "..." }
+```
 
 ### `POST /api/company-profiles/pull-peers`
 

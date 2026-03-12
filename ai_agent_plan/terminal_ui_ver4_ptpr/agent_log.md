@@ -1383,3 +1383,54 @@ Starting FMP company description update for 2 tickers (concurrency=2, interval=3
 2. **리스크:** 병렬 worker들이 429 backoff 중 모두 대기하면서 job 진행이 느려질 수 있음.
    - 완화 1: backoff 최대 30초로 cap, 10회 재시도 후 해당 ticker skip.
    - 완화 2: interval을 충분히 길게 설정하면 429 자체가 발생하지 않음.
+
+### Yahoo Company Description 연동 구현 (2026-03-12 23:35)
+
+**작성 시각:** 2026-03-12 23:35 (local)
+
+**Status: 확인 대기(awaiting user confirmation)**
+
+#### 작업 요약
+
+Yahoo Finance company description을 `yahoo-finance2` wrapper로 수집하는 기능을 end-to-end로 구현했다.
+
+#### 변경 파일
+
+| 파일 | 변경 유형 | 내용 |
+|------|-----------|------|
+| `terminal/backend/package.json` | 수정 | `yahoo-finance2` 의존성 추가 |
+| `terminal/backend/src/services/yahooCompanyProfileProvider.ts` | **신규** | Yahoo profile batch fetch provider (worker pool + throttle) |
+| `terminal/backend/src/services/companyProfileRepository.ts` | 수정 | `getTickersWithYahooProfile()` skip-existing 쿼리 추가 |
+| `terminal/backend/src/server.ts` | 수정 | `POST /api/company-profiles/pull-yahoo` 라우트 + import 추가 |
+| `termina_web/.../DataControlWindow.tsx` | 수정 | `yahooDesc` 버튼 + Yahoo concurrency/interval/skipExisting 설정 UI 추가 |
+| `ai_agent_plan/terminal_ui_ver4_ptpr/plan.md` | 수정 | PLAN CHANGE (2026-03-12) Step 20 추가 |
+
+#### 주요 결정
+
+1. `yahoo-finance2` v3은 `new YahooFinance()` 인스턴스 생성 필요 (v2와 달리 static export 아님)
+2. DB 저장: `company_profiles` 테이블에 `source='yahoo'`로 저장, `description` ← `longBusinessSummary`
+3. 병렬도: 기본 concurrency=5, interval=200ms (비공식 API이므로 보수적)
+4. Settings에서 concurrency(1~20), interval(0~5000ms), skipExisting 모두 조절 가능
+
+#### 런타임 검증 결과
+
+```
+# AAPL 테스트 — 성공
+AAPL: description updated (1834 chars)
+source=yahoo, website=https://www.apple.com
+
+# TSLA 테스트 — 성공
+TSLA: description updated (1817 chars)
+
+# skipExisting 테스트 — AAPL skipped=1 확인
+Starting Yahoo company description update for 0 tickers (skipped=1)
+```
+
+#### 검증 테이블
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | TypeScript 에러 0개 (backend + frontend) |
+| 빌드 | ✅ | backend `npm run build` + frontend `npm run build` 모두 성공 |
+| 자동 테스트 | ✅ | 55/55 pass (backend vitest) |
+| 런타임 통합 | ✅ | AAPL/TSLA pull-yahoo API 호출 → DB 저장 확인, skipExisting 동작 확인. 브라우저 시각 확인은 사용자 위임 |

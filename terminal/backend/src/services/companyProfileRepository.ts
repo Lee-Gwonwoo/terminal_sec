@@ -178,6 +178,18 @@ export async function getTickersWithExistingIpoDate(): Promise<Set<string>> {
   return new Set((rows as { ticker: string }[]).map((r) => r.ticker.toUpperCase()));
 }
 
+/**
+ * Return ticker symbols that already have a non-empty description from Yahoo source.
+ */
+export async function getTickersWithYahooProfile(): Promise<Set<string>> {
+  const rows = await getDb().all<{ ticker: string }[]>(
+    `SELECT s.ticker FROM company_profiles cp
+     JOIN securities s ON s.id = cp.security_id
+     WHERE cp.source = 'yahoo' AND cp.description IS NOT NULL AND cp.description != ''`,
+  );
+  return new Set((rows as { ticker: string }[]).map((r) => r.ticker.toUpperCase()));
+}
+
 export async function getPeersByTicker(ticker: string): Promise<string[] | null> {
   const row = await getDb().get<{ peers_json: string | null }>(
     `SELECT cp.peers_json FROM company_profiles cp
