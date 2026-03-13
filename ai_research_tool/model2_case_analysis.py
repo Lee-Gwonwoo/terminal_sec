@@ -42,7 +42,11 @@ class CategoryRule:
     label_ko: str
     description_ko: str
     patterns: tuple[str, ...]
+    compiled: tuple[re.Pattern, ...] = ()
 
+    def __post_init__(self) -> None:
+        if not self.compiled:
+            object.__setattr__(self, "compiled", tuple(re.compile(p) for p in self.patterns))
 
 CATEGORY_RULES: tuple[CategoryRule, ...] = (
     CategoryRule(
@@ -248,6 +252,93 @@ CATEGORY_RULES: tuple[CategoryRule, ...] = (
 )
 
 
+# ── Industry context for classification refinement ──
+
+CLINICAL_CORE_INDUSTRIES: frozenset[str] = frozenset({
+    "Biotechnology",
+    "Drug Manufacturers - General",
+    "Drug Manufacturers - Specialty & Generic",
+    "Pharmaceutical Retailers",
+    "Medical Devices",
+    "Medical Instruments & Supplies",
+    "Diagnostics & Research",
+    "Health Information Services",
+    "Medical Care Facilities",
+    "Medical Distribution",
+})
+
+STRONG_CLINICAL_PATTERNS: tuple[str, ...] = (
+    r"\bphase [1234]\b",
+    r"\bphase i(?:/ii|ii)?\b",
+    r"\btopline\b",
+    r"\bnda\b",
+    r"\bbla\b",
+    r"\bclinical hold\b",
+    r"\bcrl\b",
+    r"\bcomplete response letter\b",
+    r"\bpivotal\b",
+    r"\befficacy\b",
+    r"\bprimary endpoint\b",
+    r"\bclinical results?\b",
+    r"\bclinical trial\b",
+    r"\bnew drug\b",
+)
+
+STRONG_CLINICAL_COMPILED: tuple[re.Pattern, ...] = tuple(re.compile(p) for p in STRONG_CLINICAL_PATTERNS)
+
+# Patterns to detect clinical/biotech focus from company description
+DESC_CLINICAL_PATTERNS: tuple[str, ...] = (
+    r"\bbiotechnolog",
+    r"\bbiopharmaceutic",
+    r"\bpharmaceutic",
+    r"\bclinical[- ]stage\b",
+    r"\bdrug discover",
+    r"\bdrug develop",
+    r"\btherapeutic",
+    r"\boncolog",
+    r"\bimmunolog",
+    r"\bgene therap",
+    r"\bcell therap",
+    r"\bmedical device",
+    r"\bdiagnostic",
+    r"\bclinical trial",
+    r"\bbiologic",
+    r"\bnew drug application\b",
+    r"\bfda[- ]approv",
+)
+DESC_CLINICAL_COMPILED: tuple[re.Pattern, ...] = tuple(re.compile(p) for p in DESC_CLINICAL_PATTERNS)
+
+
+def industry_group(industry: str | None) -> str:
+    if not industry:
+        return "Unknown"
+    if industry in CLINICAL_CORE_INDUSTRIES:
+        return "Biotech/Pharma/MedDev"
+    low = industry.lower()
+    if "software" in low or "semiconductor" in low or "information" in low or "electronic" in low:
+        return "Technology"
+    if "capital market" in low or "bank" in low or "insurance" in low or "financial" in low:
+        return "Financial"
+    if "aerospace" in low or "defense" in low or "industrial" in low or "engineering" in low:
+        return "Industrial"
+    if "gold" in low or "oil" in low or "mining" in low or "energy" in low or "uranium" in low:
+        return "Energy/Mining"
+    if "utilities" in low or "electric" in low or "renewable" in low or "solar" in low:
+        return "Utilities"
+    if "chemical" in low or "auto" in low or "steel" in low:
+        return "Materials/Auto"
+    return "Other"
+
+
+def company_age_years(ipo_date: str | None) -> float | None:
+    if not ipo_date:
+        return None
+    with suppress(Exception):
+        ipo = datetime.strptime(ipo_date[:10], "%Y-%m-%d")
+        return round((datetime.now() - ipo).days / 365.25, 1)
+    return None
+
+
 ALL_BUCKETS = (
     "cap_300m_1b",
     "cap_1b_10b",
@@ -297,14 +388,34 @@ def normalize_text(*parts: str | None) -> str:
     return "\n".join(part for part in parts if part).lower()
 
 
-def classify_case(title: str, body: str, full_text: str) -> str:
+def classify_case(title: str, body: str, full_text: str, industry: str | None = None, description: str | None = None) -> str:
     text = normalize_text(title, body)
     if not text.strip():
         text = normalize_text(title, body, full_text)
+    candidate = None
+    fallback = None
     for rule in CATEGORY_RULES:
-        if any(re.search(pattern, text) for pattern in rule.patterns):
-            return rule.name
-    return "general_corporate_pr"
+        if any(pat.search(text) for pat in rule.compiled):
+            if candidate is None:
+                candidate = rule.name
+            elif fallback is None:
+                fallback = rule.name
+                break
+    if candidate is None:
+        return "general_corporate_pr"
+    # Industry + description-aware refinement for clinical_regulatory
+    if candidate in ("clinical_regulatory_positive", "clinical_regulatory_negative"):
+        is_clinical_industry = bool(industry and industry in CLINICAL_CORE_INDUSTRIES)
+        is_clinical_desc = False
+        if description:
+            desc_lower = description.lower()
+            is_clinical_desc = any(pat.search(desc_lower) for pat in DESC_CLINICAL_COMPILED)
+        if not is_clinical_industry and not is_clinical_desc:
+            # Neither industry nor description indicates clinical/biotech focus
+            has_strong = any(pat.search(text) for pat in STRONG_CLINICAL_COMPILED)
+            if not has_strong:
+                return fallback or "general_corporate_pr"
+    return candidate
 
 
 def category_meta(name: str) -> tuple[str, str]:
@@ -443,25 +554,55 @@ def top_level_group_for_case(case_type: str) -> str:
     return str(case_type_guidance(case_type).get("top_level") or "residual")
 
 
-def load_latest_market_caps(conn: sqlite3.Connection) -> dict[str, float]:
+def load_company_context(conn: sqlite3.Connection) -> dict[str, dict]:
+    """Load market_cap, industry, ipo_date, description for each ticker.
+
+    description priority: yahoo > fmp > finnhub (finnhub has 0 descriptions).
+    market_cap/ipo_date: latest fetched_at across all sources.
+    industry: from securities table (not company_profiles).
+    """
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
     rows = cur.execute(
         """
-        WITH latest_market_cap AS (
+        WITH cap_profile AS (
           SELECT s.ticker,
                  cp.market_cap,
+                 cp.ipo_date,
                  ROW_NUMBER() OVER (PARTITION BY s.ticker ORDER BY cp.fetched_at DESC, cp.id DESC) AS rn
           FROM securities s
           JOIN company_profiles cp ON cp.security_id = s.id
           WHERE cp.market_cap IS NOT NULL
+        ),
+        desc_profile AS (
+          SELECT s.ticker,
+                 cp.description,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY s.ticker
+                   ORDER BY CASE cp.source WHEN 'yahoo' THEN 1 WHEN 'fmp' THEN 2 ELSE 3 END,
+                            cp.fetched_at DESC, cp.id DESC
+                 ) AS rn
+          FROM securities s
+          JOIN company_profiles cp ON cp.security_id = s.id
+          WHERE cp.description IS NOT NULL AND cp.description != ''
         )
-        SELECT ticker, market_cap
-        FROM latest_market_cap
-        WHERE rn = 1
+        SELECT cp2.ticker, cp2.market_cap, cp2.ipo_date, s.industry, dp.description
+        FROM cap_profile cp2
+        JOIN securities s ON s.ticker = cp2.ticker
+        LEFT JOIN desc_profile dp ON dp.ticker = cp2.ticker AND dp.rn = 1
+        WHERE cp2.rn = 1
         """
     ).fetchall()
-    return {str(row["ticker"]).upper(): float(row["market_cap"]) for row in rows}
+    result: dict[str, dict] = {}
+    for row in rows:
+        ticker = str(row["ticker"]).upper()
+        result[ticker] = {
+            "market_cap": float(row["market_cap"]) if row["market_cap"] is not None else None,
+            "industry": row["industry"] or "",
+            "ipo_date": row["ipo_date"] or "",
+            "description": row["description"] or "",
+        }
+    return result
 
 
 def fetch_news_rows(conn: sqlite3.Connection, since: str, until: str) -> list[dict]:
@@ -601,12 +742,16 @@ def summarize_cases(rows: list[dict]) -> list[dict]:
         guidance = case_type_guidance(case_type)
         bucket_breakdown: dict[str, dict[str, int]] = defaultdict(lambda: {"total": 0, "impacted": 0})
         source_breakdown: dict[str, dict[str, int]] = defaultdict(lambda: {"total": 0, "impacted": 0})
+        ind_group_breakdown: dict[str, dict[str, int]] = defaultdict(lambda: {"total": 0, "impacted": 0})
         for item in items:
             bucket_breakdown[item["market_cap_bucket"]]["total"] += 1
             source_breakdown[item["source_type"]]["total"] += 1
+            ig = item.get("industry_group") or "Unknown"
+            ind_group_breakdown[ig]["total"] += 1
             if item.get("is_impacted"):
                 bucket_breakdown[item["market_cap_bucket"]]["impacted"] += 1
                 source_breakdown[item["source_type"]]["impacted"] += 1
+                ind_group_breakdown[ig]["impacted"] += 1
 
         top_examples = sorted(
             items,
@@ -641,6 +786,7 @@ def summarize_cases(rows: list[dict]) -> list[dict]:
                     cap_bucket_label(bucket): values for bucket, values in bucket_breakdown.items()
                 },
                 "source_breakdown": dict(source_breakdown),
+                "industry_group_breakdown": dict(ind_group_breakdown),
                 "top_examples": [
                     {
                         "news_id": item["id"],
@@ -648,6 +794,8 @@ def summarize_cases(rows: list[dict]) -> list[dict]:
                         "ticker": item["ticker"],
                         "source_type": item["source_type"],
                         "title": item["title"],
+                        "industry": item.get("industry") or "",
+                        "industry_group": item.get("industry_group") or "Unknown",
                         "change_pct": item["change_pct"],
                         "change_3d_pct": item["change_3d_pct"],
                         "change_7d_pct": item["change_7d_pct"],
@@ -665,6 +813,8 @@ def summarize_cases(rows: list[dict]) -> list[dict]:
                         "ticker": item["ticker"],
                         "source_type": item["source_type"],
                         "title": item["title"],
+                        "industry": item.get("industry") or "",
+                        "industry_group": item.get("industry_group") or "Unknown",
                         "change_pct": item["change_pct"],
                         "change_3d_pct": item["change_3d_pct"],
                         "change_7d_pct": item["change_7d_pct"],
@@ -706,7 +856,7 @@ def estimate_tokens(rows: list[dict]) -> dict:
     }
 
 
-def build_analysis(rows: list[dict], market_caps: dict[str, float]) -> dict:
+def build_analysis(rows: list[dict], company_ctx: dict[str, dict]) -> dict:
     analyzable = []
     scores_by_bucket: dict[str, list[float]] = defaultdict(list)
     source_counts = Counter()
@@ -714,11 +864,20 @@ def build_analysis(rows: list[dict], market_caps: dict[str, float]) -> dict:
     bucket_counts = Counter()
     bucket_with_change = Counter()
     source_with_fulltext = Counter()
+    industry_missing_count = 0
 
     for row in rows:
         ticker = first_ticker(row.get("tickers_csv"))
         row["ticker"] = ticker
-        row["market_cap"] = market_caps.get(ticker) if ticker else None
+        ctx = (company_ctx.get(ticker) if ticker else None) or {}
+        row["market_cap"] = ctx.get("market_cap")
+        row["industry"] = ctx.get("industry") or ""
+        row["ipo_date"] = ctx.get("ipo_date") or ""
+        row["description"] = ctx.get("description") or ""
+        row["industry_group"] = industry_group(row["industry"])
+        row["company_age_years"] = company_age_years(row["ipo_date"])
+        if not row["industry"]:
+            industry_missing_count += 1
         row["market_cap_bucket"] = cap_bucket(row.get("market_cap"))
         row["immediate_reaction_score"] = immediate_reaction_score(row)
         row["short_followthrough_score"] = short_followthrough_score(row)
@@ -728,7 +887,7 @@ def build_analysis(rows: list[dict], market_caps: dict[str, float]) -> dict:
         row["direction"] = direction
         row["direction_metric"] = direction_metric
         row["direction_value"] = direction_value
-        row["case_type"] = classify_case(row.get("title") or "", row.get("body") or "", row.get("full_text") or "")
+        row["case_type"] = classify_case(row.get("title") or "", row.get("body") or "", row.get("full_text") or "", industry=row.get("industry"), description=row.get("description"))
         row["top_level"] = top_level_group_for_case(row["case_type"])
         row["has_fulltext"] = bool(row.get("full_text"))
 
@@ -784,10 +943,20 @@ def build_analysis(rows: list[dict], market_caps: dict[str, float]) -> dict:
             }
         )
 
+    # Industry-group level summary across all analyzable rows
+    ig_summary: dict[str, dict[str, int]] = defaultdict(lambda: {"total": 0, "impacted": 0})
+    for row in analyzable:
+        ig = row.get("industry_group") or "Unknown"
+        ig_summary[ig]["total"] += 1
+        if row.get("is_impacted"):
+            ig_summary[ig]["impacted"] += 1
+
     return {
         "thresholds": thresholds,
         "analyzable_rows": len(analyzable),
         "total_rows": len(rows),
+        "industry_missing_count": industry_missing_count,
+        "industry_group_summary": dict(ig_summary),
         "source_summary": source_summary,
         "bucket_summary": bucket_summary,
         "case_summaries": case_summaries,
@@ -830,14 +999,14 @@ def write_evidence_markdown(evidence_path: Path, rows: list[dict]) -> None:
         "- 각 행은 유형 분류 또는 대표/반례 판단의 근거로 사용된 뉴스 1건이다.",
         "- 같은 note 제목 기준 파일이며, note 본문에서 이 경로를 그대로 참조해야 한다.",
         "",
-        "| top_level | case_type | reaction_tag | news_id | published_at | source_type | ticker | market_cap | market_cap_bucket | change_pct | change_from_open_pct | change_open_to_high_pct | change_1d_pct | change_3d_pct | change_7d_pct | change_14d_pct | change_30d_pct | immediate_reaction_score | short_followthrough_score | medium_persistence_score | overall_impact_score | title |",
-        "|-----------|-----------|--------------|---------|--------------|-------------|--------|------------|-------------------|------------|----------------------|--------------------------|---------------|---------------|---------------|----------------|----------------|--------------------------|---------------------------|--------------------------|----------------------|-------|",
+        "| top_level | case_type | reaction_tag | news_id | published_at | source_type | ticker | industry | industry_group | ipo_date | market_cap | market_cap_bucket | change_pct | change_from_open_pct | change_open_to_high_pct | change_1d_pct | change_3d_pct | change_7d_pct | change_14d_pct | change_30d_pct | immediate_reaction_score | short_followthrough_score | medium_persistence_score | overall_impact_score | title |",
+        "|-----------|-----------|--------------|---------|--------------|-------------|--------|----------|----------------|----------|------------|-------------------|------------|----------------------|--------------------------|---------------|---------------|---------------|----------------|----------------|--------------------------|---------------------------|--------------------------|----------------------|-------|",
     ]
     for row in rows:
         title = (row.get("title") or "").replace("|", "\\|").replace("\n", " ")
         market_cap = row.get("market_cap")
         lines.append(
-            "| {top_level} | {case_type} | {reaction_tag} | {news_id} | {published_at} | {source_type} | {ticker} | {market_cap} | {market_cap_bucket} | {change_pct} | {change_from_open_pct} | {change_open_to_high_pct} | {change_1d_pct} | {change_3d_pct} | {change_7d_pct} | {change_14d_pct} | {change_30d_pct} | {immediate_reaction_score} | {short_followthrough_score} | {medium_persistence_score} | {impact_score} | {title} |".format(
+            "| {top_level} | {case_type} | {reaction_tag} | {news_id} | {published_at} | {source_type} | {ticker} | {industry} | {industry_group} | {ipo_date} | {market_cap} | {market_cap_bucket} | {change_pct} | {change_from_open_pct} | {change_open_to_high_pct} | {change_1d_pct} | {change_3d_pct} | {change_7d_pct} | {change_14d_pct} | {change_30d_pct} | {immediate_reaction_score} | {short_followthrough_score} | {medium_persistence_score} | {impact_score} | {title} |".format(
                 top_level=row.get("top_level") or "residual",
                 case_type=row.get("case_type") or "",
                 reaction_tag=row.get("reaction_tag") or "",
@@ -845,6 +1014,9 @@ def write_evidence_markdown(evidence_path: Path, rows: list[dict]) -> None:
                 published_at=row.get("published_at") or "",
                 source_type=row.get("source_type") or "",
                 ticker=row.get("ticker") or "",
+                industry=(row.get("industry") or "").replace("|", "/"),
+                industry_group=row.get("industry_group") or "Unknown",
+                ipo_date=row.get("ipo_date") or "",
                 market_cap=format_float(market_cap) if isinstance(market_cap, (int, float)) else "Unknown",
                 market_cap_bucket=cap_bucket_label(row.get("market_cap_bucket") or "below_300m_or_unknown"),
                 change_pct=format_float(row.get("change_pct")),
@@ -868,42 +1040,67 @@ def write_evidence_markdown(evidence_path: Path, rows: list[dict]) -> None:
 def make_markdown(since: str, until: str, analysis: dict, evidence_path: Path, note_title: str) -> str:
     lines: list[str] = []
     grouped_summaries: dict[str, list[dict]] = {"long": [], "short": [], "residual": []}
+    top_level_titles = {
+        "long": "🟢 long",
+        "short": "🔴 short",
+        "residual": "⚪ residual",
+    }
     for summary in analysis["case_summaries"]:
         grouped_summaries.setdefault(summary.get("top_level") or "residual", []).append(summary)
 
-    lines.append(f"# {note_title}")
+    lines.append(f"# 🎯 {note_title}")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    lines.append("## 📌 분석 전제")
     lines.append("")
     lines.append(f"- 생성 시각: {datetime.now().strftime('%Y-%m-%d %H:%M')} (local)")
     lines.append(f"- 분석 범위: `press_release only` / `{since} ~ {until}`")
     lines.append(f"- 전체 뉴스 수: {analysis['total_rows']:,}")
     lines.append(f"- change 기반 분석 가능 뉴스 수: {analysis['analyzable_rows']:,}")
-    lines.append("")
-    lines.append("## 분석 범위")
-    lines.append("")
     lines.append("- source 범위는 `press_release only`로 고정했다.")
-    lines.append("- 기간 내 `press_release` 전체를 1차 전수 스캔하고, 각 row에 ticker, market cap, change vector를 붙였다.")
-    lines.append("- 외부 링크는 다시 열지 않고 `news_items`, `news_fulltext`, `news_change_metrics`, `company_profiles.market_cap`만 사용했다.")
+    lines.append("- 기간 내 `press_release` 전체를 1차 전수 스캔하고, 각 row에 ticker, market cap, industry(securities.industry), ipo_date(company_profiles.ipo_date), change vector를 붙였다.")
+    lines.append("- 외부 링크는 다시 열지 않고 `news_items`, `news_fulltext`, `news_change_metrics`, `company_profiles`, `securities` 테이블만 사용했다.")
+    lines.append(f"- industry 누락 row: {analysis.get('industry_missing_count', 'n/a')}건")
+    lines.append("- `company_profiles.description`은 yahoo 우선 기준으로 1683/1698 ticker에서 확보되며, 이번 분석에서는 industry 보정의 2차 컨텍스트로 사용했다.")
     lines.append("")
-    lines.append("## 유형 분류 기준")
+    lines.append("## 🗂️ 빠른 요약 표")
+    lines.append("")
+    lines.append("| 상위 분류 | 순위 | case_type | 총 건수 | 영향 미침 | 영향 비율 | Wilson LB |")
+    lines.append("| --- | --- | --- | ---: | ---: | ---: | ---: |")
+    for top_level in ("long", "short", "residual"):
+        summaries = grouped_summaries.get(top_level) or []
+        for index, summary in enumerate(summaries, start=1):
+            lines.append(
+                f"| {top_level_titles.get(top_level, top_level)} | {index} | {summary['label_ko']} | {summary['total']:,} | {summary['impacted']:,} | {summary['impact_ratio']:.3f} | {summary['impact_ratio_wilson_lb']:.3f} |"
+            )
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    lines.append("## 🧭 유형 분류 기준")
     lines.append("")
     lines.append("- 먼저 `title/body/full_text`의 언어적 의미를 기준으로 `long / short / residual` 상위 분류를 정했다.")
     lines.append("- 그 다음 반복되는 사건 패턴을 기준으로 세부 `case_type`을 묶었다.")
     lines.append("- 의미가 크게 다른 바이오 positive / negative, financing, litigation, earnings, strategic deal 등은 분리했다.")
+    lines.append("- **industry 기반 분류 보정**: `clinical_regulatory_positive/negative`는 Biotech/Pharma/Medical Device 산업에서만 우선 적용한다.")
+    lines.append("  - 비(非)임상 산업(Tech, Industrial 등)에서 'approval', 'study', 'trial' 같은 범용 키워드가 잡히면 strong clinical signal(phase 1-4, NDA, BLA, topline, pivotal 등) 없이는 해당 유형으로 분류하지 않고, 차순위 매칭 또는 general_corporate_pr로 귀속시켰다.")
     lines.append("- 애매한 표현은 대표 사례와 반례를 비교해 가장 설명력이 높은 유형으로 귀속했다.")
     lines.append("- 가격 데이터는 유형 생성 기준이 아니라, 유형별 영향 빈도 평가에만 사용했다.")
     lines.append("")
-    lines.append("## 유형별 정의 요약")
+    lines.append("---")
+    lines.append("")
+    lines.append("## 🧱 유형별 정의 요약")
     lines.append("")
     for top_level in ("long", "short", "residual"):
         summaries = grouped_summaries.get(top_level) or []
-        lines.append(f"### {top_level}")
+        lines.append(f"### {top_level_titles.get(top_level, top_level)}")
         lines.append("")
         if not summaries:
             lines.append("- 해당 상위 분류에 집계된 유형이 없다.")
             lines.append("")
             continue
-        for summary in summaries:
-            lines.append(f"#### {summary['label_ko']} (`{summary['case_type']}`)")
+        for index, summary in enumerate(summaries, start=1):
+            lines.append(f"#### {top_level}-{index}. {summary['label_ko']} (`{summary['case_type']}`)")
             lines.append(f"- 상위 분류: `{summary['top_level']}`")
             lines.append(f"- 한 줄 정의: {summary['definition']}")
             lines.append(f"- 핵심 가치 경로: {summary['value_path']}")
@@ -917,7 +1114,9 @@ def make_markdown(since: str, until: str, analysis: dict, evidence_path: Path, n
             lines.append(f"- 집계: impacted={summary['impacted']:,} / total={summary['total']:,}, ratio={summary['impact_ratio']:.3f}")
             lines.append("")
 
-    lines.append("## 영향 판정 기준")
+    lines.append("---")
+    lines.append("")
+    lines.append("## 📐 영향 판정 기준")
     lines.append("")
     lines.append("- 사용한 전체 change vector: `change_from_open_pct`, `change_open_to_high_pct`, `change_pct`, `change_1d_pct`, `change_3d_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct`")
     lines.append("- `immediate_reaction_score = max(abs(change_from_open_pct), abs(change_open_to_high_pct), abs(change_pct))`")
@@ -926,13 +1125,15 @@ def make_markdown(since: str, until: str, analysis: dict, evidence_path: Path, n
     lines.append("- `overall_impact_score = max(immediate_reaction_score, short_followthrough_score, medium_persistence_score)`")
     lines.append("- 영향 여부는 같은 market cap bucket 안에서 `overall_impact_score >= p80` 인지로 판정했다.")
     lines.append("")
-    lines.append("## market cap bucket 기준")
+    lines.append("## 🪜 market cap bucket 기준")
     lines.append("")
     lines.append("- 주 버킷: `300M~1B`, `1B~10B`, `10B~100B`, `100B~300B`, `300B~`")
     lines.append("- 보조 집단: `<300M or Unknown`")
     lines.append("- 소형주와 대형주를 같은 절대 변동폭 기준으로 자르면 과대/과소 판정이 생기므로 bucket별 threshold를 분리했다.")
     lines.append("")
-    lines.append("## 내부 사고과정 로그(주요 판단 요약)")
+    lines.append("---")
+    lines.append("")
+    lines.append("## 🧠 내부 사고과정 로그(주요 판단 요약)")
     lines.append("")
     lines.append("1. 판단 대상: source 범위")
     lines.append("   - 검토한 데이터/패턴: `press_release`, `news`, `company_news`, `market_news`를 섞으면 재서술 기사와 commentary가 늘어나 case 기준이 흐려진다.")
@@ -960,43 +1161,46 @@ def make_markdown(since: str, until: str, analysis: dict, evidence_path: Path, n
     lines.append("   - 결정 이유: 동일 bucket 분포 기준이 무너지면 threshold와 ratio 해석이 불안정해진다.")
     lines.append("   - 대표 근거: 데이터 가용성 표와 bucket별 threshold 표에서 보조 집단의 밀도 차이가 확인된다.")
     lines.append("")
-    lines.append("## 근거 표 파일")
+    lines.append("---")
+    lines.append("")
+    lines.append("## 📎 근거 표 파일")
     lines.append("")
     lines.append(f"- 근거 표 파일 경로: `{evidence_path}`")
     lines.append("- 이 파일은 현재 note와 같은 제목 기준으로 만든 전체 근거 뉴스 표다.")
     lines.append("- 각 행에는 case_type, reaction_tag, news_id, ticker, market_cap, 전체 change window, 구간 점수, overall score를 기록했다.")
     lines.append("")
-    lines.append("## 데이터 가용성")
+    lines.append("---")
     lines.append("")
+    lines.append("## 📦 데이터 가용성")
+    lines.append("")
+    lines.append("| source_type | total | with_change | with_fulltext |")
+    lines.append("| --- | ---: | ---: | ---: |")
     for source in analysis["source_summary"]:
-        lines.append(
-            f"- {source['source_type']}: total={source['total']:,}, with_change={source['with_change']:,}, with_fulltext={source['with_fulltext']:,}"
-        )
+        lines.append(f"| {source['source_type']} | {source['total']:,} | {source['with_change']:,} | {source['with_fulltext']:,} |")
     lines.append("")
-    lines.append("## 영향 판정 기준")
+    lines.append("## 📊 market cap bucket별 impact 기준")
     lines.append("")
-    lines.append("- 사용한 전체 change 컬럼: `change_from_open_pct`, `change_open_to_high_pct`, `change_pct`, `change_1d_pct`, `change_3d_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct`")
-    lines.append("- `overall_impact_score`는 immediate / short / medium 3개 구간 점수 중 최대값으로 계산했다.")
-    lines.append("- 방향성은 절대값이 가장 큰 change 컬럼의 부호로 결정했다.")
-    lines.append("- 같은 이슈라도 시총이 크면 변동폭이 줄 수 있으므로, 버킷별 p80 임계값을 따로 사용했다.")
-    lines.append("")
-    lines.append("## market cap bucket별 impact 기준")
-    lines.append("")
+    lines.append("| bucket | total | with_change | p50 | p80 | p90 |")
+    lines.append("| --- | ---: | ---: | ---: | ---: | ---: |")
     for item in analysis["bucket_summary"]:
         meta = item.get("thresholds")
         lines.append(
-            f"- {item['label']}: total={item['total']:,}, with_change={item['with_change']:,}, p50={format_float(meta['p50']) if meta else 'n/a'}, p80={format_float(meta['p80']) if meta else 'n/a'}, p90={format_float(meta['p90']) if meta else 'n/a'}"
+            f"| {item['label']} | {item['total']:,} | {item['with_change']:,} | {format_float(meta['p50']) if meta else 'n/a'} | {format_float(meta['p80']) if meta else 'n/a'} | {format_float(meta['p90']) if meta else 'n/a'} |"
         )
     lines.append("")
-    lines.append("## 전체 유형 분류 결과")
+    lines.append("---")
+    lines.append("")
+    lines.append("## 📚 전체 유형 분류 결과")
     lines.append("")
     for top_level in ("long", "short", "residual"):
         summaries = grouped_summaries.get(top_level) or []
         if not summaries:
             continue
-        lines.append(f"### {top_level} 그룹")
+        lines.append(f"### {top_level_titles.get(top_level, top_level)} 그룹")
         lines.append("")
         for index, summary in enumerate(summaries, start=1):
+            lines.append("---")
+            lines.append("")
             lines.append(f"#### {top_level}-{index}. {summary['label_ko']}")
             lines.append(f"- 설명: {summary['description_ko']}")
             lines.append(f"- 총 건수: {summary['total']:,}")
@@ -1008,38 +1212,82 @@ def make_markdown(since: str, until: str, analysis: dict, evidence_path: Path, n
             lines.append(f"- median impact score: {summary['median_impact_score']:.2f}")
             lines.append(f"- market cap breakdown: {json.dumps(summary['bucket_breakdown'], ensure_ascii=False)}")
             lines.append(f"- source breakdown: {json.dumps(summary['source_breakdown'], ensure_ascii=False)}")
+            lines.append(f"- industry group breakdown: {json.dumps(summary.get('industry_group_breakdown', {}), ensure_ascii=False)}")
             lines.append("- 대표 사례:")
             for example in summary["top_examples"][:3]:
                 lines.append(
-                    f"  - {example['news_id']} | {example['date']} | {example['source_type']} | {example['ticker']} | {example['title']} | change={example['change_pct']} | change_1d={example['change_1d_pct']} | change_3d={example['change_3d_pct']} | change_7d={example['change_7d_pct']} | intraday={example['change_from_open_pct']} | tag={example['reaction_tag']} | cap={example['market_cap_bucket']}"
+                    f"  - {example['news_id']} | {example['date']} | {example['source_type']} | {example['ticker']} | {example.get('industry', '')} | {example['title']} | change={example['change_pct']} | change_1d={example['change_1d_pct']} | change_3d={example['change_3d_pct']} | change_7d={example['change_7d_pct']} | intraday={example['change_from_open_pct']} | tag={example['reaction_tag']} | cap={example['market_cap_bucket']}"
                 )
             if summary["counter_examples"]:
                 lines.append("- 반례/영향 약한 사례:")
                 for example in summary["counter_examples"][:2]:
                     lines.append(
-                        f"  - {example['news_id']} | {example['date']} | {example['source_type']} | {example['ticker']} | {example['title']} | change={example['change_pct']} | change_1d={example['change_1d_pct']} | change_3d={example['change_3d_pct']} | change_7d={example['change_7d_pct']} | intraday={example['change_from_open_pct']} | tag={example['reaction_tag']} | cap={example['market_cap_bucket']}"
+                        f"  - {example['news_id']} | {example['date']} | {example['source_type']} | {example['ticker']} | {example.get('industry', '')} | {example['title']} | change={example['change_pct']} | change_1d={example['change_1d_pct']} | change_3d={example['change_3d_pct']} | change_7d={example['change_7d_pct']} | intraday={example['change_from_open_pct']} | tag={example['reaction_tag']} | cap={example['market_cap_bucket']}"
                     )
             lines.append("")
+    lines.append("---")
+    lines.append("")
+    lines.append("## 🥇 버킷별 상위 case")
+    lines.append("")
     for bucket in MAIN_BUCKETS:
         summaries = analysis["bucket_case_summaries"].get(bucket) or []
-        lines.append(f"## {cap_bucket_label(bucket)} 상위 case")
+        lines.append(f"### {cap_bucket_label(bucket)} 상위 case")
         lines.append("")
         for index, summary in enumerate(summaries[:5], start=1):
             lines.append(
                 f"- {index}. {summary['label_ko']}: impacted={summary['impacted']:,} / total={summary['total']:,}, ratio={summary['impact_ratio']:.3f}, Wilson={summary['impact_ratio_wilson_lb']:.3f}"
             )
         lines.append("")
+    # Industry group summary section
+    ig_summary = analysis.get("industry_group_summary", {})
+    if ig_summary:
+        lines.append("---")
+        lines.append("")
+        lines.append("## 🏭 산업 그룹별 분석")
+        lines.append("")
+        lines.append("- `securities.industry`를 7개 그룹(Biotech/Pharma/MedDev, Technology, Financial, Industrial, Energy/Mining, Utilities, Materials/Auto, Other, Unknown)으로 묶어 집계했다.")
+        lines.append("- 유형 분류 시 `clinical_regulatory_positive/negative`는 Biotech/Pharma/MedDev 그룹에서만 우선 적용하고, 비임상 산업에서는 strong clinical signal이 없으면 차순위 매칭 또는 general_corporate_pr로 귀속했다.")
+        lines.append("")
+        lines.append("| industry_group | total | impacted | impact_ratio |")
+        lines.append("|----------------|-------|----------|-------------|")
+        for ig_name, ig_vals in sorted(ig_summary.items(), key=lambda x: x[1]["total"], reverse=True):
+            ig_total = ig_vals["total"]
+            ig_impacted = ig_vals["impacted"]
+            ig_ratio = ig_impacted / ig_total if ig_total else 0.0
+            lines.append(f"| {ig_name} | {ig_total:,} | {ig_impacted:,} | {ig_ratio:.3f} |")
+        lines.append("")
+        lines.append("- 같은 case_type이라도 산업 그룹에 따라 impact_ratio가 다를 수 있으며, 각 case_type별 industry_group_breakdown은 '전체 유형 분류 결과' 섹션에서 확인 가능하다.")
+        lines.append("")
+
+    # Company context limitation note
+    lines.append("---")
+    lines.append("")
+    lines.append("## 🧾 기업 컨텍스트 데이터 활용 현황")
+    lines.append("")
+    lines.append("- `industry` (securities.industry): 1695/1698 ticker 보유 (99.8%). clinical_regulatory 유형 분류 보정에 활용 중.")
+    lines.append("- `description` (company_profiles.description, yahoo 우선): 1683/1698 ticker 보유 (99.1%). clinical/biotech 여부 판단의 2차 보정 레이어로 활용 중.")
+    lines.append("  - industry가 CLINICAL_CORE_INDUSTRIES에 없더라도, description에서 biotech/pharma/therapeutic 등 핵심 키워드가 감지되면 clinical_regulatory 분류를 유지한다.")
+    lines.append("  - description source 우선순위: yahoo(1683건) > fmp(51건) > finnhub(0건).")
+    lines.append("- `ipo_date` (company_profiles.ipo_date): 1690/1698 ticker 보유 (99.5%). 증거 표에 기록했으나 분류 보정에는 아직 미반영.")
+    lines.append("- `peers_json` (company_profiles.peers_json): 1656/1698 ticker 보유 (97.5%). 유사사례 탐색에 활용 가능하나 이번 전수 집계에서는 미사용.")
+    lines.append("")
+
     token = analysis["token_estimate"]
-    lines.append("## 토큰 비용 추정")
+    lines.append("---")
+    lines.append("")
+    lines.append("## 💰 토큰 비용 추정")
     lines.append("")
     lines.append("- 가정: 영어 기사 기준 `1 token ~= 4 chars`, 기사별 프롬프트 오버헤드 180 tokens, 출력 120 tokens")
     lines.append(f"- 전체 문자 수: {token['total_chars']:,}")
     lines.append(f"- raw input tokens 추정: {token['raw_input_tokens_estimate']:,}")
     lines.append(f"- naive article-by-article total tokens 추정: {token['estimated_total_tokens_naive_article_by_article']:,}")
     lines.append("")
-    lines.append("## 해석")
+    lines.append("---")
+    lines.append("")
+    lines.append("## 🔎 해석")
     lines.append("")
     lines.append("- 바이오 임상·규제는 positive/negative를 분리해야 한다. 같은 `trial`/`topline` 키워드라도 결과 방향에 따라 주가 반응이 반대일 수 있다.")
+    lines.append("- **industry + description 기반 분류 보정**: 비(非)임상 산업에서 'approval', 'study' 같은 범용 키워드가 잡히면 clinical_regulatory로 오분류될 수 있으므로, industry가 Biotech/Pharma/MedDev가 아니고 description에서도 임상/바이오 핵심 키워드가 없는 경우 strong clinical signal 유무로 필터링했다.")
     lines.append("- 이번 note는 `press_release only` 기준이라, 동일 taxonomy를 다른 source에 그대로 적용하면 비율이 달라질 수 있다.")
     lines.append("- `300M~1B` 버킷은 동일한 뉴스 유형에서도 절대 변동폭이 더 크게 나오기 쉬우므로, 대형주와 같은 기준으로 자르면 과대판정되기 쉽다.")
     lines.append("- `<$300M or Unknown` 집단은 전체 데이터에서 비중이 아직 크므로, 다음 단계에서는 market cap 보강이 되면 5개 주 버킷 비교가 더 안정된다.")
@@ -1073,10 +1321,10 @@ def main() -> None:
 
     conn = sqlite3.connect(args.db)
     note_title = resolve_note_title(conn, args.page_id, args.note_title)
-    market_caps = load_latest_market_caps(conn)
+    company_ctx = load_company_context(conn)
     until = args.until or datetime.now().strftime("%Y-%m-%d")
     news_rows = fetch_news_rows(conn, args.since, until)
-    analysis = build_analysis(news_rows, market_caps)
+    analysis = build_analysis(news_rows, company_ctx)
     evidence_path = source_dir / f"{slugify_note_title(note_title)}.md"
     analyzable_rows = []
     for case_summary in analysis["case_summaries"]:

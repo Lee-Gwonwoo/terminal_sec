@@ -1,8 +1,8 @@
 since=2023-01-01
 until=2025-12-31
 scope=press_release_only
-note_title=model 2-claude opus 4.6 /version 3/description,ipo date, peers
-evidence_path=ai_research_tool\model_2_source\model 2-claude opus 4.6 version 3description,ipo date, peers.md
+note_title=model 2-claude opus 4.6 /version 3/description,ipo date, peers/final 
+evidence_path=ai_research_tool\model_2_source\model 2-claude opus 4.6 version 3description,ipo date, peersfinal.md
 impact_formula=overall=max(immediate,short,medium)
 immediate=max(abs(change_from_open_pct),abs(change_open_to_high_pct),abs(change_pct))
 short=max(abs(change_1d_pct),abs(change_3d_pct))
@@ -10,4 +10,4 @@ medium=max(abs(change_7d_pct),abs(change_14d_pct),abs(change_30d_pct))
 market_cap_buckets=$300M~1B|$1B~10B|$10B~100B|$100B~300B|$300B~|<$300M or Unknown
 total_rows=137037
 analyzable_rows=114522
-top_case_types=['earnings_guidance_positive', 'clinical_regulatory_positive', 'litigation_investigation', 'clinical_regulatory_negative', 'commercial_launch_expansion', 'financing_offering', 'general_corporate_pr', 'earnings_guidance_negative', 'analyst_rating_target', 'strategic_deal_policy']
+top_case_types=['earnings_guidance_positive', 'clinical_regulatory_positive', 'litigation_investigation', 'clinical_regulatory_negative', 'commercial_launch_expansion', 'financing_offering', 'general_corporate_pr', 'earnings_guidance_negative', 'strategic_deal_policy', 'analyst_rating_target']
