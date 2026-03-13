@@ -48,23 +48,23 @@
 	- **전체 테이블 목록 (2026-03-12 live inspect 기준)**:
 		| 테이블 | 용도 | 비고 |
 		|--------|------|------|
-		| `news_items` | 뉴스 메타데이터 (226K rows) | PK: `id` (UUID). live schema에는 `publisher`, `origin_url`, 일부 legacy inline change 컬럼이 남아 있다 |
-		| `news_change_metrics` | 뉴스별 change% 파생값 (1.43M rows) | PK: `(news_id, metric_key)`. **영구 보존** (`CREATE TABLE IF NOT EXISTS`). metric_key: `change_pct`, `change_1d_pct`, `change_from_open_pct`, `change_open_to_high_pct`, `change_3d_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct` |
-		| `news_fulltext` | full text 추출/키워드 (136K rows) | PK: `news_id`. keywords_json/keywords_status 포함 |
+		| `news_items` | 뉴스 메타데이터 (226,039 rows) | PK: `id` (UUID). live schema에는 `publisher`, `origin_url`, 일부 legacy inline change 컬럼이 남아 있다 |
+		| `news_change_metrics` | 뉴스별 change% 파생값 (1,437,664 rows) | PK: `(news_id, metric_key)`. **영구 보존** (`CREATE TABLE IF NOT EXISTS`). metric_key: `change_pct`, `change_1d_pct`, `change_from_open_pct`, `change_open_to_high_pct`, `change_3d_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct` |
+		| `news_fulltext` | full text 추출/키워드 (136,116 rows) | PK: `news_id`. keywords_json/keywords_status 포함 |
 		| `news_ai_analysis` | AI 스코어/증거 (0 rows) | PK: `news_id`. score, score_evidence, analysis_status |
 		| `news_sentiment_snapshots` | 종목별 sentiment (683 rows) | UNIQUE: `(ticker, asof_date)`. Finnhub sentiment API 기반 |
 		| `news_saved_views` | 저장된 뉴스 필터 뷰 (0 rows) | |
 		| `bookmark_folders` | 북마크 폴더 트리 (3 rows) | parent_id 자기참조로 트리 구조 |
 		| `bookmark_items` | 북마크된 뉴스 (3 rows) | PK: `(folder_id, news_id)` |
-		| `confirmed_empty_ranges` | 빈 뉴스 구간 확정 (2.3K rows) | PK: `(ticker, source_type)` |
+		| `confirmed_empty_ranges` | 빈 뉴스 구간 확정 (2,343 rows) | PK: `(ticker, source_type)` |
 		| `securities` | ticker 마스터 (1,698 rows) | UNIQUE: `(ticker, exchange)`. 서버 시작 시 CSV에서 upsert |
-		| `company_profiles` | 기업 프로필 (1,734 rows) | UNIQUE: `(security_id, source)`. market_cap, peers_json 포함 |
+		| `company_profiles` | 기업 프로필 (3,432 rows) | UNIQUE: `(security_id, source)`. 현재 source 분포는 `finnhub=1698`, `yahoo=1683`, `fmp=51` |
 		| `ticker_universes` | ticker 유니버스 정의 (1 row) | |
 		| `ticker_universe_items` | 유니버스 소속 ticker (1,698 rows) | |
 		| `calendar_events` | 캘린더 이벤트 (0 rows) | |
-		| `update_status` | 업데이트 상태 추적 (11 rows) | PK: `source_key`. `company_profiles_ipo_date` 포함 |
-		| `research_tabs` | Case Research 탭 (5 rows) | `deleted_at` soft delete 포함 |
-		| `research_pages` | Case Research 페이지 (7 rows) | `deleted_at` soft delete 포함 |
+		| `update_status` | 업데이트 상태 추적 (12 rows) | PK: `source_key`. live columns는 `source_key`, `last_success_at`, `details_json`, `updated_at` |
+		| `research_tabs` | Case Research 탭 (5 rows) | `deleted_at` soft delete 포함. active 3 rows |
+		| `research_pages` | Case Research 페이지 (8 rows) | `deleted_at` soft delete 포함. active 5 rows |
 		| `users` | 사용자 (1 row) | |
 		| `watchlists` / `watchlist_items` | 관심종목 (0 rows) | `watchlist_items.security_id` FK 컬럼 포함 |
 		| `alert_rules` | 알림 규칙 (0 rows) | |
@@ -73,10 +73,13 @@
 		- `news_items` live schema에는 `[][][]ohlc_ticker[][][]`, `[][][]ohlc_date[][][]`, `[][][]change_1d_pct[][][]`, `[][][]change_from_open_pct[][][]`, `[][][]change_7d_pct[][][]`, `[][][]change_14d_pct[][][]`, `[][][]change_30d_pct[][][]`, `[][][]change_computed_at[][][]`, `[][][]publisher[][][]`, `[][][]origin_url[][][]`가 존재한다. 하지만 `newsChangeMerger`의 canonical 결과는 `news_change_metrics` 쪽을 사용한다.
 		- 실제 조회(`GET /api/news`)는 `news_items`에 `news_change_metrics` 8개 metric_key를 각각 LEFT JOIN + `news_fulltext` + `news_ai_analysis` + `news_sentiment_snapshots` + `company_profiles`/`securities`를 join해서 응답한다.
 		- `GET /api/news`는 company data enrich 단계에서 `[][][]marketCap[][][]`, `[][][]peers[][][]`, `[][][]companyDescription[][][]`, `[][][]ipoDate[][][]`를 대표 ticker 기준으로 보강한다.
+		- `GET /api/news`의 `[][][]industry[][][]`는 `company_profiles` 컬럼이 아니라 `securities.industry` 또는 `industryLookup.ts`의 CSV cache fallback에서 온다. raw DB에서 industry를 볼 때 `company_profiles`만 보면 안 된다.
 		- `GET /api/tickers`의 default-universe row도 `[][][]ipoDate[][][]`와 `[][][]marketCap[][][]`를 함께 반환한다.
-		- `company_profiles`의 핵심 company data 컬럼은 `[][][]description[][][]`, `[][][]ipo_date[][][]`, `[][][]market_cap[][][]`, `[][][]peers_json[][][]`다. `POST /api/company-profiles/pull-fmp`, `pull-peers`, `pull-market-cap`, `pull-ipo-date`가 모두 이 테이블을 갱신한다.
+		- `company_profiles`의 핵심 company data 컬럼은 `[][][]description[][][]`, `[][][]ipo_date[][][]`, `[][][]market_cap[][][]`, `[][][]peers_json[][][]`다. ticker 심볼은 이 테이블의 컬럼이 아니므로 `securities`와 JOIN해서 해석해야 한다. `POST /api/company-profiles/pull-fmp`, `pull-peers`, `pull-market-cap`, `pull-ipo-date`, `pull-yahoo`가 이 테이블을 갱신한다.
+		- `company_profiles`는 ticker당 단일 row가 아니라 source별 다중 row 구조다. raw SQL로 읽을 때는 `security_id + source` 또는 `fetched_at DESC` 기준 대표 row 선택 규칙을 먼저 정한다.
 		- Finnhub company data 경로(`pull-peers`, `pull-market-cap`, `pull-ipo-date`)는 2026-03-12 기준 **프로세스 전역 throttle**을 공유한다. 기본값은 `[][][]tickerConcurrency[][][]=1`이며, 서로 다른 job이 동시에 돌아도 실제 Finnhub 요청은 직렬화된다. 별도 사용자 조절 interval delay는 제거됐다.
-		- `update_status` live source_key 예시는 `company_profiles`, `company_profiles_ipo_date`, `company_profiles_market_cap`, `finhub_news`, `ibkr_calendar`, `ibkr_ohlc_1d`, `news_change_custom`, `news_change_recent`, `rtpr_press_release`, `tickers_csv`다.
+		- `update_status` live source_key 전체 집합은 `company_profiles`, `company_profiles_ipo_date`, `company_profiles_market_cap`, `company_profiles_yahoo`, `finhub_news`, `ibkr_calendar`, `ibkr_ohlc_1d`, `news_change_7d`, `news_change_custom`, `news_change_recent`, `rtpr_press_release`, `tickers_csv`다.
+		- `news_items.source_type` live 분포는 `press_release=192,899`, `news=18,321`, `company_news=14,354`, `market_news=440`, `IBKR=25`다.
 		- `/api/news` change 날짜 필드는 분리되어 있다.
 		  - `[][][]ohlc_date[][][]` / `[][][]change_pct_ohlc_date[][][]` = `change_pct.target_date`
 		  - `[][][]change_1d_target_date[][][]` = `change_1d_pct.target_date`
@@ -110,6 +113,7 @@
 		- 당일 same-day change는 ET 시장일 기준으로 판단하며, ET `16:00:00` 이전이면 `change_pct`, `change_from_open_pct`, `change_open_to_high_pct`를 저장하지 않는다.
 		- 장중에는 current ET date 일봉을 OHLC DB에 저장/참조하지 않으므로, 전일 기사 `change_1d_pct`도 오늘 partial bar를 보지 못한다.
 		- full text 추출 대상 판단은 현재 `news_fulltext` row 존재 여부 기준이다. 한 번 `failed`/`skipped` row가 생기면 자동 재시도 대상에서 빠질 수 있다.
+		- `news_fulltext.extraction_status` live 분포는 `success=89,812`, `failed=43,246`, `unavailable=2,951`, `skipped=107`다.
 		- keyword는 이미 runtime DB 내부 컬럼으로 관리되고 있으므로, 별도 JSONL/CSV를 canonical source로 취급하지 않는다.
 		- AI 분석(`news_ai_analysis`)은 테이블 존재하지만 아직 0건. 향후 구현 예정.
 	- 주의: 테스트/실험 산출물(JSONL/CSV)은 canonical 저장소로 간주하지 않음

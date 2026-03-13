@@ -15,6 +15,100 @@
 
 기존에 문서에 있던 단일 뉴스 `Score / Score Evidence / Keywords` 생성 방식은 이제 `Model_3`로 분류한다.
 
+### plan / log 문서 작성 예외
+
+- 이 스킬이 적용되는 작업은 기본적으로 `ai_agent_plan/.../plan.md`, `agent_log.md` 작성 대상이 아니다.
+- 즉, AI 뉴스 리서치/분석 자체를 수행할 때는 채팅에 세부 계획을 설명하더라도 별도의 `plan.md`, `agent_log.md` 파일을 만들거나 갱신할 필요가 없다.
+- 예외는 사용자가 `plan.md`, `agent_log.md`, 작업 로그, 단계별 기록 파일 작성을 **명시적으로 요청한 경우**뿐이다.
+- 이 예외는 AI 뉴스 리서치 결과 정리, 사례 분류, 근거 표 작성, 모델별 판단 규칙 정리 작업에 동일하게 적용한다.
+
+### AI News Research에 사용 가능한 DB / 저장소 정리
+
+AI news research 작업에서는 모든 저장소를 동일하게 취급하면 안 된다. 아래처럼 **source of truth**, **보조 DB**, **비정규 산출물**을 구분해서 사용한다.
+
+#### 1. 1차 source of truth: 앱 런타임 DB
+
+- 경로: `terminal/backend/backend/data/app.db`
+- 역할: AI news research에서 가장 먼저 확인해야 하는 기본 DB다.
+- 이 DB에서 직접 읽을 수 있는 핵심 데이터:
+  - `[][][]news_items[][][]`: 뉴스 메타데이터, `published_at`, `source_type`, `title`, `body`, `url`, `tickers_csv`, `publisher`, `origin_url`
+  - `[][][]news_fulltext[][][]`: full text, extraction 상태, keyword 후처리 결과
+  - `[][][]news_change_metrics[][][]`: 8개 change metric의 canonical 저장소
+  - `[][][]news_ai_analysis[][][]`: `Model_3` 저장 대상 테이블. 다만 2026-03-12 live DB 기준 현재 0 rows다.
+  - `[][][]news_sentiment_snapshots[][][]`: ticker 단위 sentiment snapshot
+  - `[][][]company_profiles[][][]`: description, peers, ipo_date, market_cap
+  - `[][][]securities[][][]`: ticker, sector, industry. 특히 `industry` 해석에 중요하다.
+  - `[][][]research_tabs[][][]`, `[][][]research_pages[][][]`: AI research note / page 관리용 메타데이터
+- 사용 우선순위:
+  - `Model_1`: `news_items` + `news_fulltext` + `news_change_metrics` + `company_profiles` + `securities`
+  - `Model_2`: `news_items` + `news_fulltext` + `news_change_metrics` + `company_profiles` + `securities` + 필요시 `research_pages`
+  - `Model_3`: `news_items` + `news_fulltext` + `company_profiles` + `securities` + 저장 결과는 `news_ai_analysis`
+- 해석 주의:
+  - `company_profiles`는 ticker당 단일 row가 아니라 source별 다중 row다. raw SQL에서는 `securities` JOIN과 대표 row 선택 규칙이 필요하다.
+  - `industry`는 `company_profiles` 컬럼이 아니라 `securities.industry` 또는 CSV fallback에서 온다.
+  - `change` 계열은 `news_items`의 legacy inline 컬럼보다 `news_change_metrics`를 우선 사용한다.
+
+#### 2. 2차 보조 DB: OHLC canonical price DB
+
+- 경로: `OHLC_data/ohlc_1d_watchlist.sqlite`
+- 역할: 뉴스 반응률을 재계산하거나 검증할 때 쓰는 가격 DB다.
+- 핵심 테이블:
+  - `[][][]ohlc_1d[][][]`: 일봉 OHLCV + 일부 파생 change 컬럼
+  - `[][][]symbols[][][]`: Symbol, Industry
+- 언제 쓰나:
+  - `news_change_metrics` 값 검증이 필요할 때
+  - `Model_1`, `Model_2`에서 change metric을 다시 계산하거나 누락 row를 점검할 때
+  - 특정 뉴스의 target date / follow-through 구조를 수동 검산할 때
+- 주의:
+  - AI news research의 기본 뉴스 source DB는 아니다.
+  - 먼저 `app.db`의 `news_change_metrics`를 보고, 부족하거나 의심될 때만 이 DB로 내려간다.
+  - 장중에는 current ET date 일봉을 canonical로 보지 않는 운영 규칙을 감안해야 한다.
+
+#### 3. Research note용 메타데이터 저장 위치
+
+- 경로: `terminal/backend/backend/data/app.db`
+- 관련 테이블:
+  - `[][][]research_tabs[][][]`
+  - `[][][]research_pages[][][]`
+- 역할:
+  - page id 기반 분석 요청이 들어올 때, 어떤 note/page가 현재 살아 있는지 확인한다.
+  - `Model_2` 결과 note와 page title, soft delete 여부를 확인할 때 사용한다.
+- 주의:
+  - 이 테이블은 뉴스 본문 source가 아니라 research 문서/탭 메타데이터다.
+  - 기사 분류 근거 자체는 여전히 `news_items`, `news_fulltext`, `news_change_metrics` 쪽에서 읽는다.
+
+#### 4. 비정규 산출물: 참고만 하고 canonical로 간주하지 않는 저장소
+
+- 대표 경로:
+  - `storage/`
+  - `tmp/`
+  - `tmp/probes/`
+  - `ai_research_tool/out/`
+  - `ai_research_tool/model_2_source/`
+- 역할:
+  - 실험 export, 임시 검증, note 산출물, 근거 표 파일 저장
+- 사용 규칙:
+  - 사람이 읽는 근거 note나 evidence table로는 쓸 수 있다.
+  - 하지만 원천 뉴스/가격/source-of-truth DB로 간주하면 안 된다.
+  - DB와 충돌하면 항상 `app.db`와 `ohlc_1d_watchlist.sqlite`를 우선한다.
+
+#### 5. DB 선택 순서 (실무 기본값)
+
+- 뉴스 텍스트/메타데이터가 필요하면 먼저 `app.db -> news_items`, 필요시 `news_fulltext`
+- 기업 컨텍스트가 필요하면 `app.db -> company_profiles + securities`
+- 산업 분류가 필요하면 `company_profiles`가 아니라 `securities.industry`를 우선 확인
+- 주가 반응률이 필요하면 먼저 `app.db -> news_change_metrics`, 검산이 필요할 때만 `OHLC_data/ohlc_1d_watchlist.sqlite`
+- note/page ID 확인은 `app.db -> research_pages`, `research_tabs`
+- 실험 파일/Markdown 산출물은 근거 참고용이지 canonical DB가 아니다.
+
+#### 6. 쿼리/해석 실수 방지 규칙
+
+- `company_profiles` 단독 조회 결과를 “회사당 1개 프로필”로 해석하지 않는다.
+- `industry`를 `company_profiles`에서 찾지 않는다.
+- `news_ai_analysis` 테이블이 존재한다고 해서 실제 AI scoring 데이터가 쌓여 있다고 가정하지 않는다.
+- `news_items`의 일부 legacy change 컬럼만 보고 `Model_1`/`Model_2` 반응률을 판단하지 않는다.
+- `storage/`나 `tmp/` 아래 export를 source DB보다 더 최신이라고 가정하지 않는다.
+
 ### 모델 분류
 
 #### `🟦 Model_1_new news analysis`
@@ -76,11 +170,11 @@
 기업 컨텍스트 참조 원칙 (전 단계 공통):
 
 - `Model_1`의 **모든 단계**(1단계 스크리닝, 2단계 유사사례 조사, 3단계 재분류)에서 뉴스 headline/본문만 보지 않고, 해당 ticker의 **기업 컨텍스트**를 함께 참조한다.
-- 참조해야 하는 기업 컨텍스트 데이터:
-  - `[][][]description[][][]` (company description): 기업이 무엇을 하는 회사인지. 뉴스의 사건이 핵심 사업과 직접 관련인지, 부수적 사업인지 판단하는 데 사용한다.
-  - `[][][]peers[][][]`: 동종 업계 비교 대상 ticker 목록. other-ticker 유사사례를 찾을 때 peers를 우선 검색 범위로 활용한다.
-  - `[][][]ipo_date[][][]`: 상장일. 최근 IPO 종목은 변동성이 크고, 오래된 종목은 같은 뉴스에도 반응이 다를 수 있으므로 해석 보정에 사용한다.
-  - `[][][]industry[][][]`: 산업 분류. 같은 industry 내 유사사례를 찾거나, 산업 특성에 따른 반응 패턴 차이를 해석하는 데 사용한다.
+- 현재 live app DB 기준으로 참조 경로를 아래처럼 구분한다.
+  - `[][][]description[][][]`, `[][][]peers[][][]`, `[][][]ipo_date[][][]`, `[][][]market_cap[][][]`는 기본적으로 `company_profiles`에서 온다.
+  - 단, `company_profiles`는 ticker당 단일 row가 아니라 `security_id + source` 기준 다중 row 구조이므로, raw DB를 직접 읽을 때는 대표 row 선택 규칙을 먼저 정해야 한다.
+  - `[][][]industry[][][]`는 `company_profiles` 컬럼이 아니라 주로 `securities.industry` 또는 `industryLookup.ts`의 CSV cache fallback에서 온다.
+  - API 응답을 사용할 때는 `/api/news`가 내려주는 `[][][]companyDescription[][][]`, `[][][]peers[][][]`, `[][][]ipoDate[][][]`, `[][][]marketCap[][][]`, `[][][]industry[][][]`를 우선 source of truth로 본다.
 - 단계별 활용 방식:
   - **1단계 (스크리닝)**: description을 보고 뉴스가 기업의 핵심 사업과 직접 연결되는지 빠르게 판단한다. 핵심 사업과 직접 연결되는 뉴스는 허들을 더 낮게, 부수적 사업 관련이면 좀 더 보수적으로 판단할 수 있다.
   - **2단계 (유사사례 조사)**: peers 목록과 industry를 활용해 other-ticker 검색 범위를 효율적으로 좁힌다. ipo_date를 확인해 유사사례의 상장 연차가 현재 ticker와 비슷한지도 기록한다.
@@ -170,6 +264,11 @@
   - `[][][]peers[][][]`: 비교 가능한 peer ticker 목록
   - `[][][]ipo_date[][][]`: 상장일
   - `[][][]industry[][][]`: 산업 분류
+- 현재 live app DB 기준 저장 위치는 아래처럼 해석한다.
+  - `description`, `peers`, `ipo_date`, `market_cap`은 `company_profiles` 계열 데이터다.
+  - `industry`는 `company_profiles` 컬럼이 아니라 `securities.industry` 또는 `industryLookup.ts` fallback에서 온다.
+  - raw SQL 분석에서는 ticker를 `company_profiles`에서 직접 읽지 말고 `securities`와 JOIN해서 붙인다.
+  - `/api/news` 응답을 재사용할 수 있으면, 여기서 이미 합쳐진 `companyDescription`, `peers`, `ipoDate`, `marketCap`, `industry`를 우선 사용한다.
 - 활용 규칙:
   - `description`은 해당 뉴스 사건이 회사의 **핵심 사업과 직접 연결되는지**, 아니면 주변 사업/부수 이슈인지 판단할 때 사용한다.
   - `peers`와 `industry`는 case 유형을 설명할 때 같은 산업/비슷한 사업 모델 안에서 반복되는 패턴인지 점검하는 데 사용한다.
@@ -385,11 +484,14 @@ market cap 반영 원칙:
 
 - 같은 이슈라도 `market cap`이 큰 종목은 주가 변동성이 작을 수 있으므로, 영향 강도 판정 기준을 더 보수적으로 둔다.
 - 따라서 case 분석은 가능하면 market cap 구간별로 나눠서 보거나, 최소한 대형주/중소형주 차이를 함께 기록한다.
-- 실무 기본 구간 예시는 아래처럼 둔다.
-  - `[][][]300M~<1B[][][]`
-  - `[][][]1B~<100B[][][]`
-  - `[][][]100B~[][][]`
-- `300M 미만` 또는 `market cap unknown` row는 위 3개 버킷과 직접 섞지 말고, 별도 보조 집단으로 집계하거나 제외 사유를 로그에 남긴다.
+- 실무 기본 구간은 아래 5단계로 둔다.
+  - `[][][]300M~1B[][][]`
+  - `[][][]1B~10B[][][]`
+  - `[][][]10B~100B[][][]`
+  - `[][][]100B~300B[][][]`
+  - `[][][]300B~[][][]`
+- `300M 미만` 또는 `market cap unknown` row는 위 5개 버킷과 직접 섞지 말고, 별도 보조 집단으로 집계하거나 제외 사유를 로그에 남긴다.
+- 5단계 분류 이유: 1B~100B를 하나로 묶으면 시총 10배 차이 종목이 같은 bucket에 들어가 변동성 기준이 왜곡된다. 10B를 경계로 나누면 mid-cap과 large-cap의 반응 차이를 구분할 수 있고, 100B 이상도 mega-cap(300B~)과 구분하면 AAPL/MSFT급과 일반 대형주의 해석이 분리된다.
 
 `press_release only` 운영 모드:
 
@@ -631,6 +733,8 @@ market cap 반영 원칙:
   - `[][][]peers[][][]`
   - `[][][]ipo_date[][][]`
   - `[][][]industry[][][]`
+- 현재 DB 기준으로는 `description`, `peers`, `ipo_date`, `market_cap`은 `company_profiles`, `industry`는 `securities.industry` 또는 CSV fallback에서 온다.
+- 따라서 raw DB를 직접 조회해 `Model_3`용 컨텍스트를 만들 때는 `company_profiles` 단독 조회가 아니라 `securities` JOIN 또는 `/api/news` enrich 결과를 우선 사용한다.
 - 활용 규칙:
   - `description`은 현재 뉴스 사건이 회사의 핵심 사업과 직접 연결되는지 확인하는 데 사용한다. 핵심 사업과 직접 연결되면 점수 근거를 더 강하게 둘 수 있고, 주변 사업이면 과대평가를 피한다.
   - `peers`는 같은 유형 뉴스가 유사 기업군에서 어떤 반응을 보였는지 빠르게 참조하는 보조 근거로 사용한다.
@@ -679,6 +783,7 @@ market cap 반영 원칙:
 - canonical 저장소는 우선 `terminal/backend/backend/data/app.db`
 - `Keywords`는 기존 `news_fulltext` 계열과 인접한 저장 구조를 우선 검토할 수 있다.
 - `Score`와 `Score Evidence`는 AI 분석 결과이므로, provider sentiment와 분리된 별도 컬럼/테이블로 관리하는 쪽을 우선 검토한다.
+- 2026-03-12 live DB 기준 `news_ai_analysis`는 아직 0 rows다. 즉 이 섹션은 **현재 적재 완료 상태 설명이 아니라 저장 계약/목표 상태**로 읽어야 한다.
 
 모델별 저장 해석:
 

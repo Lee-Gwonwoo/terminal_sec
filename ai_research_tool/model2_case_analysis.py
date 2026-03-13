@@ -248,6 +248,17 @@ CATEGORY_RULES: tuple[CategoryRule, ...] = (
 )
 
 
+ALL_BUCKETS = (
+    "cap_300m_1b",
+    "cap_1b_10b",
+    "cap_10b_100b",
+    "cap_100b_300b",
+    "cap_300b_plus",
+    "below_300m_or_unknown",
+)
+MAIN_BUCKETS = ALL_BUCKETS[:5]  # exclude below_300m_or_unknown
+
+
 def cap_bucket(market_cap: float | None) -> str:
     if market_cap is None:
         return "below_300m_or_unknown"
@@ -255,17 +266,23 @@ def cap_bucket(market_cap: float | None) -> str:
         return "below_300m_or_unknown"
     if market_cap < 1_000_000_000:
         return "cap_300m_1b"
+    if market_cap < 10_000_000_000:
+        return "cap_1b_10b"
     if market_cap < 100_000_000_000:
-        return "cap_1b_100b"
-    return "cap_100b_plus"
+        return "cap_10b_100b"
+    if market_cap < 300_000_000_000:
+        return "cap_100b_300b"
+    return "cap_300b_plus"
 
 
 def cap_bucket_label(bucket: str) -> str:
     return {
         "below_300m_or_unknown": "<$300M or Unknown",
-        "cap_300m_1b": "$300M-<$1B",
-        "cap_1b_100b": "$1B-<$100B",
-        "cap_100b_plus": ">$=100B",
+        "cap_300m_1b": "$300M~1B",
+        "cap_1b_10b": "$1B~10B",
+        "cap_10b_100b": "$10B~100B",
+        "cap_100b_300b": "$100B~300B",
+        "cap_300b_plus": "$300B~",
     }[bucket]
 
 
@@ -741,7 +758,7 @@ def build_analysis(rows: list[dict], market_caps: dict[str, float]) -> dict:
     case_summaries = summarize_cases(analyzable)
     bucket_summaries = {
         bucket: summarize_cases([row for row in analyzable if row["market_cap_bucket"] == bucket])
-        for bucket in ("cap_300m_1b", "cap_1b_100b", "cap_100b_plus", "below_300m_or_unknown")
+        for bucket in ALL_BUCKETS
     }
 
     source_summary = []
@@ -756,7 +773,7 @@ def build_analysis(rows: list[dict], market_caps: dict[str, float]) -> dict:
         )
 
     bucket_summary = []
-    for bucket in ("cap_300m_1b", "cap_1b_100b", "cap_100b_plus", "below_300m_or_unknown"):
+    for bucket in ALL_BUCKETS:
         bucket_summary.append(
             {
                 "bucket": bucket,
@@ -911,7 +928,7 @@ def make_markdown(since: str, until: str, analysis: dict, evidence_path: Path, n
     lines.append("")
     lines.append("## market cap bucket 기준")
     lines.append("")
-    lines.append("- 주 버킷: `300M~<1B`, `1B~<100B`, `100B~`")
+    lines.append("- 주 버킷: `300M~1B`, `1B~10B`, `10B~100B`, `100B~300B`, `300B~`")
     lines.append("- 보조 집단: `<300M or Unknown`")
     lines.append("- 소형주와 대형주를 같은 절대 변동폭 기준으로 자르면 과대/과소 판정이 생기므로 bucket별 threshold를 분리했다.")
     lines.append("")
@@ -929,7 +946,7 @@ def make_markdown(since: str, until: str, analysis: dict, evidence_path: Path, n
     lines.append("   - 대표 근거 뉴스: 상위 사례 표와 근거 표 파일의 각 row에서 3d, 7d, 14d, 30d 반응 차이를 추적했다.")
     lines.append("3. 판단 대상: market cap threshold")
     lines.append("   - 검토한 데이터/패턴: 소형주는 같은 PR에도 절대 변동폭이 크고, 대형주는 작은 변동으로도 의미가 생긴다.")
-    lines.append("   - 최종 결정: `300M~<1B`, `1B~<100B`, `100B~`를 주 버킷으로 나눠 각 버킷별 `p80`을 threshold로 사용했다.")
+    lines.append("   - 최종 결정: `300M~1B`, `1B~10B`, `10B~100B`, `100B~300B`, `300B~` 5단계 주 버킷으로 나눠 각 버킷별 `p80`을 threshold로 사용했다.")
     lines.append("   - 결정 이유: 전 뉴스 공통 절대값 컷오프는 소형주 과대판정과 대형주 과소판정을 동시에 만든다.")
     lines.append("   - 대표 근거 뉴스: 같은 유형이어도 cap bucket이 다르면 `overall_impact_score` 분포가 다르게 나타났다.")
     lines.append("4. 판단 대상: case taxonomy 구성")
@@ -1003,7 +1020,7 @@ def make_markdown(since: str, until: str, analysis: dict, evidence_path: Path, n
                         f"  - {example['news_id']} | {example['date']} | {example['source_type']} | {example['ticker']} | {example['title']} | change={example['change_pct']} | change_1d={example['change_1d_pct']} | change_3d={example['change_3d_pct']} | change_7d={example['change_7d_pct']} | intraday={example['change_from_open_pct']} | tag={example['reaction_tag']} | cap={example['market_cap_bucket']}"
                     )
             lines.append("")
-    for bucket in ("cap_300m_1b", "cap_1b_100b", "cap_100b_plus"):
+    for bucket in MAIN_BUCKETS:
         summaries = analysis["bucket_case_summaries"].get(bucket) or []
         lines.append(f"## {cap_bucket_label(bucket)} 상위 case")
         lines.append("")
@@ -1024,8 +1041,8 @@ def make_markdown(since: str, until: str, analysis: dict, evidence_path: Path, n
     lines.append("")
     lines.append("- 바이오 임상·규제는 positive/negative를 분리해야 한다. 같은 `trial`/`topline` 키워드라도 결과 방향에 따라 주가 반응이 반대일 수 있다.")
     lines.append("- 이번 note는 `press_release only` 기준이라, 동일 taxonomy를 다른 source에 그대로 적용하면 비율이 달라질 수 있다.")
-    lines.append("- `300M~<1B` 버킷은 동일한 뉴스 유형에서도 절대 변동폭이 더 크게 나오기 쉬우므로, 대형주와 같은 기준으로 자르면 과대판정되기 쉽다.")
-    lines.append("- `<$300M or Unknown` 집단은 전체 데이터에서 비중이 아직 크므로, 다음 단계에서는 market cap 보강이 되면 3개 주 버킷 비교가 더 안정된다.")
+    lines.append("- `300M~1B` 버킷은 동일한 뉴스 유형에서도 절대 변동폭이 더 크게 나오기 쉬우므로, 대형주와 같은 기준으로 자르면 과대판정되기 쉽다.")
+    lines.append("- `<$300M or Unknown` 집단은 전체 데이터에서 비중이 아직 크므로, 다음 단계에서는 market cap 보강이 되면 5개 주 버킷 비교가 더 안정된다.")
     lines.append("- 이 note의 내부 사고과정 로그는 내부 독백 전문이 아니라, taxonomy와 threshold를 바꾼 주요 판단을 재현 가능하게 적은 운영 로그다.")
     return "\n".join(lines)
 
@@ -1104,7 +1121,7 @@ def main() -> None:
                 "immediate=max(abs(change_from_open_pct),abs(change_open_to_high_pct),abs(change_pct))",
                 "short=max(abs(change_1d_pct),abs(change_3d_pct))",
                 "medium=max(abs(change_7d_pct),abs(change_14d_pct),abs(change_30d_pct))",
-                "market_cap_buckets=$300M-<$1B|$1B-<$100B|>=100B|<$300M or Unknown",
+                "market_cap_buckets=$300M~1B|$1B~10B|$10B~100B|$100B~300B|$300B~|<$300M or Unknown",
                 f"total_rows={len(news_rows)}",
                 f"analyzable_rows={analysis['analyzable_rows']}",
                 f"top_case_types={[item['case_type'] for item in analysis['case_summaries'][:10]]}",

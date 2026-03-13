@@ -17,11 +17,13 @@
 - Finnhub API 키는 서버 시작 시 필수다. 없으면 서버가 시작되지 않는다.
 - FMP API 키는 선택 사항이다. 없으면 company profile FMP pull만 제한된다.
 - EODHD 토큰은 `POST /api/news/pull-eodhd` 호출 시 파일에서 읽는다.
-- `GET /api/news`는 `news_items` 단독 조회가 아니라 `news_change_metrics`, `news_fulltext`, `news_ai_analysis`, sentiment snapshot, peers, company description, IPO date를 join/병합해서 내려준다.
+- `GET /api/news`는 `news_items` 단독 조회가 아니라 `news_change_metrics`, `news_fulltext`, `news_ai_analysis`, sentiment snapshot, peers, company description, IPO date, market cap, industry를 join/병합해서 내려준다.
 - `news_change_metrics`는 `CREATE TABLE IF NOT EXISTS`로 유지되는 영구 테이블이며, change update 작업이 metric 단위로 UPSERT 한다.
 - background job 상태와 로그는 메모리 기반이라 서버 재시작 시 유지되지 않는다.
 - default ticker universe는 서버 시작 시 CSV를 읽어 `securities`, `ticker_universes`, `ticker_universe_items`를 upsert하며, 이후 기본 경로 조회/수정은 DB-primary로 동작하고 CSV는 backup sync 성격이다.
 - case research 노트는 같은 `app.db`의 `research_tabs`, `research_pages` 테이블에 저장된다.
+- `company_profiles`는 ticker당 단일 row가 아니라 `security_id + source` 기준 다중 row 구조다. ticker 심볼 해석은 `securities` JOIN이 필요하다.
+- `update_status`의 현재 핵심 컬럼은 `source_key`, `last_success_at`, `details_json`, `updated_at` 이다.
 - research API, bookmarks API, alerts API는 현재 고정 demo user id를 기준으로 동작한다.
 - `GET /api/news/stream` SSE endpoint가 존재하며 새 뉴스 insert 시 필터를 만족하는 클라이언트에 push 한다.
 
@@ -101,14 +103,14 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `[][][]created_at[][][]`
 - `[][][]ohlc_ticker[][][]`
 - `[][][]ohlc_date[][][]`
-- `[][][]change_pct_ohlc_date[][][]`
-- `[][][]change_1d_target_date[][][]`
 - `[][][]change_1d_pct[][][]`
 - `[][][]change_from_open_pct[][][]`
 - `[][][]change_7d_pct[][][]`
 - `[][][]change_14d_pct[][][]`
 - `[][][]change_30d_pct[][][]`
 - `[][][]change_computed_at[][][]`
+- `[][][]origin_url[][][]`
+- `[][][]origin_url[][][]`
 
 제약:
 
@@ -118,6 +120,7 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 주의:
 
 - change 관련 컬럼은 legacy 호환용으로 남아 있지만, 실제 조회는 `news_change_metrics` join 값을 우선 사용한다.
+- `[][][]change_pct_ohlc_date[][][]`, `[][][]change_1d_target_date[][][]`는 `news_items` 물리 컬럼이 아니라 `GET /api/news`에서 joined metric target date를 alias로 노출한 응답 필드다.
 - 오래된 DB에는 `[][][]change_pct[][][]`, `[][][]change_open_to_high_pct[][][]`, `[][][]change_3d_pct[][][]` 같은 legacy 컬럼이 남아 있을 수 있지만, 현재 `initDb()`가 보장하는 핵심 컬럼은 위 목록 기준이다.
 
 #### `news_change_metrics`
@@ -252,6 +255,12 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `[][][]raw_json[][][]`
 - `[][][]peers_json[][][]`
 - `[][][]fetched_at[][][]`
+
+주의:
+
+- `company_profiles`는 현재 `fmp`, `finnhub`, `yahoo` source row가 공존할 수 있다.
+- ticker 심볼은 이 테이블 컬럼이 아니므로, raw SQL에서는 `securities`와 JOIN해서 읽는다.
+- `GET /api/news`, `GET /api/tickers`는 내부에서 대표 row를 골라 `companyDescription`, `peers`, `ipoDate`, `marketCap` 형태로 재노출한다.
 
 #### `securities`
 
@@ -404,8 +413,10 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `POST /api/ibkr/ohlc1d/update`
 - `GET /api/company-profiles/:ticker`
 - `POST /api/company-profiles/pull-fmp`
+- `POST /api/company-profiles/pull-yahoo`
 - `POST /api/company-profiles/pull-peers`
 - `POST /api/company-profiles/pull-market-cap`
+- `POST /api/company-profiles/pull-ipo-date`
 - `GET /api/db/inspect`
 
 ## 핵심 API 상세
@@ -432,6 +443,7 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `[][][]published_at[][][]`
 - `[][][]source[][][]`
 - `[][][]publisher[][][]`
+- `[][][]origin_url[][][]`
 - `[][][]source_type[][][]`
 - `[][][]title[][][]`
 - `[][][]body[][][]`
@@ -456,6 +468,7 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `[][][]keywords[][][]`
 - `[][][]keywordsStatus[][][]`
 - `[][][]industry[][][]`
+- `[][][]marketCap[][][]`
 - `[][][]score[][][]`
 - `[][][]scoreEvidence[][][]`
 - `[][][]analysisStatus[][][]`
@@ -470,7 +483,8 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 - `keywords`는 AI analysis가 완료된 경우 `news_ai_analysis.keywords_json`을 우선 사용한다.
 - sentiment 3개 필드는 대표 ticker의 최신 snapshot 기준이다.
-- peers/companyDescription도 대표 ticker 기준 최근 company profile row를 사용한다.
+- peers/companyDescription/ipoDate/marketCap도 대표 ticker 기준 최근 company profile row를 사용한다.
+- `industry`는 `company_profiles` 컬럼이 아니라 `securities.industry` 또는 CSV fallback에서 온다.
 
 ### `GET /api/news/stream`
 
@@ -628,6 +642,24 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 - `[][][]jobId[][][]`
 
+요청 body 옵션: `tickerConcurrency` (기본=1), `skipExisting` (기본=true)
+
+### `POST /api/company-profiles/pull-market-cap`
+
+응답 컬럼:
+
+- `[][][]jobId[][][]`
+
+요청 body 옵션: `tickerConcurrency` (기본=1)
+
+### `POST /api/company-profiles/pull-ipo-date`
+
+응답 컬럼:
+
+- `[][][]jobId[][][]`
+
+요청 body 옵션: `tickerConcurrency` (기본=1), `skipExisting` (기본=true)
+
 ### `GET /api/db/inspect`
 
 테이블 객체 출력 컬럼:
@@ -777,6 +809,7 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 주의:
 
 - change 관련 컬럼은 여전히 테이블에 남아 있지만, 현재 `GET /api/news`는 실질적으로 `news_change_metrics`에서 값을 읽어 join한다.
+- `[][][]change_pct_ohlc_date[][][]`, `[][][]change_1d_target_date[][][]`는 `news_items` 물리 컬럼이 아니라 joined metric alias 응답 필드다.
 - 오래된 DB에는 `[][][]change_pct[][][]`, `[][][]change_open_to_high_pct[][][]`, `[][][]change_3d_pct[][][]`가 남아 있을 수 있지만, 현재 초기화 코드가 직접 보장하는 핵심 컬럼은 위 목록 기준이다.
 
 #### `news_change_metrics`
