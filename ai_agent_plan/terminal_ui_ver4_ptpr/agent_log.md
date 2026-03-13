@@ -1434,3 +1434,44 @@ Starting Yahoo company description update for 0 tickers (skipped=1)
 | 빌드 | ✅ | backend `npm run build` + frontend `npm run build` 모두 성공 |
 | 자동 테스트 | ✅ | 55/55 pass (backend vitest) |
 | 런타임 통합 | ✅ | AAPL/TSLA pull-yahoo API 호출 → DB 저장 확인, skipExisting 동작 확인. 브라우저 시각 확인은 사용자 위임 |
+
+### News Changes 컬럼 3줄 재배치 (2026-03-12 19:59)
+
+**작성 시각:** 2026-03-12 19:59 (local)
+
+**Status: 확인 대기(awaiting user confirmation)**
+
+#### 작업 요약
+
+날짜 필터링 후 `Changes %` 셀의 오른쪽이 잘리면서 `+1D`, `+3D`가 안 보이는 문제를 완화하기 위해, changes 레이아웃을 2줄에서 3줄로 재배치했다.
+
+#### 변경 파일
+
+| 파일 | 변경 유형 | 내용 |
+|------|-----------|------|
+| `termina_web/.../FinnhubNewsWindow.tsx` | 수정 | `Changes %` 셀을 3줄 레이아웃으로 재배치, row height 소폭 상향 |
+| `ai_agent_plan/terminal_ui_ver4_ptpr/plan.md` | 수정 | PLAN CHANGE (2026-03-12) Step 21 추가 |
+
+#### 변경 내용
+
+1. 1줄: `Chg`, `fr.O→C`, `fr.O→H`
+2. 2줄: `+1D`, `+3D`
+3. 3줄: `+7D`, `+14D`, `+30D`
+4. row height: `title-only` 88 → 96, `title+abstract` 140 → 148
+
+#### 리스크 / 완화
+
+1. **리스크:** row height 증가로 한 화면에 보이는 row 수가 약간 줄 수 있음.
+   - 완화 1: 최소 증가폭(8px)만 적용.
+2. **리스크:** changes 컬럼 폭이 매우 좁으면 3줄도 일부 압박될 수 있음.
+   - 완화 1: 가장 잘리던 `+1D`, `+3D`를 전용 2번째 줄로 분리.
+   - 완화 2: 필요 시 이후 `Changes %` 기본 width도 별도 상향 가능.
+
+#### 검증 테이블
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `FinnhubNewsWindow.tsx` 에러 0개 |
+| 빌드 | ✅ | frontend `npm run build`, backend `npm run build` 성공 |
+| 자동 테스트 | ✅ | backend 55/55 pass |
+| 런타임 통합 | ✅ | 렌더 코드 리뷰로 `+1D`, `+3D`가 둘째 줄로 고정되도록 확인. 브라우저 최종 시각 확인은 사용자 위임 |

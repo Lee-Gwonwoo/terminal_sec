@@ -1186,4 +1186,21 @@ Invoke-RestMethod -UseBasicParsing http://127.0.0.1:8080/api/jobs/$($resp2.jobId
 
 - Yahoo concurrency/interval/skipExisting 설정은 FMP 설정과 완전히 동일한 UI 패턴(프리셋 버튼 + 슬라이더 + 토글)으로 구현
 - `SectionKey` 타입에 `'yahooDesc'` 추가
+
+### PLAN CHANGE (2026-03-12) — News Changes 컬럼 3줄 재배치
+
+> 배경: 날짜 필터링 후 `FinnhubNewsWindow`에서 `Changes %` 컬럼 폭이 상대적으로 부족해지면, 첫 줄 오른쪽의 `+1D`, `+3D`가 잘려 보인다. 데이터 누락이 아니라 셀 `overflow-hidden` + 2줄 레이아웃에 따른 clipping 문제다.
+
+#### 목표
+- `Changes %` 셀을 3줄 레이아웃으로 재배치
+- 2번째 줄에 `+1D`, `+3D`를 고정 배치
+- 필요한 만큼 row height를 최소 상향해 clipping을 줄임
+
+#### ⏳ Step 21 — News Changes 컬럼 3줄 UI 조정
+
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 21-1 | `Changes %` 셀을 3줄로 재구성 | `termina_web/.../FinnhubNewsWindow.tsx` | 프론트 빌드 + 렌더 코드 리뷰 | ⬜ |
+| 21-2 | row height 최소 보정 | `termina_web/.../FinnhubNewsWindow.tsx` | title-only / title+abstract 레이아웃 점검 | ⬜ |
+| 21-3 | frontend build + 정적 분석 검증 | 전체 | build 성공, 에러 0개 | ⬜ |
 - localStorage 키: `yahoo-concurrency`, `yahoo-request-interval-ms`, `yahoo-skip-existing`

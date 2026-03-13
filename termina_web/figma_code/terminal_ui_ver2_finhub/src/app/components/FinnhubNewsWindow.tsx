@@ -7,8 +7,8 @@ const API_BASE = "";
 
 // ─── Heights ───
 const STICKY_DATE_HEADER_HEIGHT = 32;
-const ROW_HEIGHT_TITLE_ONLY = 88;
-const ROW_HEIGHT_WITH_ABSTRACT = 140;
+const ROW_HEIGHT_TITLE_ONLY = 96;
+const ROW_HEIGHT_WITH_ABSTRACT = 148;
 
 // ─── Display mode ───
 type DisplayMode = 'title-only' | 'title-abstract';
@@ -1385,8 +1385,8 @@ export function FinnhubNewsWindow({
         );
       case 'changes':
         return (
-          <div className="flex flex-col justify-center gap-0 w-full">
-            <div className="flex items-center gap-1">
+          <div className="flex flex-col justify-center gap-0.5 w-full text-[11px] leading-tight">
+            <div className="flex items-center gap-1 flex-wrap">
               <span className="text-gray-500 shrink-0">Chg:</span>
               <span className={changeColor(newsItem.changePct)}>{formatChange(newsItem.changePct)}</span>
               <span className="text-gray-400 mx-0.5">|</span>
@@ -1395,14 +1395,15 @@ export function FinnhubNewsWindow({
               <span className="text-gray-400 mx-0.5">|</span>
               <span className="text-gray-500 shrink-0">fr.O→H:</span>
               <span className={changeColor(newsItem.changeOpenToHighPct)}>{formatChange(newsItem.changeOpenToHighPct)}</span>
-              <span className="text-gray-400 mx-0.5">|</span>
+            </div>
+            <div className="flex items-center gap-1 flex-wrap">
               <span className="text-gray-500 shrink-0">+1D:</span>
               <span className={changeColor(newsItem.change1dPct)}>{formatChange(newsItem.change1dPct)}</span>
               <span className="text-gray-400 mx-0.5">|</span>
               <span className="text-gray-500 shrink-0">+3D:</span>
               <span className={changeColor(newsItem.change3dPct)}>{formatChange(newsItem.change3dPct)}</span>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 flex-wrap">
               <span className="text-gray-500 shrink-0">+7D:</span>
               <span className={changeColor(newsItem.change7dPct)}>{formatChange(newsItem.change7dPct)}</span>
               <span className="text-gray-400 mx-0.5">|</span>
