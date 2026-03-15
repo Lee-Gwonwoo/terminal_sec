@@ -171,18 +171,26 @@ AI news research 작업에서는 모든 저장소를 동일하게 취급하면 �
 **Model_1 수급 구조 보조 가산점 규칙 (필수)**
 
 - `Model_1`에서는 뉴스 사건 자체와 과거 유사사례 분포가 1차 판단 기준이고, **기관보유비중(`institutional ownership %`)이 낮고 유동물량 비중(`float %`)이 높은 구조**는 그 뒤에 붙는 **보조 가산점**으로 사용한다.
+- 여기에 `insider ownership %`와 `short interest %`도 함께 본다. 다만 이 둘도 사건 자체를 덮어쓰는 주근거가 아니라, 뉴스 이후 수급 반응의 증폭 가능성 또는 잠김 구조를 해석하는 **보조 수급 지표**로 사용한다.
 - 기본 해석 방향은 아래처럼 둔다.
   - `float %`가 높을수록 실제 거래 가능한 물량이 넓게 풀려 있다고 보고, 테마 자금 유입이나 뉴스 기반 추종 매매가 붙을 때 반응성이 커질 수 있는 쪽으로 해석한다.
   - `institutional ownership %`가 낮을수록 기관 포지셔닝이 덜 차 있는 상태로 보고, 뉴스 이후 신규 기관 유입 여지가 상대적으로 큰 쪽으로 해석한다.
+  - `insider ownership %`가 높을수록 유통주식이 잠기는 효과가 있어 공급 제약과 경영진 확신 시그널로 읽을 수 있지만, 지나치게 높으면 실제 거래 가능 물량이 줄어 해석이 왜곡될 수 있으므로 `float %`와 함께 본다.
+  - `short interest %`가 높을수록 악재 기대가 많이 쌓였거나, 반대로 긍정 뉴스 시 short covering / short squeeze가 붙을 수 있으므로 **방향성보다는 반응 증폭 가능성**으로 해석한다.
 - 실무 기본 밴드는 아래처럼 사용한다.
   - `강한 가산점`: `float % >= 80` 이면서 `institutional ownership % <= 35`
   - `중간 가산점`: `float % >= 60` 이면서 `institutional ownership % <= 50`
   - `약한 가산점`: 위 둘 중 하나만 분명하게 유리한 경우
   - `가산점 없음`: `float % < 40` 이거나 `institutional ownership % >= 80` 이라서 수급상 추가 우위를 주장하기 어려운 경우
+- `insider ownership %`와 `short interest %`는 아래처럼 보조 해석 규칙을 둔다.
+  - `insider ownership %`가 높고 `float %`가 지나치게 낮지 않으면 공급 제약 + 경영진 정렬 관점의 **보조 플러스 요인**으로 적을 수 있다.
+  - `insider ownership %`가 매우 높아서 `float %`가 낮은 경우는 급등 잠재력과 함께 유동성 왜곡 리스크도 같이 적는다.
+  - `short interest %`가 높으면 positive 뉴스에서 squeeze 가능성을 적을 수 있지만, 동시에 시장이 이미 강한 반대 베팅을 하고 있다는 점도 함께 적는다.
+  - `short interest %`가 낮으면 squeeze 논리는 약하다고 적고, 반응 해석을 뉴스 자체 강도와 유사사례 분포 쪽에 더 두어야 한다.
 - 이 가산점은 어디까지나 **동일하거나 비슷한 뉴스 강도 후보 사이의 우선순위를 조정하는 보조 규칙**이다. 약한 사건이나 부정적 유사사례 분포를 `float/inst`만으로 억지 상향하면 안 된다.
-- `Model_1` 최종 서술에서는 해당 ticker의 `float %`와 `institutional ownership %`를 **숫자로 명시**해야 한다. 가능하면 `Float 82.7%`, `Institutional Ownership 24.1%`처럼 본문 또는 표에 바로 적고, 이 수치가 왜 가산점 또는 비가산점으로 이어졌는지 짧게 설명한다.
-- `float %` 또는 `institutional ownership %`가 없으면 값을 추정하지 말고 `데이터 없음`으로 적은 뒤, 그 때문에 수급 보조 가산점을 판단하지 못했다고 명시한다.
-- 이 두 수치는 현재 `app.db`의 canonical 뉴스 테이블에 항상 들어 있다고 가정하지 않는다. 별도 검증된 보조 source를 사용했다면, 최종 note에 그 source를 함께 적는다.
+- `Model_1` 최종 서술에서는 해당 ticker의 `float %`, `institutional ownership %`, `insider ownership %`, `short interest %`를 **가능한 한 숫자로 명시**해야 한다. 가능하면 `Float 82.7%`, `Institutional Ownership 24.1%`, `Insider Ownership 11.4%`, `Short Interest 23.8%`처럼 본문 또는 표에 바로 적고, 이 수치들이 왜 가산점 또는 경고 메모로 이어졌는지 짧게 설명한다.
+- 위 수치들 중 일부가 없으면 값을 추정하지 말고 `데이터 없음`으로 적은 뒤, 그 때문에 수급 보조 판단 또는 squeeze/잠김 구조 해석에 한계가 있다고 명시한다.
+- 이 수치들은 현재 `app.db`의 canonical 뉴스 테이블에 항상 들어 있다고 가정하지 않는다. 별도 검증된 보조 source를 사용했다면, 최종 note에 그 source를 함께 적는다.
 
 **1단계: 넓은 스크리닝 (후보 선별)**
 
@@ -304,11 +312,11 @@ AI news research 작업에서는 모든 저장소를 동일하게 취급하면 �
   - 단, `company_profiles`는 ticker당 단일 row가 아니라 `security_id + source` 기준 다중 row 구조이므로, raw DB를 직접 읽을 때는 대표 row 선택 규칙을 먼저 정해야 한다.
   - `[][][]industry[][][]`는 `company_profiles` 컬럼이 아니라 주로 `securities.industry` 또는 `industryLookup.ts`의 CSV cache fallback에서 온다.
   - API 응답을 사용할 때는 `/api/news`가 내려주는 `[][][]companyDescription[][][]`, `[][][]peers[][][]`, `[][][]ipoDate[][][]`, `[][][]marketCap[][][]`, `[][][]industry[][][]`를 우선 source of truth로 본다.
-  - `[][][]float %[][][]`, `[][][]institutional ownership %[][][]`는 `Model_1` 수급 보조 가산점용 보조 지표로 취급한다. canonical app DB에 항상 있다고 가정하지 말고, 별도 source를 썼다면 값과 source를 함께 적는다.
+  - `[][][]float %[][][]`, `[][][]institutional ownership %[][][]`, `[][][]insider ownership %[][][]`, `[][][]short interest %[][][]`는 `Model_1` 수급 보조 가산점용 보조 지표로 취급한다. canonical app DB에 항상 있다고 가정하지 말고, 별도 source를 썼다면 값과 source를 함께 적는다.
 - 단계별 활용 방식:
   - **1단계 (스크리닝)**: description을 보고 뉴스가 기업의 핵심 사업과 직접 연결되는지 빠르게 판단한다. 핵심 사업과 직접 연결되는 뉴스는 허들을 더 낮게, 부수적 사업 관련이면 좀 더 보수적으로 판단할 수 있다.
   - **2단계 (유사사례 조사)**: peers 목록과 industry를 활용해 other-ticker 검색 범위를 효율적으로 좁힌다. ipo_date를 확인해 유사사례의 상장 연차가 현재 ticker와 비슷한지도 기록한다. same-ticker와 other-ticker를 각각 따로 정리할 수 있을 정도로 증거를 모은다.
-  - **3단계 (재분류)**: 과거 유사사례의 반응을 해석할 때, industry 특성(예: 바이오는 임상 결과에 극단 반응, 유틸리티는 규제 뉴스에 둔감)과 ipo_date 기반 성숙도 차이를 보정 요인으로 반영한다. 이때 `float %`, `institutional ownership %`를 보조 가산점 항목으로 함께 적되, 사건 자체나 유사사례 분포를 덮어쓰는 주근거로 사용하지 않는다.
+  - **3단계 (재분류)**: 과거 유사사례의 반응을 해석할 때, industry 특성(예: 바이오는 임상 결과에 극단 반응, 유틸리티는 규제 뉴스에 둔감)과 ipo_date 기반 성숙도 차이를 보정 요인으로 반영한다. 이때 `float %`, `institutional ownership %`, `insider ownership %`, `short interest %`를 보조 수급 항목으로 함께 적되, 사건 자체나 유사사례 분포를 덮어쓰는 주근거로 사용하지 않는다.
 - 이 데이터가 DB에 없거나 비어 있을 수 있다. 그 경우 해당 항목은 건너뛰되, 어떤 컨텍스트가 누락됐는지 로그에 남긴다.
 
 운영 원칙:
@@ -338,7 +346,7 @@ AI news research 작업에서는 모든 저장소를 동일하게 취급하면 �
   1. `same-ticker 유사사례`: 현재 분석 중인 ticker에서 과거 비슷한 이슈가 있었는지, 그때 주가가 어떻게 반응했는지
   2. `other-ticker 유사사례`: 다른 ticker에서 비슷한 이슈가 있었는지, 그때 주가가 어떻게 반응했는지
 - 또한 현재 분석 대상 ticker의 `[][][]market_cap[][][]`를 현재 뉴스 요약 섹션에서 반드시 적고, 다른 사례와 비교할 때 기준 cap으로 삼는다.
-- 또한 각 ticker마다 `[][][]float %[][][]`와 `[][][]institutional ownership %[][][]`를 함께 적고, 그 조합이 왜 `가산점`, `중립`, `가산점 없음`인지 한 줄 설명을 붙인다.
+- 또한 각 ticker마다 `[][][]float %[][][]`, `[][][]institutional ownership %[][][]`, `[][][]insider ownership %[][][]`, `[][][]short interest %[][][]`를 함께 적고, 그 조합이 왜 `가산점`, `중립`, `가산점 없음`, `squeeze 가능`, `유동성 왜곡 주의` 중 무엇으로 이어지는지 한 줄 설명을 붙인다.
 - `same-ticker 유사사례`를 적을 때는 가능하면 아래 항목을 함께 남긴다.
   - 유사 뉴스의 `[][][]date[][][]`
   - 유사 뉴스의 `[][][]title[][][]`
