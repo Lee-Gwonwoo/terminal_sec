@@ -179,6 +179,11 @@ AI news research 작업에서는 모든 저장소를 동일하게 취급하면 �
   - `institutional ownership %`는 위 방식으로 계산하더라도 **실시간 확정치가 아니라 filing-based estimate**로 간주한다. 즉 note에는 가능하면 `institutional ownership estimate %` 또는 `기관보유 비중 추정치`라고 적는다.
   - Finnhub `stock/ownership` 응답이 없거나 비정상이면 `institutional ownership %`를 억지 추정하지 말고 `데이터 없음`으로 남긴다.
   - Finnhub `floatingShare` 또는 `shareOutstanding`이 없으면 `float %`도 계산하지 말고 `데이터 없음`으로 남긴다.
+- `insider ownership %`는 Finnhub에서 기관보유비중처럼 바로 계산되는 canonical 숫자가 아니므로, **토큰을 가장 적게 쓰는 기본 source는 GuruFocus 같은 웹 aggregate page**로 둔다.
+  - 기본 우선순위는 `GuruFocus 등 웹 aggregate 단일 숫자 -> SEC DEF 14A ownership table 교차검증 -> 필요시 개별 Form 3/4 추가 확인` 순서로 둔다.
+  - 토큰 효율만 보면 `GuruFocus`가 `DEF 14A`보다 우선이다. 이유는 page에 `Insider Ownership 0.12%`처럼 완성된 숫자가 바로 노출되기 때문이다.
+  - `DEF 14A`는 원문 근거가 더 강하지만 문서 길이가 길어 토큰이 많이 드므로, 기본적으로는 빠른 숫자 확보가 필요할 때 1차 source로 쓰지 않는다.
+  - 다만 `GuruFocus` 수치가 의심스럽거나 중요한 note에서 원문 확인이 필요하면 `DEF 14A`의 `Security Ownership of Certain Beneficial Owners and Management` 섹션으로 검증한다.
 - 기본 해석 방향은 아래처럼 둔다.
   - `float %`가 높을수록 실제 거래 가능한 물량이 넓게 풀려 있다고 보고, 테마 자금 유입이나 뉴스 기반 추종 매매가 붙을 때 반응성이 커질 수 있는 쪽으로 해석한다.
   - `institutional ownership %`가 낮을수록 기관 포지셔닝이 덜 차 있는 상태로 보고, 뉴스 이후 신규 기관 유입 여지가 상대적으로 큰 쪽으로 해석한다.
@@ -322,6 +327,7 @@ AI news research 작업에서는 모든 저장소를 동일하게 취급하면 �
   - `[][][]float %[][][]`, `[][][]institutional ownership %[][][]`, `[][][]insider ownership %[][][]`, `[][][]short interest %[][][]`는 `Model_1` 수급 보조 가산점용 보조 지표로 취급한다.
   - `[][][]float %[][][]`는 기본적으로 Finnhub `stock/profile2`의 `floatingShare`, `shareOutstanding` 기반 계산값을 우선 사용한다.
   - `[][][]institutional ownership %[][][]`는 기본적으로 Finnhub `stock/ownership`의 기관별 `share` 합계와 Finnhub `stock/profile2.shareOutstanding`을 결합해 계산한 `estimate`를 우선 사용한다.
+  - `[][][]insider ownership %[][][]`는 토큰 효율상 기본적으로 GuruFocus 같은 웹 aggregate 단일 숫자를 우선 확인하고, 중요한 케이스만 SEC `DEF 14A` ownership table로 교차검증한다.
   - canonical app DB에 항상 있다고 가정하지 말고, 값이 실제로 계산됐는지와 source/Finnhub 계산 여부를 함께 적는다.
 - 단계별 활용 방식:
   - **1단계 (스크리닝)**: description을 보고 뉴스가 기업의 핵심 사업과 직접 연결되는지 빠르게 판단한다. 핵심 사업과 직접 연결되는 뉴스는 허들을 더 낮게, 부수적 사업 관련이면 좀 더 보수적으로 판단할 수 있다.
