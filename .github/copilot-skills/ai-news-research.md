@@ -172,6 +172,13 @@ AI news research 작업에서는 모든 저장소를 동일하게 취급하면 �
 
 - `Model_1`에서는 뉴스 사건 자체와 과거 유사사례 분포가 1차 판단 기준이고, **기관보유비중(`institutional ownership %`)이 낮고 유동물량 비중(`float %`)이 높은 구조**는 그 뒤에 붙는 **보조 가산점**으로 사용한다.
 - 여기에 `insider ownership %`와 `short interest %`도 함께 본다. 다만 이 둘도 사건 자체를 덮어쓰는 주근거가 아니라, 뉴스 이후 수급 반응의 증폭 가능성 또는 잠김 구조를 해석하는 **보조 수급 지표**로 사용한다.
+- `float %`와 `institutional ownership %`는 가능하면 **Finnhub 기준으로 직접 받거나 계산해서 사용**한다. 이 둘은 아래처럼 source와 계산 규칙을 고정한다.
+  - `float %`: Finnhub `stock/profile2`의 `floatingShare`와 `shareOutstanding`을 사용해 계산한다. 기본 계산식은 `float % = floatingShare / shareOutstanding * 100` 이다.
+  - `institutional ownership %`: Finnhub `stock/ownership`의 기관별 `share`를 모두 합산한 뒤, Finnhub `stock/profile2.shareOutstanding`으로 나눠 계산한다. 기본 계산식은 `institutional ownership % estimate = sum(stock/ownership.share) / shareOutstanding * 100` 이다.
+  - Finnhub `profile2.shareOutstanding`은 백만 주 단위로 들어올 수 있으므로, 실제 계산 시에는 API 응답 단위를 먼저 맞춘 뒤 계산한다. 예를 들어 현재 구현 검증 기준에서는 `shareOutstanding * 1,000,000`으로 실제 주식 수로 환산한 뒤 분모로 썼다.
+  - `institutional ownership %`는 위 방식으로 계산하더라도 **실시간 확정치가 아니라 filing-based estimate**로 간주한다. 즉 note에는 가능하면 `institutional ownership estimate %` 또는 `기관보유 비중 추정치`라고 적는다.
+  - Finnhub `stock/ownership` 응답이 없거나 비정상이면 `institutional ownership %`를 억지 추정하지 말고 `데이터 없음`으로 남긴다.
+  - Finnhub `floatingShare` 또는 `shareOutstanding`이 없으면 `float %`도 계산하지 말고 `데이터 없음`으로 남긴다.
 - 기본 해석 방향은 아래처럼 둔다.
   - `float %`가 높을수록 실제 거래 가능한 물량이 넓게 풀려 있다고 보고, 테마 자금 유입이나 뉴스 기반 추종 매매가 붙을 때 반응성이 커질 수 있는 쪽으로 해석한다.
   - `institutional ownership %`가 낮을수록 기관 포지셔닝이 덜 차 있는 상태로 보고, 뉴스 이후 신규 기관 유입 여지가 상대적으로 큰 쪽으로 해석한다.
@@ -188,9 +195,9 @@ AI news research 작업에서는 모든 저장소를 동일하게 취급하면 �
   - `short interest %`가 높으면 positive 뉴스에서 squeeze 가능성을 적을 수 있지만, 동시에 시장이 이미 강한 반대 베팅을 하고 있다는 점도 함께 적는다.
   - `short interest %`가 낮으면 squeeze 논리는 약하다고 적고, 반응 해석을 뉴스 자체 강도와 유사사례 분포 쪽에 더 두어야 한다.
 - 이 가산점은 어디까지나 **동일하거나 비슷한 뉴스 강도 후보 사이의 우선순위를 조정하는 보조 규칙**이다. 약한 사건이나 부정적 유사사례 분포를 `float/inst`만으로 억지 상향하면 안 된다.
-- `Model_1` 최종 서술에서는 해당 ticker의 `float %`, `institutional ownership %`, `insider ownership %`, `short interest %`를 **가능한 한 숫자로 명시**해야 한다. 가능하면 `Float 82.7%`, `Institutional Ownership 24.1%`, `Insider Ownership 11.4%`, `Short Interest 23.8%`처럼 본문 또는 표에 바로 적고, 이 수치들이 왜 가산점 또는 경고 메모로 이어졌는지 짧게 설명한다.
+- `Model_1` 최종 서술에서는 해당 ticker의 `float %`, `institutional ownership %`, `insider ownership %`, `short interest %`를 **가능한 한 숫자로 명시**해야 한다. 가능하면 `Float 82.7% (Finnhub profile2 calc)`, `Institutional Ownership Estimate 24.1% (Finnhub ownership sum / shares outstanding)`, `Insider Ownership 11.4%`, `Short Interest 23.8%`처럼 본문 또는 표에 바로 적고, 이 수치들이 왜 가산점 또는 경고 메모로 이어졌는지 짧게 설명한다.
 - 위 수치들 중 일부가 없으면 값을 추정하지 말고 `데이터 없음`으로 적은 뒤, 그 때문에 수급 보조 판단 또는 squeeze/잠김 구조 해석에 한계가 있다고 명시한다.
-- 이 수치들은 현재 `app.db`의 canonical 뉴스 테이블에 항상 들어 있다고 가정하지 않는다. 별도 검증된 보조 source를 사용했다면, 최종 note에 그 source를 함께 적는다.
+- 이 수치들은 현재 `app.db`의 canonical 뉴스 테이블에 항상 들어 있다고 가정하지 않는다. `float %`와 `institutional ownership %`는 기본적으로 Finnhub 기반으로 직접 받거나 계산하고, 다른 보조 source를 썼다면 최종 note에 그 source를 함께 적는다.
 
 **1단계: 넓은 스크리닝 (후보 선별)**
 
@@ -312,7 +319,10 @@ AI news research 작업에서는 모든 저장소를 동일하게 취급하면 �
   - 단, `company_profiles`는 ticker당 단일 row가 아니라 `security_id + source` 기준 다중 row 구조이므로, raw DB를 직접 읽을 때는 대표 row 선택 규칙을 먼저 정해야 한다.
   - `[][][]industry[][][]`는 `company_profiles` 컬럼이 아니라 주로 `securities.industry` 또는 `industryLookup.ts`의 CSV cache fallback에서 온다.
   - API 응답을 사용할 때는 `/api/news`가 내려주는 `[][][]companyDescription[][][]`, `[][][]peers[][][]`, `[][][]ipoDate[][][]`, `[][][]marketCap[][][]`, `[][][]industry[][][]`를 우선 source of truth로 본다.
-  - `[][][]float %[][][]`, `[][][]institutional ownership %[][][]`, `[][][]insider ownership %[][][]`, `[][][]short interest %[][][]`는 `Model_1` 수급 보조 가산점용 보조 지표로 취급한다. canonical app DB에 항상 있다고 가정하지 말고, 별도 source를 썼다면 값과 source를 함께 적는다.
+  - `[][][]float %[][][]`, `[][][]institutional ownership %[][][]`, `[][][]insider ownership %[][][]`, `[][][]short interest %[][][]`는 `Model_1` 수급 보조 가산점용 보조 지표로 취급한다.
+  - `[][][]float %[][][]`는 기본적으로 Finnhub `stock/profile2`의 `floatingShare`, `shareOutstanding` 기반 계산값을 우선 사용한다.
+  - `[][][]institutional ownership %[][][]`는 기본적으로 Finnhub `stock/ownership`의 기관별 `share` 합계와 Finnhub `stock/profile2.shareOutstanding`을 결합해 계산한 `estimate`를 우선 사용한다.
+  - canonical app DB에 항상 있다고 가정하지 말고, 값이 실제로 계산됐는지와 source/Finnhub 계산 여부를 함께 적는다.
 - 단계별 활용 방식:
   - **1단계 (스크리닝)**: description을 보고 뉴스가 기업의 핵심 사업과 직접 연결되는지 빠르게 판단한다. 핵심 사업과 직접 연결되는 뉴스는 허들을 더 낮게, 부수적 사업 관련이면 좀 더 보수적으로 판단할 수 있다.
   - **2단계 (유사사례 조사)**: peers 목록과 industry를 활용해 other-ticker 검색 범위를 효율적으로 좁힌다. ipo_date를 확인해 유사사례의 상장 연차가 현재 ticker와 비슷한지도 기록한다. same-ticker와 other-ticker를 각각 따로 정리할 수 있을 정도로 증거를 모은다.
@@ -347,6 +357,7 @@ AI news research 작업에서는 모든 저장소를 동일하게 취급하면 �
   2. `other-ticker 유사사례`: 다른 ticker에서 비슷한 이슈가 있었는지, 그때 주가가 어떻게 반응했는지
 - 또한 현재 분석 대상 ticker의 `[][][]market_cap[][][]`를 현재 뉴스 요약 섹션에서 반드시 적고, 다른 사례와 비교할 때 기준 cap으로 삼는다.
 - 또한 각 ticker마다 `[][][]float %[][][]`, `[][][]institutional ownership %[][][]`, `[][][]insider ownership %[][][]`, `[][][]short interest %[][][]`를 함께 적고, 그 조합이 왜 `가산점`, `중립`, `가산점 없음`, `squeeze 가능`, `유동성 왜곡 주의` 중 무엇으로 이어지는지 한 줄 설명을 붙인다.
+- 이때 `[][][]float %[][][]`와 `[][][]institutional ownership %[][][]`는 가능하면 source 라벨까지 같이 적는다. 예: `Float 82.7% (Finnhub profile2 calc)`, `Institutional Ownership Estimate 24.1% (Finnhub ownership sum / shares outstanding)`.
 - `same-ticker 유사사례`를 적을 때는 가능하면 아래 항목을 함께 남긴다.
   - 유사 뉴스의 `[][][]date[][][]`
   - 유사 뉴스의 `[][][]title[][][]`
