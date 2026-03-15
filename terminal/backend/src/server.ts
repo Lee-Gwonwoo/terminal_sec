@@ -4,7 +4,7 @@ import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { config } from "./config.js";
 import { initDb } from "./db.js";
-import { getNews, getNewsById, getNewsIdBySourceUrl } from "./services/newsRepository.js";
+import { getModel1News, getModel1NewsById, getNews, getNewsById, getNewsIdBySourceUrl } from "./services/newsRepository.js";
 import { createSavedView, deleteSavedView, listSavedViews } from "./services/savedViewRepository.js";
 import { createWatchlist, deleteWatchlist, listWatchlists, backfillWatchlistSecurityIds } from "./services/watchlistRepository.js";
 import {
@@ -1366,6 +1366,29 @@ app.post("/api/news/change/update-custom", async (req, res, next) => {
       }
     })();
     res.json({ jobId });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/model1/news", async (req, res, next) => {
+  try {
+    const parsedQuery = parseNewsQuery(req.query as Record<string, unknown>);
+    const result = await getModel1News(parsedQuery);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/model1/news/:id", async (req, res, next) => {
+  try {
+    const item = await getModel1NewsById(req.params.id);
+    if (!item) {
+      res.status(404).json({ error: "News item not found" });
+      return;
+    }
+    res.json(item);
   } catch (error) {
     next(error);
   }

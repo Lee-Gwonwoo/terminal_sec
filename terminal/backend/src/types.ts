@@ -61,3 +61,20 @@ export type NewsItem = {
   // ver3: company description (Step 8)
   companyDescription?: string | null;
 };
+
+export type Model1NewsItem = Omit<
+  NewsItem,
+  | "ohlc_ticker"
+  | "ohlc_date"
+  | "change_pct_ohlc_date"
+  | "change_1d_target_date"
+  | "change_pct"
+  | "change_1d_pct"
+  | "change_from_open_pct"
+  | "change_open_to_high_pct"
+  | "change_3d_pct"
+  | "change_7d_pct"
+  | "change_14d_pct"
+  | "change_30d_pct"
+  | "change_computed_at"
+>;

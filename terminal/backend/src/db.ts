@@ -140,6 +140,33 @@ export async function initDb(): Promise<void> {
     "CREATE INDEX IF NOT EXISTS idx_ncm_news_id ON news_change_metrics (news_id);"
   );
 
+  await db.exec("DROP VIEW IF EXISTS model1_current_news_view;");
+  await db.exec(`
+    CREATE VIEW model1_current_news_view AS
+    SELECT ni.id,
+           ni.published_at,
+           ni.source,
+           ni.publisher,
+           ni.origin_url,
+           ni.source_type,
+           ni.title,
+           ni.body,
+           ni.url,
+           ni.tickers_csv,
+           ni.tags_csv,
+           ni.created_at,
+           CASE WHEN nf.extraction_status = 'success' THEN 1 ELSE 0 END AS has_full_text,
+           nf.keywords_json,
+           nf.keywords_status,
+           naa.score AS ai_score,
+           naa.score_evidence AS ai_score_evidence,
+           naa.analysis_status AS ai_analysis_status,
+           naa.keywords_json AS ai_keywords_json
+    FROM news_items ni
+    LEFT JOIN news_fulltext nf ON nf.news_id = ni.id
+    LEFT JOIN news_ai_analysis naa ON naa.news_id = ni.id;
+  `);
+
   // Step 10: publisher column on news_items
   await ensureColumn("news_items", "publisher", "TEXT");
 

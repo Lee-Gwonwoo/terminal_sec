@@ -12,6 +12,7 @@ const ROW_HEIGHT_WITH_ABSTRACT = 148;
 
 // ─── Display mode ───
 type DisplayMode = 'title-only' | 'title-abstract';
+type NewsProjectionMode = 'full' | 'model1-safe';
 
 // ─── Column definition ───
 type ColumnId = 'date' | 'ticker' | 'time' | 'title' | 'publisher' | 'industry' | 'ipoDate' | 'source' | 'changes' | 'fulltext' | 'keywords' | 'score' | 'scoreEvidence' | 'sentiment' | 'peers' | 'companyDesc';
@@ -324,6 +325,16 @@ export function FinnhubNewsWindow({
     } catch { /* ignore */ }
     return 'title-only';
   });
+  const [newsProjection, setNewsProjection] = useState<NewsProjectionMode>(() => {
+    try {
+      const saved = localStorage.getItem('finhub-news-ui-state');
+      if (saved) {
+        const p = JSON.parse(saved);
+        if (p.newsProjection === 'model1-safe') return 'model1-safe';
+      }
+    } catch { /* ignore */ }
+    return 'full';
+  });
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
 
   // Column ordering + visibility
@@ -349,7 +360,11 @@ export function FinnhubNewsWindow({
   const columnMenuRef = useRef<HTMLDivElement>(null);
 
   // Visible columns (filtered + preserving order)
-  const activeColumns = useMemo(() => columns.filter(c => visibleCols.has(c.id)), [columns, visibleCols]);
+  const isModel1SafeMode = newsProjection === 'model1-safe';
+  const activeColumns = useMemo(
+    () => columns.filter(c => visibleCols.has(c.id) && !(isModel1SafeMode && c.id === 'changes')),
+    [columns, visibleCols, isModel1SafeMode],
+  );
   const activeColWidths = useMemo(() => {
     const widthMap = new Map(columns.map((c, i) => [c.id, colWidths[i]]));
     return activeColumns.map(c => widthMap.get(c.id) ?? c.defaultWidth);
@@ -367,6 +382,8 @@ export function FinnhubNewsWindow({
       return next;
     });
   }, []);
+
+  const newsApiBase = isModel1SafeMode ? `${API_BASE}/api/model1/news` : `${API_BASE}/api/news`;
 
   // Sort
   const [sort, setSort] = useState<SortState>({ column: null, dir: null });
@@ -638,7 +655,7 @@ export function FinnhubNewsWindow({
       }
       params.set('limit', '500');
 
-      const res = await fetch(`${API_BASE}/api/news?${params.toString()}`, { signal: controller.signal });
+      const res = await fetch(`${newsApiBase}?${params.toString()}`, { signal: controller.signal });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || `HTTP ${res.status}`);
@@ -653,7 +670,7 @@ export function FinnhubNewsWindow({
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, [selectedBookmarkFolderId, sourceTypeFilter, fromDate, toDate]);
+  }, [selectedBookmarkFolderId, sourceTypeFilter, fromDate, toDate, newsApiBase]);
 
   // ─── Fetch more (cursor-based append) ───
   const fetchMore = useCallback(async () => {
@@ -684,7 +701,7 @@ export function FinnhubNewsWindow({
       params.set('limit', '500');
       params.set('cursor', nextCursor);
 
-      const res = await fetch(`${API_BASE}/api/news?${params.toString()}`);
+      const res = await fetch(`${newsApiBase}?${params.toString()}`);
       const data = await res.json();
       if (!res.ok) return;
       const items: BackendNewsItem[] = data.items ?? [];
@@ -698,7 +715,13 @@ export function FinnhubNewsWindow({
       setLoadingMore(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nextCursor, loadingMore, selectedBookmarkFolderId, sourceTypeFilter, fromDate, toDate]);
+  }, [nextCursor, loadingMore, selectedBookmarkFolderId, sourceTypeFilter, fromDate, toDate, newsApiBase]);
+
+  useEffect(() => {
+    if (isModel1SafeMode && sort.column === 'changes') {
+      setSort({ column: null, dir: null });
+    }
+  }, [isModel1SafeMode, sort.column]);
 
   useEffect(() => {
     fetchBookmarkFolders();
@@ -1204,12 +1227,13 @@ export function FinnhubNewsWindow({
     });
   }, [displayMode]);
 
-  // ─── Persist UI state (visibleCols / displayMode / sourceTypeFilter / searchQuery / tickerQuery / fromDate / toDate) ───
+  // ─── Persist UI state (visibleCols / displayMode / sourceTypeFilter / projection / searchQuery / tickerQuery / fromDate / toDate) ───
   useEffect(() => {
     try {
       localStorage.setItem('finhub-news-ui-state', JSON.stringify({
         visibleCols: Array.from(visibleCols),
         displayMode,
+        newsProjection,
         sourceTypeFilter,
         searchQuery,
         tickerQuery,
@@ -1218,7 +1242,7 @@ export function FinnhubNewsWindow({
         selectedBookmarkFolderId,
       }));
     } catch { /* quota / SSR */ }
-  }, [visibleCols, displayMode, sourceTypeFilter, searchQuery, tickerQuery, fromDate, toDate, selectedBookmarkFolderId]);
+  }, [visibleCols, displayMode, newsProjection, sourceTypeFilter, searchQuery, tickerQuery, fromDate, toDate, selectedBookmarkFolderId]);
 
   // ─── Save / Load ───
   const handleSaveSearch = () => {
@@ -1596,6 +1620,31 @@ export function FinnhubNewsWindow({
                 {getSourceTypeLabel(st)}
               </button>
             ))}
+          </div>
+
+          <div className="flex items-center border border-gray-300 dark:border-gray-600 rounded overflow-hidden">
+            <button
+              onClick={() => setNewsProjection('full')}
+              className={`px-2 py-1.5 text-[10px] whitespace-nowrap transition-colors ${
+                newsProjection === 'full'
+                  ? 'bg-blue-500 text-white'
+                  : 'hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400'
+              }`}
+              title="General news view with full payload"
+            >
+              Full View
+            </button>
+            <button
+              onClick={() => setNewsProjection('model1-safe')}
+              className={`px-2 py-1.5 text-[10px] whitespace-nowrap transition-colors ${
+                newsProjection === 'model1-safe'
+                  ? 'bg-emerald-600 text-white'
+                  : 'hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400'
+              }`}
+              title="Model_1 safe view: uses /api/model1/news and hides current change columns"
+            >
+              Model_1 Safe
+            </button>
           </div>
 
           <div className="relative">
@@ -2071,6 +2120,12 @@ export function FinnhubNewsWindow({
             <span className="text-[10px] text-red-500 truncate max-w-[200px]" title={error}>{error}</span>
           )}
 
+          {isModel1SafeMode && (
+            <span className="text-[10px] text-emerald-600 dark:text-emerald-400 truncate" title="Current news is loaded from /api/model1/news without change fields.">
+              Model_1 safe payload active
+            </span>
+          )}
+
           {/* Column visibility toggle */}
           <div className="relative ml-auto" ref={columnMenuRef}>
             <button
@@ -2089,17 +2144,26 @@ export function FinnhubNewsWindow({
                   {columns.map(col => (
                     <label
                       key={col.id}
-                      className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer"
+                      className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs rounded ${isModel1SafeMode && col.id === 'changes' ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer'}`}
                     >
                       <input
                         type="checkbox"
-                        checked={visibleCols.has(col.id)}
-                        onChange={() => toggleColumnVisibility(col.id)}
+                        checked={col.id === 'changes' && isModel1SafeMode ? false : visibleCols.has(col.id)}
+                        onChange={() => {
+                          if (isModel1SafeMode && col.id === 'changes') return;
+                          toggleColumnVisibility(col.id);
+                        }}
+                        disabled={isModel1SafeMode && col.id === 'changes'}
                         className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
                       />
                       <span>{col.label}</span>
                     </label>
                   ))}
+                  {isModel1SafeMode && (
+                    <div className="px-3 py-1 text-[10px] text-emerald-600 dark:text-emerald-400">
+                      Model_1 safe mode hides current-news change columns.
+                    </div>
+                  )}
                 </div>
               </div>
             )}

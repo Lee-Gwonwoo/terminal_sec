@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { getDb } from "../db.js";
-import type { NewsItem, NewsQuery } from "../types.js";
+import type { Model1NewsItem, NewsItem, NewsQuery } from "../types.js";
 import { getIndustry } from "./industryLookup.js";
 
 function clampInt(value: number, min: number, max: number): number {
@@ -363,6 +363,108 @@ export async function getNewsById(id: string): Promise<NewsItem | null> {
   return mapNewsRow(row, sentimentMap, undefined, undefined, marketCapMap, ipoMap);
 }
 
+export async function getModel1News(query: NewsQuery): Promise<{ items: Model1NewsItem[]; nextCursor?: string }> {
+  const where: string[] = [];
+  const values: unknown[] = [];
+  let extraJoins = "";
+
+  if (query.bookmarkFolderId) {
+    extraJoins += ` INNER JOIN bookmark_items bi ON bi.news_id = mn.id AND bi.folder_id = ?`;
+    values.push(query.bookmarkFolderId);
+  }
+
+  if (query.keyword) {
+    values.push(`%${query.keyword.toLowerCase()}%`);
+    where.push(`LOWER(mn.title || ' ' || mn.body) LIKE ?`);
+  }
+
+  if (query.tickers?.length) {
+    const tickerClauses = query.tickers.map(() => "mn.tickers_csv LIKE ?");
+    for (const ticker of query.tickers) {
+      values.push(`%,${ticker.toUpperCase()},%`);
+    }
+    where.push(`(${tickerClauses.join(" OR ")})`);
+  }
+
+  if (query.sources?.length) {
+    const sourcePlaceholders = query.sources.map(() => "?").join(",");
+    values.push(...query.sources);
+    where.push(`mn.source_type IN (${sourcePlaceholders})`);
+  }
+
+  if (query.sourceNames?.length) {
+    const sourcePlaceholders = query.sourceNames.map(() => "?").join(",");
+    values.push(...query.sourceNames);
+    where.push(`mn.source IN (${sourcePlaceholders})`);
+  }
+
+  if (query.tags?.length) {
+    const tagClauses = query.tags.map(() => "mn.tags_csv LIKE ?");
+    for (const tag of query.tags) {
+      values.push(`%,${tag.toLowerCase()},%`);
+    }
+    where.push(`(${tagClauses.join(" OR ")})`);
+  }
+
+  if (query.from) {
+    values.push(query.from);
+    where.push(`mn.published_at >= ?`);
+  }
+
+  if (query.to) {
+    values.push(`${query.to}T23:59:59.999Z`);
+    where.push(`mn.published_at <= ?`);
+  }
+
+  const cursor = decodeCursor(query.cursor);
+  if (cursor) {
+    values.push(cursor.publishedAt, cursor.publishedAt, cursor.id);
+    where.push(`(mn.published_at < ? OR (mn.published_at = ? AND mn.id < ?))`);
+  }
+
+  const requestedLimit = typeof query.limit === "number" && Number.isFinite(query.limit) ? query.limit : 500;
+  const rangeDays = computeRangeDays(query.from, query.to);
+  const policyMax = capLimitByRangeDays(rangeDays);
+  const limit = clampInt(Math.min(requestedLimit, policyMax), 1, 500);
+  values.push(limit + 1);
+
+  const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+  const sql = `
+    SELECT mn.id, mn.published_at, mn.source, mn.publisher, mn.origin_url, mn.source_type, mn.title, mn.body, mn.url, mn.tickers_csv, mn.tags_csv, mn.created_at,
+           mn.has_full_text, mn.keywords_json, mn.keywords_status,
+           mn.ai_score, mn.ai_score_evidence, mn.ai_analysis_status, mn.ai_keywords_json
+    FROM model1_current_news_view mn
+    ${extraJoins}
+    ${whereSql}
+    ORDER BY mn.published_at DESC, mn.id DESC
+    LIMIT ?
+  `;
+
+  const rows = await getDb().all<any[]>(sql, values);
+  const { sentimentMap, peersMap, marketCapMap, descMap, ipoMap } = await loadNewsEnrichmentMaps(rows);
+  const mapped = rows.map((row) => mapModel1NewsRow(row, sentimentMap, peersMap, descMap, marketCapMap, ipoMap));
+  const hasMore = mapped.length > limit;
+  const items = hasMore ? mapped.slice(0, limit) : mapped;
+  const nextCursor = hasMore ? encodeCursor(items[items.length - 1]) : undefined;
+
+  return { items, nextCursor }; 
+}
+
+export async function getModel1NewsById(id: string): Promise<Model1NewsItem | null> {
+  const row = await getDb().get<any>(
+    `SELECT mn.id, mn.published_at, mn.source, mn.publisher, mn.origin_url, mn.source_type, mn.title, mn.body, mn.url, mn.tickers_csv, mn.tags_csv, mn.created_at,
+            mn.has_full_text, mn.keywords_json, mn.keywords_status,
+            mn.ai_score, mn.ai_score_evidence, mn.ai_analysis_status, mn.ai_keywords_json
+     FROM model1_current_news_view mn
+     WHERE mn.id = ?`,
+    [id],
+  );
+  if (!row) return null;
+
+  const { sentimentMap, marketCapMap, ipoMap } = await loadSingleNewsEnrichmentMaps(row);
+  return mapModel1NewsRow(row, sentimentMap, undefined, undefined, marketCapMap, ipoMap);
+}
+
 export async function insertNewsItem(params: {
   publishedAt: string;
   source: string;
@@ -492,6 +594,226 @@ function mapNewsRow(
     // Company description
     companyDescription: (primaryTicker && descMap ? descMap.get(primaryTicker) : undefined) ?? null,
   };
+}
+
+function mapModel1NewsRow(
+  row: any,
+  sentimentMap?: Map<string, { bullishPct: number | null; bearishPct: number | null; newsScore: number | null }>,
+  peersMap?: Map<string, string[]>,
+  descMap?: Map<string, string>,
+  marketCapMap?: Map<string, number | null>,
+  ipoMap?: Map<string, string | null>,
+): Model1NewsItem {
+  const tickers = splitCsvEnvelope(row.tickers_csv);
+  const primaryTicker = tickers.length > 0 ? tickers[0] : null;
+  const sent = primaryTicker && sentimentMap ? sentimentMap.get(primaryTicker) : undefined;
+
+  return {
+    id: row.id,
+    published_at: row.published_at,
+    source: row.source,
+    publisher: row.publisher ?? null,
+    origin_url: row.origin_url ?? null,
+    source_type: row.source_type,
+    title: row.title,
+    body: row.body,
+    url: row.url,
+    tickers,
+    tags: splitCsvEnvelope(row.tags_csv),
+    created_at: row.created_at,
+    hasFullText: row.has_full_text === 1,
+    keywords: parseKeywords(row),
+    keywordsStatus: row.keywords_status ?? null,
+    industry: (() => {
+      for (const ticker of tickers) {
+        const industry = getIndustry(ticker);
+        if (industry) return industry;
+      }
+      return null;
+    })(),
+    ipoDate: (primaryTicker && ipoMap ? ipoMap.get(primaryTicker) : undefined) ?? null,
+    marketCap: (primaryTicker && marketCapMap ? marketCapMap.get(primaryTicker) : undefined) ?? null,
+    score: row.ai_score ?? null,
+    scoreEvidence: row.ai_score_evidence ?? null,
+    analysisStatus: row.ai_analysis_status ?? null,
+    sentimentBullishPct: sent?.bullishPct ?? null,
+    sentimentBearishPct: sent?.bearishPct ?? null,
+    companyNewsScore: sent?.newsScore ?? null,
+    peers: (primaryTicker && peersMap ? peersMap.get(primaryTicker) : undefined) ?? [],
+    companyDescription: (primaryTicker && descMap ? descMap.get(primaryTicker) : undefined) ?? null,
+  };
+}
+
+function parseKeywords(row: { ai_analysis_status?: string | null; ai_keywords_json?: string | null; keywords_json?: string | null }): string[] {
+  if (row.ai_analysis_status === "completed" && row.ai_keywords_json) {
+    return JSON.parse(row.ai_keywords_json);
+  }
+  return row.keywords_json ? JSON.parse(row.keywords_json) : [];
+}
+
+async function loadNewsEnrichmentMaps(rows: any[]): Promise<{
+  sentimentMap: Map<string, { bullishPct: number | null; bearishPct: number | null; newsScore: number | null }>;
+  peersMap: Map<string, string[]>;
+  marketCapMap: Map<string, number | null>;
+  descMap: Map<string, string>;
+  ipoMap: Map<string, string | null>;
+}> {
+  const tickerSet = collectPrimaryTickers(rows);
+  const sentimentMap = await loadSentimentMap(tickerSet);
+  const peersMap = await loadPeersMap(tickerSet);
+  const marketCapMap = await loadMarketCapMap(tickerSet);
+  const descMap = await loadDescriptionMap(tickerSet);
+  const ipoMap = await loadIpoMap(tickerSet);
+  return { sentimentMap, peersMap, marketCapMap, descMap, ipoMap };
+}
+
+async function loadSingleNewsEnrichmentMaps(row: any): Promise<{
+  sentimentMap: Map<string, { bullishPct: number | null; bearishPct: number | null; newsScore: number | null }>;
+  marketCapMap: Map<string, number | null>;
+  ipoMap: Map<string, string | null>;
+}> {
+  const tickerSet = collectPrimaryTickers([row]);
+  return {
+    sentimentMap: await loadSentimentMap(tickerSet),
+    marketCapMap: await loadMarketCapMap(tickerSet),
+    ipoMap: await loadIpoMap(tickerSet),
+  };
+}
+
+function collectPrimaryTickers(rows: any[]): Set<string> {
+  const tickerSet = new Set<string>();
+  for (const row of rows) {
+    const tickers = splitCsvEnvelope(row.tickers_csv ?? "");
+    if (tickers.length > 0) tickerSet.add(tickers[0]);
+  }
+  return tickerSet;
+}
+
+async function loadSentimentMap(
+  tickerSet: Set<string>,
+): Promise<Map<string, { bullishPct: number | null; bearishPct: number | null; newsScore: number | null }>> {
+  const sentimentMap = new Map<string, { bullishPct: number | null; bearishPct: number | null; newsScore: number | null }>();
+  if (tickerSet.size === 0) {
+    return sentimentMap;
+  }
+
+  const tickerArr = Array.from(tickerSet);
+  const placeholders = tickerArr.map(() => "?").join(",");
+  const sentRows = await getDb().all<any[]>(
+    `SELECT ticker, sentiment_bullish_pct, sentiment_bearish_pct, company_news_score
+     FROM news_sentiment_snapshots
+     WHERE ticker IN (${placeholders})
+     AND asof_date = (SELECT MAX(asof_date) FROM news_sentiment_snapshots s2 WHERE s2.ticker = news_sentiment_snapshots.ticker)`,
+    tickerArr,
+  );
+  for (const row of sentRows) {
+    sentimentMap.set(row.ticker, {
+      bullishPct: row.sentiment_bullish_pct,
+      bearishPct: row.sentiment_bearish_pct,
+      newsScore: row.company_news_score,
+    });
+  }
+  return sentimentMap;
+}
+
+async function loadPeersMap(tickerSet: Set<string>): Promise<Map<string, string[]>> {
+  const peersMap = new Map<string, string[]>();
+  if (tickerSet.size === 0) {
+    return peersMap;
+  }
+
+  const tickerArr = Array.from(tickerSet);
+  const placeholders = tickerArr.map(() => "?").join(",");
+  const peersRows = await getDb().all<any[]>(
+    `SELECT s.ticker, cp.peers_json
+     FROM company_profiles cp
+     JOIN securities s ON s.id = cp.security_id
+     WHERE s.ticker IN (${placeholders}) AND cp.peers_json IS NOT NULL
+     ORDER BY cp.fetched_at DESC`,
+    tickerArr,
+  );
+  for (const row of peersRows) {
+    if (!peersMap.has(row.ticker) && row.peers_json) {
+      try {
+        peersMap.set(row.ticker, JSON.parse(row.peers_json));
+      } catch {
+        // Skip malformed peers_json rows.
+      }
+    }
+  }
+  return peersMap;
+}
+
+async function loadMarketCapMap(tickerSet: Set<string>): Promise<Map<string, number | null>> {
+  const marketCapMap = new Map<string, number | null>();
+  if (tickerSet.size === 0) {
+    return marketCapMap;
+  }
+
+  const tickerArr = Array.from(tickerSet);
+  const placeholders = tickerArr.map(() => "?").join(",");
+  const marketCapRows = await getDb().all<any[]>(
+    `SELECT s.ticker, cp.market_cap
+     FROM company_profiles cp
+     JOIN securities s ON s.id = cp.security_id
+     WHERE s.ticker IN (${placeholders}) AND cp.market_cap IS NOT NULL
+     ORDER BY cp.fetched_at DESC`,
+    tickerArr,
+  );
+  for (const row of marketCapRows) {
+    if (!marketCapMap.has(row.ticker)) {
+      marketCapMap.set(row.ticker, row.market_cap ?? null);
+    }
+  }
+  return marketCapMap;
+}
+
+async function loadDescriptionMap(tickerSet: Set<string>): Promise<Map<string, string>> {
+  const descMap = new Map<string, string>();
+  if (tickerSet.size === 0) {
+    return descMap;
+  }
+
+  const tickerArr = Array.from(tickerSet);
+  const placeholders = tickerArr.map(() => "?").join(",");
+  const descRows = await getDb().all<any[]>(
+    `SELECT s.ticker, cp.description
+     FROM company_profiles cp
+     JOIN securities s ON s.id = cp.security_id
+     WHERE s.ticker IN (${placeholders}) AND cp.description IS NOT NULL AND cp.description != ''
+     ORDER BY cp.fetched_at DESC`,
+    tickerArr,
+  );
+  for (const row of descRows) {
+    if (!descMap.has(row.ticker)) {
+      descMap.set(row.ticker, row.description);
+    }
+  }
+  return descMap;
+}
+
+async function loadIpoMap(tickerSet: Set<string>): Promise<Map<string, string | null>> {
+  const ipoMap = new Map<string, string | null>();
+  if (tickerSet.size === 0) {
+    return ipoMap;
+  }
+
+  const tickerArr = Array.from(tickerSet);
+  const placeholders = tickerArr.map(() => "?").join(",");
+  const ipoRows = await getDb().all<any[]>(
+    `SELECT s.ticker, cp.ipo_date
+     FROM company_profiles cp
+     JOIN securities s ON s.id = cp.security_id
+     WHERE s.ticker IN (${placeholders}) AND cp.ipo_date IS NOT NULL AND cp.ipo_date != ''
+     ORDER BY cp.fetched_at DESC`,
+    tickerArr,
+  );
+  for (const row of ipoRows) {
+    if (!ipoMap.has(row.ticker)) {
+      ipoMap.set(row.ticker, row.ipo_date ?? null);
+    }
+  }
+  return ipoMap;
 }
 
 function splitCsvEnvelope(csv: string): string[] {

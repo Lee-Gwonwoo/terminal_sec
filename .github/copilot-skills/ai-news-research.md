@@ -156,6 +156,9 @@ AI news research 작업에서는 모든 저장소를 동일하게 취급하면 �
 - 다시 말해 `Model_1`에서 허용되는 가격 데이터는 항상 `현재 분석 중인 뉴스의 published_at 이전`에 나온 기사들의 historical reaction뿐이다.
 - 따라서 현재 기사의 importance는 먼저 `headline / body / full_text / 기업 컨텍스트`로 1차 판단하고, 그 다음 `과거 유사사례의 change 분포`로만 보강한다.
 - 이 원칙은 `change_from_open_pct`에도 동일하게 적용된다. intraday 반응 구조 해석은 과거 유사사례에 대해서만 가능하며, 현재 기사에 대해서는 같은 날 intraday move를 보고 importance를 올리거나 내리면 안 된다.
+- 구현 레벨에서는 **current-news용 API와 일반 뉴스 API를 분리**하는 것을 기본값으로 둔다. 현재 레포 기준으로는 backend `[][][]/api/model1/news[][][]`, `[][][]/api/model1/news/:id[][][]`가 `[][][]model1_current_news_view[][][]`만 조회하는 Model_1 safe endpoint다.
+- 위 Model_1 safe endpoint는 `news_items` / `news_fulltext` / `news_ai_analysis` 기반 projection만 반환하고, current-news용 응답 JSON에는 `[][][]change_*[][][]`, `[][][]ohlc_*[][][]` 필드를 포함하지 않는다.
+- 따라서 **현재 뉴스 목록/상세를 Model_1로 읽는 UI나 agent는 공용 `[][][]/api/news[][][]`가 아니라 `[][][]/api/model1/news[][][]` 계열을 사용**해야 한다. 공용 `[][][]/api/news[][][]`는 일반 운영/모니터링용이며 change 필드를 계속 포함할 수 있다.
 
 **Model_1 시가총액 범위 가드레일 (필수)**
 
