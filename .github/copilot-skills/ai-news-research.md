@@ -1,4 +1,4 @@
-# AI News Research
+﻿# AI News Research
 
 ### 언제 쓰나
 - 채팅에서 `ai research`, `AI research`, `ai news research`처럼 AI 리서치 관련 작업을 말했고, 뉴스/종목 영향 해석이나 사례 분류가 포함될 때.

@@ -70,6 +70,25 @@
 - 위 수치들 중 일부가 없으면 값을 추정하지 말고 `데이터 없음`으로 적은 뒤, 그 때문에 수급 보조 판단 또는 squeeze/잠김 구조 해석에 한계가 있다고 명시한다.
 - 이 수치들은 현재 `app.db`의 canonical 뉴스 테이블에 항상 들어 있다고 가정하지 않는다. `float %`와 `institutional ownership %`는 기본적으로 Finnhub 기반으로 직접 받거나 계산하고, 다른 보조 source를 썼다면 최종 note에 그 source를 함께 적는다.
 
+**Model_1 ranking 확정 순서 규칙 (필수)**
+
+- `Model_1`에서는 **1단계 스크리닝 직후에 final primary ranking을 확정하면 안 된다.** 1단계의 산출물은 어디까지나 `후보 리스트` 또는 `임시 상위 후보`여야 한다.
+- 현재 기간 뉴스 중에서 `primary` 경쟁 후보가 2개 이상 보이기 시작하면, **final rank를 쓰기 전에** 최소한 아래 항목을 먼저 붙인다.
+  - `market_cap`
+  - `float %`
+  - `institutional ownership % estimate`
+  - 가능하면 `insider ownership %`, `short interest %`
+- 즉 실무 순서는 기본적으로 아래처럼 고정한다.
+  1. `1단계`: 사건 강도 기준으로 후보를 넓게 통과시킨다.
+  2. `수급/시총 보강`: final 경쟁 후보들에 대해 `market_cap`, `float %`, `institutional ownership % estimate`를 먼저 확보한다.
+  3. `임시 순위`: 필요하면 `수급 미반영 임시 상위 후보`까지는 적을 수 있다.
+  4. `2단계`: same-ticker / other-ticker 유사사례를 충분히 모은다.
+  5. `3단계`: 유사사례 분포 + 시총 맥락 + 수급 가산점을 함께 보고 final importance / final ranking을 확정한다.
+- 따라서 문서나 research page에서 `Primary 1`, `Primary 2`, `Top pick`, `최종 rank 1`처럼 **확정형 표현**을 쓰려면, 적어도 해당 경쟁 후보들 사이에서는 `float %`와 `institutional ownership % estimate`가 이미 반영돼 있어야 한다.
+- 반대로 이 수치들이 아직 없는 상태에서는 `스크리닝 통과 후보`, `임시 상위 후보`, `수급 미반영 provisional rank`처럼 **임시 라벨**만 허용한다. 이를 final ranking처럼 쓰면 안 된다.
+- 수급 보조 가산점은 사건 자체를 뒤집는 1차 기준이 아니지만, **비슷한 뉴스 강도의 후보 사이 순서를 닫는 tie-breaker**이므로 final ranking 직전에 반드시 반영한다.
+- 만약 source 제약 때문에 `float %` 또는 `institutional ownership % estimate`를 확보하지 못했다면, `final ranking` 대신 `보수적 provisional ranking`으로 남기고, 어떤 source를 시도했고 왜 못 구했는지 함께 적는다.
+
 **1단계: 넓은 스크리닝 (후보 선별)**
 
 - 목적: 잠재적으로 중요한 뉴스를 **놓치지 않고** 넓게 픽한다.
@@ -83,6 +102,7 @@
   - 기본 분석 대상 ticker가 `100B` 미만인가 (`100B` 이상이면 기본적으로 reference 후보로만 남긴다)
 - 산출물: **후보 리스트** (예: 뉴스 30~50건, 또는 전체 뉴스 대비 상위 10~30% 수준)
 - 핵심 원칙: 이 단계에서 엄격하게 자르면, 2단계에서 유사사례를 조사해볼 기회 자체가 사라진다. 따라서 **false negative를 줄이는 것**이 1단계의 최우선 목표다.
+- 이 단계에서는 `final primary`, `최종 rank 1`, `확정 top pick`처럼 **확정형 ranking 표현을 쓰지 않는다.** 필요하면 `임시 상위 후보`까지만 적는다.
 
 **1단계 사고과정 기록 규칙 (필수)**
 
@@ -105,6 +125,7 @@
   4. 다른 ticker에서도 비슷한 뉴스/이슈가 있었는지 확인한다 (other-ticker).
   5. 필요하면 `industry`가 비슷한 종목으로 범위를 넓혀 유사 사례를 추가로 찾는다.
   6. 각 유사사례에 대해 **change 데이터 전체**(8개 metric)를 수집한다.
+  7. final 경쟁 후보들에 대해서는 유사사례 조사와 병행해 `market_cap`, `float %`, `institutional ownership % estimate`를 확보해 둔다.
 - 추가 수행 규칙:
   7. **확증 사례와 반례를 함께 수집한다.** 현재 뉴스를 bullish/bearish로 보고 싶더라도, 그 방향과 반대였던 유사사례를 의도적으로 같이 모은다.
   8. **시가총액 구간을 같이 기록한다.** other-ticker 사례를 쓸 때는 small-cap 사례만 잔뜩 모아 놓고 large-cap 현재 뉴스에 그대로 대입하지 않는다.
@@ -147,6 +168,7 @@
 - 목적: 1단계 판단 + 2단계 증거를 종합해서 **최종 등급**을 확정한다.
 - 허들: **높음**. 증거 기반으로만 판단한다.
 - 이 단계에서는 **대표 사례 중심 수동 인상비평**으로 끝내면 안 된다. 최소한 `same-ticker 분포`, `other-ticker 분포`, `시총 맥락`, `선반영 여부`를 함께 보고 재판단해야 한다.
+- 이 단계에서만 `Primary 1/2/3`, `Top pick`, `최종 importance 순서` 같은 **확정형 ranking**을 닫는다. 1단계나 2단계 중간 메모에서 이미 확정 순서를 적어두고, 나중에 수급 가산점을 덧붙이는 방식은 지양한다.
 - 이 단계에서 할 수 있는 것:
   - 1단계에서 "중요"로 뽑았는데, 과거 유사사례가 전부 무반응이면 → **중요도 하향**
   - 1단계에서 "경계선"으로 애매했는데, 과거 유사사례에서 같은 market cap 구간에서 큰 움직임이 반복됐으면 → **중요도 상향**
@@ -234,6 +256,7 @@
 - 또한 현재 분석 대상 ticker의 `[][][]market_cap[][][]`를 현재 뉴스 요약 섹션에서 반드시 적고, 다른 사례와 비교할 때 기준 cap으로 삼는다.
 - 또한 각 ticker마다 `[][][]float %[][][]`, `[][][]institutional ownership %[][][]`, `[][][]insider ownership %[][][]`, `[][][]short interest %[][][]`를 함께 적고, 그 조합이 왜 `가산점`, `중립`, `가산점 없음`, `squeeze 가능`, `유동성 왜곡 주의` 중 무엇으로 이어지는지 한 줄 설명을 붙인다.
 - 이때 `[][][]float %[][][]`와 `[][][]institutional ownership %[][][]`는 가능하면 source 라벨까지 같이 적는다. 예: `Float 82.7% (Finnhub profile2 calc)`, `Institutional Ownership Estimate 24.1% (Finnhub ownership sum / shares outstanding)`.
+- 여러 ticker를 같은 날짜 구간 안에서 서로 비교해 `Primary 1`, `Primary 2`처럼 순서를 매길 때는, **해당 경쟁 ticker들에 대한 수급 가산점 반영이 끝난 뒤에만** 최종 순서를 쓴다. 수급 보강이 사후에 들어갔다면 기존 ranking을 그대로 두지 말고 순서를 다시 검토한다.
 - `same-ticker 유사사례`를 적을 때는 가능하면 아래 항목을 함께 남긴다.
   - 유사 뉴스의 `[][][]date[][][]`
   - 유사 뉴스의 `[][][]title[][][]`
