@@ -139,7 +139,10 @@
 ## 스킬 지침(상황별)
 아래 규칙들은 특정 상황에서만 적용됩니다. 자세한 내용은 `.github/copilot-skills/`를 참고하세요:
 - [플랜 & 에이전트 로그](copilot-skills/planning.md)
-- [AI 뉴스 리서치](copilot-skills/ai-news-research.md)
+- [AI 뉴스 리서치 (공통)](copilot-skills/ai-news-research.md)
+  - [Model_1](copilot-skills/ai-news-research_model1.md)
+  - [Model_2](copilot-skills/ai-news-research_model2.md)
+  - [Model_3](copilot-skills/ai-news-research_model3.md)
 - [Wrapper + base 패턴 (momentum)](copilot-skills/momentum-wrapper-base.md)
 - [Indicator calculators](copilot-skills/indicator-calculators.md)
 - [딥러닝 트레이너](copilot-skills/deep-learning-trainers.md)
