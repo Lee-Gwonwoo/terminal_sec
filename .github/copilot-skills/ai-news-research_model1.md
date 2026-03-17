@@ -90,6 +90,10 @@
 - `insider %`가 실제로 확보되지 않았으면 추정하지 말고 `N/A` 또는 `데이터 없음`으로 적는다. 빈 칸으로 숨기지 않는다.
 - 표 안의 숫자는 가능하면 `%`까지 붙인 짧은 형식으로 적는다. 예: `82.7%`, `24.1%`, `N/A`.
 - 상단 표는 raw Markdown에서도 한눈에 스캔되어야 하므로, 컬럼 수가 많아지면 headline/근거 문장을 짧게 줄이고 수급/등급 컬럼을 유지하는 쪽을 우선한다.
+- 여러 날짜 note에서는 **`primary`만 표에 넣고 `secondary`를 본문 아래로 숨기지 않는다.**
+  - 권장 구조는 `primary 확정 표` + `secondary/watch 보조 표`의 2단 구성이다.
+  - `secondary`는 가능하면 `방향`, `Float %`, `Institutional %`, `Insider %`, `수급 가산점`, `최종 등급`까지 함께 적는다. 다만 아직 수급/증거 보강이 덜 끝났으면 `보류`, `provisional`, `❔ Pending`으로 표기한다.
+  - `watch`는 상세 분석을 끝내지 않았더라도, 적어도 `Ticker`, `Headline (요약)`, `watch 사유`는 상단 표 또는 표 바로 아래 보조 표에 남겨 사용자가 어떤 이름들이 watch인지 즉시 볼 수 있게 한다.
 
 **Model_1 상단 요약 표 방향 표기 규칙 (필수)**
 
@@ -132,6 +136,8 @@
 - 수급 데이터 또는 유사사례 조사가 아직 덜 끝난 상태에서는 `A+` 계열 등급 대신 `보류`, `임시 A군`, `provisional` 같은 표현만 허용한다.
 - `Medium-High`, `Medium` 같은 서술형 강도 라벨을 계속 쓸 수는 있지만, 상단 요약 표에는 가능하면 이를 `A-`, `B+`처럼 **문자 등급으로 한 번 더 압축**해 같이 적는다.
 - 본문 3단계 결론에도 가능하면 `최종 등급: A- (Primary)`처럼 **letter grade + importance 라벨**을 같이 적는다.
+- `secondary`도 최종 note에 남기는 경우에는, 본문 3단계 결론에 `최종 등급: B+ (Secondary)`처럼 **letter grade + importance 라벨**을 같이 적는다.
+- 즉 `secondary`는 요약 메모만 남기고 조사 축을 생략하는 카테고리가 아니다. 최종 산출물에 포함했다면 `primary`와 같은 구조로 설명하고, importance만 한 단계 낮게 닫는다.
 
 **Model_1 상단 요약 표 권장 컬럼 예시**
 
@@ -174,6 +180,7 @@
   5. `3단계`: 유사사례 분포 + 시총 맥락 + 수급 가산점을 함께 보고 final importance / final ranking을 확정한다.
 - 따라서 문서나 research page에서 `Primary 1`, `Primary 2`, `Top pick`, `최종 rank 1`처럼 **확정형 표현**을 쓰려면, 적어도 해당 경쟁 후보들 사이에서는 `float %`와 `institutional ownership % estimate`가 이미 반영돼 있어야 한다.
 - 반대로 이 수치들이 아직 없는 상태에서는 `스크리닝 통과 후보`, `임시 상위 후보`, `수급 미반영 provisional rank`처럼 **임시 라벨**만 허용한다. 이를 final ranking처럼 쓰면 안 된다.
+- `secondary`도 같은 원칙을 따른다. 즉 `secondary 1`, `secondary top`, `차점 확정`처럼 닫으려면 최소한 해당 후보에도 `market_cap`, `float %`, `institutional ownership % estimate`가 먼저 반영돼 있어야 한다.
 - 수급 가산점은 사건 자체를 뒤집는 1차 기준은 아니지만, `강한 가산점`과 `중간 가산점`은 **final ranking 재정렬 요소**로 취급한다. 즉 비슷한 뉴스 강도의 후보 사이 순서를 닫는 tie-breaker를 넘어서, 경계선 등급과 최종 순서를 실제로 조정하는 단계로 final ranking 직전에 반드시 반영한다.
 - 만약 source 제약 때문에 `float %` 또는 `institutional ownership % estimate`를 확보하지 못했다면, `final ranking` 대신 `보수적 provisional ranking`으로 남기고, 어떤 source를 시도했고 왜 못 구했는지 함께 적는다.
 
@@ -336,8 +343,10 @@
 최종 주요 이슈 / ticker 분석 출력 규칙:
 
 - `Model_1`로 최종 주요 이슈와 ticker를 분석할 때는, **현재 뉴스 1건만 요약하고 끝내면 안 된다.** 반드시 과거 유사사례 비교 결과를 같이 적는다.
+- `primary`뿐 아니라 `secondary`로 최종 note에 남긴 ticker도 동일하다. 즉 `secondary`도 현재 뉴스 요약만 적고 끝내지 말고, same-ticker / other-ticker 비교 결과를 함께 적는다.
 - 또한 `Model_1` 최종 주요 이슈 리스트는 기본적으로 **시가총액 `100B` 미만 ticker만 직접 분석 대상**으로 삼는다. `100B` 이상 ticker는 필요하면 reference case 또는 보류 메모로만 적는다.
 - 최종 답변이나 research note에서 same-ticker 또는 other-ticker 중 한 축이라도 빠져 있으면, 원칙적으로 `Model_1 분석 완료`로 보지 않는다. 각 축에서 우선 `3건 이상` 찾으려고 시도해야 하며, 일반적으로는 `5건 안팎`이면 더 좋다. 한쪽 사례가 0건이거나 3건 미만이면 그 실제 확보 건수와 검색 시도 내역을 적는 방식으로라도 **반드시 섹션을 남긴다.**
+- `watch`는 상세 Model_1 완료 대상으로 보지 않더라도, 최소한 `ticker`, `headline 요약`, `watch로 둔 이유`는 상단 스크리닝 표 또는 바로 아래 watch 보조 표에서 반드시 보이게 남긴다.
 - 최종 답변에는 최소한 아래 2개 비교 축을 **동시에** 포함한다.
   1. `same-ticker 유사사례`: 현재 분석 중인 ticker에서 과거 비슷한 이슈가 있었는지, 그때 주가가 어떻게 반응했는지
   2. `other-ticker 유사사례`: 다른 ticker에서 비슷한 이슈가 있었는지, 그때 주가가 어떻게 반응했는지
@@ -389,5 +398,9 @@
 - 가능하면 최종 문장에는 아래 수준의 종합 해석을 남긴다.
   - `same-ticker에서는 과거 7건 중 5건이 7거래일 내 상승했지만, other-ticker 비교에서는 대형주보다 중소형주에서 반응이 더 컸다. 따라서 이번 건은 방향은 positive지만, 강한 재평가를 기대하려면 추가 상업화 확인이 필요하다.`
 - 즉 `Model_1` 최종 출력은 **현재 뉴스 요약 + 현재 ticker market cap + same-ticker 과거 반응 + other-ticker 유사사례 + 비교 ticker market cap 설명 + market cap 맥락 + 종합 해석**까지 포함해야 완료로 본다.
+- 여러 날짜 산출물에서는 이를 아래처럼 적용한다.
+  - `primary`: 위 전체 구조를 모두 수행하고, 상단 확정 표 + 상세 본문에 모두 포함한다.
+  - `secondary`: 위 전체 구조를 동일하게 수행하고, 상단 보조 표 + 상세 본문에 모두 포함한다.
+  - `watch`: 상세 본문은 선택 사항이지만, `ticker / headline 요약 / watch 이유`는 반드시 사용자에게 보이게 남긴다.
 
 이 모델은 현재 뉴스를 해석할 때 참고하는 **유사사례 비교 모델**이다.
