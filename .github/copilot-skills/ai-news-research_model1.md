@@ -14,7 +14,7 @@
 **Model_1 데이터 사용 가드레일 (필수)**
 
 - `Model_1`에서는 **현재 분석 대상 기간에 속한 뉴스의 후행 change 데이터**를 보고 중요도를 정하면 안 된다.
-- 즉 `2026-03-11 ~ 2026-03-12` 뉴스를 분석하는 중이라면, 그 기간 기사들의 `[][][]change_pct[][][]`, `[][][]change_from_open_pct[][][]`, `[][][]change_open_to_high_pct[][][]`, `[][][]change_1d_pct[][][]`, `[][][]change_3d_pct[][][]`, `[][][]change_7d_pct[][][]`, `[][][]change_14d_pct[][][]`, `[][][]change_30d_pct[][][]`는 **현재 기사 평가 근거로 사용 금지**다.
+- 즉 `2026-03-11 09:30 ~ 2026-03-12 16:00 (America/New_York)` 뉴스를 분석하는 중이라면, 그 기간 기사들의 `[][][]change_pct[][][]`, `[][][]change_from_open_pct[][][]`, `[][][]change_open_to_high_pct[][][]`, `[][][]change_1d_pct[][][]`, `[][][]change_3d_pct[][][]`, `[][][]change_7d_pct[][][]`, `[][][]change_14d_pct[][][]`, `[][][]change_30d_pct[][][]`는 **현재 기사 평가 근거로 사용 금지**다.
 - `change` 계열 데이터는 오직 **현재 뉴스보다 과거에 발생한 유사사례**에 대해서만 사용할 수 있다.
 - 다시 말해 `Model_1`에서 허용되는 가격 데이터는 항상 `현재 분석 중인 뉴스의 published_at 이전`에 나온 기사들의 historical reaction뿐이다.
 - 따라서 현재 기사의 importance는 먼저 `headline / body / full_text / 기업 컨텍스트`로 1차 판단하고, 그 다음 `과거 유사사례의 change 분포`로만 보강한다.
@@ -22,6 +22,16 @@
 - 구현 레벨에서는 **current-news용 API와 일반 뉴스 API를 분리**하는 것을 기본값으로 둔다. 현재 레포 기준으로는 backend `[][][]/api/model1/news[][][]`, `[][][]/api/model1/news/:id[][][]`가 `[][][]model1_current_news_view[][][]`만 조회하는 Model_1 safe endpoint다.
 - 위 Model_1 safe endpoint는 `news_items` / `news_fulltext` / `news_ai_analysis` 기반 projection만 반환하고, current-news용 응답 JSON에는 `[][][]change_*[][][]`, `[][][]ohlc_*[][][]` 필드를 포함하지 않는다.
 - 따라서 **현재 뉴스 목록/상세를 Model_1로 읽는 UI나 agent는 공용 `[][][]/api/news[][][]`가 아니라 `[][][]/api/model1/news[][][]` 계열을 사용**해야 한다. 공용 `[][][]/api/news[][][]`는 일반 운영/모니터링용이며 change 필드를 계속 포함할 수 있다.
+
+**Model_1 분석 기간 표기 규칙 (필수)**
+
+- `Model_1` 산출물에서는 **분석한 기간을 날짜만 쓰지 말고, 시작 시각과 종료 시각까지 포함한 datetime range로 명시**해야 한다.
+- 기본 표기 형식은 `분석 기간: YYYY-MM-DD HH:mm ~ YYYY-MM-DD HH:mm (timezone)` 으로 고정한다. 예: `분석 기간: 2026-03-11 09:30 ~ 2026-03-12 16:00 (America/New_York)`.
+- 날짜 헤더가 이미 있더라도 그것만으로는 부족하다. 상단 요약, 최종 note, research page 중 사용자가 실제로 읽는 본문 시작 구간에 **별도의 `분석 기간:` 줄**을 남긴다.
+- 하루치만 분석해도 `2026-03-11`처럼 날짜만 적지 말고 `2026-03-11 09:30 ~ 2026-03-11 16:00`처럼 시각을 끝까지 적는다.
+- 기간 경계는 가능하면 실제 스크리닝/조회에 사용한 `published_at` 필터의 시작·종료 시각과 정확히 일치해야 한다. 날짜만 반올림해서 쓰지 않는다.
+- 타임존 변환이 들어가면, **최종 표시 타임존을 괄호로 명시**하고 필요하면 source 타임존도 짧게 메모한다. 타임존을 확정할 수 없으면 임의 추정하지 말고 `timezone 확인 필요`를 적는다.
+- 여러 날짜를 묶은 note에서도 `2026-03-11 ~ 2026-03-12`처럼 뭉뚱그리지 말고, 실제 분석 범위를 `start datetime ~ end datetime`으로 한 줄에 닫는다.
 
 **Model_1 시가총액 범위 가드레일 (필수)**
 
@@ -344,6 +354,7 @@
 
 - `Model_1`로 최종 주요 이슈와 ticker를 분석할 때는, **현재 뉴스 1건만 요약하고 끝내면 안 된다.** 반드시 과거 유사사례 비교 결과를 같이 적는다.
 - `primary`뿐 아니라 `secondary`로 최종 note에 남긴 ticker도 동일하다. 즉 `secondary`도 현재 뉴스 요약만 적고 끝내지 말고, same-ticker / other-ticker 비교 결과를 함께 적는다.
+- 최종 답변, research note, 날짜별 스크리닝 note의 시작 부분에는 **`분석 기간: YYYY-MM-DD HH:mm ~ YYYY-MM-DD HH:mm (timezone)`** 줄을 반드시 넣는다. 날짜 제목만 있고 시각이 없는 출력은 완료본으로 보지 않는다.
 - 또한 `Model_1` 최종 주요 이슈 리스트는 기본적으로 **시가총액 `100B` 미만 ticker만 직접 분석 대상**으로 삼는다. `100B` 이상 ticker는 필요하면 reference case 또는 보류 메모로만 적는다.
 - 최종 답변이나 research note에서 same-ticker 또는 other-ticker 중 한 축이라도 빠져 있으면, 원칙적으로 `Model_1 분석 완료`로 보지 않는다. 각 축에서 우선 `3건 이상` 찾으려고 시도해야 하며, 일반적으로는 `5건 안팎`이면 더 좋다. 한쪽 사례가 0건이거나 3건 미만이면 그 실제 확보 건수와 검색 시도 내역을 적는 방식으로라도 **반드시 섹션을 남긴다.**
 - `watch`는 상세 Model_1 완료 대상으로 보지 않더라도, 최소한 `ticker`, `headline 요약`, `watch로 둔 이유`는 상단 스크리닝 표 또는 바로 아래 watch 보조 표에서 반드시 보이게 남긴다.
