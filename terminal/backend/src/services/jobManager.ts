@@ -139,3 +139,12 @@ export function cancelJob(id: string): boolean {
 export function isJobCancelled(id: string): boolean {
   return cancelledJobs.has(id);
 }
+
+/** Return all currently running jobs (for auto-reconnect after page refresh) */
+export function getActiveJobs(): JobState[] {
+  const result: JobState[] = [];
+  for (const job of jobs.values()) {
+    if (job.status === "running") result.push(job);
+  }
+  return result;
+}

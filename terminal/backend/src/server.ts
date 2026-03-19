@@ -39,7 +39,7 @@ import {
 } from "./services/finnhubNewsProvider.js";
 import type { FinnhubMappedItem } from "./services/finnhubNewsProvider.js";
 import { mergeChangeForNewItems, bulkUpdateRecentChange, bulkUpdateCustomChange, type IbkrFallbackOptions } from "./services/newsChangeMerger.js";
-import { createJob, getJob, updateProgress, appendLog, completeJob, failJob, cancelJob, isJobCancelled } from "./services/jobManager.js";
+import { createJob, getJob, getActiveJobs, updateProgress, appendLog, completeJob, failJob, cancelJob, isJobCancelled } from "./services/jobManager.js";
 import { getFulltext, getUnextractedNewsIds, deleteFailedFulltextRows, getFulltextStats, upsertProvidedFulltext } from "./services/fulltextRepository.js";
 import { runFulltextUpdate, runFulltextPlainTextBackfill, runRtprBodyBackfill, runOriginUrlBackfill } from "./services/fulltextUpdateService.js";
 import { extractOriginUrl } from "./services/rtprOriginUrlExtractor.js";
@@ -1176,6 +1176,18 @@ app.post("/api/news/pull-rtpr", async (req, res, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+// ── Active jobs (for auto-reconnect after page refresh) ──
+app.get("/api/jobs/active", (_req, res) => {
+  const active = getActiveJobs().map((j) => ({
+    id: j.id,
+    status: j.status,
+    progress: j.progress,
+    createdAt: j.createdAt,
+    updatedAt: j.updatedAt,
+  }));
+  res.json(active);
 });
 
 // ── Job status polling endpoint ──
