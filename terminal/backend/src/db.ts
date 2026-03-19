@@ -3,6 +3,7 @@ import { Database, open } from "sqlite";
 import path from "node:path";
 import fs from "node:fs";
 import { config } from "./config.js";
+import { toEtNaiveIso } from "./services/timeUtils.js";
 
 let db: Database<sqlite3.Database, sqlite3.Statement>;
 
@@ -352,6 +353,37 @@ export async function initDb(): Promise<void> {
   await db.exec("CREATE INDEX IF NOT EXISTS idx_research_pages_active ON research_pages(tab_id, deleted_at, sort_order, created_at);");
   await db.exec("CREATE INDEX IF NOT EXISTS idx_research_pages_deleted_at ON research_pages(deleted_at);");
   await db.exec("CREATE INDEX IF NOT EXISTS idx_research_pages_fts ON research_pages(title, body);");
+
+  await migrateFinnhubCompanyNewsPublishedAtToEt();
+}
+
+async function migrateFinnhubCompanyNewsPublishedAtToEt(): Promise<void> {
+  const rows = await db.all<{ id: string; published_at: string }[]>(
+    `SELECT id, published_at
+     FROM news_items
+     WHERE source = 'FINNHUB'
+       AND source_type = 'company_news'
+       AND published_at GLOB '*Z'`,
+  );
+
+  if (rows.length === 0) {
+    return;
+  }
+
+  await db.exec("BEGIN TRANSACTION");
+  try {
+    for (const row of rows) {
+      await db.run(
+        `UPDATE news_items SET published_at = ? WHERE id = ?`,
+        [toEtNaiveIso(row.published_at), row.id],
+      );
+    }
+    await db.exec("COMMIT");
+    console.log(`[db] migrated ${rows.length} FINNHUB company_news published_at rows from UTC to ET`);
+  } catch (error) {
+    await db.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 async function ensureColumn(tableName: string, columnName: string, definition: string): Promise<void> {

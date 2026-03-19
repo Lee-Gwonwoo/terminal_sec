@@ -1,5 +1,6 @@
 import { config } from "../config.js";
 import { getDb } from "../db.js";
+import { getEtDateString, toEtNaiveIso } from "./timeUtils.js";
 
 const FINNHUB_BASE = "https://finnhub.io/api/v1";
 const MAX_RETRIES = 10;
@@ -96,7 +97,7 @@ interface MarketNewsPullOptions {
 
 // ---------- Helpers ----------
 
-function toIsoDate(epoch: number): string {
+function toUtcIsoDate(epoch: number): string {
   return new Date(epoch * 1000).toISOString();
 }
 
@@ -209,13 +210,10 @@ async function getLastPublishedAt(sourceType: string): Promise<string | null> {
 function computeFromDate(lastPublished: string | null, lookbackDays: number): string {
   if (lastPublished) {
     // Start from the day of last published item (may re-fetch same day — deduped by INSERT OR IGNORE)
-    const d = new Date(lastPublished);
-    return formatDate(d);
+    return getEtDateString(lastPublished);
   }
   // First time: lookback N days
-  const d = new Date();
-  d.setDate(d.getDate() - lookbackDays);
-  return formatDate(d);
+  return addDays(getEtDateString(new Date()), -lookbackDays);
 }
 
 // ---------- Raw fetch helpers (single request, no splitting) ----------
@@ -230,7 +228,7 @@ export async function fetchCompanyNewsRaw(
   if (!Array.isArray(raw)) return [];
 
   return raw.map((item: any) => ({
-    publishedAt: item.datetime ? toIsoDate(item.datetime) : new Date().toISOString(),
+    publishedAt: item.datetime ? toEtNaiveIso(item.datetime * 1000) : toEtNaiveIso(new Date()),
     source: "FINNHUB",
     sourceType: "company_news",
     title: item.headline ?? "(untitled)",
@@ -283,7 +281,7 @@ export async function fetchMarketNewsPageRaw(
   }
 
   const mapped = raw.map((item: any) => ({
-    publishedAt: item.datetime ? toIsoDate(item.datetime) : new Date().toISOString(),
+    publishedAt: item.datetime ? toUtcIsoDate(item.datetime) : new Date().toISOString(),
     source: "FINNHUB",
     sourceType: "market_news",
     title: item.headline ?? "(untitled)",
@@ -468,7 +466,7 @@ export async function pullCompanyNews(
 ): Promise<FinnhubMappedItem[]> {
   const lastPub = await getLastPublishedAt("company_news");
   const from = fromOverride ?? computeFromDate(lastPub, 7);
-  const to = toOverride ?? formatDate(new Date());
+  const to = toOverride ?? getEtDateString(new Date());
 
   return fetchCompanyNewsRaw(symbol, from, to);
 }

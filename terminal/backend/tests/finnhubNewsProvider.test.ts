@@ -218,12 +218,12 @@ describe("finnhubNewsProvider mapping", () => {
   });
 
   describe("epoch timestamp conversion", () => {
-    it("should convert epoch seconds to ISO string", async () => {
+    it("should convert company news epoch seconds to ET naive ISO string", async () => {
       const epoch = 1709683200; // 2024-03-06T00:00:00.000Z
       mockFetchOnce([{ datetime: epoch, headline: "Test", url: "https://example.com" }]);
 
       const items = await fetchCompanyNewsRaw("TEST", "2024-03-01", "2024-03-07");
-      expect(items[0].publishedAt).toBe("2024-03-06T00:00:00.000Z");
+      expect(items[0].publishedAt).toBe("2024-03-05T19:00:00");
     });
   });
 });
