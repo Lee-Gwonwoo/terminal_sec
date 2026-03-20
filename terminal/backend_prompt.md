@@ -322,6 +322,26 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `[][][]range_to[][][]`
 - `[][][]confirmed_at[][][]`
 
+#### `sec_filings`
+
+Finnhub SEC filing 메타데이터 companion table. `news_items`의 SEC filing row에 대한 구조화 필드 저장.
+
+컬럼:
+
+- `[][][]id[][][]` — INTEGER PRIMARY KEY AUTOINCREMENT
+- `[][][]news_id[][][]` — `news_items.id` FK (SEC filing parent row)
+- `[][][]accession_number[][][]` — UNIQUE dedup key (SEC EDGAR accession number)
+- `[][][]cik[][][]` — SEC Central Index Key
+- `[][][]form_type[][][]` — filing 유형 (예: `4`, `8-K`, `10-K`, `10-Q`, `DEF 14A`, `144`)
+- `[][][]filed_at[][][]` — filing 기준일 (YYYY-MM-DD 또는 YYYY-MM-DD HH:mm:ss)
+- `[][][]accepted_at[][][]` — SEC 접수 시각
+- `[][][]report_url[][][]` — SEC 원문 XML/HTML 문서 URL
+- `[][][]filing_url[][][]` — SEC filing index 페이지 URL
+- `[][][]raw_json[][][]` — Finnhub 원본 응답 JSON
+- `[][][]created_at[][][]`
+
+인덱스: `accession_number` UNIQUE, `news_id`, `form_type + filed_at DESC`, `filed_at DESC`
+
 #### 기타 테이블
 
 - `news_saved_views`
@@ -375,6 +395,7 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 - `GET /api/news/pull-finhub/preflight`
 - `POST /api/news/pull-finhub`
+- `POST /api/news/pull-finhub-sec`
 - `POST /api/news/pull-eodhd`
 - `POST /api/news/fulltext/update`
 - `POST /api/news/fulltext/backfill-plaintext`
@@ -514,6 +535,36 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `sourceType`: `all | company_news | press_release | market_news`
 - `custom`일 때만 `from/to` 사용
 - 즉시 `jobId`를 반환하고 background에서 적재한다.
+
+응답 컬럼:
+
+- `[][][]jobId[][][]`
+
+### `POST /api/news/pull-finhub-sec`
+
+요청 body:
+
+```json
+{
+  "mode": "recent",
+  "from": "2026-03-01",
+  "to": "2026-03-20",
+  "tickerConcurrency": 3,
+  "requestIntervalMs": 300
+}
+```
+
+설명:
+
+- `mode`: `recent | custom`
+- `custom`일 때만 `from/to` 사용
+- `recent` 모드는 ticker별 anchor (마지막 filed_at)로부터 조회, anchor 없으면 7일 fallback
+- Finnhub `GET /stock/filings` API로 SEC filing metadata를 수집한다.
+- `news_items`에 `source='FINNHUB'`, `source_type='sec_filing'`으로 저장한다.
+- `sec_filings` companion table에 `accession_number`, `form_type`, `report_url`, `filing_url` 등 구조화 필드를 함께 저장한다.
+- dedup: `UNIQUE(source, url)` — url은 `sec-filing://<accessNumber>` 형태
+- 즉시 `jobId`를 반환하고 background에서 적재한다.
+- duplicate guard: 동일 `sec_filing` job이 running이면 `409 { error, existingJobId }` 반환
 
 응답 컬럼:
 

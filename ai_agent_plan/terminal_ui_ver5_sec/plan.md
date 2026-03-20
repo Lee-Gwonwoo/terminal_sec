@@ -121,15 +121,15 @@
 
 ### 단계별 계획(각 단계: 구현 → 검증)
 
-#### ⏳ Step 0 — Finnhub SEC filing 응답 구조 및 full text 가능성 확정
+#### ✅ Step 0 — Finnhub SEC filing 응답 구조 및 full text 가능성 확정
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 0-1 | Finnhub `stock/filings` live probe로 실제 응답 샘플 1건 확보 | 런타임 probe | PowerShell 또는 테스트 스크립트로 200 응답 + 샘플 JSON 확인 | ⏳ |
-| 0-2 | 응답에서 dedup 후보 필드(`accessNumber`, URL, filed date, form type 등) 확인 | 조사 결과를 plan에 반영 | 샘플 JSON 기준 필드 목록 표 작성 | ⏳ |
-| 0-3 | 응답에 원문 링크 또는 문서 index URL이 있는지 확인 | 조사 결과를 plan에 반영 | URL 존재/부재 명시 | ⏳ |
-| 0-4 | recent/custom 모드에서 필요한 date 파라미터 규칙 확인 | 조사 결과를 plan에 반영 | `from/to` 지원 여부 및 형식 기록 | ⏳ |
-| 0-5 | Step 3 full text 진행 가능 여부를 `가능 / 조건부 / 불가`로 판정 | `plan.md` | 판정 결과와 근거 append | ⏳ |
+| 0-1 | Finnhub `stock/filings` live probe로 실제 응답 샘플 1건 확보 | 런타임 probe | PowerShell 또는 테스트 스크립트로 200 응답 + 샘플 JSON 확인 | ✅ |
+| 0-2 | 응답에서 dedup 후보 필드(`accessNumber`, URL, filed date, form type 등) 확인 | 조사 결과를 plan에 반영 | 샘플 JSON 기준 필드 목록 표 작성 | ✅ |
+| 0-3 | 응답에 원문 링크 또는 문서 index URL이 있는지 확인 | 조사 결과를 plan에 반영 | URL 존재/부재 명시 | ✅ |
+| 0-4 | recent/custom 모드에서 필요한 date 파라미터 규칙 확인 | 조사 결과를 plan에 반영 | `from/to` 지원 여부 및 형식 기록 | ✅ |
+| 0-5 | Step 3 full text 진행 가능 여부를 `가능 / 조건부 / 불가`로 판정 | `plan.md` | 판정 결과와 근거 append | ✅ |
 
 실측 결과 요약(2026-03-20, AAPL sample)
 - 응답은 array 형태였고, `2026-01-01 ~ 2026-03-20` 범위에서 24건이 내려왔다.
@@ -176,15 +176,15 @@ Invoke-RestMethod -Uri "https://finnhub.io/api/v1/stock/filings?symbol=AAPL&from
 ```
 사용자 확인 필요: **예**
 
-#### ⬜ Step 1 — Backend schema + provider + pull job 추가
+#### ✅ Step 1 — Backend schema + provider + pull job 추가
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 1-1 | `sec_filings` companion table schema 추가 | `terminal/backend/src/db.ts` | DB 시작 후 테이블/인덱스 존재 확인 | ⬜ |
-| 1-2 | Finnhub SEC provider 생성 (`finnhubSecProvider.ts`) | `terminal/backend/src/services/finnhubSecProvider.ts` | `npx tsc --noEmit` 통과 | ⬜ |
-| 1-3 | recent anchor / custom range / dedup helper 추가 | `terminal/backend/src/services/finnhubSecProvider.ts`, `newsRepository.ts` 또는 신규 repository | 단위 테스트 또는 샘플 run으로 중복 방지 확인 | ⬜ |
-| 1-4 | `POST /api/news/pull-finhub-sec` job endpoint 추가 | `terminal/backend/src/server.ts` | `{ jobId }` 응답 + duplicate guard 확인 | ⬜ |
-| 1-5 | job log에 ticker 진행/삽입/skip/실패 사유 기록 추가 | `terminal/backend/src/server.ts` | `/api/jobs/:jobId`에서 로그 확인 | ⬜ |
+| 1-1 | `sec_filings` companion table schema 추가 | `terminal/backend/src/db.ts` | DB 시작 후 테이블/인덱스 존재 확인 | ✅ |
+| 1-2 | Finnhub SEC provider 생성 (`finnhubSecProvider.ts`) | `terminal/backend/src/services/finnhubSecProvider.ts` | `npx tsc --noEmit` 통과 | ✅ |
+| 1-3 | recent anchor / custom range / dedup helper 추가 | `terminal/backend/src/services/finnhubSecProvider.ts` | 샘플 run으로 중복 방지 확인 | ✅ |
+| 1-4 | `POST /api/news/pull-finhub-sec` job endpoint 추가 | `terminal/backend/src/server.ts` | `{ jobId }` 응답 + duplicate guard 확인 | ✅ |
+| 1-5 | job log에 ticker 진행/삽입/skip/실패 사유 기록 추가 | `terminal/backend/src/server.ts` | `/api/jobs/:jobId`에서 로그 확인 | ✅ |
 
 - `1-1` 목적: 일반 news row와 SEC 전용 metadata를 분리 저장. 설명: `news_items`를 공통 feed로 유지하고 structured fields는 companion table에 둔다.
   - 완료 조건(눈으로 확인): `sec_filings` 테이블이 존재한다.
@@ -215,15 +215,15 @@ Invoke-RestMethod -Uri "http://localhost:8080/api/news/pull-finhub-sec" -Method 
 ```
 사용자 확인 필요: **예**
 
-#### ⬜ Step 2 — Frontend `SEC Filing` 버튼 2개 + View Log 통합
+#### ⏳ Step 2 — Frontend `SEC Filing` 버튼 2개 + View Log 통합
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 2-1 | Update 드롭다운에 `SEC Filing` 섹션 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | webui build 후 메뉴 표시 확인 | ⬜ |
-| 2-2 | `Recent SEC Update` 버튼 연결 | `FinnhubNewsWindow.tsx` | 클릭 시 job 시작 + jobId 저장 확인 | ⬜ |
-| 2-3 | `Custom SEC Update` 버튼 + 날짜 modal 연결 | `FinnhubNewsWindow.tsx` | 날짜 지정 후 POST body 확인 | ⬜ |
-| 2-4 | 기존 `View Log`가 SEC job에도 동일하게 붙는지 확인 | `FinnhubNewsWindow.tsx` | 로그 패널에 SEC 로그 표시 | ⬜ |
-| 2-5 | 버튼 배치를 `Press Release` 옆 흐름으로 시각 정렬 | `FinnhubNewsWindow.tsx` | 드롭다운 순서와 설명문 확인 | ⬜ |
+| 2-1 | Update 드롭다운에 `SEC Filing` 섹션 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | webui build 후 메뉴 표시 확인 | ⏳ |
+| 2-2 | `Recent SEC Update` 버튼 연결 | `FinnhubNewsWindow.tsx` | 클릭 시 job 시작 + jobId 저장 확인 | ⏳ |
+| 2-3 | `Custom SEC Update` 버튼 + 날짜 modal 연결 | `FinnhubNewsWindow.tsx` | 날짜 지정 후 POST body 확인 | ⏳ |
+| 2-4 | 기존 `View Log`가 SEC job에도 동일하게 붙는지 확인 | `FinnhubNewsWindow.tsx` | 로그 패널에 SEC 로그 표시 | ⏳ |
+| 2-5 | 버튼 배치를 `Press Release` 옆 흐름으로 시각 정렬 | `FinnhubNewsWindow.tsx` | 드롭다운 순서와 설명문 확인 | ⏳ |
 
 - `2-1` 목적: 사용자가 기존 위치에서 바로 SEC pull을 찾게 한다. 설명: Update 메뉴에 별도 섹션이 생기면 완료다.
   - 완료 조건(눈으로 확인): 드롭다운에 `SEC Filing` 헤더가 보인다.
@@ -364,19 +364,19 @@ Legend: `✅` 완료+사용자확인 완료 / `⏳` 완료, 사용자확인 대�
 
 트랙 A — API/저장 구조 확정
 ```text
-⏳ Step 0 Finnhub SEC filing 응답 구조 및 full text 가능성 확정
-  ⏳ 0-1 live probe sample 확보
-  ⏳ 0-2 dedup 후보 필드 확인
-  ⏳ 0-3 원문 링크 존재 여부 확인
-  ⏳ 0-4 from/to 규칙 확인
-  ⏳ 0-5 full text 가능 여부 판정
+✅ Step 0 Finnhub SEC filing 응답 구조 및 full text 가능성 확정
+  ✅ 0-1 live probe sample 확보
+  ✅ 0-2 dedup 후보 필드 확인
+  ✅ 0-3 원문 링크 존재 여부 확인
+  ✅ 0-4 from/to 규칙 확인
+  ✅ 0-5 full text 가능 여부 판정
 
-⬜ Step 1 Backend schema + provider + pull job 추가
-  ⬜ 1-1 sec_filings companion table 추가
-  ⬜ 1-2 finnhubSecProvider 생성
-  ⬜ 1-3 recent/custom/dedup helper 추가
-  ⬜ 1-4 /api/news/pull-finhub-sec endpoint 추가
-  ⬜ 1-5 job log 상세화
+✅ Step 1 Backend schema + provider + pull job 추가
+  ✅ 1-1 sec_filings companion table 추가
+  ✅ 1-2 finnhubSecProvider 생성
+  ✅ 1-3 recent/custom/dedup helper 추가
+  ✅ 1-4 /api/news/pull-finhub-sec endpoint 추가
+  ✅ 1-5 job log 상세화
 
 🚫 Step 3 SEC filing full text 수집/백필 경로 구현
   🚫 3-1 full text source 확정
@@ -388,11 +388,11 @@ Legend: `✅` 완료+사용자확인 완료 / `⏳` 완료, 사용자확인 대�
 
 트랙 B — UI/조회 계층 반영
 ```text
-⬜ Step 2 Frontend SEC Filing 버튼 2개 + View Log 통합
-  ⬜ 2-1 SEC Filing 섹션 추가
-  ⬜ 2-2 Recent SEC Update 버튼 연결
-  ⬜ 2-3 Custom SEC Update 버튼 연결
-  ⬜ 2-4 View Log 재사용 확인
+⏳ Step 2 Frontend SEC Filing 버튼 2개 + View Log 통합
+  ⏳ 2-1 SEC Filing 섹션 추가
+  ⏳ 2-2 Recent SEC Update 버튼 연결
+  ⏳ 2-3 Custom SEC Update 버튼 연결
+  ⏳ 2-4 View Log 재사용 확인
   ⬜ 2-5 Press Release 인접 배치
 
 ⬜ Step 4 feed 조회/필터/표시 계층 반영

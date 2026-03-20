@@ -354,6 +354,27 @@ export async function initDb(): Promise<void> {
   await db.exec("CREATE INDEX IF NOT EXISTS idx_research_pages_deleted_at ON research_pages(deleted_at);");
   await db.exec("CREATE INDEX IF NOT EXISTS idx_research_pages_fts ON research_pages(title, body);");
 
+  // SEC Filings companion table — stores Finnhub SEC filing metadata alongside news_items
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS sec_filings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      news_id TEXT NOT NULL REFERENCES news_items(id) ON DELETE CASCADE,
+      accession_number TEXT NOT NULL,
+      cik TEXT NOT NULL,
+      form_type TEXT NOT NULL,
+      filed_at TEXT NOT NULL,
+      accepted_at TEXT,
+      report_url TEXT,
+      filing_url TEXT,
+      raw_json TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (accession_number)
+    );
+  `);
+  await db.exec("CREATE INDEX IF NOT EXISTS idx_sec_filings_news_id ON sec_filings(news_id);");
+  await db.exec("CREATE INDEX IF NOT EXISTS idx_sec_filings_form_type ON sec_filings(form_type, filed_at DESC);");
+  await db.exec("CREATE INDEX IF NOT EXISTS idx_sec_filings_filed_at ON sec_filings(filed_at DESC);");
+
   await migrateFinnhubCompanyNewsPublishedAtToEt();
 }
 

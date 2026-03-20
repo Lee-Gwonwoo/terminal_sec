@@ -432,6 +432,9 @@ export function FinnhubNewsWindow({
   const [showPtprCustomDateModal, setShowPtprCustomDateModal] = useState(false);
   const [ptprCustomFrom, setPtprCustomFrom] = useState('');
   const [ptprCustomTo, setPtprCustomTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [showSecFilingCustomDateModal, setShowSecFilingCustomDateModal] = useState(false);
+  const [secFilingCustomFrom, setSecFilingCustomFrom] = useState('');
+  const [secFilingCustomTo, setSecFilingCustomTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [showControlWindow, setShowControlWindow] = useState(false);
   const [finnhubTickerConcurrencyInput, setFinnhubTickerConcurrencyInput] = useState(() => String(getFinnhubTickerConcurrency()));
   const [finnhubRequestIntervalSecInput, setFinnhubRequestIntervalSecInput] = useState(() => String(getFinnhubRequestIntervalMs() / 1000));
@@ -855,6 +858,46 @@ export function FinnhubNewsWindow({
     setPtprCustomFrom('');
     setPtprCustomTo(new Date().toISOString().slice(0, 10));
     setShowPtprCustomDateModal(true);
+  };
+
+  // ─── SEC Filing pull ───
+  const handleSecFilingUpdate = async (mode: 'recent' | 'custom', from?: string, to?: string) => {
+    setUpdating(true);
+    setError(null);
+    setJobStatus(null);
+    try {
+      const body: Record<string, unknown> = { mode };
+      if (from) body.from = from;
+      if (to) body.to = to;
+      const res = await fetch(`${API_BASE}/api/news/pull-finhub-sec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (res.status === 409 && data.existingJobId) {
+          setCurrentJobId(data.existingJobId);
+          setShowLogPanel(true);
+          setError(data.error || 'SEC filing pull job is already running');
+          return;
+        }
+        setError(data.error || `HTTP ${res.status}`);
+        setUpdating(false);
+        return;
+      }
+      setCurrentJobId(data.jobId);
+    } catch (err: any) {
+      setError(err.message || 'Failed to start SEC filing update');
+      setUpdating(false);
+    }
+  };
+
+  // ─── SEC Filing Custom: open date picker then call handleSecFilingUpdate ───
+  const handleSecFilingCustomStart = () => {
+    setSecFilingCustomFrom('');
+    setSecFilingCustomTo(new Date().toISOString().slice(0, 10));
+    setShowSecFilingCustomDateModal(true);
   };
 
   const handleSaveControlWindow = () => {
@@ -1937,6 +1980,18 @@ export function FinnhubNewsWindow({
                         <div><div className="font-medium">Custom Calendar Update</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">사용자 지정 날짜 범위로 캘린더 이벤트를 수집합니다</div></div>
                       </button>
 
+                      {/* ── SEC Filing ── */}
+                      <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
+                      <div className="px-2 py-1 text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">SEC Filing</div>
+                      <button onClick={() => { setShowUpdateMenu(false); handleSecFilingUpdate('recent'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <Download className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
+                        <div><div className="font-medium">Recent SEC Filing</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Per-ticker incremental · latest 8-K/10-K/10-Q filings</div></div>
+                      </button>
+                      <button onClick={() => { setShowUpdateMenu(false); handleSecFilingCustomStart(); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <Calendar className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
+                        <div><div className="font-medium">Custom SEC Filing</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick date range · per-ticker SEC filing pull</div></div>
+                      </button>
+
                       {/* ── PTPR Press Release ── */}
                       <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
                       <div className="px-2 py-1 text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">PTPR Press Release</div>
@@ -2464,6 +2519,40 @@ export function FinnhubNewsWindow({
                 onClick={() => { if (!customFrom || !customTo) return; setShowCustomDateModal(false); handleUpdate('custom', pendingUpdateSourceType, customFrom, customTo); }}
                 disabled={!customFrom || !customTo}
                 className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+              >Start Update</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── SEC Filing Custom Date Modal ─── */}
+      {showSecFilingCustomDateModal && (
+        <div className="absolute inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-4 w-80 border border-gray-200 dark:border-gray-700">
+            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><Calendar className="w-4 h-4 text-emerald-600" />Custom SEC Filing — Date Range</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">From</label>
+                <input type="date" value={secFilingCustomFrom} onChange={(e) => setSecFilingCustomFrom(e.target.value)}
+                  className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">To</label>
+                <input type="date" value={secFilingCustomTo} onChange={(e) => setSecFilingCustomTo(e.target.value)}
+                  className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+              </div>
+              <p className="text-[10px] text-gray-400">Per-ticker SEC filing pull within date range. Finnhub rate limit: 60 rpm.</p>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setShowSecFilingCustomDateModal(false)} className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
+              <button
+                onClick={() => {
+                  if (!secFilingCustomFrom || !secFilingCustomTo) return;
+                  setShowSecFilingCustomDateModal(false);
+                  handleSecFilingUpdate('custom', secFilingCustomFrom, secFilingCustomTo);
+                }}
+                disabled={!secFilingCustomFrom || !secFilingCustomTo}
+                className="px-3 py-1.5 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50"
               >Start Update</button>
             </div>
           </div>

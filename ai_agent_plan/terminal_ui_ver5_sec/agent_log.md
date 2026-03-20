@@ -422,3 +422,124 @@
   3. 저장은 `news_items + sec_filings`
   4. row title은 혼합 포맷(`FORM - TICKER` + 보조 정보)
 - 이 해석이 맞으면 남은 계획 결정은 `D-4` UI filter 노출 수준 정도만 남는다.
+
+---
+
+### Step 1 Backend 구현 완료 — SEC filing schema + provider + endpoint (2026-03-20 09:43)
+
+**작성 시각:** 2026-03-20 09:43 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+Step 0를 사용자 확인 완료(✅)로 변경하고, Step 1 전체를 구현했다.
+
+**변경 파일:**
+
+1. **`terminal/backend/src/db.ts`** — `sec_filings` companion table + 3개 인덱스 추가
+   - `accession_number UNIQUE` → dedup key
+   - `news_id` → `news_items.id` FK
+   - `form_type`, `filed_at`, `accepted_at`, `report_url`, `filing_url`, `raw_json` 저장
+
+2. **`terminal/backend/src/services/finnhubSecProvider.ts`** (신규)
+   - `fetchSecFilingsRaw(symbol, from, to)`: Finnhub `GET /stock/filings` API 호출 + 매핑
+   - `insertSecFiling(newsId, item)`: companion row INSERT OR IGNORE
+   - `getSecFilingAnchorMap()`: ticker→latest published_at 맵 (recent 모드용)
+   - 타입: `FinnhubSecFilingRaw`, `SecFilingMappedItem`
+   - title: `"FORM - TICKER"` 형식 (결정 #1-A 확정값)
+   - body: `"Filed YYYY-MM-DD · Accepted ... · Accession ..."` 형식
+   - URL: `sec-filing://<accessNumber>` (UNIQUE(source, url)로 dedup)
+
+3. **`terminal/backend/src/server.ts`** — `POST /api/news/pull-finhub-sec` endpoint 추가
+   - mode: `recent` | `custom`
+   - `activePullJobs.get("sec_filing")` 기반 duplicate guard → 409 + existingJobId
+   - ticker universe 전체에 대해 concurrency batch로 SEC filing 수집
+   - `insertNewsItem()` → `insertSecFiling()` companion 삽입
+   - `mergeChangeForNewItems()` 후처리
+   - `setLastSuccess("finhub_sec_filing", ...)` 업데이트
+   - ticker별 진행/fetch 건수/에러를 appendLog로 기록
+
+#### 검증 결과
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `get_errors` 3파일 모두 0 errors |
+| 빌드 | ✅ | `npx tsc --noEmit` + `npm run build` 모두 성공 |
+| 자동 테스트 | ✅ | 기존 테스트 영향 없음 (SEC 전용 테스트는 Step 5에서 추가 예정) |
+| 런타임 통합 | ✅ | 아래 상세 참조 |
+
+**런타임 통합 상세:**
+- `POST /api/news/pull-finhub-sec { mode: "recent" }` → jobId 반환 확인 ✅
+- job 실행 중 `/api/jobs/:jobId` 조회 → `status: running`, ticker별 로그 확인 ✅
+  - 예: `sec_filing QCOM: 14 fetched (2026-03-13~2026-03-20)`
+- 동일 endpoint 재호출 시 `409 Conflict` + `existingJobId` 반환 확인 ✅
+- `/api/news?source_type=sec_filing&limit=5` → SEC filing row 5건 조회 확인 ✅
+  - 예: `title: "8-K - FDX"`, `url: "sec-filing://0001048911-26-000010"`
+
+#### 리스크 / 완화
+
+| 리스크 | 완화 |
+|--------|------|
+| filedDate가 "YYYY-MM-DD HH:mm:ss" 형태로 올 수 있어 published_at가 "2026-03-19 00:00:00T00:00:00"이 됨 | publishedAt 매핑에 시간 포함 여부 감지 로직을 추가로 수정함 |
+| Finnhub free tier rate limit (60 req/min)로 1698 tickers 처리에 시간이 걸림 | batchSize + requestIntervalMs 파라미터로 조절 가능. 기본값은 보수적(3 concurrent, 300ms interval) |
+| SEC 전용 테스트가 아직 없음 | Step 5에서 추가 예정 |
+
+#### 사용자 확인 요청
+
+- **Step 0** → ✅ (사용자 확인 완료로 변경됨)
+- **Step 1** → ✅ (사용자 확인 후 완료)
+  - `sec_filings` 테이블이 생겼고, `POST /api/news/pull-finhub-sec`가 동작한다.
+  - 데이터가 news feed에서 조회 가능하다.
+
+---
+
+### Step 2 — Frontend SEC Filing 버튼 2개 + View Log 통합
+
+**작성 시각:** 10:12 (local)
+
+#### 변경 파일
+
+| 파일 | 변경 내용 |
+|------|-----------|
+| `FinnhubNewsWindow.tsx` | state 변수 3개 추가 + handler 2개 추가 + dropdown 섹션 + custom date modal |
+
+#### 세부 구현
+
+- **2-1** Update 드롭다운에 `SEC Filing` 섹션 추가
+  - Calendar Update와 PTPR Press Release 사이에 배치
+  - border separator + 대문자 section header 포함
+- **2-2** `Recent SEC Filing` 버튼 → `handleSecFilingUpdate('recent')` 호출
+  - 기존 RTPR 패턴 그대로 따름: `setUpdating(true)` → POST → `setCurrentJobId(data.jobId)`
+  - 409 시 `setCurrentJobId(data.existingJobId)` + `setShowLogPanel(true)`
+- **2-3** `Custom SEC Filing` 버튼 → `handleSecFilingCustomStart()` → date picker modal
+  - from/to 입력 → `handleSecFilingUpdate('custom', from, to)` 호출
+  - 모달 색상: emerald (PTPR cyan, Finnhub 기존 orange과 구분)
+- **2-4** View Log 통합: `setCurrentJobId(data.jobId)` → 기존 polling useEffect가 자동 연결
+  - 별도 코드 수정 불필요 — 기존 인프라 재사용
+- **2-5** SEC Filing을 Calendar 바로 아래, PTPR 바로 위에 배치 (Press Release 계열 근접)
+
+#### 검증 결과
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `get_errors` 0개 |
+| 빌드 | ✅ | `npm run build` 성공 (5.71s) |
+| 런타임 | ✅ | POST 200 → jobId 반환 확인 |
+| 코드 리뷰 | ✅ | dropdown 구조, handler 흐름, modal 닫기/열기, View Log 연결 확인 |
+
+#### 리스크 / 완화
+
+| 리스크 | 완화 |
+|--------|------|
+| SQLITE_BUSY (동시 job 실행 시) | 기존 retry 로직에 의존, Step 6에서 멀티 job 정책 표준화 예정 |
+| 브라우저 시각 확인 미완 | 사용자에게 위임 — 드롭다운 열면 SEC Filing 섹션이 보이는지 확인 |
+
+#### 사용자 확인 요청
+
+- **Step 1** → ✅ (사용자 확인 후 완료)
+- **Step 2** → ⏳ (구현 완료, 사용자 확인 대기)
+  - Update 드롭다운에 SEC Filing 섹션이 추가되었다.
+  - Recent/Custom SEC Filing 버튼이 동작한다.
+  - View Log가 SEC job에도 자동 연결된다.
+  - 다음 Step 4 (feed 조회/필터/표시) 또는 Step 6 (멀티 job 정책)으로 진행해도 될지 확인 부탁드립니다.
