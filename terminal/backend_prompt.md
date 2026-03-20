@@ -347,6 +347,7 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `GET /healthz`
 - `GET /api/config`
 - `GET /api/updates/status`
+- `GET /api/jobs/active`
 - `GET /api/jobs/:jobId`
 - `POST /api/jobs/:jobId/cancel`
 
@@ -1217,10 +1218,27 @@ SSE endpoint.
 7. 마지막에 신규 뉴스에 대해 `mergeChangeForNewItems()`를 돌린다 (기존 OHLC DB에서만 계산, OHLC 없는 티커는 skip).
 8. `update_status.finhub_news`를 갱신한다.
 
+현재 job/중복 규칙:
+
+- backend는 `activePullJobs`를 사용해 `sourceType` 단위 중복 실행을 막는다.
+- 같은 logical pull을 다시 호출하면 `409`와 함께 `[][][]existingJobId[][][]`를 반환한다.
+- 예: `sourceType='press_release'` Finnhub pull이 running일 때 같은 sourceType으로 다시 호출하면 새 job을 만들지 않는다.
+- 반면 다른 sourceType Finnhub pull, RTPR pull, fulltext job, change job 자체는 job manager 차원에서 동시에 존재할 수 있다.
+- 즉 backend 기준으로는 "같은 pull key는 차단, 다른 job은 병렬 가능"이 현재 규칙이다.
+
 응답:
 
 ```json
 { "jobId": "..." }
+```
+
+duplicate 응답 예시:
+
+```json
+{
+  "error": "A pull job for sourceType='press_release' is already running (jobId=...). Wait for it to finish or cancel it first.",
+  "existingJobId": "..."
+}
 ```
 
 background job 완료 시 `result` 예시:
@@ -1321,6 +1339,14 @@ query:
 { "jobId": "...", "total": 123 }
 ```
 
+현재 job/중복 규칙:
+
+- fulltext update는 background job으로 실행되고 `jobId`를 반환한다.
+- 하지만 현재 backend에는 `pull-finhub`/`pull-rtpr`처럼 endpoint 전용 duplicate guard가 없다.
+- 따라서 API만 보면 같은 fulltext 계열 job을 연속 호출해 여러 job을 만들 수 있다.
+- 다만 현재 프론트 `FinnhubNewsWindow`는 `updating || ftUpdating` 전역 lock으로 fulltext 버튼도 함께 비활성화하기 때문에, 일반 UI 경로에서는 중복 시작이 잘 일어나지 않는다.
+- 이 제약은 frontend UX 제약이지 backend contract 보장은 아니다.
+
 ### `GET /api/news/fulltext/:newsId`
 
 응답 출력 컬럼:
@@ -1367,6 +1393,12 @@ query:
 - 즉시 `jobId` 반환
 - 완료 시 `update_status.news_change_recent` 갱신
 
+현재 job/중복 규칙:
+
+- change update는 background job으로 실행되지만, 현재 endpoint 레벨 duplicate guard는 없다.
+- 즉 backend contract만 보면 recent/custom change job을 연속 호출해 복수 running job을 만들 수 있다.
+- 현재 프론트는 전역 `updating` lock 때문에 사용자가 보통 동시에 두 change job을 시작하지 못한다.
+
 ### `POST /api/news/change/update-custom`
 
 요청 body:
@@ -1380,7 +1412,34 @@ query:
 - 즉시 `jobId` 반환
 - 완료 시 `update_status.news_change_custom` 갱신
 
+현재 job/중복 규칙:
+
+- `update-recent`와 동일하게 background job이지만 duplicate guard는 없다.
+- 향후 프론트 전역 lock을 해체할 경우 backend 측 logical job key 표준화가 필요하다.
+
 ## Job API
+
+### `GET /api/jobs/active`
+
+현재 running 상태인 job 목록만 반환한다.
+
+응답 출력 컬럼:
+
+- `[][][]id[][][]`
+- `[][][]status[][][]`
+- `[][][]progress[][][]`
+  - `[][][]completed[][][]`
+  - `[][][]total[][][]`
+  - `[][][]pct[][][]`
+- `[][][]createdAt[][][]`
+- `[][][]updatedAt[][][]`
+
+현재 동작 규칙:
+
+- `status='running'`인 job만 포함한다.
+- 완료(`done`), 실패(`failed`), 취소(`cancelled`)된 job은 이 목록에서 빠진다.
+- 따라서 프론트가 `activeJobs` dropdown으로 선택할 수 있는 것은 현재 시점 running job뿐이다.
+- job manager 자체는 여러 running job을 동시에 저장할 수 있다.
 
 ### `GET /api/jobs/:jobId`
 
@@ -1403,6 +1462,8 @@ query:
 - 메모리 기반이므로 서버 재시작 시 사라진다.
 - 30분 cleanup 정책이 적용된다.
 - `status=running` 동안 `[][][]progress.pct[][][]`는 최대 99까지만 올라간다. `100`은 `completeJob()`으로 최종 완료 처리된 뒤에만 노출된다.
+- 현재 프론트 `FinnhubNewsWindow`는 `GET /api/jobs/active` 결과가 2개 이상일 때 선택 dropdown을 띄워 여러 running job 중 하나를 수동으로 볼 수 있다.
+- 단, 프론트 update 버튼 대부분은 전역 `updating` lock으로 묶여 있어 실제 사용자가 여러 job을 쉽게 동시에 만들지는 못한다.
 
 ## Ticker CSV API
 
@@ -1552,6 +1613,12 @@ query:
 { "mode": "backfill", "dateRange": { "from": "2024-03-08", "to": "2026-09-03" }, "upserted": 10, "deletedMockRows": 5, "source": "IBKR" }
 ```
 
+현재 구현 상태:
+
+- 이 endpoint는 background job이 아니라 즉시 처리형이다.
+- 따라서 `jobId`를 반환하지 않고 `GET /api/jobs/:jobId` / `GET /api/jobs/active` 기반 View Log 대상이 아니다.
+- 현재 프론트 문서의 update/log 체계와 완전히 맞물리지 않는 남은 예외가 calendar update다.
+
 응답 (현재 stub 에러):
 
 ```json
@@ -1585,6 +1652,11 @@ UI 위치:
 ```json
 { "mode": "custom", "dateRange": { "from": "2026-03-01", "to": "2026-03-31" }, "upserted": 10, "deletedMockRows": 5, "source": "IBKR" }
 ```
+
+현재 구현 상태:
+
+- `POST /api/ibkr/calendar/update`와 동일하게 synchronous response다.
+- 따라서 다른 background job처럼 View Log dropdown에서 선택하는 대상이 아니다.
 
 ## OHLC API
 

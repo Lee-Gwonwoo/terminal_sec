@@ -266,6 +266,7 @@ Finnhub 뉴스 적재는 직접 API response를 표에 그리지 않고, backend
 
 - `GET /api/news/pull-finhub/preflight?sourceType=...`
 - `POST /api/news/pull-finhub`
+- `GET /api/jobs/active`
 - `GET /api/jobs/:jobId`
 
 `recent`를 시작하면 preflight modal이 먼저 열리고, 기존 데이터가 없는 fallback ticker 수를 보여준다.
@@ -281,6 +282,21 @@ Recent Update 섹션 바로 아래에 automatic recent retry 정책 설명이 �
 - 강제 재조회가 필요하면 `Custom Update` 사용
 
 custom update는 별도 날짜 선택 modal에서 `from/to`를 입력한 뒤 시작한다.
+
+현재 코드 상태(중요):
+
+- Finnhub News 창은 내부적으로 `currentJobId`, `jobStatus`, `activeJobs`를 유지하므로 여러 running job을 표시할 준비는 되어 있다.
+- 하지만 update 버튼 대부분은 전역 `[][][]updating[][][]` 상태로 `disabled`된다.
+- 따라서 실제 UI 기준으로는 한 update가 running이면 다른 종류의 update 버튼도 대부분 같이 잠긴다.
+- 즉 "서로 다른 플랫폼/종류 update를 동시에 시작"하는 UX는 현재 완전히 열려 있지 않다.
+- 예외적으로 backend에 이미 여러 running job이 있으면(다른 탭, 새로고침 복구, 직접 API 호출 등) `View Log`에서 이들 중 하나를 선택해 볼 수 있다.
+
+중복 실행 현재 상태:
+
+- Finnhub pull과 RTPR pull은 backend가 `409 + existingJobId`로 중복 실행을 막는다.
+- 프론트는 이 `409`를 받으면 새 job을 만들지 않고 기존 `existingJobId`로 포커스를 옮기며, `View Log`를 연다.
+- Change Update, Full Text Update는 현재 같은 방식의 backend duplicate guard가 없다.
+- 다만 현재 프론트 전역 lock 때문에 일반적인 UI 사용 경로에서는 중복 시작이 잘 드러나지 않는다.
 
 ### Change Update 버튼
 
@@ -320,6 +336,13 @@ API:
 
 - `POST /api/news/fulltext/update`
 
+현재 코드 상태:
+
+- Full Text 메뉴 버튼도 `updating || ftUpdating` 조건으로 비활성화된다.
+- 따라서 뉴스 update가 running이면 Full Text Update도 같이 잠기고, 반대로 Full Text job이 running이면 일반 update 버튼도 잠긴다.
+- backend 자체는 fulltext endpoint에 Finnhub/RTPR pull과 같은 `409 + existingJobId` duplicate guard가 없다.
+- 즉 현재 UX는 "병렬 실행 방지"가 backend 정책이 아니라 프론트 전역 disable에 크게 의존한다.
+
 ### Log 패널
 
 - `View Log` 버튼은 항상 보이지만 job이 없으면 disabled
@@ -327,6 +350,16 @@ API:
 - 사용자가 직접 `View Log`를 눌러야 하단 패널이 열린다
 - `Esc`로 닫기 가능
 - 진행률 bar, 상태 badge, 로그 줄, 완료 result 표시
+
+현재 코드 상태(구체):
+
+- `GET /api/jobs/active`를 5초마다 polling해서 running job 목록을 `activeJobs`로 유지한다.
+- `currentJobId`가 비어 있고 running job이 있으면 가장 최근 job을 자동 선택하고 로그 패널을 연다.
+- running job이 2개 이상이면 패널 헤더에 select dropdown이 나타나고, 사용자가 볼 job을 수동으로 바꿀 수 있다.
+- dropdown 항목 라벨은 현재 `Job 1`, `Job 2` 형태에 가깝고 platform/mode/source를 직접 보여 주지 않는다.
+- `Stop` 버튼은 현재 선택된 `currentJobId`에만 적용된다.
+- `activeJobs`는 running job만 포함하므로, 완료된 job을 dropdown에서 다시 고르는 용도는 아니다.
+- 결과적으로 "동시에 진행 중인 job 선택해서 보기"는 현재도 가능하지만, label 가독성과 전역 버튼 lock 때문에 사용성이 제한적이다.
 
 ### 북마크 기능
 
@@ -544,6 +577,7 @@ company data job contract:
 주의:
 
 - 현재 불일치는 calendar update 섹션에만 남아 있다. `Company Description Update`, `Yahoo Description Update`, `Peers Data Update`, `IPO Date Update`는 `{jobId}` 반환 + `GET /api/jobs/:jobId` polling 계약으로 맞춰졌다.
+- 같은 이유로 News Feed 창에서도 calendar update만 background job/View Log 표준 계약 바깥의 예외다.
 
 ### Settings 탭
 
