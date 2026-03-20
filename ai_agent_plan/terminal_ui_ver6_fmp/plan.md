@@ -47,6 +47,63 @@
   - `PTPR Press Release`
 - 이번 대화에서 현재 FMP key로 `stable/news/stock-latest` 접근 가능은 이미 live probe로 확인되었다.
 
+### 최근 live probe로 추가 확인된 사실(2026-03-20 19:13)
+
+#### FMP press release 접근 상태
+- 현재 갱신된 FMP 구독 기준으로 아래 endpoint는 실제 `200 OK` 응답을 반환했다.
+  - `stable/news/press-releases-latest`
+  - `stable/news/press-releases?symbols=AAPL`
+- `press-releases-latest` 샘플 응답은 실제 publisher/site/url을 포함했다.
+  - 예: `Accesswire`, `accessnewswire.com`
+- 따라서 현재 상태는 `FMP press release 사용 가능`으로 본다.
+- 반면 `stable/search-press-releases?symbol=AAPL`는 이번 확인에서 `404`가 나왔으므로, 이 endpoint는 별도 파라미터/경로 재확인이 필요하다.
+
+#### RTPR 대비 FMP press release 비교
+- latest feed 기준으로 FMP와 RTPR는 상당 부분 겹친다.
+  - 비교 결과: FMP latest `20건`, RTPR latest `50건`, 제목 교집합 `13건`
+- latest feed 기준 publisher/배포 채널 계열은 실제로 많이 겹친다.
+  - FMP URL 도메인: `businesswire.com`, `newsfilecorp.com`, `globenewswire.com`, `accessnewswire.com`, `prnewswire.com`
+  - RTPR author: `ACCESSWIRE`, `Newsfile Corp`, `Business Wire`, `Globe Newswire`, `PR Newswire`
+- 하지만 두 플랫폼은 **동일 데이터셋**이 아니다.
+  - latest feed 건수와 구성 비중이 다르다.
+  - ticker 매핑이 다르게 붙는 사례가 실제로 확인되었다.
+- 같은 제목인데 ticker가 다르게 매핑된 실제 사례가 있었다.
+  - `Carlyle Commodities Announces Resignation of Vice President of Exploration`
+    - FMP: `CG`
+    - RTPR: `CCC`
+  - `Defence Therapeutics Announces Warrant Terms Amendment`
+    - FMP: `DTCFF`
+    - RTPR: `DTC`
+  - `HTGC CLASS ACTION NOTICE ... Hercules Capital ...`
+    - FMP: `HCXY`
+    - RTPR: `HTGC`
+  - `ROSEN ... ODDITY Tech Ltd ...`
+    - FMP: `LAW`
+    - RTPR: `ODD`
+- 따라서 “같은 기간 + 같은 ticker면 같은 press release 결과가 나와야 한다”는 가정은 현재 live probe 결과와 맞지 않는다.
+
+#### 최근 7일 ticker 비교(RKLB, RCAT)
+- 최근 7일 컷오프 기준 직접 비교 결과:
+  - `RKLB`
+    - FMP `2건`
+    - RTPR `1건`
+    - 제목 교집합 `1건`
+    - 공통 제목: `Mission Success: Rocket Lab Launches Latest Satellite for Synspective`
+  - `RCAT`
+    - FMP `1건`
+    - RTPR `0건`
+    - 제목 교집합 `0건`
+- 이 비교는 같은 최근 구간에서도 결과셋이 완전히 일치하지 않음을 보여준다.
+
+#### FMP text 필드와 full text
+- FMP `press-releases-latest`, `press-releases?symbols=...`, `stock-latest` 응답에는 `text` 필드가 있다.
+- 하지만 현재 확인 기준 `text`는 full text 전체가 아니라 짧은 본문 발췌/요약에 가깝다.
+  - 샘플 press release 1건 비교:
+    - FMP `text` 길이: `267자`
+    - 같은 원문 페이지 추출 텍스트 길이: `8923자`
+- 따라서 press release/news 계열에서 FMP `text`만으로 RTPR의 HTML/fulltext 저장 전략을 완전히 대체한다고 가정하면 안 된다.
+- 반면 `stable/fmp-articles`는 `content` 필드를 제공했고, 샘플 길이도 `2686자` 수준으로 더 긴 본문형 데이터에 가깝다.
+
 ### 핵심 설계 원칙
 1. **안전 삭제 우선**
    - 기존 SEC 삭제는 “SEC 관련 row만 정확히 한정”해야 한다.
@@ -76,6 +133,8 @@
    - 하지만 기존 Finnhub `/stock/filings`와 같은 필드 수준인지, ticker/date 범위 입력 방식이 같은지는 구현 전 추가 확인이 필요하다.
 2. `fmp stock` UI는 단순 label 추가가 아니라 backend query/filter 조건과 함께 맞물려야 한다.
 3. 기존 SEC 버튼을 완전 제거할지, 임시로 숨길지, FMP로 이름을 바꿔 재사용할지는 구현 중 선택 포인트다.
+4. press release를 FMP로까지 통합할지는 별도 결정이 필요하다.
+  - 이유: FMP press release는 접근 가능하지만, RTPR와 결과셋이 완전히 같지 않고, FMP `text`는 full text 전체가 아니다.
 
 ### 단계별 계획(각 단계: 구현 → 검증 → 사용자 확인 요청)
 

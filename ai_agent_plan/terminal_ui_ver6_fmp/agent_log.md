@@ -159,3 +159,47 @@
 
 - 현재 상태는 구현 plan 재작성 완료다.
 - 다음 단계는 이 plan 기준으로 `Step 1 — FMP SEC 수집 스펙 고정`부터 실제 코드 작업에 들어가는 것이다.
+
+### FMP press release / RTPR 비교 / full text 확인 반영 (2026-03-20 19:13)
+
+**작성 시각:** 2026-03-20 19:13 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. 새로 갱신된 FMP 구독 상태에서 press release endpoint를 다시 live probe했다.
+2. FMP press release와 RTPR를 latest/ticker 기준으로 직접 비교했다.
+3. `RKLB`, `RCAT` 최근 7일 결과를 FMP와 RTPR에서 직접 비교했다.
+4. FMP 응답의 `text`가 full text인지 여부를 원문 URL과 길이 비교로 확인한 뒤, 그 결과를 `plan.md`에 반영했다.
+
+#### plan에 반영한 확인 사실
+
+- 현재 FMP 구독에서는 `press-releases-latest`, `press-releases?symbols=AAPL`가 실제 `200 OK`로 동작한다.
+- FMP와 RTPR latest feed는 실제로 일부 크게 겹치지만, 건수와 ticker 매핑은 다르다.
+- 같은 제목인데 FMP/RTPR에서 ticker가 다르게 붙는 사례가 실제로 있었다.
+- 최근 7일 비교에서 `RKLB`는 부분 중복, `RCAT`는 FMP만 결과가 있었다.
+- FMP `press release` 응답의 `text` 필드는 존재하지만, 원문 전체 full text라기보다 짧은 발췌/요약에 가깝다.
+
+#### 리스크 / 완화
+
+1. **리스크:** press release 접근 가능을 곧바로 “RTPR 완전 대체 가능”으로 해석할 수 있다.
+   - 완화 1: plan에 latest/ticker 비교 결과를 수치로 넣었다.
+   - 완화 2: ticker 매핑 불일치 사례를 명시했다.
+2. **리스크:** FMP `text`를 full text로 오해해 본문 저장 전략을 단순화할 수 있다.
+   - 완화 1: 실제 원문 길이 대비 `text` 길이 비교를 plan에 넣었다.
+   - 완화 2: `fmp-articles`의 긴 `content`와 news/press-release의 `text`를 구분했다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | Markdown 문서 수정만 수행 |
+| 빌드 | ✅ | 코드 변경 없음 |
+| 자동 테스트 | ✅ | 코드 변경 없음 |
+| 런타임 통합 | ✅ | FMP/RTPR live API 호출, 최근 7일 ticker 비교, 원문 URL 길이 비교 결과를 반영 |
+
+#### 사용자 확인 요청
+
+- 현재 반영은 plan에 확인 사실 추가까지다.
+- 원하면 다음으로는 이 결과를 기준으로 `press release를 RTPR 유지 / FMP 통합 / 병행 운영` 중 어느 구조가 더 적합한지 결정 항목까지 plan에 추가할 수 있다.
