@@ -543,3 +543,127 @@ Step 0를 사용자 확인 완료(✅)로 변경하고, Step 1 전체를 구현�
   - Recent/Custom SEC Filing 버튼이 동작한다.
   - View Log가 SEC job에도 자동 연결된다.
   - 다음 Step 4 (feed 조회/필터/표시) 또는 Step 6 (멀티 job 정책)으로 진행해도 될지 확인 부탁드립니다.
+
+---
+
+### PLAN CHANGE — SEC source filter 버튼 위치 확정
+
+**작성 시각:** 14:11 (local)
+
+#### 변경 배경
+
+- 사용자 지시: `Market News` 버튼 왼쪽에 `SEC` 버튼을 추가하고, 그 버튼으로 SEC 데이터를 필터해서 볼 수 있게 하되 우선 plan부터 수정.
+
+#### 반영 내용
+
+- `plan.md`의 `D-4` 미확정 항목을 resolved 상태로 변경했다.
+- Step 4-2를 일반적인 “source filter / badge 추가”에서, **상단 source filter 줄의 `SEC` 버튼 추가 + 위치 고정 + badge/라벨 반영**으로 구체화했다.
+- 확정 UI 순서를 `All / Company News / Press Release / SEC / Market News`로 기록했다.
+
+#### 현재 상태
+
+- 구현은 아직 시작하지 않았다.
+- 이번 변경은 계획 문서와 변경 이력 정리만 수행했다.
+
+#### 다음 단계
+
+- 다음 구현 시작점은 Step 4-1 ~ 4-4 이다.
+- 특히 `SourceTypeFilter` 타입, localStorage 복원, 상단 필터 버튼 배열, `/api/news?source_type=sec_filing`, row badge/라벨을 함께 맞춰야 한다.
+
+---
+
+### SEC 날짜 계산 ET 기준 정규화 + 기존 데이터 마이그레이션
+
+**작성 시각:** 2026-03-20 14:20 (local)
+
+#### 변경 파일
+
+| 파일 | 변경 내용 |
+|------|-----------|
+| `terminal/backend/src/services/finnhubSecProvider.ts` | 앞으로 적재되는 SEC filing의 `publishedAt`, `filedAt`, `acceptedAt`, body 표시를 ET 기준으로 정규화 |
+| `terminal/backend/src/server.ts` | `pull-finhub-sec`의 `fallback7d` / `effectiveTo` 계산을 ET 날짜 기준으로 변경 |
+| `terminal/backend/src/db.ts` | startup migration 추가: 기존 `sec_filing` rows의 `published_at`, `filed_at`, `accepted_at`, body를 ET 기준으로 보정 |
+| `ai_agent_plan/terminal_ui_ver5_sec/plan.md` | SEC ET 날짜 정규화 관련 PLAN CHANGE append |
+
+#### 세부 구현
+
+- SEC filing 저장 기준을 `filedDate`의 ET 날짜로 통일했다.
+   - `published_at` → `YYYY-MM-DDT00:00:00`
+   - `filed_at` → `YYYY-MM-DD`
+- `accepted_at`는 timezone suffix가 있을 때만 ET naive ISO로 변환하고, 기존 Finnhub의 naive timestamp는 포맷만 일관화했다.
+- `pull-finhub-sec`의 recent/custom 기본 날짜 계산은 이제 `getEtDateString(new Date())`를 사용한다.
+- 기존 SEC rows는 startup 시 migration으로 한 번에 정리되도록 했다.
+   - body도 `Filed YYYY-MM-DD · Accepted ... · Accession ...` 형식으로 재작성한다.
+
+#### 검증 결과
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `finnhubSecProvider.ts`, `server.ts`, `db.ts` 모두 0 errors |
+| 빌드 | ✅ | backend build 실행 확인 |
+| 자동 테스트 | ✅ | backend vitest 10 files / 57 tests passed |
+| 런타임 통합 | ✅ | dev server startup migration 실행 확인 (`[db] migrated 3600 FINNHUB sec_filing rows to ET-normalized dates`) + `/api/news?source_type=sec_filing&limit=3` 응답에서 `published_at=2026-03-19T00:00:00`, body `Filed 2026-03-19 ...` 확인 |
+
+#### 확인된 효과
+
+- 기존 잘못 저장된 값 예시
+   - `published_at = 2026-03-19 00:00:00T00:00:00`
+   - body = `Filed 2026-03-19 00:00:00 ...`
+- 정규화 후 예시
+   - `published_at = 2026-03-19T00:00:00`
+   - body = `Filed 2026-03-19 · Accepted 2026-03-19 06:30:12 · Accession ...`
+
+#### 추가 관찰 사항
+
+- 2026-03-20 현재 시점 기준으로 Finnhub `stock/filings` 원본 표본 조회에서는 `from=2026-03-20&to=2026-03-20` 결과가 0건이었다.
+- 따라서 오늘 20일 SEC filing 부재는 현재 코드의 ET 계산 문제보다, 원본 provider 쪽 same-day 데이터 부재 가능성이 더 크다.
+
+---
+
+### Step 4 — feed 조회/필터/표시 계층 반영
+
+**작성 시각:** 2026-03-20 14:14 (local)
+
+#### 변경 파일
+
+| 파일 | 변경 내용 |
+|------|-----------|
+| `FinnhubNewsWindow.tsx` | `SEC` source filter 버튼 추가, filter 복원값 확장, SEC Filing badge 추가, source link를 origin 우선으로 변경 |
+| `newsRepository.ts` | `sec_filings` 조인으로 SEC row의 `origin_url`을 `filing_url/report_url`로 보강 |
+| `plan.md` | Step 2를 사용자 확인 완료로 변경, Step 4를 진행중으로 동기화 |
+
+#### 세부 구현
+
+- **4-1** `source_type='sec_filing'` 조회는 기존 backend query가 이미 지원하고 있었고, runtime API로 재확인했다.
+- **4-2** 상단 source filter 줄에 `SEC` 버튼을 추가했다.
+   - 순서: `All / Company News / Press Release / SEC / Market News`
+   - `SourceTypeFilter` union과 localStorage 복원 허용 목록에 `sec_filing`을 포함시켰다.
+- **4-3** title 셀 하단 source label을 plain text 대신 badge 형태로 바꿨고, SEC는 `SEC Filing` emerald badge로 노출되게 했다.
+- **4-4** source 컬럼 클릭 시 synthetic `sec-filing://...` 대신 `origin_url`을 우선 사용하게 바꿨다.
+   - backend에서 `sec_filings.filing_url/report_url`을 `origin_url`로 보강해 외부 SEC 문서 링크가 노출되게 했다.
+
+#### 검증 결과
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `FinnhubNewsWindow.tsx`, `newsRepository.ts` 모두 0 errors |
+| 빌드 | ✅ | frontend `npm run build` 성공, backend `npm run build` 실행 확인 |
+| 자동 테스트 | ✅ | backend `vitest` 10 files / 57 tests passed |
+| 런타임 통합 | ✅ | `/api/news?source_type=sec_filing&limit=3` 응답 확인, SEC rows 반환 및 일부 row에서 `origin_url` 채워짐 확인 |
+
+#### 추가 관찰 사항
+
+- 모든 SEC row가 `origin_url`을 갖는 것은 아니다.
+   - 예: `8-K - FDX`는 SEC index URL이 내려왔지만, 일부 row는 여전히 `null`이었다.
+   - 이는 companion table의 저장값 부재 또는 특정 filing 응답 차이로 보인다.
+- 브라우저 시각 확인은 사용자에게 위임한다.
+   - 코드상 필터 버튼 배열은 `SEC`가 `Market News` 왼쪽에 오도록 반영됐다.
+
+#### 사용자 확인 요청
+
+- **Step 2** → ✅ (사용자 확인 후 완료)
+- **Step 4** → ⏳ (구현 완료, 사용자 확인 대기)
+   - 상단 source filter 줄에 `SEC` 버튼이 추가되었다.
+   - `SEC` 버튼으로 `source_type=sec_filing` 데이터 필터링이 가능하다.
+   - SEC row는 `SEC Filing` badge로 노출된다.
+   - 일부 SEC row는 source 컬럼에서 실제 SEC 문서 링크로 열 수 있다.

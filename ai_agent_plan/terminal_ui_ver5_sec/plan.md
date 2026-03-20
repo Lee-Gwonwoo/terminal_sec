@@ -95,7 +95,8 @@
    - 권장: `access_number` 우선, 없으면 `document URL`
 5. **UI 노출 위치**
    - 선택지: update 메뉴에만 추가 / source filter와 row badge까지 추가
-   - 권장: update 메뉴 + source filter + row badge까지 같이 추가
+  - 권장: update 메뉴 + source filter + row badge까지 같이 추가
+  - 현재 사용자 결정(2026-03-20): source filter 줄에 `SEC` 버튼을 추가하고, 위치는 기존 `Market News` 버튼의 왼쪽으로 고정한다.
 
 ### 계획 중간 필수 확인
 - Step 0에서 아래 5개를 반드시 확보해야 한다.
@@ -215,15 +216,15 @@ Invoke-RestMethod -Uri "http://localhost:8080/api/news/pull-finhub-sec" -Method 
 ```
 사용자 확인 필요: **예**
 
-#### ⏳ Step 2 — Frontend `SEC Filing` 버튼 2개 + View Log 통합
+#### ✅ Step 2 — Frontend `SEC Filing` 버튼 2개 + View Log 통합
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 2-1 | Update 드롭다운에 `SEC Filing` 섹션 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | webui build 후 메뉴 표시 확인 | ⏳ |
-| 2-2 | `Recent SEC Update` 버튼 연결 | `FinnhubNewsWindow.tsx` | 클릭 시 job 시작 + jobId 저장 확인 | ⏳ |
-| 2-3 | `Custom SEC Update` 버튼 + 날짜 modal 연결 | `FinnhubNewsWindow.tsx` | 날짜 지정 후 POST body 확인 | ⏳ |
-| 2-4 | 기존 `View Log`가 SEC job에도 동일하게 붙는지 확인 | `FinnhubNewsWindow.tsx` | 로그 패널에 SEC 로그 표시 | ⏳ |
-| 2-5 | 버튼 배치를 `Press Release` 옆 흐름으로 시각 정렬 | `FinnhubNewsWindow.tsx` | 드롭다운 순서와 설명문 확인 | ⏳ |
+| 2-1 | Update 드롭다운에 `SEC Filing` 섹션 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | webui build 후 메뉴 표시 확인 | ✅ |
+| 2-2 | `Recent SEC Update` 버튼 연결 | `FinnhubNewsWindow.tsx` | 클릭 시 job 시작 + jobId 저장 확인 | ✅ |
+| 2-3 | `Custom SEC Update` 버튼 + 날짜 modal 연결 | `FinnhubNewsWindow.tsx` | 날짜 지정 후 POST body 확인 | ✅ |
+| 2-4 | 기존 `View Log`가 SEC job에도 동일하게 붙는지 확인 | `FinnhubNewsWindow.tsx` | 로그 패널에 SEC 로그 표시 | ✅ |
+| 2-5 | 버튼 배치를 `Press Release` 옆 흐름으로 시각 정렬 | `FinnhubNewsWindow.tsx` | 드롭다운 순서와 설명문 확인 | ✅ |
 
 - `2-1` 목적: 사용자가 기존 위치에서 바로 SEC pull을 찾게 한다. 설명: Update 메뉴에 별도 섹션이 생기면 완료다.
   - 완료 조건(눈으로 확인): 드롭다운에 `SEC Filing` 헤더가 보인다.
@@ -298,23 +299,23 @@ Invoke-RestMethod -Uri "http://localhost:8080/api/news/fulltext/<sec_news_id>"
 ```
 사용자 확인 필요: **예**
 
-#### ⬜ Step 4 — feed 조회/필터/표시 계층에 `SEC Filing` 반영
+#### ⏳ Step 4 — feed 조회/필터/표시 계층에 `SEC Filing` 반영
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 4-1 | `source_type='sec_filing'` 조회 지원 추가 | `terminal/backend/src/services/newsRepository.ts`, `terminal/backend/src/types.ts` | `/api/news?source_type=sec_filing` 확인 | ⬜ |
-| 4-2 | source filter / badge / 라벨에 `SEC Filing` 추가 | `FinnhubNewsWindow.tsx` 및 관련 타입 | UI에서 필터/배지 표시 확인 | ⬜ |
-| 4-3 | row 표시용 subtitle/body/title 구성 확정 | `newsRepository.ts`, `FinnhubNewsWindow.tsx` | form type, filed date, ticker가 읽히게 보이는지 확인 | ⬜ |
-| 4-4 | filing 원문 링크 또는 detail 링크 노출 | `FinnhubNewsWindow.tsx` | 링크 클릭 동작 확인 | ⬜ |
+| 4-1 | `source_type='sec_filing'` 조회 지원 추가 | `terminal/backend/src/services/newsRepository.ts`, `terminal/backend/src/types.ts` | `/api/news?source_type=sec_filing` 확인 | ⏳ |
+| 4-2 | 상단 source filter 줄에 `SEC` 버튼 추가 + row badge / 라벨에 `SEC Filing` 추가 | `FinnhubNewsWindow.tsx` 및 관련 타입 | UI에서 `Market News` 왼쪽 `SEC` 버튼 + 배지 표시 확인 | ⏳ |
+| 4-3 | row 표시용 subtitle/body/title 구성 확정 | `newsRepository.ts`, `FinnhubNewsWindow.tsx` | form type, filed date, ticker가 읽히게 보이는지 확인 | ⏳ |
+| 4-4 | filing 원문 링크 또는 detail 링크 노출 | `FinnhubNewsWindow.tsx` | 링크 클릭 동작 확인 | ⏳ |
 
 - `4-1` 목적: SEC row가 실제 feed에서 검색 가능해야 한다. 설명: source_type filter가 동작하면 완료다.
   - 완료 조건(눈으로 확인): API에서 sec_filing 행이 내려온다.
   - 사람 검증(비개발자): 필터를 누르면 SEC 항목만 보인다.
   - 흔한 문제/주의: ingest만 되고 조회 filter에 안 걸리면 UI에서 없는 데이터처럼 보인다.
 - `4-2` 목적: 사용자가 일반 기사와 SEC filing을 구분. 설명: 배지/라벨이 붙으면 완료다.
-  - 완료 조건(눈으로 확인): SEC Filing 배지 노출.
-  - 사람 검증(비개발자): 목록에서 어떤 row가 filing인지 한눈에 보인다.
-  - 흔한 문제/주의: 기존 `Press Release` 색/배지와 너무 비슷하면 혼동된다.
+  - 완료 조건(눈으로 확인): 상단 필터 줄에 `SEC` 버튼이 생기고, 위치가 `Market News` 왼쪽이다. 동시에 row에 SEC Filing 배지가 노출된다.
+  - 사람 검증(비개발자): `SEC` 버튼을 누르면 SEC 항목만 보이고, 목록에서 어떤 row가 filing인지 한눈에 보인다.
+  - 흔한 문제/주의: `SourceTypeFilter` union, localStorage 복원 값, 필터 버튼 배열, badge 라벨 중 하나만 바꾸면 UI/상태 복원이 어긋날 수 있다.
 - `4-3` 목적: structured metadata를 읽기 쉬운 row로 변환. 설명: title/body/보조행에 form, ticker, filed date가 보여야 한다.
   - 완료 조건(눈으로 확인): 빈 body 대신 요약 텍스트가 보인다.
   - 사람 검증(비개발자): 목록 한 줄만 봐도 어떤 filing인지 알 수 있다.
@@ -355,9 +356,8 @@ npm run test
 사용자 확인 필요: **예**
 
 ### 미확정 사항(명시 결정 필요)
-1. `D-4` SEC filing source filter 노출 수준
-   - 선택지: 내부 source_type만 지원 / UI filter badge까지 노출
-   - 차단 대상 Step: Step 4
+- 현재 없음
+- `D-4` SEC filing source filter 노출 수준은 2026-03-20 사용자 지시로 확정됨: 상단 source filter 줄에 `SEC` 버튼 추가, 위치는 `Market News` 왼쪽.
 
 ### 실행 의존성 그래프
 Legend: `✅` 완료+사용자확인 완료 / `⏳` 완료, 사용자확인 대기 / `⬜` 미착수 / `🚫` 차단
@@ -388,18 +388,18 @@ Legend: `✅` 완료+사용자확인 완료 / `⏳` 완료, 사용자확인 대�
 
 트랙 B — UI/조회 계층 반영
 ```text
-⏳ Step 2 Frontend SEC Filing 버튼 2개 + View Log 통합
-  ⏳ 2-1 SEC Filing 섹션 추가
-  ⏳ 2-2 Recent SEC Update 버튼 연결
-  ⏳ 2-3 Custom SEC Update 버튼 연결
-  ⏳ 2-4 View Log 재사용 확인
-  ⬜ 2-5 Press Release 인접 배치
+✅ Step 2 Frontend SEC Filing 버튼 2개 + View Log 통합
+  ✅ 2-1 SEC Filing 섹션 추가
+  ✅ 2-2 Recent SEC Update 버튼 연결
+  ✅ 2-3 Custom SEC Update 버튼 연결
+  ✅ 2-4 View Log 재사용 확인
+  ✅ 2-5 Press Release 인접 배치
 
-⬜ Step 4 feed 조회/필터/표시 계층 반영
-  ⬜ 4-1 source_type=sec_filing 조회 지원
-  ⬜ 4-2 source filter / badge 추가
-  ⬜ 4-3 row 표시 포맷 확정
-  ⬜ 4-4 원문 링크 노출
+⏳ Step 4 feed 조회/필터/표시 계층 반영
+  ⏳ 4-1 source_type=sec_filing 조회 지원
+  ⏳ 4-2 상단 SEC 필터 버튼 + badge 추가
+  ⏳ 4-3 row 표시 포맷 확정
+  ⏳ 4-4 원문 링크 노출
 
 ⬜ Step 5 검증 + 문서 동기화
   ⬜ 5-1 정적 분석
@@ -424,7 +424,7 @@ Legend: `✅` 완료+사용자확인 완료 / `⏳` 완료, 사용자확인 대�
 
 | 결정 | 차단 대상 | 선택지 |
 |------|-----------|--------|
-| `D-4` UI filter 노출 수준 | Step 4 | 내부 필터만 / 배지까지 노출 |
+| 현재 추가 차단 없음 | - | - |
 
 ### 결정 #1 — 저장 전략(상세)
 - 확정값: `news_items + sec_filings companion table`
@@ -480,6 +480,16 @@ Legend: `✅` 완료+사용자확인 완료 / `⏳` 완료, 사용자확인 대�
 - 이유:
   - 현재 사용자 지시가 명확히 "calendar 작업은 지금 하지 마라"이기 때문이다.
   - SEC 기능과 멀티-job 정책 정리에 우선 집중한다.
+
+### 결정 #5 — SEC source filter 위치(확정)
+- 확정값: **상단 source filter 줄에 `SEC` 버튼을 추가하고, 위치는 `Market News` 왼쪽으로 고정한다.**
+- 의미:
+  - 현재 `All / Company News / Press Release / Market News` 버튼 줄이 `All / Company News / Press Release / SEC / Market News`로 바뀐다.
+  - `SEC` 버튼은 `source_type='sec_filing'` filter와 직접 연결된다.
+  - row badge/라벨도 같이 추가하되, 이번 사용자 요청의 핵심은 상단 필터 버튼 노출과 위치 고정이다.
+- 이유:
+  - 사용자가 feed 조회 단계에서 SEC 데이터를 일반 뉴스와 분리해 즉시 보고 싶다고 명시했다.
+  - 필터 버튼 위치를 먼저 고정해야 UI 변경 후 사용자 기대와 실제 배치가 어긋나지 않는다.
 
 ---
 
@@ -611,3 +621,37 @@ Invoke-RestMethod -Uri "http://localhost:8080/api/jobs/<jobId>"
 # 다른 logical button 호출 시 병렬 jobId 2개 생성 확인
 ```
 사용자 확인 필요: **예**
+
+---
+
+### PLAN CHANGE (2026-03-20) — SEC source filter 버튼 위치 확정
+
+사용자 요청: "ui 에서 보기 모드중 market news 메뉴버튼 왼쪽에 도 sec 라고 버튼 만들어서 필터해서 데이터를 보는게 가능하게 해라. 일단 계획부터 추가 수정"
+
+**이번 변경으로 확정된 내용:**
+- `D-4`는 더 이상 미확정이 아니다.
+- Step 4는 단순한 내부 `source_type=sec_filing` 지원이 아니라, **상단 source filter 줄의 명시적 `SEC` 버튼 추가**를 포함한다.
+- 버튼 순서는 `All / Company News / Press Release / SEC / Market News`를 기본안으로 고정한다.
+- 구현 시 `SourceTypeFilter` 타입, localStorage 복원, API query param, row badge/라벨을 함께 맞춘다.
+
+**영향 받는 단계:**
+- Step 4-2를 이 결정에 맞춰 구현한다.
+- Step 5 runtime 검증 시 상단 필터 버튼 배치와 필터 결과를 함께 확인한다.
+
+---
+
+### PLAN CHANGE (2026-03-20) — SEC 날짜 계산 ET 기준 정규화 + 기존 데이터 마이그레이션
+
+사용자 요청: "SEC recent/custom 날짜 계산을 진짜 ET 기준으로 고치기 / 기존데이터도 et 로 고치고 앞으로 받을 데이터도"
+
+**이번 변경으로 확정된 내용:**
+- `POST /api/news/pull-finhub-sec`의 `recent/custom` 날짜 계산은 UTC `toISOString().slice(0, 10)`이 아니라 **ET 날짜 문자열**을 기준으로 계산한다.
+- SEC filing의 저장 기준 시각은 일반 news headline timestamp가 아니라 **filedDate의 ET 날짜**를 기준으로 한다.
+- 기존 SEC row도 startup migration으로 정규화한다.
+  - `news_items.published_at` → `YYYY-MM-DDT00:00:00` (ET 날짜 자정, naive)
+  - `sec_filings.filed_at` → `YYYY-MM-DD`
+  - SEC row의 표시 body도 filed date 표기를 ET 날짜 기준으로 다시 맞춘다.
+
+**영향 받는 단계:**
+- Step 1 backend ingest의 SEC 날짜 처리 로직을 보정한다.
+- Step 5 runtime 검증 시 기존 SEC rows가 ET 기준 포맷으로 정리되었는지 함께 확인한다.

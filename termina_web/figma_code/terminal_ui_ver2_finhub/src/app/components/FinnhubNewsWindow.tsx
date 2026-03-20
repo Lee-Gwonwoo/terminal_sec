@@ -53,11 +53,12 @@ type SortDir = 'asc' | 'desc' | null;
 interface SortState { column: ColumnId | null; dir: SortDir; }
 
 // ─── Source type filter ───
-type SourceTypeFilter = 'all' | 'company_news' | 'press_release' | 'market_news';
+type SourceTypeFilter = 'all' | 'company_news' | 'press_release' | 'sec_filing' | 'market_news';
 
 function getSourceTypeLabel(sourceType: SourceTypeFilter | string): string {
   if (sourceType === 'company_news') return 'Company News';
   if (sourceType === 'press_release') return 'Press Release';
+  if (sourceType === 'sec_filing') return 'SEC';
   if (sourceType === 'market_news') return 'Market News';
   return 'All';
 }
@@ -65,8 +66,30 @@ function getSourceTypeLabel(sourceType: SourceTypeFilter | string): string {
 function getSourceTypeShortLabel(sourceType: SourceTypeFilter | string): string {
   if (sourceType === 'company_news') return 'Co.';
   if (sourceType === 'press_release') return 'PR';
+  if (sourceType === 'sec_filing') return 'SEC';
   if (sourceType === 'market_news') return 'Mkt.';
   return 'All';
+}
+
+function getSourceTypeBadgeLabel(sourceType: string): string {
+  if (sourceType === 'sec_filing') return 'SEC Filing';
+  return getSourceTypeLabel(sourceType);
+}
+
+function getSourceTypeBadgeClass(sourceType: string): string {
+  if (sourceType === 'company_news') {
+    return 'bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400';
+  }
+  if (sourceType === 'press_release') {
+    return 'bg-green-50 dark:bg-green-900/40 text-green-600 dark:text-green-400';
+  }
+  if (sourceType === 'sec_filing') {
+    return 'bg-emerald-50 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300';
+  }
+  if (sourceType === 'market_news') {
+    return 'bg-amber-50 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300';
+  }
+  return 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300';
 }
 
 function getFinnhubTickerConcurrency(): number {
@@ -394,7 +417,7 @@ export function FinnhubNewsWindow({
       const saved = localStorage.getItem('finhub-news-ui-state');
       if (saved) {
         const p = JSON.parse(saved);
-        if (['all', 'company_news', 'press_release', 'market_news'].includes(p.sourceTypeFilter)) {
+        if (['all', 'company_news', 'press_release', 'sec_filing', 'market_news'].includes(p.sourceTypeFilter)) {
           return p.sourceTypeFilter as SourceTypeFilter;
         }
       }
@@ -1459,8 +1482,8 @@ export function FinnhubNewsWindow({
               </p>
             )}
             {newsItem.sourceType && (
-              <span className="text-[10px] text-gray-400 mt-0.5">
-                {getSourceTypeLabel(newsItem.sourceType)}
+              <span className={`mt-1 inline-flex w-fit items-center rounded px-1.5 py-0.5 text-[10px] font-medium ${getSourceTypeBadgeClass(newsItem.sourceType)}`}>
+                {getSourceTypeBadgeLabel(newsItem.sourceType)}
               </span>
             )}
           </div>
@@ -1473,8 +1496,10 @@ export function FinnhubNewsWindow({
         return <span className="truncate text-gray-600 dark:text-gray-400" title={newsItem.industry ?? undefined}>{newsItem.industry ?? '-'}</span>;
       case 'ipoDate':
         return <span className="truncate text-gray-600 dark:text-gray-400" title={newsItem.ipoDate ?? undefined}>{newsItem.ipoDate ?? '-'}</span>;
-      case 'source':
-        return renderLinkCell(newsItem.source, 'text-gray-600 dark:text-gray-400', newsItem.url);
+      case 'source': {
+        const sourceHref = newsItem.originUrl || (newsItem.url?.startsWith('http') ? newsItem.url : null);
+        return renderLinkCell(newsItem.source, 'text-gray-600 dark:text-gray-400', sourceHref);
+      }
       case 'fulltext':
         return newsItem.hasFullText ? (
           <span
@@ -1687,7 +1712,7 @@ export function FinnhubNewsWindow({
 
           {/* Source type filter toggle */}
           <div className="flex items-center border border-gray-300 dark:border-gray-600 rounded overflow-hidden">
-            {(['all', 'company_news', 'press_release', 'market_news'] as SourceTypeFilter[]).map(st => (
+            {(['all', 'company_news', 'press_release', 'sec_filing', 'market_news'] as SourceTypeFilter[]).map(st => (
               <button
                 key={st}
                 onClick={() => setSourceTypeFilter(st)}

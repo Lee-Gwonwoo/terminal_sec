@@ -90,6 +90,7 @@ import { fetchFinnhubProfilesBatch } from "./services/finnhubProfile2Provider.js
 import { fetchRtprArticles, fetchRtprArticlesByTicker } from "./services/ptprNewsProvider.js";
 import { fetchSecFilingsRaw, insertSecFiling, getSecFilingAnchorMap } from "./services/finnhubSecProvider.js";
 import type { SecFilingMappedItem } from "./services/finnhubSecProvider.js";
+import { getEtDateString } from "./services/timeUtils.js";
 import {
   clampFinnhubCompanyDataConcurrency,
   getFinnhubCompanyDataDefaults,
@@ -965,9 +966,10 @@ app.post("/api/news/pull-finhub-sec", async (req, res, next) => {
     const tickerList = await getDefaultUniverseTickers();
 
     // Date range
-    const fallback7d = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10);
+    const todayEt = getEtDateString(new Date());
+    const fallback7d = getEtDateString(new Date(Date.now() - 7 * 86_400_000));
     let effectiveFrom = input.from ?? fallback7d;
-    const effectiveTo = input.to ?? new Date().toISOString().slice(0, 10);
+    const effectiveTo = input.to ?? todayEt;
 
     // For recent mode, load per-ticker anchor map
     let secAnchorMap: Map<string, string> | undefined;

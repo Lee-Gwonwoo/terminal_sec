@@ -1,6 +1,6 @@
 import { config } from "../config.js";
 import { getDb } from "../db.js";
-import { getEtDateString } from "./timeUtils.js";
+import { getEtDateString, toEtNaiveIso } from "./timeUtils.js";
 import type { FinnhubMappedItem } from "./finnhubNewsProvider.js";
 
 const FINNHUB_BASE = "https://finnhub.io/api/v1";
@@ -69,6 +69,33 @@ async function fetchWithRetry(url: string): Promise<any> {
   }
 }
 
+function normalizeSecPublishedAt(value?: string): string {
+  if (!value) {
+    return toEtNaiveIso(new Date()).slice(0, 10) + "T00:00:00";
+  }
+  return `${getEtDateString(value)}T00:00:00`;
+}
+
+function normalizeSecFiledAt(value?: string): string {
+  if (!value) {
+    return "";
+  }
+  return getEtDateString(value);
+}
+
+function normalizeSecAcceptedAt(value?: string): string {
+  if (!value) {
+    return "";
+  }
+  if (/(Z|[+-]\d{2}:\d{2})$/.test(value)) {
+    return toEtNaiveIso(value);
+  }
+  if (value.includes(" ")) {
+    return value.replace(" ", "T");
+  }
+  return value;
+}
+
 // ---------- Fetch + Map ----------
 
 /**
@@ -87,20 +114,19 @@ export async function fetchSecFilingsRaw(
   return raw.map((item: FinnhubSecFilingRaw) => {
     const formType = item.form ?? "UNKNOWN";
     const ticker = (item.symbol || symbol).toUpperCase();
+    const filedAt = normalizeSecFiledAt(item.filedDate);
+    const acceptedAt = normalizeSecAcceptedAt(item.acceptedDate);
     // Synthetic title: "FORM - TICKER"
     const title = `${formType} - ${ticker}`;
     // Subtitle info as body (show date-only for filedDate, keep acceptedDate as-is)
-    const filedDisplay = (item.filedDate ?? "N/A").slice(0, 10);
-    const body = `Filed ${filedDisplay} · Accepted ${item.acceptedDate ?? "N/A"} · Accession ${item.accessNumber ?? "N/A"}`;
+    const filedDisplay = filedAt || "N/A";
+    const acceptedDisplay = acceptedAt ? acceptedAt.replace("T", " ") : "N/A";
+    const body = `Filed ${filedDisplay} · Accepted ${acceptedDisplay} · Accession ${item.accessNumber ?? "N/A"}`;
     // Use accession number as dedup key in the URL field (UNIQUE(source, url))
     const dedupUrl = `sec-filing://${item.accessNumber}`;
 
     return {
-      publishedAt: item.filedDate
-        ? (item.filedDate.includes("T") || item.filedDate.includes(" ")
-            ? item.filedDate
-            : `${item.filedDate}T00:00:00`)
-        : new Date().toISOString(),
+      publishedAt: normalizeSecPublishedAt(item.filedDate),
       source: "FINNHUB",
       sourceType: "sec_filing",
       title,
@@ -113,8 +139,8 @@ export async function fetchSecFilingsRaw(
       accessionNumber: item.accessNumber ?? "",
       cik: item.cik ?? "",
       formType,
-      filedAt: item.filedDate ?? "",
-      acceptedAt: item.acceptedDate ?? "",
+      filedAt,
+      acceptedAt,
       reportUrl: item.reportUrl ?? "",
       filingUrl: item.filingUrl ?? "",
       rawJson: JSON.stringify(item),

@@ -119,7 +119,7 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
 
   const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
   const sql = `
-    SELECT ni.id, ni.published_at, ni.source, ni.publisher, ni.origin_url, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
+    SELECT ni.id, ni.published_at, ni.source, ni.publisher, COALESCE(ni.origin_url, sf.filing_url, sf.report_url) AS origin_url, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
            cm_1d.ohlc_ticker,
            cm_chg.target_date AS ohlc_date,
            cm_chg.target_date AS change_pct_ohlc_date,
@@ -140,6 +140,7 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
            naa.analysis_status AS ai_analysis_status,
            naa.keywords_json AS ai_keywords_json
     FROM news_items ni
+    LEFT JOIN sec_filings sf ON sf.news_id = ni.id
     LEFT JOIN news_fulltext nf ON nf.news_id = ni.id
     LEFT JOIN news_change_metrics cm_chg ON cm_chg.news_id = ni.id AND cm_chg.metric_key = 'change_pct'
     LEFT JOIN news_change_metrics cm_1d ON cm_1d.news_id = ni.id AND cm_1d.metric_key = 'change_1d_pct'
@@ -274,7 +275,7 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
 
 export async function getNewsById(id: string): Promise<NewsItem | null> {
   const row = await getDb().get<any>(
-    `SELECT ni.id, ni.published_at, ni.source, ni.publisher, ni.origin_url, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
+    `SELECT ni.id, ni.published_at, ni.source, ni.publisher, COALESCE(ni.origin_url, sf.filing_url, sf.report_url) AS origin_url, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
             cm_1d.ohlc_ticker,
             cm_chg.target_date AS ohlc_date,
             cm_chg.target_date AS change_pct_ohlc_date,
@@ -295,6 +296,7 @@ export async function getNewsById(id: string): Promise<NewsItem | null> {
             naa.analysis_status AS ai_analysis_status,
             naa.keywords_json AS ai_keywords_json
      FROM news_items ni
+    LEFT JOIN sec_filings sf ON sf.news_id = ni.id
      LEFT JOIN news_fulltext nf ON nf.news_id = ni.id
      LEFT JOIN news_change_metrics cm_chg ON cm_chg.news_id = ni.id AND cm_chg.metric_key = 'change_pct'
      LEFT JOIN news_change_metrics cm_1d ON cm_1d.news_id = ni.id AND cm_1d.metric_key = 'change_1d_pct'
@@ -430,10 +432,11 @@ export async function getModel1News(query: NewsQuery): Promise<{ items: Model1Ne
 
   const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
   const sql = `
-    SELECT mn.id, mn.published_at, mn.source, mn.publisher, mn.origin_url, mn.source_type, mn.title, mn.body, mn.url, mn.tickers_csv, mn.tags_csv, mn.created_at,
+    SELECT mn.id, mn.published_at, mn.source, mn.publisher, COALESCE(mn.origin_url, sf.filing_url, sf.report_url) AS origin_url, mn.source_type, mn.title, mn.body, mn.url, mn.tickers_csv, mn.tags_csv, mn.created_at,
            mn.has_full_text, mn.keywords_json, mn.keywords_status,
            mn.ai_score, mn.ai_score_evidence, mn.ai_analysis_status, mn.ai_keywords_json
     FROM model1_current_news_view mn
+    LEFT JOIN sec_filings sf ON sf.news_id = mn.id
     ${extraJoins}
     ${whereSql}
     ORDER BY mn.published_at DESC, mn.id DESC
@@ -452,10 +455,11 @@ export async function getModel1News(query: NewsQuery): Promise<{ items: Model1Ne
 
 export async function getModel1NewsById(id: string): Promise<Model1NewsItem | null> {
   const row = await getDb().get<any>(
-    `SELECT mn.id, mn.published_at, mn.source, mn.publisher, mn.origin_url, mn.source_type, mn.title, mn.body, mn.url, mn.tickers_csv, mn.tags_csv, mn.created_at,
+    `SELECT mn.id, mn.published_at, mn.source, mn.publisher, COALESCE(mn.origin_url, sf.filing_url, sf.report_url) AS origin_url, mn.source_type, mn.title, mn.body, mn.url, mn.tickers_csv, mn.tags_csv, mn.created_at,
             mn.has_full_text, mn.keywords_json, mn.keywords_status,
             mn.ai_score, mn.ai_score_evidence, mn.ai_analysis_status, mn.ai_keywords_json
      FROM model1_current_news_view mn
+     LEFT JOIN sec_filings sf ON sf.news_id = mn.id
      WHERE mn.id = ?`,
     [id],
   );
