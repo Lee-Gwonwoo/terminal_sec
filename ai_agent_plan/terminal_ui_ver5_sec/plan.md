@@ -35,6 +35,7 @@
 - mock 데이터는 사용하지 않는다.
 - Finnhub API 키, 기타 시크릿은 로그/문서/코드에 노출하지 않는다.
 - `IBKR calendar sec_filings`를 재활용해 UI만 억지로 연결하지 않는다. 이번 범위는 `Finnhub SEC filing ingestion`이다.
+- `calendar` update/job 구조 변경은 이번 작업 범위에서 제외한다.
 - Finnhub 응답 필드가 live probe로 확인되기 전까지, `url`, `accessNumber`, `form`, `filedDate` 필드명을 추측해서 고정 구현하지 않는다.
 - 이번 plan 단계에서는 코드 구현이 아니라 구현 순서와 검증 포인트를 확정한다.
 - SEC filing full text가 안정적으로 확보되지 않으면, 1차 구현에서는 metadata + 원문 링크 + unavailable status까지를 우선 완료하고 본문 파서는 2차로 분리할 수 있다.
@@ -120,15 +121,30 @@
 
 ### 단계별 계획(각 단계: 구현 → 검증)
 
-#### ⬜ Step 0 — Finnhub SEC filing 응답 구조 및 full text 가능성 확정
+#### ⏳ Step 0 — Finnhub SEC filing 응답 구조 및 full text 가능성 확정
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 0-1 | Finnhub `stock/filings` live probe로 실제 응답 샘플 1건 확보 | 런타임 probe | PowerShell 또는 테스트 스크립트로 200 응답 + 샘플 JSON 확인 | ⬜ |
-| 0-2 | 응답에서 dedup 후보 필드(`accessNumber`, URL, filed date, form type 등) 확인 | 조사 결과를 plan에 반영 | 샘플 JSON 기준 필드 목록 표 작성 | ⬜ |
-| 0-3 | 응답에 원문 링크 또는 문서 index URL이 있는지 확인 | 조사 결과를 plan에 반영 | URL 존재/부재 명시 | ⬜ |
-| 0-4 | recent/custom 모드에서 필요한 date 파라미터 규칙 확인 | 조사 결과를 plan에 반영 | `from/to` 지원 여부 및 형식 기록 | ⬜ |
-| 0-5 | Step 3 full text 진행 가능 여부를 `가능 / 조건부 / 불가`로 판정 | `plan.md` | 판정 결과와 근거 append | ⬜ |
+| 0-1 | Finnhub `stock/filings` live probe로 실제 응답 샘플 1건 확보 | 런타임 probe | PowerShell 또는 테스트 스크립트로 200 응답 + 샘플 JSON 확인 | ⏳ |
+| 0-2 | 응답에서 dedup 후보 필드(`accessNumber`, URL, filed date, form type 등) 확인 | 조사 결과를 plan에 반영 | 샘플 JSON 기준 필드 목록 표 작성 | ⏳ |
+| 0-3 | 응답에 원문 링크 또는 문서 index URL이 있는지 확인 | 조사 결과를 plan에 반영 | URL 존재/부재 명시 | ⏳ |
+| 0-4 | recent/custom 모드에서 필요한 date 파라미터 규칙 확인 | 조사 결과를 plan에 반영 | `from/to` 지원 여부 및 형식 기록 | ⏳ |
+| 0-5 | Step 3 full text 진행 가능 여부를 `가능 / 조건부 / 불가`로 판정 | `plan.md` | 판정 결과와 근거 append | ⏳ |
+
+실측 결과 요약(2026-03-20, AAPL sample)
+- 응답은 array 형태였고, `2026-01-01 ~ 2026-03-20` 범위에서 24건이 내려왔다.
+- 샘플 필드는 `accessNumber`, `symbol`, `cik`, `form`, `filedDate`, `acceptedDate`, `reportUrl`, `filingUrl`로 확인됐다.
+- dedup 핵심 키로 `accessNumber`를 우선 사용 가능하다.
+- 본문 유사 필드(`text`, `body`, `content`, `fullText`, `reportText`)는 샘플에 없었다.
+- `reportUrl`은 SEC XML 문서, `filingUrl`은 SEC index HTML 문서로 확인됐다.
+- 좁은 범위 재조회(`from=2026-03-16`, `to=2026-03-18`)에서 `filedDate=2026-03-17` 1건만 반환돼 `from/to` 기반 custom filtering이 실제로 동작하는 것으로 봐도 된다.
+- SEC URL은 PowerShell 기본 `Invoke-WebRequest`에서는 403이 날 수 있었지만, `curl` + `User-Agent`로는 `reportUrl=HTTP 200 text/xml`, `filingUrl=HTTP 200 text/html`이 확인됐다.
+- 대표 form 검증 결과, full text fetch는 가능하되 포맷이 균일하지 않았다.
+  - `4`, `144`: XML 계열 (`text/xml`)
+  - `8-K`, `10-K`, `10-Q`, `DEF 14A`: HTML 계열 (`text/html`)이지만 대부분 inline XBRL namespace를 포함했다.
+  - 따라서 "문서를 받아오는 것"과 "사람이 읽는 plain text로 안정 추출하는 것"은 별도 난이도로 봐야 한다.
+- 결론: Finnhub가 직접 본문을 주지는 않고, **SEC 원문 링크는 준다**. 따라서 Step 3은 `링크 기반 backfill` 전제로만 진행 가능하다.
+- 안전성 판정: 링크 fetch 자체는 가능하지만, 자동 plain-text 추출을 1차부터 안전하다고 보기는 어렵다. Step 3은 별도 `SEC FT Backfill` job으로 분리하는 것이 안전하다.
 
 - `0-1` 목적: 추측 구현 금지. 설명: 실 API 응답 1건을 확인하기 전에는 SEC filing 스키마를 고정하지 않는다.
   - 완료 조건(눈으로 확인): 샘플 JSON 요약이 plan 또는 agent_log에 적힌다.
@@ -146,10 +162,12 @@
   - 완료 조건(눈으로 확인): `from/to` 형식과 inclusive/exclusive 여부가 적힌다.
   - 사람 검증(비개발자): 예시 날짜가 적혀 있다.
   - 흔한 문제/주의: 최근 업데이트가 ticker anchor 기준인지, provider 전체 최신일 기준인지 혼동할 수 있다.
+  - 현재 확인 결과: `YYYY-MM-DD` 형식 `from/to`로 narrow range 조회가 가능했고, 샘플상 범위 밖 데이터는 내려오지 않았다.
 - `0-5` 목적: Step 3 차단 여부 판단. 설명: full text path를 계속 진행할지 metadata-only로 남길지 결정한다.
   - 완료 조건(눈으로 확인): Step 3 상태가 `⬜` 또는 `🚫`로 결정된다.
   - 사람 검증(비개발자): “본문 가능/불가”가 한 줄로 정리된다.
   - 흔한 문제/주의: URL만 있다고 바로 본문 파싱 성공을 가정하면 안 된다.
+  - 현재 판정: `조건부`. direct body는 없지만 `reportUrl`/`filingUrl`이 있어 별도 fetch/backfill 경로는 설계 가능하다.
 
 검증 훅:
 ```powershell
@@ -337,16 +355,7 @@ npm run test
 사용자 확인 필요: **예**
 
 ### 미확정 사항(명시 결정 필요)
-1. `D-1` SEC filing full text 1차 범위
-   - 선택지: metadata-only / 링크 있으면 즉시 fetch / 별도 backfill 버튼만 제공
-   - 차단 대상 Step: Step 3
-2. `D-2` companion table 채택 여부
-   - 선택지: `news_items` 단독 / `news_items + sec_filings`
-   - 차단 대상 Step: Step 1
-3. `D-3` row title 포맷
-   - 선택지: provider headline 사용 / `FORM - TICKER - DATE` 합성 / 둘 혼합
-   - 차단 대상 Step: Step 4
-4. `D-4` SEC filing source filter 노출 수준
+1. `D-4` SEC filing source filter 노출 수준
    - 선택지: 내부 source_type만 지원 / UI filter badge까지 노출
    - 차단 대상 Step: Step 4
 
@@ -355,12 +364,12 @@ Legend: `✅` 완료+사용자확인 완료 / `⏳` 완료, 사용자확인 대�
 
 트랙 A — API/저장 구조 확정
 ```text
-⬜ Step 0 Finnhub SEC filing 응답 구조 및 full text 가능성 확정
-  ⬜ 0-1 live probe sample 확보
-  ⬜ 0-2 dedup 후보 필드 확인
-  ⬜ 0-3 원문 링크 존재 여부 확인
-  ⬜ 0-4 from/to 규칙 확인
-  ⬜ 0-5 full text 가능 여부 판정
+⏳ Step 0 Finnhub SEC filing 응답 구조 및 full text 가능성 확정
+  ⏳ 0-1 live probe sample 확보
+  ⏳ 0-2 dedup 후보 필드 확인
+  ⏳ 0-3 원문 링크 존재 여부 확인
+  ⏳ 0-4 from/to 규칙 확인
+  ⏳ 0-5 full text 가능 여부 판정
 
 ⬜ Step 1 Backend schema + provider + pull job 추가
   ⬜ 1-1 sec_filings companion table 추가
@@ -402,8 +411,8 @@ Legend: `✅` 완료+사용자확인 완료 / `⏳` 완료, 사용자확인 대�
 
 ┌────────────────────────────────────────────────────────────────────┐
 │ 차단 구간: Step 3 full text                                       │
-│ 이유: Finnhub SEC filings 응답에 본문/원문 링크가 실제로 있는지    │
-│ Step 0 live probe 결과가 먼저 필요함                              │
+│ 이유: direct body는 없고 링크 기반 backfill만 가능하므로,           │
+│ Step 3 범위를 자동 수집이 아닌 link-based backfill로 고정해야 함   │
 └────────────────────────────────────────────────────────────────────┘
 
 병렬 트랙 요약
@@ -415,28 +424,62 @@ Legend: `✅` 완료+사용자확인 완료 / `⏳` 완료, 사용자확인 대�
 
 | 결정 | 차단 대상 | 선택지 |
 |------|-----------|--------|
-| `D-1` full text 1차 범위 | Step 3 | metadata-only / 즉시 fetch / backfill only |
-| `D-2` companion table 채택 | Step 1 | `news_items` only / `news_items + sec_filings` |
-| `D-3` row title 포맷 | Step 4 | provider headline / 합성 제목 / 혼합 |
 | `D-4` UI filter 노출 수준 | Step 4 | 내부 필터만 / 배지까지 노출 |
 
 ### 결정 #1 — 저장 전략(상세)
-- 권장안: `news_items + sec_filings companion table`
+- 확정값: `news_items + sec_filings companion table`
 - 이유:
   - news feed는 기존 `news_items` 조회/정렬/UI를 재사용할 수 있다.
   - SEC 전용 필드(accession, form, SEC link, raw_json)를 별도 테이블에 두면 억지 문자열 합성을 줄일 수 있다.
   - 이후 `form_type=8-K` 같은 조건 검색이 필요해져도 확장하기 쉽다.
 
+### 결정 #1-A — SEC row title 포맷(확정)
+- 확정값: **혼합 포맷**을 사용한다.
+- 의미:
+  - row title은 `FORM - TICKER` 중심의 짧은 합성 제목으로 만든다.
+  - 상세 정보는 subtitle/body에 `filedDate`, `acceptedDate`, `accessNumber`를 나눠 보여 준다.
+- 예시:
+  - title: `Form 4 - AAPL`
+  - title: `8-K - AAPL`
+  - subtitle/body: `Filed 2026-03-17 · Accepted 2026-03-17 18:31 · Accession 0001780525-26-000005`
+- 이유:
+  - SEC filing은 일반 뉴스 headline 품질이 일정하지 않다.
+  - `FORM/TICKER`가 제목에 있어야 사용자가 row 의미를 즉시 이해할 수 있다.
+  - accession까지 제목에 넣으면 지나치게 길어지므로 subtitle/body로 내리는 편이 낫다.
+
 ### 결정 #2 — full text 전략(상세)
 - 현재 확인 사실:
-  - 레포에 있는 probe 스크립트는 `stock/filings` endpoint 존재만 보여 준다.
-  - Finnhub가 filing별 직접 본문을 주는지, filing URL 또는 index URL을 주는지는 아직 live sample로 확인하지 못했다.
+  - live probe에서 `accessNumber`, `form`, `filedDate`, `acceptedDate`, `reportUrl`, `filingUrl`를 실제 확인했다.
+  - live probe 샘플에는 direct body 필드가 없었다.
+  - `reportUrl`은 SEC XML, `filingUrl`은 SEC index HTML로 200 응답이 가능했다(`curl` + `User-Agent` 기준).
+  - 대표 form 확인 결과 `4`/`144`는 XML, `8-K`/`10-K`/`10-Q`/`DEF 14A`는 HTML + inline XBRL 성격이 강했다.
+  - 즉 URL fetch는 비교적 안정적이지만, form별 파싱 로직 없이 단일 plain-text 추출기로 처리하기는 위험하다.
 - 권장안:
   - 1차 구현: metadata ingest + 링크 저장 + View Log + feed 조회까지 완성
   - 1차 기본값: `Recent SEC Update` / `Custom SEC Update`에서 SEC full text 자동 다운로드는 하지 않는다.
-  - 2차 구현: live probe에서 원문 링크가 확인되면 SEC 문서 fetch/backfill 추가
+  - 2차 구현: `reportUrl` 또는 `filingUrl` 기반 SEC 문서 fetch/backfill 추가
   - 링크조차 없으면 full text는 `unavailable`로 명시하고 UI에서 링크 기반 이동만 제공
   - 자동 수집이 불안정하면 `Full Text` 메뉴에 `SEC FT Backfill` 전용 버튼을 추가하는 쪽을 우선한다
+  - 최종 판단(현재): **안전한 자동 full text ingest는 아직 아님**. 안전한 범위는 `링크 저장 + 별도 backfill job + 실패 상태 기록`까지다.
+
+### 결정 #3 — SEC full text 1차 범위(확정)
+- 확정값: **SEC full text는 ingest와 분리하고, `SEC FT Backfill` 전용 버튼/작업으로 처리한다.**
+- 의미:
+  - `Recent SEC Update`, `Custom SEC Update`는 metadata + SEC 링크 저장까지만 담당한다.
+  - SEC 본문 추출은 `Full Text` 메뉴 아래 별도 job으로 돌린다.
+- 이유:
+  - direct body가 없다.
+  - representative form 기준으로 XML/HTML/inline XBRL 포맷이 혼합돼 있다.
+  - 링크 fetch는 가능하지만, 자동 plain-text ingest를 한 버튼에 묶기에는 실패/지연 리스크가 높다.
+
+### 결정 #4 — calendar 범위(확정)
+- 확정값: **calendar update/job 구조 변경은 이번 작업에서 하지 않는다.**
+- 의미:
+  - 이번 구현 대상은 `finnhub`, `rtpr`, `sec`, `change`, `fulltext` 중심이다.
+  - `calendar`는 현행 synchronous 흐름을 유지하고, View Log 일원화 대상에서 당장 포함하지 않는다.
+- 이유:
+  - 현재 사용자 지시가 명확히 "calendar 작업은 지금 하지 마라"이기 때문이다.
+  - SEC 기능과 멀티-job 정책 정리에 우선 집중한다.
 
 ---
 
@@ -462,6 +505,7 @@ Legend: `✅` 완료+사용자확인 완료 / `⏳` 완료, 사용자확인 대�
 - View Log에서 진행 중인 job을 명시적으로 선택해서 볼 수 있게 현재 구조를 유지/보강한다.
 - 같은 버튼(같은 logical job key) 재클릭 시에는 backend가 409 + `existingJobId`를 반환하게 통일한다.
 - job 기반이 아닌 update는 View Log 대상인지 여부를 먼저 결정하고, 필요 시 job 기반으로 승격한다.
+- 단, `calendar`는 이번 change 범위에서는 제외하고 기존 구조를 유지한다.
 
 #### ⬜ Step 6 — 멀티 job 동시 실행 정책 확정 및 프론트 전역 lock 해체
 

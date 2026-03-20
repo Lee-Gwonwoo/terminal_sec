@@ -213,3 +213,212 @@
   2. SEC full text 자동 수집은 아직 확정 아님
   3. URL 제공 여부는 Step 0 live probe로 확인 필요
 - 다음으로는 실제 Finnhub `stock/filings` live probe를 해 보고 URL/link/body 필드 존재 여부를 확정하면 된다.
+
+### Finnhub `stock/filings` live probe 실행 및 Step 0 사실관계 확정 (2026-03-20 09:02)
+
+**작성 시각:** 2026-03-20 09:02 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. 로컬 Finnhub API key 파일을 사용해 `stock/filings`를 실제 호출했다. 토큰 값은 출력하지 않았다.
+2. `AAPL`, `from=2026-01-01`, `to=2026-03-20` 기준으로 array 응답 24건을 확인했다.
+3. 샘플 필드에서 아래 항목을 실제 확인했다.
+   - `accessNumber`
+   - `form`
+   - `filedDate`
+   - `acceptedDate`
+   - `reportUrl`
+   - `filingUrl`
+4. 본문 유사 필드(`text`, `body`, `content`, `fullText`, `reportText`)는 샘플에 없음을 확인했다.
+5. 좁은 범위(`from=2026-03-16`, `to=2026-03-18`) 재조회에서 `2026-03-17` filing 1건만 반환돼 `from/to` custom filtering이 실제로 먹는 것을 확인했다.
+6. Finnhub가 준 SEC 링크는 기본 PowerShell HEAD 요청에서는 403이 날 수 있었지만, `curl`에 `User-Agent`를 넣어 확인했을 때 아래가 성립했다.
+   - `reportUrl`: `HTTP/1.1 200 OK`, `text/xml`
+   - `filingUrl`: `HTTP/1.1 200 OK`, `text/html`
+
+#### 결론
+
+- Finnhub는 SEC filing에 대해 **링크를 준다**.
+- direct body/full text 필드는 현재 샘플에서 확인되지 않았다.
+- 따라서 현재 plan의 full text 전략은 “자동 body 수집”이 아니라 **링크 기반 backfill**이 맞다.
+- recent/custom 버튼은 그대로 ingest 버튼으로 두고, full text는 별도 단계 또는 별도 `SEC FT Backfill` 버튼 후보로 유지하는 것이 타당하다.
+
+#### 리스크 / 완화
+
+1. **리스크:** SEC URL fetch는 클라이언트 헤더 없이 호출하면 403이 날 수 있다.
+   - 완화 1: backend fetcher에 `User-Agent`를 명시한다.
+   - 완화 2: `reportUrl` 실패 시 `filingUrl` fallback을 둔다.
+2. **리스크:** XML/HTML/index 페이지 포맷이 filing마다 달라 단일 파서로 끝나지 않을 수 있다.
+   - 완화 1: 1차는 원문 저장보다 링크 저장을 우선한다.
+   - 완화 2: backfill은 실패 상태(`unavailable`/`failed`)를 명시적으로 남긴다.
+3. **리스크:** `from/to`가 일 단위라 accepted time 기준 recent anchor와 어긋날 수 있다.
+   - 완화 1: dedup는 `accessNumber`를 우선 사용한다.
+   - 완화 2: recent 증분 기준은 `acceptedDate`와 `filedDate`를 함께 검토하는 설계를 유지한다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | plan/agent log 문서 수정만 수행 |
+| 빌드 | ✅ | 코드 변경 없음 |
+| 자동 테스트 | ✅ | 코드 변경 없음 |
+| 런타임 통합 | ✅ | Finnhub `stock/filings` 실제 호출, narrow date range 재조회, SEC URL header 확인(`curl` + `User-Agent`) |
+
+#### 사용자 확인 요청
+
+- Step 0 사실관계는 이제 아래처럼 정리할 수 있다.
+  1. `accessNumber` dedup 가능
+  2. `reportUrl` / `filingUrl` 제공됨
+  3. direct body 필드는 없음
+  4. full text는 link-based backfill 방향이 맞음
+- 이 해석이 맞으면 다음 plan은 Step 1 provider/schema와 Step 2 버튼 구현으로 넘어가고, Step 3은 `SEC FT Backfill` 전제로 설계하면 된다.
+
+### SEC full text 안전성 추가 점검: fetch 가능, 자동 plain-text 추출은 아직 불안정 (2026-03-20 09:09)
+
+**작성 시각:** 2026-03-20 09:09 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. AAPL filing 데이터를 넓은 기간으로 다시 조회해 대표 form 분포를 확인했다.
+   - `4`, `144`, `8-K`, `10-K`, `10-Q`, `DEF 14A` 등이 섞여 있었다.
+2. 대표 form별 `reportUrl` 문서를 실제로 받아 포맷을 비교했다.
+3. 결과는 다음과 같았다.
+   - `4`, `144`: XML 계열
+   - `8-K`, `10-K`, `10-Q`, `DEF 14A`: HTML 계열이지만 inline XBRL namespace를 포함
+4. 모든 대표 샘플은 `curl` + `User-Agent` 기준으로 200 응답이 가능했다.
+5. 하지만 문서 포맷이 XML/HTML/inline XBRL로 혼합되어 있어, form 구분 없이 바로 plain text를 안정 추출하는 것은 아직 위험하다고 판단했다.
+
+#### 결론
+
+- SEC full text를 "받아오는 것" 자체는 가능하다.
+- 하지만 "항상 같은 방식으로 사람 읽는 텍스트를 안정 추출"하는 것은 아직 안전하다고 보기 어렵다.
+- 따라서 1차 구현은 `SEC Update = metadata + link 저장`, `SEC FT Backfill = 별도 job`으로 분리하는 것이 안전하다.
+- backfill 단계에서도 최소한 아래가 필요하다.
+  - `User-Agent` 강제
+  - XML/HTML 분기
+  - 파싱 실패 상태 저장
+  - `reportUrl` 실패 시 `filingUrl` fallback 검토
+
+#### 리스크 / 완화
+
+1. **리스크:** HTML 문서가 inline XBRL 기반이라 태그 제거만으로는 지저분한 텍스트가 남을 수 있다.
+   - 완화 1: form/type별 파서 또는 HTML 정제 규칙을 둔다.
+   - 완화 2: 1차는 full text 저장보다 링크 제공을 우선한다.
+2. **리스크:** XML ownership forms와 10-K/10-Q/DEF 14A HTML을 같은 추출기에서 다루면 오탐/누락이 생길 수 있다.
+   - 완화 1: XML form과 HTML form을 분리 처리한다.
+   - 완화 2: 추출 실패 시 `failed` 또는 `unavailable`로 남긴다.
+3. **리스크:** SEC가 헤더 없는 요청을 막으면 자동 수집 job이 간헐적으로 실패할 수 있다.
+   - 완화 1: backend fetcher에 `User-Agent`를 고정한다.
+   - 완화 2: 재시도 + 실패 로그를 남긴다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | plan/agent log 문서 수정만 수행 |
+| 빌드 | ✅ | 코드 변경 없음 |
+| 자동 테스트 | ✅ | 코드 변경 없음 |
+| 런타임 통합 | ✅ | 대표 form 분포 조회 + 대표 SEC 문서 URL 실 fetch + content-type/포맷 확인 |
+
+#### 사용자 확인 요청
+
+- 현재 판단은 아래 한 줄로 요약된다.
+  - **SEC full text는 링크 fetch는 가능하지만, 자동 plain-text ingest를 바로 안전하다고 보긴 어렵다.**
+- 이 판단이 맞으면 Step 3은 계속 `SEC FT Backfill` 분리 방향으로 유지하는 것이 적절하다.
+
+### 사용자 결정 반영: SEC full text 분리 확정 / calendar 범위 제외 (2026-03-20 09:10)
+
+**작성 시각:** 2026-03-20 09:10 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. 사용자 결정에 따라 SEC full text 1차 범위를 확정했다.
+   - `SEC Update`와 SEC full text 수집을 분리한다.
+   - full text는 `SEC FT Backfill` 전용 버튼/작업으로 처리한다.
+2. `plan.md`의 `미확정 사항`에서 기존 `D-1`을 제거하고, 별도 결정 섹션으로 승격했다.
+3. 사용자 지시에 따라 `calendar` update/job 구조 변경은 이번 작업 범위에서 제외한다고 plan에 명시했다.
+4. 멀티-job 계획 섹션에도 `calendar`는 이번 change 범위에서 제외한다는 제한을 추가했다.
+
+#### 확정된 사항
+
+- `Recent SEC Update`, `Custom SEC Update`는 metadata + SEC 링크 저장까지만 담당한다.
+- SEC 본문 추출은 `Full Text` 메뉴 아래 별도 `SEC FT Backfill` job으로 처리한다.
+- `calendar`는 현행 구조를 유지하고, 이번 작업에서는 손대지 않는다.
+
+#### 리스크 / 완화
+
+1. **리스크:** 나중에 사용자가 calendar까지 View Log 일원화를 기대할 수 있다.
+   - 완화 1: plan의 비범위에 `calendar 제외`를 명시했다.
+   - 완화 2: 멀티-job 섹션에도 같은 제한을 반복 반영했다.
+2. **리스크:** full text 버튼이 분리되면 사용자가 왜 두 번 눌러야 하는지 헷갈릴 수 있다.
+   - 완화 1: `Update`와 `Full Text`의 역할을 UI 문구로 구분한다.
+   - 완화 2: View Log와 메뉴 설명에 metadata vs full text를 명확히 적는다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | plan/agent log 문서 수정만 수행 |
+| 빌드 | ✅ | 코드 변경 없음 |
+| 자동 테스트 | ✅ | 코드 변경 없음 |
+| 런타임 통합 | ✅ | 사용자의 최신 결정이 plan 구조와 충돌 없이 반영되도록 문서 갱신 확인 |
+
+#### 사용자 확인 요청
+
+- 현재 plan은 아래 두 문장으로 고정됐다.
+  1. SEC full text는 `SEC FT Backfill`로 분리
+  2. calendar는 지금 하지 않음
+- 이 해석이 맞으면 다음 구현 범위는 Step 1, Step 2, 그리고 calendar 제외 상태의 Step 6~8이다.
+
+### 사용자 결정 반영: companion table 채택 / SEC row title 혼합 포맷 확정 (2026-03-20 09:14)
+
+**작성 시각:** 2026-03-20 09:14 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. 사용자 요청대로 권장안을 plan의 확정값으로 반영했다.
+2. 저장 전략은 `news_items + sec_filings companion table`로 고정했다.
+3. SEC row title 포맷은 `혼합 포맷`으로 고정했다.
+   - title은 `FORM - TICKER`
+   - subtitle/body는 `filedDate`, `acceptedDate`, `accessNumber`
+4. `미확정 사항`에서 기존 `D-2`, `D-3`를 제거하고, 결정 섹션으로 승격했다.
+
+#### 확정된 사항
+
+- DB 저장: `news_items + sec_filings`
+- row title: `FORM - TICKER` 중심 혼합 포맷
+- 여전히 남은 미확정은 `D-4` UI filter 노출 수준뿐이다.
+
+#### 리스크 / 완화
+
+1. **리스크:** row title이 너무 짧으면 filing 세부 식별이 부족할 수 있다.
+   - 완화 1: `acceptedDate`와 `accessNumber`를 subtitle/body에 항상 포함한다.
+   - 완화 2: row detail 패널에 `reportUrl`/`filingUrl`을 함께 노출한다.
+2. **리스크:** `sec_filings` companion table 추가 시 join/query가 늘어난다.
+   - 완화 1: `news_items`는 feed용 최소 조회만 유지한다.
+   - 완화 2: `news_id`, `access_number` 인덱스를 먼저 설계한다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | plan/agent log 문서 수정만 수행 |
+| 빌드 | ✅ | 코드 변경 없음 |
+| 자동 테스트 | ✅ | 코드 변경 없음 |
+| 런타임 통합 | ✅ | 사용자 최신 결정이 plan의 미확정/결정 구조에 일관되게 반영되도록 문서 갱신 확인 |
+
+#### 사용자 확인 요청
+
+- 현재 plan 기준 확정값은 아래 4개다.
+  1. SEC full text는 `SEC FT Backfill`로 분리
+  2. calendar는 이번 작업에서 제외
+  3. 저장은 `news_items + sec_filings`
+  4. row title은 혼합 포맷(`FORM - TICKER` + 보조 정보)
+- 이 해석이 맞으면 남은 계획 결정은 `D-4` UI filter 노출 수준 정도만 남는다.
