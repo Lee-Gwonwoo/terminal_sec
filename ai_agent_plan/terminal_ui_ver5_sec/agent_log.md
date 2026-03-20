@@ -167,3 +167,49 @@
 
 - 현재 요청한 "현재 코드 상태를 front md / backend md에 구체적으로 반영"은 완료했다.
 - 다음 단계는 이 문서 기준대로 실제 멀티 job 구조를 구현할지 여부다.
+
+### plan 점검 반영: SEC 버튼 의미 / full text 자동 수집 범위 / URL 미확정 상태 명시 (2026-03-20 08:58)
+
+**작성 시각:** 2026-03-20 08:58 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. `plan.md`에 `Recent SEC Update`, `Custom SEC Update`의 의미를 기존 recent/custom update와 동일한 UX로 고정했다.
+2. `plan.md`에 현재 1차 계획상 SEC full text 자동 다운로드를 기본값으로 보지 않는다는 점을 명시했다.
+3. Finnhub가 실제로 filing URL 또는 index URL을 주는지는 아직 live probe 미완료 상태라는 점을 결정 #2와 Step 0/3 설명에 반영했다.
+4. URL이 확인되더라도 자동 수집이 불안정하면 `Full Text` 메뉴에 `SEC FT Backfill` 전용 버튼을 두는 방향을 기본 대안으로 명시했다.
+
+#### 핵심 정리
+
+- SEC recent/custom 버튼은 기존 다른 recent/custom과 기능 의미가 같다.
+- 달라지는 것은 내려받는 데이터가 `SEC Filing`이라는 점이다.
+- 현재 plan상 SEC full text 자동 수집은 확정되지 않았다.
+- URL 제공 여부도 아직 실응답으로 확인하지 못했다.
+
+#### 리스크 / 완화
+
+1. **리스크:** 사용자가 SEC update 버튼이 곧바로 full text까지 자동 수집한다고 오해할 수 있다.
+   - 완화 1: plan 목표와 Step 3 앞에 "자동 full text 아님"을 명시했다.
+   - 완화 2: Step 0 선행 확인 없이는 Step 3을 시작하지 않도록 유지했다.
+2. **리스크:** Finnhub가 링크를 안 주거나, 줘도 직접 본문 추출이 불안정할 수 있다.
+   - 완화 1: metadata + link 저장을 1차 기본값으로 유지했다.
+   - 완화 2: 필요 시 `SEC FT Backfill` 전용 버튼으로 분리하도록 문서화했다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | plan/agent log 문서 수정만 수행 |
+| 빌드 | ✅ | 코드 변경 없음 |
+| 자동 테스트 | ✅ | 코드 변경 없음 |
+| 런타임 통합 | ✅ | 기존 plan 내용과 이번 사용자 질문을 대조해 문서 문구를 명시적으로 보강 |
+
+#### 사용자 확인 요청
+
+- 현재 plan은 아래 해석으로 정리돼 있다.
+  1. SEC recent/custom 버튼은 기존 recent/custom과 같은 역할
+  2. SEC full text 자동 수집은 아직 확정 아님
+  3. URL 제공 여부는 Step 0 live probe로 확인 필요
+- 다음으로는 실제 Finnhub `stock/filings` live probe를 해 보고 URL/link/body 필드 존재 여부를 확정하면 된다.

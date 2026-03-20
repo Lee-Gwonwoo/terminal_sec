@@ -5,10 +5,12 @@
 ### 목표
 - `Update` 드롭다운에서 `Press Release` 옆 계열로 `SEC Filing` 섹션을 추가한다.
 - `Recent SEC Update`, `Custom SEC Update` 두 버튼을 추가한다.
+- 두 버튼의 UX와 동작 의미는 기존 다른 `Recent Update`, `Custom Update`와 동일하게 유지하고, **달라지는 것은 provider/source_type이 `SEC Filing`이라는 점뿐**으로 설계한다.
 - backend는 Finnhub `SEC Filings` endpoint를 사용해 데이터를 수집한다.
 - 수집 작업은 기존 news pull과 동일하게 background job으로 실행하고 `View Log`에서 진행률과 로그를 확인할 수 있게 한다.
 - `SEC Filing` 항목은 기존 news feed 흐름 안에서 조회 가능해야 하며, dedup / recent anchor / custom range 규칙도 기존 패턴을 따른다.
 - full text는 “Finnhub가 직접 본문을 주는지”와 “문서 URL만 주는지”를 구분해서 설계하고, 원문 본문 확보가 불가능한 경우에도 metadata + 원문 링크는 반드시 저장되게 한다.
+- **중요:** 현재 plan 기준으로 `Recent SEC Update` / `Custom SEC Update` 실행 시 SEC full text까지 자동 다운로드된다고 가정하지 않는다. 1차 기본값은 `metadata + link 저장`이고, 본문 재수집은 Step 0 결과에 따라 별도 Step/버튼으로 분리한다.
 
 ### 현재 레포 상태(중요, 확인됨)
 - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`에는 이미 다음 패턴이 구현돼 있다.
@@ -98,7 +100,7 @@
 - Step 0에서 아래 5개를 반드시 확보해야 한다.
   - 실제 응답 sample 1건
   - access number 존재 여부
-  - 원문 링크 존재 여부
+  - Finnhub가 직접 주는 원문 링크 또는 index URL 존재 여부
   - date range 파라미터 지원 여부
   - 최근/커스텀 모드에서 필요한 최소 필드 목록
 - Step 3(full text)는 Step 0 결과에서 원문 링크 또는 본문 소스가 확인되기 전까지 시작하지 않는다.
@@ -213,10 +215,12 @@ Invoke-RestMethod -Uri "http://localhost:8080/api/news/pull-finhub-sec" -Method 
   - 완료 조건(눈으로 확인): 클릭 후 View Log 활성화.
   - 사람 검증(비개발자): 버튼 누르면 진행률이 움직인다.
   - 흔한 문제/주의: recent가 7일 고정 backfill로 동작하면 기존 recent 의미와 달라진다.
+  - 동작 원칙: UX 의미는 기존 `Recent Update`와 같고, 조회 대상 데이터만 `SEC Filing`으로 바뀐다.
 - `2-3` 목적: 사용자 지정 날짜 범위 업데이트. 설명: 기존 Custom Update modal 패턴을 재사용한다.
   - 완료 조건(눈으로 확인): from/to 입력 후 job 시작.
   - 사람 검증(비개발자): 날짜를 고르면 job이 시작된다.
   - 흔한 문제/주의: from/to validation이 없으면 빈 요청으로 backend 400이 쉽게 난다.
+  - 동작 원칙: UX 의미는 기존 `Custom Update`와 같고, 내려받는 payload만 `SEC Filing` 범위로 바뀐다.
 - `2-4` 목적: 새 버튼도 기존 로그 UX를 그대로 재사용. 설명: 별도 로그 UI를 만들지 않고 `currentJobId` 흐름에 얹는다.
   - 완료 조건(눈으로 확인): SEC job 로그가 패널에 보인다.
   - 사람 검증(비개발자): View Log 열었을 때 SEC 관련 문장이 보인다.
@@ -234,6 +238,12 @@ npm run build
 사용자 확인 필요: **예**
 
 #### 🚫 Step 3 — SEC filing full text 수집/백필 경로 구현
+
+> 현재 plan 기준 정리:
+> - `Recent SEC Update` / `Custom SEC Update`는 **SEC filing ingest 버튼**이다.
+> - 이 두 버튼이 SEC full text까지 자동으로 끝낸다고 현재는 가정하지 않는다.
+> - Step 0에서 Finnhub 응답에 유효한 문서 URL 또는 본문 소스가 확인되고, 자동 수집 안정성이 확보될 때만 자동 full text 또는 별도 backfill 버튼을 확정한다.
+> - 자동 수집이 불안정하거나 링크가 누락되면 `Full Text` 메뉴에 `SEC FT Backfill` 같은 전용 버튼을 두는 방향이 기본 대안이다.
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
@@ -420,11 +430,13 @@ Legend: `✅` 완료+사용자확인 완료 / `⏳` 완료, 사용자확인 대�
 ### 결정 #2 — full text 전략(상세)
 - 현재 확인 사실:
   - 레포에 있는 probe 스크립트는 `stock/filings` endpoint 존재만 보여 준다.
-  - 본문 제공 여부는 아직 live sample로 확인하지 못했다.
+  - Finnhub가 filing별 직접 본문을 주는지, filing URL 또는 index URL을 주는지는 아직 live sample로 확인하지 못했다.
 - 권장안:
   - 1차 구현: metadata ingest + 링크 저장 + View Log + feed 조회까지 완성
-  - 2차 구현: 원문 링크가 있으면 SEC 문서 fetch/backfill 추가
+  - 1차 기본값: `Recent SEC Update` / `Custom SEC Update`에서 SEC full text 자동 다운로드는 하지 않는다.
+  - 2차 구현: live probe에서 원문 링크가 확인되면 SEC 문서 fetch/backfill 추가
   - 링크조차 없으면 full text는 `unavailable`로 명시하고 UI에서 링크 기반 이동만 제공
+  - 자동 수집이 불안정하면 `Full Text` 메뉴에 `SEC FT Backfill` 전용 버튼을 추가하는 쪽을 우선한다
 
 ---
 
