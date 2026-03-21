@@ -53,11 +53,12 @@ type SortDir = 'asc' | 'desc' | null;
 interface SortState { column: ColumnId | null; dir: SortDir; }
 
 // ─── Source type filter ───
-type SourceTypeFilter = 'all' | 'company_news' | 'press_release' | 'sec_filing' | 'market_news';
+type SourceTypeFilter = 'all' | 'company_news' | 'press_release' | 'fmp_press_release' | 'sec_filing' | 'market_news';
 
 function getSourceTypeLabel(sourceType: SourceTypeFilter | string): string {
   if (sourceType === 'company_news') return 'Company News';
   if (sourceType === 'press_release') return 'Press Release';
+  if (sourceType === 'fmp_press_release') return 'FMP PR';
   if (sourceType === 'sec_filing') return 'SEC';
   if (sourceType === 'market_news') return 'Market News';
   return 'All';
@@ -66,6 +67,7 @@ function getSourceTypeLabel(sourceType: SourceTypeFilter | string): string {
 function getSourceTypeShortLabel(sourceType: SourceTypeFilter | string): string {
   if (sourceType === 'company_news') return 'Co.';
   if (sourceType === 'press_release') return 'PR';
+  if (sourceType === 'fmp_press_release') return 'FMP PR';
   if (sourceType === 'sec_filing') return 'SEC';
   if (sourceType === 'market_news') return 'Mkt.';
   return 'All';
@@ -82,6 +84,9 @@ function getSourceTypeBadgeClass(sourceType: string): string {
   }
   if (sourceType === 'press_release') {
     return 'bg-green-50 dark:bg-green-900/40 text-green-600 dark:text-green-400';
+  }
+  if (sourceType === 'fmp_press_release') {
+    return 'bg-emerald-50 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300';
   }
   if (sourceType === 'sec_filing') {
     return 'bg-emerald-50 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300';
@@ -417,7 +422,7 @@ export function FinnhubNewsWindow({
       const saved = localStorage.getItem('finhub-news-ui-state');
       if (saved) {
         const p = JSON.parse(saved);
-        if (['all', 'company_news', 'press_release', 'sec_filing', 'market_news'].includes(p.sourceTypeFilter)) {
+        if (['all', 'company_news', 'press_release', 'fmp_press_release', 'sec_filing', 'market_news'].includes(p.sourceTypeFilter)) {
           return p.sourceTypeFilter as SourceTypeFilter;
         }
       }
@@ -435,7 +440,7 @@ export function FinnhubNewsWindow({
 
   // ─── Update config (last used mode/sourceType) ───
   type UpdateMode = '7d' | 'recent' | 'custom';
-  type UpdateSourceType = 'all' | 'company_news' | 'press_release' | 'market_news';
+  type UpdateSourceType = 'all' | 'company_news' | 'press_release' | 'market_news' | 'fmp_press_release';
   const [lastUpdateConfig, setLastUpdateConfig] = useState<{ mode: UpdateMode; sourceType: UpdateSourceType }>(() => {
     try {
       const saved = localStorage.getItem('finnhub-last-update-config');
@@ -660,11 +665,13 @@ export function FinnhubNewsWindow({
     setNextCursor(null);
     try {
       const params = new URLSearchParams();
-      params.set('source_names', 'FINNHUB,RTPR');
+      params.set('source_names', sourceTypeFilter === 'fmp_press_release' ? 'FMP' : 'FINNHUB,RTPR,FMP');
       if (selectedBookmarkFolderId) {
         params.set('bookmarkFolderId', selectedBookmarkFolderId);
       }
-      if (sourceTypeFilter !== 'all') {
+      if (sourceTypeFilter === 'fmp_press_release') {
+        params.set('source_type', 'fmp_press_release');
+      } else if (sourceTypeFilter !== 'all') {
         params.set('source_type', sourceTypeFilter);
       }
       if (keyword) {
@@ -705,11 +712,13 @@ export function FinnhubNewsWindow({
     setLoadingMore(true);
     try {
       const params = new URLSearchParams();
-      params.set('source_names', 'FINNHUB,RTPR');
+      params.set('source_names', sourceTypeFilter === 'fmp_press_release' ? 'FMP' : 'FINNHUB,RTPR,FMP');
       if (selectedBookmarkFolderId) {
         params.set('bookmarkFolderId', selectedBookmarkFolderId);
       }
-      if (sourceTypeFilter !== 'all') {
+      if (sourceTypeFilter === 'fmp_press_release') {
+        params.set('source_type', 'fmp_press_release');
+      } else if (sourceTypeFilter !== 'all') {
         params.set('source_type', sourceTypeFilter);
       }
       if (searchQueryRef.current) {
@@ -779,6 +788,31 @@ export function FinnhubNewsWindow({
     setError(null);
     setJobStatus(null);
     try {
+      if (sourceType === 'fmp_press_release') {
+        const body: Record<string, unknown> = { mode };
+        if (from) body.from = from;
+        if (to) body.to = to;
+        const res = await fetch(`${API_BASE}/api/news/pull-fmp-press-release`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          if (res.status === 409 && data.existingJobId) {
+            setCurrentJobId(data.existingJobId);
+            setShowLogPanel(true);
+            setError(data.error || 'FMP press release pull job is already running');
+            return;
+          }
+          setError(data.error || `HTTP ${res.status}`);
+          setUpdating(false);
+          return;
+        }
+        setCurrentJobId(data.jobId);
+        return;
+      }
+
       const body: Record<string, unknown> = {
         mode,
         sourceType,
@@ -813,7 +847,7 @@ export function FinnhubNewsWindow({
 
   // ─── Recent Update with preflight check ───
   const handleRecentWithPreflight = async (sourceType: UpdateSourceType) => {
-    if (sourceType === 'market_news') {
+    if (sourceType === 'market_news' || sourceType === 'fmp_press_release') {
       handleUpdate('recent', sourceType);
       return;
     }
@@ -1057,7 +1091,7 @@ export function FinnhubNewsWindow({
   }, []);
 
   // ─── Full text extraction (background job) ───
-  type FtSourceType = 'all' | 'company_news' | 'press_release' | 'market_news' | 'rtpr';
+  type FtSourceType = 'all' | 'company_news' | 'press_release' | 'market_news' | 'rtpr' | 'fmp_press_release';
   const [lastFtSourceType, setLastFtSourceType] = useState<FtSourceType>('all');
 
   const handleFulltextUpdate = async (sourceType: FtSourceType = 'all') => {
@@ -1078,6 +1112,8 @@ export function FinnhubNewsWindow({
         : `${API_BASE}/api/news/fulltext/update`;
       const payload = sourceType === 'rtpr'
         ? { concurrency }
+        : sourceType === 'fmp_press_release'
+          ? { sourceType: 'fmp_press_release', sourceName: 'FMP', concurrency }
         : { sourceType, concurrency };
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -1712,7 +1748,7 @@ export function FinnhubNewsWindow({
 
           {/* Source type filter toggle */}
           <div className="flex items-center border border-gray-300 dark:border-gray-600 rounded overflow-hidden">
-            {(['all', 'company_news', 'press_release', 'sec_filing', 'market_news'] as SourceTypeFilter[]).map(st => (
+            {(['all', 'company_news', 'press_release', 'fmp_press_release', 'sec_filing', 'market_news'] as SourceTypeFilter[]).map(st => (
               <button
                 key={st}
                 onClick={() => setSourceTypeFilter(st)}
@@ -1952,6 +1988,10 @@ export function FinnhubNewsWindow({
                         <RotateCw className="w-3.5 h-3.5 shrink-0 text-purple-500" />
                         <div><div className="font-medium">Recent Press Release</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">From last collected · Press Releases only</div></div>
                       </button>
+                      <button onClick={() => { setShowUpdateMenu(false); handleRecentWithPreflight('fmp_press_release'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <RotateCw className="w-3.5 h-3.5 shrink-0 text-emerald-500" />
+                        <div><div className="font-medium">Recent FMP PR</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Per-ticker incremental · FMP press release only</div></div>
+                      </button>
                       <button onClick={() => { setShowUpdateMenu(false); handleRecentWithPreflight('market_news'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <RotateCw className="w-3.5 h-3.5 shrink-0 text-amber-500" />
                         <div><div className="font-medium">Recent Market News</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Continue paging Finnhub /news from last stored timestamp</div></div>
@@ -1971,6 +2011,10 @@ export function FinnhubNewsWindow({
                       <button onClick={() => { setShowUpdateMenu(false); handleCustomStart('press_release'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <Calendar className="w-3.5 h-3.5 shrink-0 text-orange-500" />
                         <div><div className="font-medium">Custom Press Release</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick date range · Press Releases only</div></div>
+                      </button>
+                      <button onClick={() => { setShowUpdateMenu(false); handleCustomStart('fmp_press_release'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <Calendar className="w-3.5 h-3.5 shrink-0 text-emerald-500" />
+                        <div><div className="font-medium">Custom FMP PR</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick date range · FMP press release only</div></div>
                       </button>
                       <button onClick={() => { setShowUpdateMenu(false); handleCustomStart('market_news'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <Calendar className="w-3.5 h-3.5 shrink-0 text-amber-500" />
@@ -2081,6 +2125,7 @@ export function FinnhubNewsWindow({
             const ftLabel = ftUpdating
               ? 'Extracting...'
               : lastFtSourceType === 'rtpr' ? 'FT RTPR'
+              : lastFtSourceType === 'fmp_press_release' ? 'FT FMP PR'
               : lastFtSourceType === 'company_news' ? 'FT Co.'
               : lastFtSourceType === 'press_release' ? 'FT PR'
               : lastFtSourceType === 'market_news' ? 'FT Mkt.'
@@ -2122,6 +2167,10 @@ export function FinnhubNewsWindow({
                       <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('press_release'); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <FileText className="w-3.5 h-3.5 shrink-0 text-green-500" />
                         <div><div className="font-medium">Press Release Only</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Extract for press_release items</div></div>
+                      </button>
+                      <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('fmp_press_release'); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <FileText className="w-3.5 h-3.5 shrink-0 text-emerald-500" />
+                        <div><div className="font-medium">FMP PR Only</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Extract for FMP press release items only</div></div>
                       </button>
                       <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('market_news'); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <FileText className="w-3.5 h-3.5 shrink-0 text-amber-500" />

@@ -97,16 +97,21 @@ export async function upsertProvidedFulltext(
 
 /**
  * Returns news_items that do NOT have a corresponding news_fulltext row.
- * @param sourceType  Optional filter: 'company_news' | 'press_release'. Omit or 'all' for no filter.
+ * @param sourceType  Optional filter: 'company_news' | 'press_release' | 'fmp_press_release'. Omit or 'all' for no filter.
  */
 export async function getUnextractedNewsIds(
   sourceType?: string,
+  sourceName?: string,
 ): Promise<UnextractedNewsRow[]> {
   const params: string[] = [];
   let whereExtra = "";
   if (sourceType && sourceType !== "all") {
     whereExtra = " AND ni.source_type = ?";
     params.push(sourceType);
+  }
+  if (sourceName && sourceName !== "all") {
+    whereExtra += " AND ni.source = ?";
+    params.push(sourceName);
   }
   return getDb().all<UnextractedNewsRow[]>(
     `SELECT ni.id, ni.url, ni.publisher, ni.body

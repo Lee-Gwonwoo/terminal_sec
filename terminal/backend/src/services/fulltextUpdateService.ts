@@ -23,14 +23,18 @@ function countWords(text: string): number {
 export async function runFulltextUpdate(
   jobId: string,
   sourceType?: string,
+  sourceName?: string,
   concurrency: number = DEFAULT_CONCURRENCY,
 ): Promise<void> {
   const effectiveConcurrency = Math.max(1, Math.min(concurrency, MAX_CONCURRENCY));
   try {
-    const unextracted = await getUnextractedNewsIds(sourceType);
+    const unextracted = await getUnextractedNewsIds(sourceType, sourceName);
     const total = unextracted.length;
 
-    appendLog(jobId, `Starting full text extraction: ${total} items, concurrency=${effectiveConcurrency}`);
+    appendLog(
+      jobId,
+      `Starting full text extraction: ${total} items, sourceType=${sourceType ?? "all"}, source=${sourceName ?? "all"}, concurrency=${effectiveConcurrency}`,
+    );
     updateProgress(jobId, 0);
 
     if (total === 0) {

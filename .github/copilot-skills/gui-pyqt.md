@@ -7,6 +7,11 @@
 
 - **GUI 스크립트(사용자가 GUI 요청 시)**
   - Tkinter/Streamlit 등 금지, **PyQt만 사용**. 기본은 PyQt6(이미 PyQt5를 쓰면 유지).
+  - press release 관련 버튼/필터/로그/상태 문구에서는 provider를 명시해서 말하세요.
+    - `FMP` 쪽은 기본적으로 `fmp pr` 또는 `fmp press release`라고 표기합니다.
+    - `RTPR`/`PTPR` 쪽은 `RTPR press release` 또는 `PTPR press release`라고 표기합니다.
+    - `Finnhub` 쪽은 `Finnhub press release`라고 표기합니다.
+    - 단순히 `press release`라고만 써서 provider가 섞여 보이게 하지 마세요.
   - GUI의 텍스트 영역/테이블/상태 표시에서 복사 가능하도록 설정.
   - 창 크기는 항상 조정 가능해야 하며, 레이아웃은 내부 위젯이 자동으로 맞춰지게 구성(고정 크기 금지).
   - 사용자가 고정 크기를 명시적으로 요청하지 않는 한 `setFixedSize(...)`, `MSWindowsFixedSizeDialogHint` 같은 고정 크기 힌트/제약을 사용하지 마세요.

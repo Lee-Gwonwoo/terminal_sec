@@ -88,6 +88,7 @@ import {
 } from "./services/researchRepository.js";
 import { fetchFinnhubProfilesBatch } from "./services/finnhubProfile2Provider.js";
 import { fetchRtprArticles, fetchRtprArticlesByTicker } from "./services/ptprNewsProvider.js";
+import { fetchFmpPressReleasesByTicker } from "./services/fmpPressReleaseProvider.js";
 import { fetchSecFilingsRaw, insertSecFiling, getSecFilingAnchorMap } from "./services/finnhubSecProvider.js";
 import type { SecFilingMappedItem } from "./services/finnhubSecProvider.js";
 import { getEtDateString } from "./services/timeUtils.js";
@@ -1117,6 +1118,16 @@ const pullRtprSchema = z.object({
   tickerConcurrency: z.number().int().min(1).max(20).optional().default(DEFAULT_RTPR_TICKER_CONCURRENCY),
 });
 
+const pullFmpPressReleaseSchema = z.object({
+  mode: z.enum(["recent", "custom"]).optional().default("recent"),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  tickerConcurrency: z.number().int().min(1).max(20).optional().default(5),
+  requestIntervalMs: z.number().int().min(0).max(5_000).optional().default(250),
+  pageLimit: z.number().int().min(1).max(100).optional().default(50),
+  maxPages: z.number().int().min(1).max(50).optional().default(8),
+});
+
 app.post("/api/news/pull-rtpr", async (req, res, next) => {
   try {
     if (!config.rtprApiKey) {
@@ -1363,6 +1374,240 @@ app.post("/api/news/pull-rtpr", async (req, res, next) => {
   }
 });
 
+app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
+  try {
+    if (!config.fmpApiKey) {
+      res.status(400).json({ error: "FMP API key is not configured" });
+      return;
+    }
+
+    const input = pullFmpPressReleaseSchema.parse(req.body ?? {});
+    const isCustom = input.mode === "custom";
+    if (isCustom && !input.from) {
+      res.status(400).json({ error: "Custom mode requires 'from' date" });
+      return;
+    }
+
+    const jobKey = "fmp_press_release";
+    const existingJobId = activePullJobs.get(jobKey);
+    if (existingJobId) {
+      const existingJob = getJob(existingJobId);
+      if (existingJob && existingJob.status === "running") {
+        res.status(409).json({
+          error: `An FMP press release pull job is already running (jobId=${existingJobId}). Wait for it to finish or cancel it first.`,
+          existingJobId,
+        });
+        return;
+      }
+      activePullJobs.delete(jobKey);
+    }
+
+    const tickerList = await getDefaultUniverseTickers();
+    const todayEt = getEtDateString(new Date());
+    const fallback7d = getEtDateString(new Date(Date.now() - 7 * 86_400_000));
+    const effectiveTo = input.to ?? todayEt;
+    const jobId = createJob(tickerList.length);
+    activePullJobs.set(jobKey, jobId);
+    appendLog(jobId, `Starting FMP press release ${input.mode} pull — ${tickerList.length} tickers`);
+    appendLog(jobId, `[batch] tickerConcurrency=${input.tickerConcurrency}, requestIntervalMs=${input.requestIntervalMs}, pageLimit=${input.pageLimit}, maxPages=${input.maxPages}`);
+
+    let anchorMap: Map<string, string> | undefined;
+    if (!isCustom) {
+      anchorMap = await getTickerAnchorMap("fmp_press_release", "FMP");
+    }
+
+    res.json({ jobId });
+
+    (async () => {
+      const counters = { totalInserted: 0, totalSkipped: 0 };
+      const newItems: Array<{ id: string; tickers: string[]; publishedAt: string }> = [];
+      const confirmedEmptyKey = "fmp_press_release";
+      const yesterday = getEtDateString(new Date(Date.now() - 86_400_000));
+      let completedTickers = 0;
+
+      const finishOneTicker = () => {
+        completedTickers += 1;
+        updateProgress(jobId, completedTickers);
+      };
+
+      const runTickerPool = async (processTicker: (ticker: string) => Promise<void>) => {
+        const workerCount = Math.max(1, Math.min(input.tickerConcurrency, tickerList.length || 1));
+        let nextIndex = 0;
+        const worker = async () => {
+          while (!isJobCancelled(jobId)) {
+            const currentIndex = nextIndex;
+            nextIndex += 1;
+            if (currentIndex >= tickerList.length) {
+              return;
+            }
+            const ticker = tickerList[currentIndex];
+            await processTicker(ticker);
+            finishOneTicker();
+          }
+        };
+
+        appendLog(jobId, `[batch] concurrency=${workerCount}`);
+        await Promise.all(Array.from({ length: workerCount }, () => worker()));
+      };
+
+      try {
+        if (!isCustom) {
+          const fallbackCount = tickerList.filter((ticker) => !anchorMap!.has(ticker.toUpperCase())).length;
+          if (fallbackCount > 0) {
+            appendLog(jobId, `${fallbackCount} tickers have no prior FMP PR data → 7d fallback`);
+          }
+
+          await runTickerPool(async (ticker) => {
+            const anchor = anchorMap!.get(ticker.toUpperCase());
+            const tickerFrom = anchor ? anchor.slice(0, 10) : fallback7d;
+            const emptyRange = await getConfirmedEmptyRange(ticker, confirmedEmptyKey);
+            if (emptyRange && tickerFrom >= emptyRange.rangeFrom && yesterday <= emptyRange.rangeTo) {
+              return;
+            }
+
+            try {
+              const items = await fetchFmpPressReleasesByTicker(ticker, {
+                fromDate: tickerFrom,
+                toDate: effectiveTo,
+                pageLimit: input.pageLimit,
+                maxPages: input.maxPages,
+                requestIntervalMs: input.requestIntervalMs,
+              });
+
+              if (items.length === 0 && tickerFrom <= yesterday) {
+                await recordConfirmedEmpty(ticker, confirmedEmptyKey, tickerFrom, yesterday);
+                return;
+              }
+
+              for (const rawItem of items) {
+                const inserted = await insertNewsItem({
+                  publishedAt: rawItem.publishedAt,
+                  source: rawItem.source,
+                  sourceType: rawItem.sourceType,
+                  title: rawItem.title,
+                  body: rawItem.body,
+                  url: rawItem.url,
+                  tickers: rawItem.providerTickers,
+                  tags: rawItem.tags,
+                  publisher: rawItem.publisher,
+                });
+                if (inserted) {
+                  counters.totalInserted++;
+                  newItems.push({
+                    id: inserted.id,
+                    tickers: inserted.tickers,
+                    publishedAt: inserted.published_at,
+                  });
+                  streamHub.publishNews(inserted);
+                } else {
+                  counters.totalSkipped++;
+                }
+              }
+
+              if (items.length > 0) {
+                appendLog(jobId, `  FMP PR ${ticker}: ${items.length} new`);
+              }
+            } catch (err: any) {
+              console.error(`[pull-fmp-press-release] ${ticker}: ${err.message}`);
+              appendLog(jobId, `  ⚠ FMP PR ${ticker}: ${err.message}`);
+            }
+          });
+        } else {
+          const effectiveFrom = input.from!;
+          appendLog(jobId, `Custom mode: ${effectiveFrom} ~ ${effectiveTo}, ${tickerList.length} tickers`);
+
+          await runTickerPool(async (ticker) => {
+            try {
+              const items = await fetchFmpPressReleasesByTicker(ticker, {
+                fromDate: effectiveFrom,
+                toDate: effectiveTo,
+                pageLimit: input.pageLimit,
+                maxPages: input.maxPages,
+                requestIntervalMs: input.requestIntervalMs,
+              });
+
+              for (const rawItem of items) {
+                const inserted = await insertNewsItem({
+                  publishedAt: rawItem.publishedAt,
+                  source: rawItem.source,
+                  sourceType: rawItem.sourceType,
+                  title: rawItem.title,
+                  body: rawItem.body,
+                  url: rawItem.url,
+                  tickers: rawItem.providerTickers,
+                  tags: rawItem.tags,
+                  publisher: rawItem.publisher,
+                });
+                if (inserted) {
+                  counters.totalInserted++;
+                  newItems.push({
+                    id: inserted.id,
+                    tickers: inserted.tickers,
+                    publishedAt: inserted.published_at,
+                  });
+                  streamHub.publishNews(inserted);
+                } else {
+                  counters.totalSkipped++;
+                }
+              }
+
+              if (items.length > 0) {
+                appendLog(jobId, `  FMP PR ${ticker}: ${items.length} in range`);
+              }
+            } catch (err: any) {
+              console.error(`[pull-fmp-press-release] ${ticker}: ${err.message}`);
+              appendLog(jobId, `  ⚠ FMP PR ${ticker}: ${err.message}`);
+            }
+          });
+        }
+
+        appendLog(jobId, `Total: inserted=${counters.totalInserted}, skipped=${counters.totalSkipped}`);
+
+        let changeMergeResult = { merged: 0, skipped: 0 };
+        if (newItems.length > 0 && !isJobCancelled(jobId)) {
+          appendLog(jobId, `Merging change% for ${newItems.length} new FMP PR items...`);
+          try {
+            changeMergeResult = await mergeChangeForNewItems(newItems, undefined, () => isJobCancelled(jobId));
+            appendLog(jobId, `Change merge: ${changeMergeResult.merged} merged, ${changeMergeResult.skipped} skipped`);
+          } catch (err: any) {
+            console.error(`[pull-fmp-press-release] change merger error: ${err.message}`);
+            appendLog(jobId, `⚠ Change merge error: ${err.message}`);
+          }
+        }
+
+        await setLastSuccess("fmp_press_release", new Date().toISOString(), {
+          mode: input.mode,
+          tickerCount: tickerList.length,
+          tickerConcurrency: input.tickerConcurrency,
+          requestIntervalMs: input.requestIntervalMs,
+          pageLimit: input.pageLimit,
+          maxPages: input.maxPages,
+          inserted: counters.totalInserted,
+          skipped: counters.totalSkipped,
+          changeMerged: changeMergeResult.merged,
+        });
+
+        completeJob(jobId, {
+          source: "FMP",
+          mode: input.mode,
+          sourceType: "fmp_press_release",
+          tickerCount: tickerList.length,
+          inserted: counters.totalInserted,
+          skipped: counters.totalSkipped,
+          changeMerged: changeMergeResult.merged,
+        });
+        activePullJobs.delete(jobKey);
+      } catch (err: any) {
+        console.error(`[pull-fmp-press-release] job ${jobId} fatal error: ${err.message}`);
+        failJob(jobId, err.message || "Unknown error");
+        activePullJobs.delete(jobKey);
+      }
+    })();
+  } catch (error) {
+    next(error);
+  }
+});
+
 // ── Active jobs (for auto-reconnect after page refresh) ──
 app.get("/api/jobs/active", (_req, res) => {
   const active = getActiveJobs().map((j) => ({
@@ -1408,22 +1653,23 @@ app.post("/api/jobs/:jobId/cancel", (req, res) => {
 
 app.post("/api/news/fulltext/update", async (req, res, next) => {
   try {
-    const sourceType: string | undefined = req.body?.sourceType; // 'all' | 'company_news' | 'press_release'
+    const sourceType: string | undefined = req.body?.sourceType; // 'all' | 'company_news' | 'press_release' | 'fmp_press_release'
+    const sourceName: string | undefined = req.body?.sourceName;
     const concurrency: number = Math.max(1, Math.min(Number(req.body?.concurrency) || 10, 200));
 
     // backfill publisher for any rows missing it
     await backfillPublisher();
 
-    const unextracted = await getUnextractedNewsIds(sourceType);
+    const unextracted = await getUnextractedNewsIds(sourceType, sourceName);
     const total = unextracted.length;
     const jobId = createJob(total);
 
     // Fire-and-forget background job
-    runFulltextUpdate(jobId, sourceType, concurrency).catch((err) => {
+    runFulltextUpdate(jobId, sourceType, sourceName, concurrency).catch((err) => {
       console.error("[fulltext-update] unhandled:", err);
     });
 
-    res.json({ jobId, total, concurrency });
+    res.json({ jobId, total, concurrency, sourceName: sourceName ?? "all" });
   } catch (error) {
     next(error);
   }

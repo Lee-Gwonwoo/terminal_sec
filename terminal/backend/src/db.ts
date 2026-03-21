@@ -257,6 +257,13 @@ export async function initDb(): Promise<void> {
     );
   `);
 
+  // Migration: promote existing FMP press release rows to dedicated source_type.
+  await db.run(
+    `UPDATE news_items
+     SET source_type = 'fmp_press_release'
+     WHERE source = 'FMP' AND source_type = 'press_release'`,
+  );
+
   // Step 5-1: canonical ticker master model
   await db.exec(`
     CREATE TABLE IF NOT EXISTS securities (

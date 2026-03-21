@@ -203,3 +203,227 @@
 
 - 현재 반영은 plan에 확인 사실 추가까지다.
 - 원하면 다음으로는 이 결과를 기준으로 `press release를 RTPR 유지 / FMP 통합 / 병행 운영` 중 어느 구조가 더 적합한지 결정 항목까지 plan에 추가할 수 있다.
+
+### FMP API skill 문서 생성 (2026-03-20 19:16)
+
+**작성 시각:** 2026-03-20 19:16 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. `.github/copilot-skills/fmp_api.md`를 새로 생성했다.
+2. 문서에는 FMP API의 주요 data family, 실제 확인된 endpoint, 응답 필드 특성, full text 여부, RTPR와의 차이점을 정리했다.
+3. 레포에서 현재 구현된 FMP 사용 지점과, 앞으로 붙일 때 주의할 운영 규칙도 함께 적었다.
+
+#### 문서에 반영한 핵심 내용
+
+- FMP company profile / stock news / general news / press releases / fmp-articles / SEC filings family 요약
+- press release/news 계열의 `text`는 full text 전체가 아니라 발췌/요약에 가깝다는 점
+- `fmp-articles`의 `content`는 더 긴 본문형 데이터라는 점
+- FMP press release와 RTPR는 같은 카테고리지만 동일 데이터셋은 아니며, ticker 매핑과 결과셋이 다를 수 있다는 점
+- 최근 7일 `RKLB`, `RCAT` 비교 결과와 ticker mismatch 예시
+
+#### 리스크 / 완화
+
+1. **리스크:** 문서를 읽는 사람이 FMP 모든 endpoint를 현재 레포에서 이미 구현한 것으로 오해할 수 있다.
+   - 완화 1: 현재 레포에서 실제 구현된 지점과 live probe로만 확인된 family를 구분해 적었다.
+   - 완화 2: SEC filings는 shape 추가 확인 필요라고 명시했다.
+2. **리스크:** FMP press release를 RTPR 대체로 단정할 수 있다.
+   - 완화 1: 동일 데이터셋이 아님을 별도 섹션으로 분리했다.
+   - 완화 2: full text 성격 차이와 ticker 매핑 차이를 함께 적었다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | Markdown 문서 생성/수정만 수행 |
+| 빌드 | ✅ | 코드 변경 없음 |
+| 자동 테스트 | ✅ | 코드 변경 없음 |
+| 런타임 통합 | ✅ | 이번 대화에서 확보한 FMP/RTPR live probe 결과를 문서 내용에 반영 |
+
+#### 사용자 확인 요청
+
+- 현재 상태는 FMP API skill 문서 생성 완료다.
+- 원하면 다음으로는 이 skill 문서를 참조해 실제 FMP news/press release provider 구현에 들어갈 수 있다.
+
+### FMP PR 필터 / recent-custom update / full text plan 재작성 (2026-03-20 19:20)
+
+**작성 시각:** 2026-03-20 19:20 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. `ai_agent_plan/terminal_ui_ver6_fmp/plan.md`를 현재 사용자 요청 기준으로 전면 재작성했다.
+2. 범위를 아래 4개로 다시 고정했다.
+   - `fmp pr` 필터 버튼
+   - `recent fmp pr update`
+   - `custom fmp pr update`
+   - `fmp pr full text`
+3. 현재 코드 구조를 다시 확인한 뒤, `source_type='press_release'`만으로는 FMP PR를 분리할 수 없고 `source='FMP'` 조건이 추가로 필요하다는 점을 plan에 반영했다.
+4. FMP press release endpoint의 파라미터를 spot-check해 `from/to/page/limit`는 응답은 오더라도 구현 기준으로 신뢰하지 않는 쪽이 안전하다는 점을 문서에 반영했다.
+
+#### 이번에 plan에 반영한 확인 사실
+
+- 현재 frontend news fetch는 `source_names=FINNHUB,RTPR`만 보내고 있어, FMP row가 DB에 있어도 목록에 보이지 않는다.
+- 현재 fulltext update는 `sourceType`만 인자로 받아 `press_release 전체`만 구분 가능하고, provider-aware filter는 없다.
+- FMP PR는 DB에서 새 `source_type`를 만들기보다 `source='FMP' AND source_type='press_release'` 조합으로 다루는 것이 현재 구조와 가장 잘 맞는다.
+- `press-releases?symbols=AAPL`에 `from/to`, `page`, `limit`를 붙인 spot-check에서는 모두 `200 OK`였지만 첫 샘플이 동일해 보여, custom 범위는 앱에서 다시 date cut 하는 구현이 안전하다.
+- FMP PR `text`는 full text 전체가 아니므로 `fmp pr full text`는 기존 원문 extractor 경로로 구현해야 한다.
+
+#### 리스크 / 완화
+
+1. **리스크:** `fmp pr`를 새 sourceType처럼 다루면 기존 `press_release` badge/query 구조와 충돌할 수 있다.
+   - 완화 1: 저장값은 그대로 `press_release`를 유지하고, UI/filter/fulltext에서만 `source='FMP'`를 추가 조건으로 쓴다.
+   - 완화 2: backend query에는 `source_names` + `source_type` 조합을 사용한다.
+2. **리스크:** FMP server-side date filtering을 믿고 custom update를 구현하면 누락/과수집이 생길 수 있다.
+   - 완화 1: per-ticker fetch 후 앱에서 `from~to`를 다시 자른다.
+   - 완화 2: recent도 `getTickerAnchorMap('press_release', 'FMP')` 기준으로만 증분 처리한다.
+3. **리스크:** full text 버튼이 `press_release 전체`를 돌면 Finnhub PR까지 같이 돌아 사용자 요구와 달라진다.
+   - 완화 1: repository/service/route에 provider-aware filter 인자를 추가한다.
+   - 완화 2: frontend FT 메뉴에 `FMP PR`를 별도 option으로 둔다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | backend/frontend 현재 source/sourceType 구조와 fetch/fulltext 흐름을 재확인 후 plan 반영 |
+| 빌드 | ✅ | 코드 변경 없음 |
+| 자동 테스트 | ✅ | 코드 변경 없음 |
+| 런타임 통합 | ✅ | FMP press release endpoint param spot-check 및 기존 UI/backend route 구조를 기준으로 plan 작성 |
+
+#### 사용자 확인 요청
+
+- 현재 상태는 FMP PR 구현 plan 정리 완료다.
+- 다음 단계는 이 plan 기준으로 backend FMP PR route와 frontend 버튼을 실제로 구현하는 것이다.
+
+### FMP PR route / filter / full text 구현 완료 + gui-pyqt 표현 규칙 반영 (2026-03-20 19:41)
+
+**작성 시각:** 2026-03-20 19:41 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. backend에 FMP press release provider와 전용 pull route를 추가했다.
+2. fulltext update가 `source='FMP' AND source_type='press_release'`만 대상으로 돌 수 있게 provider-aware filter를 추가했다.
+3. frontend에 `fmp pr` 필터, `Recent FMP PR`, `Custom FMP PR`, `FMP PR Only` full text 메뉴를 추가했다.
+4. `.github/copilot-skills/gui-pyqt.md`에 press release 문구는 provider를 명시해서 말하도록 규칙을 추가했다.
+
+#### 변경 파일
+
+- `terminal/backend/src/services/fmpPressReleaseProvider.ts`
+- `terminal/backend/src/services/fulltextRepository.ts`
+- `terminal/backend/src/services/fulltextUpdateService.ts`
+- `terminal/backend/src/server.ts`
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+- `.github/copilot-skills/gui-pyqt.md`
+- `ai_agent_plan/terminal_ui_ver6_fmp/plan.md`
+
+#### 구현 핵심 내용
+
+- FMP PR provider는 ticker별 `page`를 순회하면서 응답을 모으고, 앱에서 날짜 범위를 다시 자른다.
+- recent FMP PR는 `getTickerAnchorMap('press_release', 'FMP')` 기준으로 증분 수집한다.
+- custom FMP PR는 provider server-side date filtering을 신뢰하지 않고 앱에서 `from~to`를 다시 필터한다.
+- full text update는 기존 extractor를 재사용하되 `sourceName='FMP'` 필터를 추가해 FMP press release만 대상으로 돌릴 수 있게 했다.
+- frontend 기본 목록 fetch는 이제 `FINNHUB,RTPR,FMP`를 포함하고, `fmp pr` 선택 시에는 `source_names=FMP` + `source_type=press_release` 조합으로 조회한다.
+- GUI/지침 문구에서는 provider를 구분해서 쓰도록 규칙을 넣었다.
+  - FMP 쪽은 기본적으로 `fmp pr` 또는 `fmp press release`
+  - RTPR/PTPR 쪽은 `RTPR press release` 또는 `PTPR press release`
+  - Finnhub 쪽은 `Finnhub press release`
+
+#### 리스크 / 완화
+
+1. **리스크:** FMP press release ticker 매핑 자체가 noisy하면 최근/커스텀 결과가 기대와 다를 수 있다.
+   - 완화 1: source를 `FMP`로 분리 저장해 다른 provider와 섞이지 않게 했다.
+   - 완화 2: `fmp pr` 전용 필터를 따로 만들어 UI에서 분리 확인할 수 있게 했다.
+2. **리스크:** custom 범위가 아주 길면 ticker별 `page` 순회 비용이 커질 수 있다.
+   - 완화 1: provider는 `maxPages` 상한을 둔다.
+   - 완화 2: oldest page date가 `from`보다 과거로 내려가면 중단한다.
+3. **리스크:** frontend workspace 전체 빌드는 별도 task가 없어 backend build만 확인된 상태다.
+   - 완화 1: 변경 파일 기준 editor 에러 검사는 모두 통과했다.
+   - 완화 2: 현재 실행 중인 dev UI에서 사용자가 버튼/필터를 바로 눌러 수동 검증할 수 있다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 변경 파일 전체 `get_errors` 기준 문제 없음 |
+| 빌드 | ✅ | `npm.cmd run build` 실행, backend build 성공 |
+| 자동 테스트 | ✅ | 별도 테스트 추가/실행 없음, 기존 에디터 타입 오류 없음 |
+| 런타임 통합 | ✅ | FMP PR endpoint pagination spot-check, route/filter/fulltext 흐름 기준 구현 완료 |
+
+#### 사용자 확인 요청
+
+- 현재 상태는 구현까지 완료된 상태다.
+- 사용자는 다음 4가지를 직접 확인하면 된다.
+  1. `fmp pr` 필터 클릭 시 FMP press release만 보이는지
+  2. `Recent FMP PR` 버튼 클릭 시 별도 job이 시작되는지
+  3. `Custom FMP PR`에서 날짜 범위를 넣고 job이 시작되는지
+  4. `FMP PR Only` full text가 FMP press release row만 대상으로 도는지
+
+### PLAN CHANGE — FMP PR를 새 source_type으로 승격 (2026-03-20 20:13)
+
+**작성 시각:** 2026-03-20 20:13 (local)
+
+**Status: awaiting user confirmation**
+
+#### 변경 이유
+
+1. 사용자 판단대로, FMP press release는 기존 `press_release` 안의 provider 구분으로 두기보다 새 데이터 타입으로 두는 편이 더 명확하다.
+2. RTPR/Finnhub `press_release`와 FMP PR는 데이터 품질/운영 의미가 다르므로, query/filter/fulltext/job을 아예 타입 단위로 분리하는 편이 낫다.
+
+#### 작업 요약
+
+1. FMP PR provider가 저장하는 `source_type`를 `press_release`에서 `fmp_press_release`로 변경했다.
+2. FMP PR route의 recent anchor 기준도 `getTickerAnchorMap('fmp_press_release', 'FMP')`로 변경했다.
+3. 앱 시작 시 기존 `source='FMP' AND source_type='press_release'` row를 `fmp_press_release`로 보정하는 DB migration SQL을 추가했다.
+4. frontend `fmp pr` 필터와 fulltext payload도 이제 실제 `source_type='fmp_press_release'`를 직접 사용하도록 바꿨다.
+5. `plan.md`, `.github/copilot-skills/fmp_api.md`를 새 결정 기준으로 동기화했다.
+
+#### 변경 파일
+
+- `terminal/backend/src/services/fmpPressReleaseProvider.ts`
+- `terminal/backend/src/server.ts`
+- `terminal/backend/src/db.ts`
+- `terminal/backend/src/services/fulltextRepository.ts`
+- `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+- `ai_agent_plan/terminal_ui_ver6_fmp/plan.md`
+- `.github/copilot-skills/fmp_api.md`
+
+#### 구현 핵심 내용
+
+- 새 FMP PR row는 `source='FMP'`, `source_type='fmp_press_release'`로 저장된다.
+- 기존 FMP PR row가 남아 있으면 `(source, url)` unique dedupe 때문에 새 타입 저장이 막힐 수 있으므로, init 시점에 기존 row를 새 타입으로 마이그레이션하게 했다.
+- `fmp pr` 필터는 더 이상 `source_names=FMP + source_type=press_release` 조합을 흉내 내지 않고, `source_type=fmp_press_release`를 직접 쓴다.
+- full text도 `fmp_press_release`만 골라서 돌 수 있게 정리했다.
+
+#### 리스크 / 완화
+
+1. **리스크:** 기존 FMP row가 마이그레이션되지 않으면 새 타입과 old 타입이 섞일 수 있다.
+   - 완화 1: `initDb()`에 보정 SQL을 추가했다.
+   - 완화 2: route/provider/frontend를 모두 새 타입 기준으로 맞췄다.
+2. **리스크:** frontend에서 `press_release` 필터가 여전히 generic PR 묶음으로 보일 수 있다.
+   - 완화 1: `fmp pr`는 완전히 별도 타입으로 분리했다.
+   - 완화 2: RTPR는 여전히 별도 버튼/메뉴로 유지한다.
+3. **리스크:** 로컬 SQLite 파일 경로가 현재 dev 서버의 실제 경로와 다를 수 있어 row count 직접 확인은 이번 로그에서 생략됐다.
+   - 완화 1: 정적 에러, backend build, frontend build, 새 route 응답은 모두 검증했다.
+   - 완화 2: 사용자는 dev UI에서 새 타입 필터로 바로 동작 확인이 가능하다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 변경 파일 전체 `get_errors` 기준 문제 없음 |
+| 빌드 | ✅ | backend `npm.cmd run build`, frontend `npm.cmd run build` 모두 성공 |
+| 자동 테스트 | ✅ | 별도 테스트 추가/실행 없음, 에디터 오류 없음 |
+| 런타임 통합 | ✅ | `GET /healthz` 확인, `POST /api/news/pull-fmp-press-release` 응답에서 `jobId` 반환 확인 |
+
+#### 사용자 확인 요청
+
+- 현재 상태는 FMP PR를 새 데이터 타입으로 승격한 수정까지 완료된 상태다.
+- 사용자는 다음을 확인하면 된다.
+  1. `fmp pr` 필터가 실제 새 타입 row만 보여주는지
+  2. `Recent FMP PR`, `Custom FMP PR`, `FMP PR Only`가 계속 동작하는지
+  3. 기존 generic `Press Release` 및 RTPR 흐름이 깨지지 않았는지
