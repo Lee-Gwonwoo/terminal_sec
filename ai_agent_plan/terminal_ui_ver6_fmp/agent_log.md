@@ -65,6 +65,107 @@
   1. 이 plan 그대로 유지하고, 이후 내가 representative endpoint probe를 실제로 시작한다.
   2. 먼저 probe 범위를 줄여서 `company/profile + news + charts` 같은 핵심 family만 확인한다.
 
+### PLAN CHANGE — legacy Finnhub SEC 제거 반영 (2026-03-20 20:26)
+
+**작성 시각:** 2026-03-20 20:26 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. 사용자 지시에 따라 기존 `Finnhub SEC filing` 데이터를 유지하지 않고 제거하는 방향으로 plan을 수정했다.
+2. code scope를 아래 4개로 확정했다.
+   - backend `/api/news/pull-finhub-sec` 제거
+   - legacy `finnhubSecProvider.ts` 제거
+   - startup 시 `FINNHUB + sec_filing` row purge
+   - frontend SEC 필터 / Recent SEC Filing / Custom SEC Filing / modal 제거
+3. 문서도 현재 상태에 맞추기로 했다.
+   - `plan.md`
+   - `terminal/backend_prompt.md`
+
+#### 확인된 사실
+
+- live DB 확인 기준, 제거 직전 기존 SEC row가 실제로 남아 있었다.
+  - `news_items`: `source='FINNHUB' AND source_type='sec_filing'` = `3608`
+  - `sec_filings`: `3604`
+- 따라서 단순히 UI 버튼만 숨기면 안 되고, DB purge와 backend route 제거가 함께 필요했다.
+- 현재 결정은 `FMP SEC로 이미 전환`이 아니라, `legacy Finnhub SEC 제거`다.
+
+#### 리스크 / 완화
+
+1. **리스크:** 삭제 조건을 넓게 잡으면 다른 뉴스 row까지 지울 수 있다.
+   - 완화 1: startup purge 조건을 `source='FINNHUB' AND source_type='sec_filing'`로 고정한다.
+   - 완화 2: purge 후 count 쿼리로 `sec_filing` row가 0인지 재검증한다.
+2. **리스크:** backend route만 지우고 frontend 버튼을 남기면 사용자 클릭 시 런타임 에러가 난다.
+   - 완화 1: frontend `sec_filing` 필터와 update/menu/modal을 같이 제거한다.
+3. **리스크:** 문서가 예전 route를 계속 설명하면 운영 상태를 오해할 수 있다.
+   - 완화 1: `plan.md`와 `backend_prompt.md`를 함께 갱신한다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ⏳ | 코드 제거 직후 재검증 예정 |
+| 빌드 | ⏳ | backend/frontend 재빌드 예정 |
+| 자동 테스트 | ⏳ | 제거 반영 후 실행 예정 |
+| 런타임 통합 | ⏳ | purge 후 DB count + route 제거 확인 예정 |
+
+#### 사용자 확인 요청
+
+- 현재 상태는 제거 방향을 plan/log에 반영하고 실제 코드 제거를 진행 중이다.
+- 다음 단계는 build와 DB 재검증까지 마무리하는 것이다.
+
+### legacy Finnhub SEC 제거 완료 + FMP SEC full text 방향 정리 (2026-03-20 20:33)
+
+**작성 시각:** 2026-03-20 20:33 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. legacy `Finnhub SEC filing` backend route, provider, frontend 진입점 제거를 마무리했다.
+2. startup purge로 기존 `FINNHUB + sec_filing` 데이터가 실제로 제거됐는지 DB에서 재검증했다.
+3. `plan.md`에 FMP PR full text / FMP SEC full text 설계 원칙을 다시 정리했다.
+
+#### 반영한 설계 원칙
+
+- `FMP PR full text`
+   - 별도 버튼 유지가 맞다.
+   - 저장된 `text`를 full text로 쓰지 않고 원문 `url` 재방문 후 추출한다.
+- `FMP SEC full text`
+   - FMP 응답만으로 full text를 얻는 구조가 아니다.
+   - `finalLink` 또는 `link`를 따라 SEC 문서를 직접 파싱해야 한다.
+   - 향후 버튼이 필요하면 `FMP SEC full text`보다 `SEC filing full text`라는 독립 개념이 더 적합하다.
+   - 단, 나중에 `FMP SEC`를 별도 dataset으로 운영하면 FMP 전용 버튼도 가능하다.
+
+#### 검증 결과
+
+- legacy SEC route 제거 확인:
+   - `POST /api/news/pull-finhub-sec` → `404 Not Found`
+- DB purge 확인:
+   - `news_items WHERE source_type='sec_filing'` → `0 rows`
+   - `sec_filings` → `0 rows`
+- build/test 확인:
+   - backend build 성공
+   - frontend build 성공
+   - backend test `57 passed`
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 변경 파일 기준 `get_errors` 0개 |
+| 빌드 | ✅ | backend + frontend build 모두 성공 |
+| 자동 테스트 | ✅ | backend vitest `57 passed` |
+| 런타임 통합 | ✅ | `/healthz` 200, legacy SEC route 404, DB `sec_filing` count 0 |
+
+#### 사용자 확인 요청
+
+- 현재 상태는 legacy Finnhub SEC 제거와 관련 검증까지 모두 완료된 상태다.
+- 사용자가 직접 확인할 포인트는 아래 2개다.
+   1. UI에서 더 이상 SEC 필터/SEC update 메뉴가 보이지 않는지
+   2. `fmp pr` 관련 버튼 흐름이 기존대로 보이고 동작하는지
+
 ### plan.md 확인 사실 반영 (2026-03-20 18:24)
 
 **작성 시각:** 2026-03-20 18:24 (local)

@@ -382,8 +382,8 @@ export async function initDb(): Promise<void> {
   await db.exec("CREATE INDEX IF NOT EXISTS idx_sec_filings_form_type ON sec_filings(form_type, filed_at DESC);");
   await db.exec("CREATE INDEX IF NOT EXISTS idx_sec_filings_filed_at ON sec_filings(filed_at DESC);");
 
+  await purgeLegacyFinnhubSecFilings();
   await migrateFinnhubCompanyNewsPublishedAtToEt();
-  await migrateFinnhubSecFilingDatesToEt();
 }
 
 async function migrateFinnhubCompanyNewsPublishedAtToEt(): Promise<void> {
@@ -436,82 +436,32 @@ function normalizeSecAcceptedAt(value: string | null): string | null {
   return value;
 }
 
-async function migrateFinnhubSecFilingDatesToEt(): Promise<void> {
-  const rows = await db.all<{
-    news_id: string;
-    published_at: string;
-    body: string;
-    accession_number: string;
-    filed_at: string;
-    accepted_at: string | null;
-  }[]>(
-    `SELECT ni.id AS news_id,
-            ni.published_at,
-            ni.body,
-            sf.accession_number,
-            sf.filed_at,
-            sf.accepted_at
-     FROM news_items ni
-     JOIN sec_filings sf ON sf.news_id = ni.id
-     WHERE ni.source = 'FINNHUB'
-       AND ni.source_type = 'sec_filing'`,
+async function purgeLegacyFinnhubSecFilings(): Promise<void> {
+  const counts = await db.get<{ newsCount: number; companionCount: number }>(
+    `SELECT
+       (SELECT COUNT(*) FROM news_items WHERE source = 'FINNHUB' AND source_type = 'sec_filing') AS newsCount,
+       (SELECT COUNT(*) FROM sec_filings) AS companionCount`,
   );
 
-  const updates = rows
-    .map((row) => {
-      const nextPublishedAt = normalizeSecPublishedAt(row.published_at || row.filed_at);
-      const nextFiledAt = normalizeSecFiledAt(row.filed_at || row.published_at);
-      const nextAcceptedAt = normalizeSecAcceptedAt(row.accepted_at);
-      const acceptedDisplay = nextAcceptedAt ? nextAcceptedAt.replace("T", " ") : "N/A";
-      const nextBody = `Filed ${nextFiledAt} · Accepted ${acceptedDisplay} · Accession ${row.accession_number ?? "N/A"}`;
-
-      const bodyChanged = row.body !== nextBody;
-      const publishedChanged = row.published_at !== nextPublishedAt;
-      const filedChanged = row.filed_at !== nextFiledAt;
-      const acceptedChanged = (row.accepted_at ?? null) !== nextAcceptedAt;
-
-      if (!bodyChanged && !publishedChanged && !filedChanged && !acceptedChanged) {
-        return null;
-      }
-
-      return {
-        newsId: row.news_id,
-        nextPublishedAt,
-        nextBody,
-        nextFiledAt,
-        nextAcceptedAt,
-      };
-    })
-    .filter((row): row is {
-      newsId: string;
-      nextPublishedAt: string;
-      nextBody: string;
-      nextFiledAt: string;
-      nextAcceptedAt: string | null;
-    } => row !== null);
-
-  if (updates.length === 0) {
+  const newsCount = counts?.newsCount ?? 0;
+  const companionCount = counts?.companionCount ?? 0;
+  if (newsCount === 0 && companionCount === 0) {
     return;
   }
 
   await db.exec("BEGIN TRANSACTION");
   try {
-    for (const row of updates) {
-      await db.run(
-        `UPDATE news_items
-         SET published_at = ?, body = ?
-         WHERE id = ?`,
-        [row.nextPublishedAt, row.nextBody, row.newsId],
-      );
-      await db.run(
-        `UPDATE sec_filings
-         SET filed_at = ?, accepted_at = ?
-         WHERE news_id = ?`,
-        [row.nextFiledAt, row.nextAcceptedAt, row.newsId],
-      );
-    }
+    await db.run(
+      `DELETE FROM news_items
+       WHERE source = 'FINNHUB' AND source_type = 'sec_filing'`,
+    );
+    await db.run(
+      `DELETE FROM sec_filings
+       WHERE news_id NOT IN (SELECT id FROM news_items)`,
+    );
+    await db.run(`DELETE FROM update_status WHERE source_key = 'finhub_sec_filing'`);
     await db.exec("COMMIT");
-    console.log(`[db] migrated ${updates.length} FINNHUB sec_filing rows to ET-normalized dates`);
+    console.log(`[db] purged legacy FINNHUB sec_filing rows: news_items=${newsCount}, sec_filings=${companionCount}`);
   } catch (error) {
     await db.exec("ROLLBACK");
     throw error;

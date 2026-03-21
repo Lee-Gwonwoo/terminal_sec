@@ -324,7 +324,11 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 #### `sec_filings`
 
-Finnhub SEC filing 메타데이터 companion table. `news_items`의 SEC filing row에 대한 구조화 필드 저장.
+Legacy SEC filing companion table.
+
+- 과거 `Finnhub SEC filing` 메타데이터를 저장하던 companion table이다.
+- 2026-03-20 리비전부터 startup purge가 `source='FINNHUB' AND source_type='sec_filing'` parent row를 삭제하며, 연결된 `sec_filings` row도 함께 정리한다.
+- 현재는 스키마 호환성 때문에 테이블 정의만 유지하고, active ingestion path는 제공하지 않는다.
 
 컬럼:
 
@@ -395,7 +399,6 @@ Finnhub SEC filing 메타데이터 companion table. `news_items`의 SEC filing r
 
 - `GET /api/news/pull-finhub/preflight`
 - `POST /api/news/pull-finhub`
-- `POST /api/news/pull-finhub-sec`
 - `POST /api/news/pull-eodhd`
 - `POST /api/news/fulltext/update`
 - `POST /api/news/fulltext/backfill-plaintext`
@@ -535,36 +538,6 @@ Finnhub SEC filing 메타데이터 companion table. `news_items`의 SEC filing r
 - `sourceType`: `all | company_news | press_release | market_news`
 - `custom`일 때만 `from/to` 사용
 - 즉시 `jobId`를 반환하고 background에서 적재한다.
-
-응답 컬럼:
-
-- `[][][]jobId[][][]`
-
-### `POST /api/news/pull-finhub-sec`
-
-요청 body:
-
-```json
-{
-  "mode": "recent",
-  "from": "2026-03-01",
-  "to": "2026-03-20",
-  "tickerConcurrency": 3,
-  "requestIntervalMs": 300
-}
-```
-
-설명:
-
-- `mode`: `recent | custom`
-- `custom`일 때만 `from/to` 사용
-- `recent` 모드는 ticker별 anchor (마지막 filed_at)로부터 조회, anchor 없으면 7일 fallback
-- Finnhub `GET /stock/filings` API로 SEC filing metadata를 수집한다.
-- `news_items`에 `source='FINNHUB'`, `source_type='sec_filing'`으로 저장한다.
-- `sec_filings` companion table에 `accession_number`, `form_type`, `report_url`, `filing_url` 등 구조화 필드를 함께 저장한다.
-- dedup: `UNIQUE(source, url)` — url은 `sec-filing://<accessNumber>` 형태
-- 즉시 `jobId`를 반환하고 background에서 적재한다.
-- duplicate guard: 동일 `sec_filing` job이 running이면 `409 { error, existingJobId }` 반환
 
 응답 컬럼:
 
