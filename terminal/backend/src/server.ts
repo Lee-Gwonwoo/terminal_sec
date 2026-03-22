@@ -21,7 +21,7 @@ import { ensureSeedData } from "./seed.js";
 import { pullIbkrCalendar, pullIbkrCalendarCustom, getCalendarDateRange } from "./services/calendarIngestion.js";
 import type { CalendarUpdateMode } from "./services/calendarIngestion.js";
 import { pullEodhdNews, pullEodhdNewsAll } from "./services/eodhdNewsProvider.js";
-import { insertNewsItem } from "./services/newsRepository.js";
+import { insertNewsItem, insertSecFilingCompanion } from "./services/newsRepository.js";
 import { listUpdateStatuses, setLastSuccess } from "./services/updateStatusRepository.js";
 import { readTickersFromCsv, appendTickerToCsv, removeTickerFromCsv, readTickerRowsFromCsv, CsvServiceError } from "./services/tickerCsvService.js";
 import {
@@ -89,6 +89,7 @@ import {
 import { fetchFinnhubProfilesBatch } from "./services/finnhubProfile2Provider.js";
 import { fetchRtprArticles, fetchRtprArticlesByTicker } from "./services/ptprNewsProvider.js";
 import { fetchFmpPressReleasesByTicker } from "./services/fmpPressReleaseProvider.js";
+import { fetchFmpSecFilings } from "./services/fmpSecFilingProvider.js";
 import { getEtDateString } from "./services/timeUtils.js";
 import {
   clampFinnhubCompanyDataConcurrency,
@@ -944,6 +945,14 @@ const pullFmpPressReleaseSchema = z.object({
   maxPages: z.number().int().min(1).max(50).optional().default(8),
 });
 
+const pullFmpSecFilingSchema = z.object({
+  mode: z.enum(["recent", "custom"]).optional().default("recent"),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  requestIntervalMs: z.number().int().min(0).max(5_000).optional().default(300),
+  maxPages: z.number().int().min(1).max(100).optional().default(20),
+});
+
 app.post("/api/news/pull-rtpr", async (req, res, next) => {
   try {
     if (!config.rtprApiKey) {
@@ -1415,6 +1424,160 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
         activePullJobs.delete(jobKey);
       } catch (err: any) {
         console.error(`[pull-fmp-press-release] job ${jobId} fatal error: ${err.message}`);
+        failJob(jobId, err.message || "Unknown error");
+        activePullJobs.delete(jobKey);
+      }
+    })();
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── FMP SEC Filing pull ──
+app.post("/api/news/pull-fmp-sec-filing", async (req, res, next) => {
+  try {
+    if (!config.fmpApiKey) {
+      res.status(400).json({ error: "FMP API key is not configured" });
+      return;
+    }
+
+    const input = pullFmpSecFilingSchema.parse(req.body ?? {});
+    const isCustom = input.mode === "custom";
+    if (isCustom && !input.from) {
+      res.status(400).json({ error: "Custom mode requires 'from' date" });
+      return;
+    }
+
+    const jobKey = "fmp_sec_filing";
+    const existingJobId = activePullJobs.get(jobKey);
+    if (existingJobId) {
+      const existingJob = getJob(existingJobId);
+      if (existingJob && existingJob.status === "running") {
+        res.status(409).json({
+          error: `An FMP SEC filing pull job is already running (jobId=${existingJobId}). Wait for it to finish or cancel it first.`,
+          existingJobId,
+        });
+        return;
+      }
+      activePullJobs.delete(jobKey);
+    }
+
+    const tickerList = await getDefaultUniverseTickers();
+    const universeSet = new Set(tickerList.map((t) => t.toUpperCase()));
+    const todayEt = getEtDateString(new Date());
+    const effectiveTo = input.to ?? todayEt;
+
+    let effectiveFrom: string;
+    if (isCustom) {
+      effectiveFrom = input.from!;
+    } else {
+      // Recent mode: find latest accepted_at for fmp_sec_filing
+      const anchor = await getDb().get<{ max_acc: string | null }>(
+        `SELECT MAX(published_at) as max_acc FROM news_items WHERE source = 'FMP' AND source_type = 'fmp_sec_filing'`,
+      );
+      effectiveFrom = anchor?.max_acc?.slice(0, 10) ?? getEtDateString(new Date(Date.now() - 7 * 86_400_000));
+    }
+
+    const jobId = createJob(0);
+    activePullJobs.set(jobKey, jobId);
+    appendLog(jobId, `Starting FMP SEC filing ${input.mode} pull — from=${effectiveFrom} to=${effectiveTo}`);
+    appendLog(jobId, `Universe: ${tickerList.length} tickers, maxPages=${input.maxPages}, requestIntervalMs=${input.requestIntervalMs}`);
+
+    res.json({ jobId });
+
+    (async () => {
+      const counters = { totalInserted: 0, totalSkipped: 0, companionInserted: 0 };
+      const newItems: Array<{ id: string; tickers: string[]; publishedAt: string }> = [];
+
+      try {
+        const filings = await fetchFmpSecFilings({
+          fromDate: effectiveFrom,
+          toDate: effectiveTo,
+          maxPages: input.maxPages,
+          requestIntervalMs: input.requestIntervalMs,
+          universeSymbols: universeSet,
+        });
+
+        appendLog(jobId, `Fetched ${filings.length} filings matching universe`);
+        updateProgress(jobId, 0);
+
+        for (const filing of filings) {
+          if (isJobCancelled(jobId)) break;
+
+          const inserted = await insertNewsItem({
+            publishedAt: filing.acceptedDate,
+            source: "FMP",
+            sourceType: "fmp_sec_filing",
+            title: filing.title,
+            body: filing.body,
+            url: filing.finalLink,
+            tickers: [filing.symbol],
+            tags: [filing.formType.toLowerCase()],
+            publisher: "SEC/EDGAR",
+          });
+
+          if (inserted) {
+            counters.totalInserted++;
+            newItems.push({
+              id: inserted.id,
+              tickers: inserted.tickers,
+              publishedAt: inserted.published_at,
+            });
+
+            await insertSecFilingCompanion({
+              newsId: inserted.id,
+              accessionNumber: filing.accessionNumber,
+              cik: filing.cik,
+              formType: filing.formType,
+              filedAt: filing.filingDate,
+              acceptedAt: filing.acceptedDate,
+              reportUrl: filing.finalLink,
+              filingUrl: filing.link,
+            });
+            counters.companionInserted++;
+
+            streamHub.publishNews(inserted);
+          } else {
+            counters.totalSkipped++;
+          }
+        }
+
+        appendLog(jobId, `Insert: ${counters.totalInserted} new, ${counters.totalSkipped} skipped, ${counters.companionInserted} companion rows`);
+
+        let changeMergeResult = { merged: 0, skipped: 0 };
+        if (newItems.length > 0 && !isJobCancelled(jobId)) {
+          appendLog(jobId, `Merging change% for ${newItems.length} new SEC filing items...`);
+          try {
+            changeMergeResult = await mergeChangeForNewItems(newItems, undefined, () => isJobCancelled(jobId));
+            appendLog(jobId, `Change merge: ${changeMergeResult.merged} merged, ${changeMergeResult.skipped} skipped`);
+          } catch (err: any) {
+            console.error(`[pull-fmp-sec-filing] change merger error: ${err.message}`);
+            appendLog(jobId, `⚠ Change merge error: ${err.message}`);
+          }
+        }
+
+        await setLastSuccess("fmp_sec_filing", new Date().toISOString(), {
+          mode: input.mode,
+          from: effectiveFrom,
+          to: effectiveTo,
+          inserted: counters.totalInserted,
+          skipped: counters.totalSkipped,
+          companionInserted: counters.companionInserted,
+          changeMerged: changeMergeResult.merged,
+        });
+
+        completeJob(jobId, {
+          source: "FMP",
+          mode: input.mode,
+          sourceType: "fmp_sec_filing",
+          inserted: counters.totalInserted,
+          skipped: counters.totalSkipped,
+          companionInserted: counters.companionInserted,
+          changeMerged: changeMergeResult.merged,
+        });
+        activePullJobs.delete(jobKey);
+      } catch (err: any) {
+        console.error(`[pull-fmp-sec-filing] job ${jobId} fatal error: ${err.message}`);
         failJob(jobId, err.message || "Unknown error");
         activePullJobs.delete(jobKey);
       }

@@ -523,6 +523,36 @@ export async function insertNewsItem(params: {
   };
 }
 
+export async function insertSecFilingCompanion(params: {
+  newsId: string;
+  accessionNumber: string;
+  cik: string;
+  formType: string;
+  filedAt: string;
+  acceptedAt: string;
+  reportUrl: string;
+  filingUrl: string;
+  rawJson?: string;
+}): Promise<boolean> {
+  const result = await getDb().run(
+    `INSERT OR IGNORE INTO sec_filings
+      (news_id, accession_number, cik, form_type, filed_at, accepted_at, report_url, filing_url, raw_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      params.newsId,
+      params.accessionNumber,
+      params.cik,
+      params.formType,
+      params.filedAt,
+      params.acceptedAt,
+      params.reportUrl,
+      params.filingUrl,
+      params.rawJson ?? null,
+    ],
+  );
+  return (result.changes ?? 0) > 0;
+}
+
 export async function getNewsIdBySourceUrl(source: string, url: string): Promise<string | null> {
   const row = await getDb().get<{ id: string }>(
     `SELECT id FROM news_items WHERE source = ? AND url = ? LIMIT 1`,

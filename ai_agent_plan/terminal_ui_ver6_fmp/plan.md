@@ -9,6 +9,26 @@
   - backend `/api/news/pull-finhub-sec` + frontend SEC 필터/업데이트 진입점
 - 중요한 점: 이번 작업은 `FMP SEC` 신규 구현이 아니다. 제거 후 상태는 `구 SEC 경로 없음 + FMP SEC 미구현`이다.
 
+### PLAN CHANGE — 2026-03-21 00:50 (FMP SEC filing 신규 구현)
+- 사용자 결정에 따라 기존 `비범위`였던 **FMP SEC filing** 을 신규 구현한다.
+- FMP API 엔드포인트: `stable/sec-filings-financials`
+  - symbol/cik 필터: **미동작** (글로벌 피드만 반환)
+  - date 필터(`from`/`to`): **정상 동작**
+  - 응답 shape: `{ symbol, cik, filingDate, acceptedDate, formType, hasFinancials, link, finalLink }` — title/body 없음
+- 설계 결정:
+  - `source_type='fmp_sec_filing'`, `source='FMP'`
+  - 글로벌 피드 → 앱에서 universe ticker로 필터
+  - title 자동 생성: `"{symbol}: {formType}"`, body: `"Filed {date}, accepted {date}. CIK: {cik}."`
+  - `url = finalLink`, `published_at = acceptedDate`
+  - accession number: `link` URL에서 regex 추출
+  - `sec_filings` companion 테이블 재활용
+  - publisher: `SEC/EDGAR`
+- 추가된 파일/변경:
+  - 신규: `terminal/backend/src/services/fmpSecFilingProvider.ts`
+  - 수정: `newsRepository.ts` (`insertSecFilingCompanion` 추가)
+  - 수정: `server.ts` (route `POST /api/news/pull-fmp-sec-filing` + Zod schema)
+  - 수정: `FinnhubNewsWindow.tsx` (필터/업데이트/FT 메뉴 15곳 + FtSourceType 수정)
+
 ### 목표
 - 뉴스 상단 필터에 `fmp pr` 버튼을 추가한다.
 - 업데이트 메뉴에 `recent fmp pr update`, `custom fmp pr update` 버튼을 추가한다.
@@ -38,7 +58,7 @@
 ### 비범위
 - Finnhub company news / market news 구조 개편
 - RTPR 제거 또는 FMP로 완전 대체
-- FMP SEC 신규 구현
+- ~~FMP SEC 신규 구현~~ → PLAN CHANGE 2026-03-21에서 구현 완료
 - mock 데이터 추가
 
 ### 현재 코드/데이터 구조(확인됨)
@@ -258,6 +278,9 @@ npm.cmd run build
 ### 현재 상태
 - FMP PR provider, pull route, 기존 row 마이그레이션, fulltext filter, frontend 필터/버튼, `gui-pyqt.md` 표현 규칙 수정까지 반영했다.
 - 이번 리비전에서 legacy `Finnhub SEC filing` route/UI/DB row 제거를 추가 반영했다.
+- PLAN CHANGE 2026-03-21: **FMP SEC filing 신규 구현 완료.**
+  - provider, route, companion insert, frontend 필터/업데이트/FT 메뉴 전부 추가.
+  - 런타임 검증: 12건 삽입 확인 (`news_items` + `sec_filings` companion).
 - 검증 결과:
   - 정적 분석: 변경 파일 기준 에러 0개
   - backend build: 성공
@@ -266,4 +289,5 @@ npm.cmd run build
   - backend health: `200 {"ok":true}`
   - legacy route: `POST /api/news/pull-finhub-sec` → `404 Not Found`
   - DB purge: `source_type='sec_filing'` row `0`, `sec_filings` row `0`
-- 남은 것은 사용자가 UI에서 `fmp pr` 관련 버튼 흐름을 직접 확인하는 수동 점검이다.
+  - FMP SEC: `source_type='fmp_sec_filing'` → 12건, `sec_filings` companion → 12건
+- 남은 것은 사용자가 UI에서 `fmp pr` / `fmp sec` 관련 버튼 흐름을 직접 확인하는 수동 점검이다.

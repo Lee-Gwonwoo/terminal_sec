@@ -324,11 +324,11 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 #### `sec_filings`
 
-Legacy SEC filing companion table.
+SEC filing companion table.
 
-- 과거 `Finnhub SEC filing` 메타데이터를 저장하던 companion table이다.
-- 2026-03-20 리비전부터 startup purge가 `source='FINNHUB' AND source_type='sec_filing'` parent row를 삭제하며, 연결된 `sec_filings` row도 함께 정리한다.
-- 현재는 스키마 호환성 때문에 테이블 정의만 유지하고, active ingestion path는 제공하지 않는다.
+- `news_items`에 저장된 SEC filing의 추가 메타데이터를 저장하는 companion table이다.
+- 과거 `Finnhub SEC filing` 데이터는 startup purge가 `source='FINNHUB' AND source_type='sec_filing'` parent row를 삭제하며 함께 정리된다.
+- 2026-03-21 리비전부터 `FMP SEC filing` (`source='FMP'`, `source_type='fmp_sec_filing'`) ingestion path가 추가됐으며, 같은 테이블에 companion row를 저장한다.
 
 컬럼:
 
@@ -400,6 +400,8 @@ Legacy SEC filing companion table.
 - `GET /api/news/pull-finhub/preflight`
 - `POST /api/news/pull-finhub`
 - `POST /api/news/pull-eodhd`
+- `POST /api/news/pull-fmp-press-release`
+- `POST /api/news/pull-fmp-sec-filing`
 - `POST /api/news/fulltext/update`
 - `POST /api/news/fulltext/backfill-plaintext`
 - `POST /api/news/fulltext/reset-failed`
@@ -566,6 +568,60 @@ Legacy SEC filing companion table.
 - `[][][]fetched[][][]`
 - `[][][]inserted[][][]`
 - `[][][]truncated[][][]`
+
+### `POST /api/news/pull-fmp-press-release`
+
+FMP press release를 수집한다.
+
+요청 body:
+
+```json
+{
+  "mode": "recent",
+  "from": "2026-03-01",
+  "to": "2026-03-20",
+  "requestIntervalMs": 300
+}
+```
+
+- `mode`: `recent | custom`
+- `recent`: DB의 마지막 `fmp_press_release` anchor 이후부터 수집
+- `custom`: `from/to` 범위로 수집
+- `requestIntervalMs`: FMP API 호출 간격 (기본 300ms)
+- job key: `fmp_press_release`
+
+응답 컬럼:
+
+- `[][][]jobId[][][]`
+
+### `POST /api/news/pull-fmp-sec-filing`
+
+FMP SEC filing을 수집한다. `stable/sec-filings-financials` 엔드포인트 사용.
+
+요청 body:
+
+```json
+{
+  "mode": "recent",
+  "from": "2026-03-01",
+  "to": "2026-03-20",
+  "requestIntervalMs": 300,
+  "maxPages": 20
+}
+```
+
+- `mode`: `recent | custom`
+- `recent`: DB의 마지막 `fmp_sec_filing` published_at 이후(없으면 7일 전)부터 수집
+- `custom`: `from/to` 범위로 수집
+- `requestIntervalMs`: FMP API 호출 간격 (기본 300ms)
+- `maxPages`: 최대 페이지 수 (기본 20)
+- job key: `fmp_sec_filing`
+- 동작: FMP 글로벌 피드를 가져온 뒤 default universe ticker로 필터링. `sec_filings` companion 테이블에도 저장.
+- 저장 규칙: `source='FMP'`, `source_type='fmp_sec_filing'`, `publisher='SEC/EDGAR'`, `url=finalLink`, `published_at=acceptedDate`
+
+응답 컬럼:
+
+- `[][][]jobId[][][]`
 
 ### `POST /api/news/fulltext/update`
 

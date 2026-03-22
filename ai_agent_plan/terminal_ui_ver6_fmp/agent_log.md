@@ -528,3 +528,44 @@
   1. `fmp pr` 필터가 실제 새 타입 row만 보여주는지
   2. `Recent FMP PR`, `Custom FMP PR`, `FMP PR Only`가 계속 동작하는지
   3. 기존 generic `Press Release` 및 RTPR 흐름이 깨지지 않았는지
+
+---
+
+## 2026-03-21
+
+### FMP SEC Filing 신규 구현 (2026-03-21 00:50)
+
+**Status: 사용자 확인 대기(awaiting user confirmation)**
+
+#### 작업 배경
+- plan.md에서 "비범위"로 분류했던 FMP SEC filing을 사용자가 구현하라고 지시.
+- FMP API live probe 결과, `stable/sec-filings-financials` 엔드포인트만 접근 가능.
+  - symbol/cik 필터: 미동작 (글로벌 피드만 반환)
+  - date 필터(`from`/`to`): 정상 동작
+
+#### 변경 사항
+
+**신규 파일:**
+- `terminal/backend/src/services/fmpSecFilingProvider.ts` — provider (fetch, map, retry, dedup)
+
+**수정 파일:**
+- `newsRepository.ts` — `insertSecFilingCompanion()` 추가
+- `server.ts` — route `POST /api/news/pull-fmp-sec-filing` + Zod schema 추가
+- `FinnhubNewsWindow.tsx` — 필터/업데이트/FT 메뉴 18곳 수정
+
+#### 검증
+
+| 검증 계층 | 결과 |
+|-----------|------|
+| 정적 분석 | ✅ 에러 0 |
+| backend build | ✅ |
+| frontend build | ✅ |
+| 테스트 | ✅ 57/57 |
+| 런타임 API | ✅ jobId 반환, 12건 삽입 |
+| DB companion | ✅ sec_filings 12건 |
+
+#### 사용자 확인 요청
+1. `FMP SEC` 필터 버튼 동작 확인
+2. `Recent/Custom FMP SEC Filing` 메뉴 동작 확인
+3. `FMP SEC Filing Only` fulltext 버튼 동작 확인
+4. 기존 FMP PR / Press Release / RTPR 흐름 비회귀 확인
