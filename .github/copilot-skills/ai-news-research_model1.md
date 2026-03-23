@@ -11,6 +11,17 @@
 
 `Model_1`은 아래 3단계를 순서대로 수행한다. 각 단계의 역할이 다르므로 단계를 건너뛰거나 합치지 않는다.
 
+**Model_1 소스 커버리지 규칙 (필수)**
+
+- DB 구조 변경 이후 `Model_1`에서 현재 뉴스와 관련 공시/보도자료를 볼 때는 **아래 3개 소스를 함께 확인하는 것**을 기본값으로 둔다.
+  - `FMP PR`: `source='FMP'`, `source_type='fmp_press_release'`
+  - `press release 데이터`: 현재 앱의 press release provider dataset (`RTPR`/`PTPR` 등 별도 press release source)
+  - `FMP SEC`: `source='FMP'`, `source_type='fmp_sec_filing'`
+- 즉 `Model_1`에서 보도자료 계열을 볼 때는 **FMP PR만 보고 끝내면 안 되고**, `press release` provider 데이터도 같이 확인해야 한다. 두 feed는 제목, ticker 매핑, 본문 길이, coverage가 완전히 같지 않을 수 있다.
+- `FMP SEC`는 `Model_1`에서 **모든 form을 다 보는 것이 아니라 `8-K`만 확인**한다. 기본 해석 대상은 material event disclosure이며, `10-K`, `10-Q`, `S-3`, `424B5`, `FWP` 등 다른 form은 사용자가 명시적으로 요청하지 않는 한 `Model_1` 기본 조사 범위에 포함하지 않는다.
+- 따라서 `Model_1`의 source check가 완료되었다고 쓰려면, 최소한 `FMP PR 확인`, `press release provider 확인`, `FMP SEC 8-K 확인`의 3개 체크가 모두 끝나 있어야 한다.
+- 세 소스 중 일부가 비어 있거나 DB에 아직 적재되지 않았으면 이를 숨기지 말고 `소스 없음`, `결과 0건`, `적재 확인 필요`처럼 명시한다. 데이터 부재를 다른 소스가 자동 대체한다고 가정하지 않는다.
+
 **Model_1 데이터 사용 가드레일 (필수)**
 
 - `Model_1`에서는 **현재 분석 대상 기간에 속한 뉴스의 후행 change 데이터**를 보고 중요도를 정하면 안 된다.
@@ -199,6 +210,7 @@
 - 목적: 잠재적으로 중요한 뉴스를 **놓치지 않고** 넓게 픽한다.
 - 허들: **낮음**. 약간이라도 주가에 의미 있을 가능성이 있으면 일단 통과시킨다.
 - 이 단계에서는 과거 유사사례를 깊이 조사하지 않는다. headline/lead/본문의 언어적 성격만 보고 빠르게 판단한다.
+- 이 단계의 현재 기사 확인에서는, 가능하면 `FMP PR`, `press release provider`, `FMP SEC 8-K`를 먼저 훑어 **같은 경제 사건이 보도자료/8-K에도 걸려 있는지**를 같이 본다. 단, `FMP SEC`는 여기서도 `8-K` 이외 form으로 범위를 넓히지 않는다.
 - 이 단계에서도 **사고과정을 숨기지 않는다.** 왜 통과시켰는지, 왜 제외했는지, 어떤 경제 사건으로 읽었는지를 짧게라도 드러낸다.
 - 판단 기준:
   - 사건의 경제적 성격이 명확한가 (계약, 승인, 실적, 오퍼링, 소송 등)
@@ -225,18 +237,21 @@
 - 이 단계의 핵심은 **대표 사례 몇 개를 예쁘게 고르는 것**이 아니라, 3단계에서 실제로 재판단할 수 있을 만큼 **분포를 볼 수 있는 증거 집합**을 확보하는 것이다.
 - 수행 내용:
   1. 현재 뉴스에서 핵심 키워드를 선별한다.
-  2. 그 키워드로 과거 뉴스 검색 범위를 좁힌다.
-  3. 해당 ticker의 유사 뉴스가 있었는지 확인한다 (same-ticker).
-  4. 다른 ticker에서도 비슷한 뉴스/이슈가 있었는지 확인한다 (other-ticker).
-  5. 필요하면 `industry`가 비슷한 종목으로 범위를 넓혀 유사 사례를 추가로 찾는다.
-  6. 각 유사사례에 대해 **change 데이터 전체**(8개 metric)를 수집한다.
-  7. final 경쟁 후보들에 대해서는 유사사례 조사와 병행해 `market_cap`, `float %`, `institutional ownership % estimate`를 확보해 둔다.
+  2. 현재 사건과 직접 연결되는 source coverage를 먼저 점검한다. 기본 체크는 `FMP PR`, `press release provider`, `FMP SEC 8-K`의 3개다.
+  3. 그 키워드로 과거 뉴스 검색 범위를 좁힌다.
+  4. 해당 ticker의 유사 뉴스가 있었는지 확인한다 (same-ticker).
+  5. 다른 ticker에서도 비슷한 뉴스/이슈가 있었는지 확인한다 (other-ticker).
+  6. 필요하면 `industry`가 비슷한 종목으로 범위를 넓혀 유사 사례를 추가로 찾는다.
+  7. 각 유사사례에 대해 **change 데이터 전체**(8개 metric)를 수집한다.
+  8. final 경쟁 후보들에 대해서는 유사사례 조사와 병행해 `market_cap`, `float %`, `institutional ownership % estimate`를 확보해 둔다.
 - 추가 수행 규칙:
+  1. 현재 기사 해석 메모에는 `FMP PR 확인 여부`, `press release provider 확인 여부`, `FMP SEC 8-K 확인 여부`를 가능하면 짧게 같이 남긴다. 예: `source check: FMP PR 있음 / RTPR 없음 / FMP SEC 8-K 없음`.
   7. **확증 사례와 반례를 함께 수집한다.** 현재 뉴스를 bullish/bearish로 보고 싶더라도, 그 방향과 반대였던 유사사례를 의도적으로 같이 모은다.
   8. **시가총액 구간을 같이 기록한다.** other-ticker 사례를 쓸 때는 small-cap 사례만 잔뜩 모아 놓고 large-cap 현재 뉴스에 그대로 대입하지 않는다.
   9. **선반영 가능성을 같이 점검한다.** 가능하면 현재 ticker의 뉴스 직전 `1d / 3d / 5d / 20d` 가격 흐름을 확인해, 이미 유사 재료로 먼저 오른 상태인지 본다.
   10. **사례 수가 부족하면 더 조사한다.** same-ticker 또는 other-ticker가 1~2건만 잡혔다고 바로 3단계로 넘기지 말고, 키워드/peer/industry 축을 바꿔 추가 탐색한다.
   11. 현재 분석 대상 기간의 기사에는 `change` 계열 데이터를 붙여서 판단하지 않는다. 현재 기사에 대한 price move를 보고 importance를 정하는 대신, 반드시 `현재 기사 이전`에 나온 유사사례의 반응만 수집한다.
+  12. `FMP SEC`를 확인할 때는 `8-K`만 대상으로 삼는다. symbol search 결과에 다른 form이 함께 섞여 있어도 `Model_1` 기본 조사 로그에는 `8-K`만 채택하고, 나머지는 `비대상 form`으로 분리한다.
 - 사례 수 목표는 **same-ticker 3건 이상, other-ticker 3건 이상을 각각 따로 확보하려고 시도하는 것**을 최소 기준으로 둔다.
 - 실무 기본 권장치는 **same-ticker 약 5건, other-ticker 약 5건**이다. 즉 일반적으로는 각 축에서 5건 안팎이면 분포를 보기 더 좋다고 본다.
 - 다만 항상 5건을 강제하지는 않는다. 핵심은 `각 축에서 최소 3건 이상을 확보하려고 충분히 시도했는가`이며, 3건 미만이면 더 찾으려고 한 검색 시도와 한계를 같이 남긴다.
@@ -355,6 +370,7 @@
 - `Model_1`로 최종 주요 이슈와 ticker를 분석할 때는, **현재 뉴스 1건만 요약하고 끝내면 안 된다.** 반드시 과거 유사사례 비교 결과를 같이 적는다.
 - `primary`뿐 아니라 `secondary`로 최종 note에 남긴 ticker도 동일하다. 즉 `secondary`도 현재 뉴스 요약만 적고 끝내지 말고, same-ticker / other-ticker 비교 결과를 함께 적는다.
 - 최종 답변, research note, 날짜별 스크리닝 note의 시작 부분에는 **`분석 기간: YYYY-MM-DD HH:mm ~ YYYY-MM-DD HH:mm (timezone)`** 줄을 반드시 넣는다. 날짜 제목만 있고 시각이 없는 출력은 완료본으로 보지 않는다.
+- 최종 현재 뉴스 요약에는 가능하면 `source check`를 함께 적는다. 기본 형식은 `FMP PR / press release / FMP SEC 8-K` 3축이며, 예: `source check: FMP PR 있음, RTPR press release 있음, FMP SEC 8-K 없음`.
 - 또한 `Model_1` 최종 주요 이슈 리스트는 기본적으로 **시가총액 `100B` 미만 ticker만 직접 분석 대상**으로 삼는다. `100B` 이상 ticker는 필요하면 reference case 또는 보류 메모로만 적는다.
 - 최종 답변이나 research note에서 same-ticker 또는 other-ticker 중 한 축이라도 빠져 있으면, 원칙적으로 `Model_1 분석 완료`로 보지 않는다. 각 축에서 우선 `3건 이상` 찾으려고 시도해야 하며, 일반적으로는 `5건 안팎`이면 더 좋다. 한쪽 사례가 0건이거나 3건 미만이면 그 실제 확보 건수와 검색 시도 내역을 적는 방식으로라도 **반드시 섹션을 남긴다.**
 - `watch`는 상세 Model_1 완료 대상으로 보지 않더라도, 최소한 `ticker`, `headline 요약`, `watch로 둔 이유`는 상단 스크리닝 표 또는 바로 아래 watch 보조 표에서 반드시 보이게 남긴다.
