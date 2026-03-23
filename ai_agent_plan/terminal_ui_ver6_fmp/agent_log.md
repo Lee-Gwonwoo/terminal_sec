@@ -166,6 +166,64 @@
    1. UI에서 더 이상 SEC 필터/SEC update 메뉴가 보이지 않는지
    2. `fmp pr` 관련 버튼 흐름이 기존대로 보이고 동작하는지
 
+### Finnhub News 상단 툴바 재배치 구현 (2026-03-23 08:48)
+
+**작성 시각:** 2026-03-23 08:48 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. `FinnhubNewsWindow.tsx` 상단 툴바를 한 줄 과밀 구조에서 `좌측 검색 블록 + 우측 제어 블록 + 하단 유틸리티 줄` 구조로 재배치했다.
+2. 일반 검색 입력과 ticker 입력은 유지하되, 검색 블록 자체 폭을 늘리고 `From / To` 날짜 입력칸을 더 넓게 보이도록 조정했다.
+3. `Update`, `View Log`, `Full Text`, `Refresh`, `Control`, `Save`, `Load` 버튼을 같은 목적끼리 묶어 여러 줄로 정리했다.
+4. `Full View / Model_1 Safe`, `Bookmark view`, `Display mode`는 액션 버튼과 분리해 상단 제어 블록 안의 별도 행으로 옮겼다.
+5. `figma_frontend_prompt.md`의 검색 UI 설명과 current source filter/query 설명을 현재 구현 기준으로 갱신했다.
+
+#### 변경 파일
+
+1. `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+2. `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+
+#### 사용자가 직접 확인할 수 있는 방법
+
+1. 프론트 dev 서버 화면에서 `News Feed: Finnhub API` 창을 연다.
+2. 검색창이 좌측에 넓게 보이고, 날짜 입력칸에 실제 날짜 문자열이 잘리는지 아닌지 확인한다.
+3. 우측 상단 컨트롤이 아래처럼 정리됐는지 본다.
+   - source filter 줄
+   - view / bookmark / display mode 줄
+   - update / log / full text / control / save / load 줄
+4. 하단 유틸리티 줄에 `Columns`, `Watch Lists`, item count가 따로 빠져 있는지 확인한다.
+
+#### 리스크 / 완화
+
+1. **리스크:** 버튼 위치가 바뀌면서 기존 사용자 습관과 달라질 수 있다.
+   - 완화 1: 기능 자체는 제거하지 않고 그룹만 재배치했다.
+   - 완화 2: `View Log`, `Full Text`, `Save`, `Load` 라벨을 그대로 유지했다.
+2. **리스크:** 메뉴 anchor가 바뀌면서 dropdown 위치가 어색할 수 있다.
+   - 완화 1: 기존 `relative` container와 menu 상태 로직은 유지했다.
+   - 완화 2: 변경은 주로 상위 flex/grid 구조에만 제한했다.
+3. **리스크:** dev 서버의 이전 HMR 에러 로그가 최신 정상 상태와 섞여 보일 수 있다.
+   - 완화 1: 변경 파일 기준 `get_errors` 0개를 확인했다.
+   - 완화 2: production build를 다시 돌려 실제 bundle 생성 성공을 확인했다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `FinnhubNewsWindow.tsx`, `figma_frontend_prompt.md` 기준 에러 0개 |
+| 빌드 | ✅ | `termina_web/figma_code/terminal_ui_ver2_finhub`에서 `npm run build` 성공 |
+| 자동 테스트 | ❌ | 해당 프론트 프로젝트 `package.json`에 test script가 없어 실행 불가 |
+| 런타임 통합 | ✅ | backend dev `http://localhost:8080` 확인, 프론트 페이지 `http://localhost:5173` 오픈. 브라우저 시각 확인은 사용자 위임 |
+
+#### 사용자 확인 요청
+
+- 현재 상태는 코드 반영과 빌드 검증까지 끝났고, 화면 배치가 실제로 더 읽기 좋은지에 대한 사용자의 시각 확인만 남아 있다.
+- 확인 포인트는 아래 3개다.
+  1. 검색창과 날짜 입력칸 폭이 충분한지
+  2. 우측 버튼 그룹이 이전보다 덜 답답하게 느껴지는지
+  3. `Update`, `View Log`, `Full Text`, `Columns`, `Watch Lists` 메뉴 접근이 불편해지지 않았는지
+
 ### plan.md 확인 사실 반영 (2026-03-20 18:24)
 
 **작성 시각:** 2026-03-20 18:24 (local)

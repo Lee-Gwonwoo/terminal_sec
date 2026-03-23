@@ -1701,223 +1701,296 @@ export function FinnhubNewsWindow({
 
   return (
     <div className="h-full flex flex-col bg-white dark:bg-gray-900 text-sm">
-      {/* Row 1: Search bar | Source type filter | Update | Refresh | Save | Load | Filter */}
-      <div className="px-3 pt-3 pb-2 border-b border-gray-200 dark:border-gray-700 space-y-2">
-        <div className="flex items-center gap-2">
-          <div className="flex-1 flex flex-col gap-2">
+      <div className="px-3 pt-3 pb-3 border-b border-gray-200 dark:border-gray-700 space-y-3">
+        <div className="flex flex-col xl:flex-row gap-3">
+          <div className="xl:w-[560px] 2xl:w-[620px] shrink-0 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-800/40 p-3 space-y-3">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400 dark:text-gray-500">Search</div>
+              <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">Make search and date range readable first, then keep actions grouped on the right.</div>
+            </div>
+
             <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') triggerSearch(); }}
-                placeholder="Search news... (Enter)"
-                className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                placeholder="Search news, title, abstract... (Enter)"
+                className="w-full pl-10 pr-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
             </div>
+
             <div className="relative">
-              <TrendingUp className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input type="text" value={tickerQuery} onChange={(e) => setTickerQuery(e.target.value)}
+              <TrendingUp className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                type="text"
+                value={tickerQuery}
+                onChange={(e) => setTickerQuery(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') triggerSearch(); }}
-                placeholder="Ticker only (e.g. AAPL, TSLA) (Enter)"
-                className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                placeholder="Ticker only: AAPL, TSLA, NVDA... (Enter)"
+                className="w-full pl-10 pr-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="relative">
-                <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)}
-                  className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500" />
-              </div>
-              <div className="relative">
-                <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)}
-                  className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500" />
-              </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400">From</span>
+                <div className="relative">
+                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="date"
+                    value={fromDate}
+                    onChange={(e) => setFromDate(e.target.value)}
+                    className="w-full min-w-0 pl-10 pr-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400">To</span>
+                <div className="relative">
+                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="date"
+                    value={toDate}
+                    onChange={(e) => setToDate(e.target.value)}
+                    className="w-full min-w-0 pl-10 pr-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+              </label>
             </div>
           </div>
 
-          {/* Source type filter toggle */}
-          <div className="flex items-center border border-gray-300 dark:border-gray-600 rounded overflow-hidden">
-            {(['all', 'company_news', 'press_release', 'fmp_press_release', 'fmp_sec_filing', 'market_news'] as SourceTypeFilter[]).map(st => (
-              <button
-                key={st}
-                onClick={() => setSourceTypeFilter(st)}
-                className={`px-2 py-1.5 text-[10px] whitespace-nowrap transition-colors ${
-                  sourceTypeFilter === st
-                    ? 'bg-blue-500 text-white'
-                    : 'hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400'
-                }`}
-              >
-                {getSourceTypeLabel(st)}
-              </button>
-            ))}
-          </div>
+          <div className="min-w-0 flex-1 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-800/30 p-3 space-y-3">
+            <div className="space-y-2">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400 dark:text-gray-500">Source Filter</div>
+              <div className="flex flex-wrap gap-1.5">
+                {(['all', 'company_news', 'press_release', 'fmp_press_release', 'fmp_sec_filing', 'market_news'] as SourceTypeFilter[]).map(st => (
+                  <button
+                    key={st}
+                    onClick={() => setSourceTypeFilter(st)}
+                    className={`px-2.5 py-1.5 rounded-md text-[11px] whitespace-nowrap transition-colors ${
+                      sourceTypeFilter === st
+                        ? 'bg-blue-500 text-white'
+                        : 'border border-gray-300 dark:border-gray-600 hover:bg-white dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300'
+                    }`}
+                  >
+                    {getSourceTypeLabel(st)}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-          <div className="flex items-center border border-gray-300 dark:border-gray-600 rounded overflow-hidden">
-            <button
-              onClick={() => setNewsProjection('full')}
-              className={`px-2 py-1.5 text-[10px] whitespace-nowrap transition-colors ${
-                newsProjection === 'full'
-                  ? 'bg-blue-500 text-white'
-                  : 'hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400'
-              }`}
-              title="General news view with full payload"
-            >
-              Full View
-            </button>
-            <button
-              onClick={() => setNewsProjection('model1-safe')}
-              className={`px-2 py-1.5 text-[10px] whitespace-nowrap transition-colors ${
-                newsProjection === 'model1-safe'
-                  ? 'bg-emerald-600 text-white'
-                  : 'hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400'
-              }`}
-              title="Model_1 safe view: uses /api/model1/news and hides current change columns"
-            >
-              Model_1 Safe
-            </button>
-          </div>
-
-          <div className="relative">
-            <button
-              onClick={() => setShowBookmarkMenu(prev => !prev)}
-              className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5"
-              title="Bookmark view"
-            >
-              <FolderOpen className="w-3.5 h-3.5" />
-              <span className="text-xs">
-                {selectedBookmarkFolderId
-                  ? (bookmarkFolders.find((folder) => folder.id === selectedBookmarkFolderId)?.name ?? 'Bookmark view')
-                  : 'Bookmark view'}
-              </span>
-              <ChevronDown className="w-3 h-3" />
-            </button>
-            {showBookmarkMenu && (
-              <div className="absolute top-full left-0 mt-1 w-56 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg z-30 overflow-hidden">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center border border-gray-300 dark:border-gray-600 rounded-lg overflow-hidden bg-white dark:bg-gray-900">
                 <button
-                  onClick={() => {
-                    setSelectedBookmarkFolderId('');
-                    setShowBookmarkMenu(false);
-                  }}
-                  className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800 ${selectedBookmarkFolderId === '' ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
+                  onClick={() => setNewsProjection('full')}
+                  className={`px-2.5 py-1.5 text-[11px] whitespace-nowrap transition-colors ${
+                    newsProjection === 'full'
+                      ? 'bg-blue-500 text-white'
+                      : 'hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400'
+                  }`}
+                  title="General news view with full payload"
                 >
-                  All news
+                  Full View
                 </button>
-                {bookmarkFolders.map((folder) => (
-                  <div key={folder.id} className="relative">
-                    {editingBookmarkFolderId === folder.id ? (
+                <button
+                  onClick={() => setNewsProjection('model1-safe')}
+                  className={`px-2.5 py-1.5 text-[11px] whitespace-nowrap transition-colors ${
+                    newsProjection === 'model1-safe'
+                      ? 'bg-emerald-600 text-white'
+                      : 'hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400'
+                  }`}
+                  title="Model_1 safe view: uses /api/model1/news and hides current change columns"
+                >
+                  Model_1 Safe
+                </button>
+              </div>
+
+              <div className="relative">
+                <button
+                  onClick={() => setShowBookmarkMenu(prev => !prev)}
+                  className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-white dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 bg-white dark:bg-gray-900"
+                  title="Bookmark view"
+                >
+                  <FolderOpen className="w-3.5 h-3.5" />
+                  <span className="text-xs">
+                    {selectedBookmarkFolderId
+                      ? (bookmarkFolders.find((folder) => folder.id === selectedBookmarkFolderId)?.name ?? 'Bookmark view')
+                      : 'Bookmark view'}
+                  </span>
+                  <ChevronDown className="w-3 h-3" />
+                </button>
+                {showBookmarkMenu && (
+                  <div className="absolute top-full left-0 mt-1 w-56 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg z-30 overflow-hidden">
+                    <button
+                      onClick={() => {
+                        setSelectedBookmarkFolderId('');
+                        setShowBookmarkMenu(false);
+                      }}
+                      className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800 ${selectedBookmarkFolderId === '' ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
+                    >
+                      All news
+                    </button>
+                    {bookmarkFolders.map((folder) => (
+                      <div key={folder.id} className="relative">
+                        {editingBookmarkFolderId === folder.id ? (
+                          <form
+                            className="px-2 py-1.5"
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              handleRenameBookmarkFolder(folder.id, editingBookmarkFolderName);
+                            }}
+                          >
+                            <input
+                              autoFocus
+                              value={editingBookmarkFolderName}
+                              onChange={(e) => setEditingBookmarkFolderName(e.target.value)}
+                              onBlur={() => handleRenameBookmarkFolder(folder.id, editingBookmarkFolderName)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Escape') {
+                                  setEditingBookmarkFolderId(null);
+                                  setEditingBookmarkFolderName('');
+                                }
+                              }}
+                              className="w-full px-2 py-1 text-xs border border-blue-400 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            />
+                          </form>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              setSelectedBookmarkFolderId(folder.id);
+                              setShowBookmarkMenu(false);
+                            }}
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setBookmarkFolderCtxMenu({ x: e.clientX, y: e.clientY, folderId: folder.id });
+                            }}
+                            className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800 ${selectedBookmarkFolderId === folder.id ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
+                          >
+                            {folder.name}
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <div className="border-t border-gray-200 dark:border-gray-700" />
+                    {showNewFolderInput ? (
                       <form
-                        className="px-2 py-1.5"
-                        onSubmit={(e) => {
-                          e.preventDefault();
-                          handleRenameBookmarkFolder(folder.id, editingBookmarkFolderName);
-                        }}
+                        className="flex items-center gap-1 px-2 py-1.5"
+                        onSubmit={(e) => { e.preventDefault(); handleCreateFolder(newFolderName); }}
                       >
                         <input
                           autoFocus
-                          value={editingBookmarkFolderName}
-                          onChange={(e) => setEditingBookmarkFolderName(e.target.value)}
-                          onBlur={() => handleRenameBookmarkFolder(folder.id, editingBookmarkFolderName)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Escape') {
-                              setEditingBookmarkFolderId(null);
-                              setEditingBookmarkFolderName('');
-                            }
-                          }}
-                          className="w-full px-2 py-1 text-xs border border-blue-400 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          value={newFolderName}
+                          onChange={(e) => setNewFolderName(e.target.value)}
+                          placeholder="Folder name"
+                          className="flex-1 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          onKeyDown={(e) => { if (e.key === 'Escape') { setShowNewFolderInput(false); setNewFolderName(''); } }}
                         />
+                        <button type="submit" className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600">OK</button>
                       </form>
                     ) : (
                       <button
-                        onClick={() => {
-                          setSelectedBookmarkFolderId(folder.id);
-                          setShowBookmarkMenu(false);
-                        }}
-                        onContextMenu={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setBookmarkFolderCtxMenu({ x: e.clientX, y: e.clientY, folderId: folder.id });
-                        }}
-                        className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800 ${selectedBookmarkFolderId === folder.id ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
+                        onClick={() => setShowNewFolderInput(true)}
+                        className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-1.5 text-blue-600 dark:text-blue-400"
                       >
-                        {folder.name}
+                        <Plus className="w-3 h-3" /> New folder
                       </button>
                     )}
+                    <button
+                      onClick={() => { setShowBookmarkMenu(false); setShowBookmarkManager(true); }}
+                      className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-1.5 text-gray-600 dark:text-gray-400"
+                    >
+                      <Settings2 className="w-3 h-3" /> Bookmark Manager
+                    </button>
                   </div>
-                ))}
-                {/* Separator + New folder + Manager */}
-                <div className="border-t border-gray-200 dark:border-gray-700" />
-                {showNewFolderInput ? (
-                  <form
-                    className="flex items-center gap-1 px-2 py-1.5"
-                    onSubmit={(e) => { e.preventDefault(); handleCreateFolder(newFolderName); }}
-                  >
-                    <input
-                      autoFocus
-                      value={newFolderName}
-                      onChange={(e) => setNewFolderName(e.target.value)}
-                      placeholder="Folder name"
-                      className="flex-1 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      onKeyDown={(e) => { if (e.key === 'Escape') { setShowNewFolderInput(false); setNewFolderName(''); } }}
-                    />
-                    <button type="submit" className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600">OK</button>
-                  </form>
-                ) : (
-                  <button
-                    onClick={() => setShowNewFolderInput(true)}
-                    className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-1.5 text-blue-600 dark:text-blue-400"
-                  >
-                    <Plus className="w-3 h-3" /> New folder
-                  </button>
                 )}
-                <button
-                  onClick={() => { setShowBookmarkMenu(false); setShowBookmarkManager(true); }}
-                  className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-1.5 text-gray-600 dark:text-gray-400"
-                >
-                  <Settings2 className="w-3 h-3" /> Bookmark Manager
-                </button>
+                {showBookmarkMenu && bookmarkFolderCtxMenu && (
+                  <div
+                    ref={bookmarkFolderCtxMenuRef}
+                    className="fixed z-[60] min-w-[140px] overflow-hidden rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg"
+                    style={{
+                      left: Math.min(bookmarkFolderCtxMenu.x, typeof window !== 'undefined' ? window.innerWidth - 160 : bookmarkFolderCtxMenu.x),
+                      top: Math.min(bookmarkFolderCtxMenu.y, typeof window !== 'undefined' ? window.innerHeight - 80 : bookmarkFolderCtxMenu.y),
+                    }}
+                  >
+                    <button
+                      onClick={() => {
+                        const folder = bookmarkFolders.find((item) => item.id === bookmarkFolderCtxMenu.folderId);
+                        if (folder) startRenameBookmarkFolder(folder);
+                      }}
+                      className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800"
+                    >
+                      Rename
+                    </button>
+                  </div>
+                )}
               </div>
-            )}
-            {showBookmarkMenu && bookmarkFolderCtxMenu && (
-              <div
-                ref={bookmarkFolderCtxMenuRef}
-                className="fixed z-[60] min-w-[140px] overflow-hidden rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg"
-                style={{
-                  left: Math.min(bookmarkFolderCtxMenu.x, typeof window !== 'undefined' ? window.innerWidth - 160 : bookmarkFolderCtxMenu.x),
-                  top: Math.min(bookmarkFolderCtxMenu.y, typeof window !== 'undefined' ? window.innerHeight - 80 : bookmarkFolderCtxMenu.y),
-                }}
-              >
+
+              <div className="relative" ref={displayModeMenuRef}>
                 <button
-                  onClick={() => {
-                    const folder = bookmarkFolders.find((item) => item.id === bookmarkFolderCtxMenu.folderId);
-                    if (folder) startRenameBookmarkFolder(folder);
-                  }}
-                  className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800"
+                  onClick={() => { setShowDisplayModeMenu(!showDisplayModeMenu); setShowFilterMenu(false); setShowLoadMenu(false); setShowWatchlistMenu(false); }}
+                  className="px-2.5 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-white dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 bg-white dark:bg-gray-900"
+                  title="Display mode"
                 >
-                  Rename
+                  {displayMode === 'title-only'
+                    ? <FileText className="w-3 h-3 text-gray-500" />
+                    : <AlignLeft className="w-3 h-3 text-blue-500" />
+                  }
+                  <span className="whitespace-nowrap">{displayModeLabel}</span>
+                  <ChevronDown className="w-3 h-3" />
                 </button>
+                {showDisplayModeMenu && (
+                  <div className="absolute top-full mt-1 left-0 w-48 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-lg z-30">
+                    <div className="p-1.5">
+                      <button
+                        onClick={() => { setDisplayMode('title-only'); setExpandedItems(new Set()); setShowDisplayModeMenu(false); }}
+                        className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 ${displayMode === 'title-only' ? 'bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : ''}`}
+                      >
+                        <FileText className="w-3.5 h-3.5 shrink-0" />
+                        <div>
+                          <div className="font-medium">Title Only</div>
+                          <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Click title to show body</div>
+                        </div>
+                      </button>
+                      <button
+                        onClick={() => { setDisplayMode('title-abstract'); setExpandedItems(new Set()); setShowDisplayModeMenu(false); }}
+                        className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 ${displayMode === 'title-abstract' ? 'bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : ''}`}
+                      >
+                        <AlignLeft className="w-3.5 h-3.5 shrink-0" />
+                        <div>
+                          <div className="font-medium">Title + Body</div>
+                          <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Always show body excerpt</div>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            </div>
 
-          {/* Update split-button with dropdown menu */}
-          {(() => {
-            const [showUpdateMenu, setShowUpdateMenu] = React.useState(false);
-            const updateMenuRef = React.useRef<HTMLDivElement>(null);
+            <div className="flex flex-wrap items-center gap-2">
+              {(() => {
+                const [showUpdateMenu, setShowUpdateMenu] = React.useState(false);
+                const updateMenuRef = React.useRef<HTMLDivElement>(null);
 
-            React.useEffect(() => {
-              if (!showUpdateMenu) return;
-              const handler = (e: MouseEvent) => {
-                if (updateMenuRef.current && !updateMenuRef.current.contains(e.target as Node)) setShowUpdateMenu(false);
-              };
-              document.addEventListener('mousedown', handler);
-              return () => document.removeEventListener('mousedown', handler);
-            }, [showUpdateMenu]);
+                React.useEffect(() => {
+                  if (!showUpdateMenu) return;
+                  const handler = (e: MouseEvent) => {
+                    if (updateMenuRef.current && !updateMenuRef.current.contains(e.target as Node)) setShowUpdateMenu(false);
+                  };
+                  document.addEventListener('mousedown', handler);
+                  return () => document.removeEventListener('mousedown', handler);
+                }, [showUpdateMenu]);
 
-            return (
-              <div className="relative flex" ref={updateMenuRef}>
+                return (
+                  <div className="relative flex" ref={updateMenuRef}>
                 {/* Main button — repeats last used update */}
                 <button
                   onClick={handleMainButtonClick}
                   disabled={updating}
-                  className="px-3 py-1.5 border border-r-0 border-gray-300 dark:border-gray-600 rounded-l hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                  className="px-3 py-1.5 border border-r-0 border-gray-300 dark:border-gray-600 rounded-l-lg hover:bg-white dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 disabled:opacity-50 bg-white dark:bg-gray-900"
                   title={`Repeat last update: ${mainBtnLabel}`}
                 >
                   <Download className={`w-3.5 h-3.5 ${updating ? 'animate-bounce' : ''}`} />
@@ -1927,7 +2000,7 @@ export function FinnhubNewsWindow({
                 <button
                   onClick={() => setShowUpdateMenu(!showUpdateMenu)}
                   disabled={updating}
-                  className="px-1.5 py-1.5 border border-gray-300 dark:border-gray-600 rounded-r hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
+                  className="px-1.5 py-1.5 border border-gray-300 dark:border-gray-600 rounded-r-lg hover:bg-white dark:hover:bg-gray-800 transition-colors disabled:opacity-50 bg-white dark:bg-gray-900"
                   title="More update options"
                 >
                   <ChevronDown className="w-3 h-3" />
@@ -2058,69 +2131,67 @@ export function FinnhubNewsWindow({
                   </div>
                 )}
               </div>
-            );
-          })()}
+                );
+              })()}
 
-          {/* View Log button — always visible, disabled when no job */}
-          <button
-            onClick={() => (currentJobId || activeJobs.length > 0) && setShowLogPanel(!showLogPanel)}
-            disabled={!currentJobId && activeJobs.length === 0}
-            className={`px-3 py-1.5 border rounded transition-colors flex items-center gap-1.5 text-xs ${
-              !currentJobId && activeJobs.length === 0
-                ? 'border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-600 cursor-not-allowed opacity-50'
-                : showLogPanel
-                  ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
-                  : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800'
-            }`}
-            title={currentJobId ? "View update job logs and progress" : activeJobs.length > 0 ? "View active jobs" : "No active job — click Update first"}
-          >
-            <Eye className="w-3.5 h-3.5" />
-            <span>View Log</span>
-            {activeJobs.length > 1 && (
-              <span className="ml-1 px-1.5 py-0.5 rounded-full bg-blue-500 text-white text-[9px] font-bold leading-none">{activeJobs.length}</span>
-            )}
-            {jobStatus?.status === 'running' && (
-              <span className="ml-1 text-[10px] text-blue-500 tabular-nums">{jobStatus.progress.pct}%</span>
-            )}
-            {jobStatus?.status === 'done' && (
-              <span className="ml-1 w-2 h-2 rounded-full bg-green-500 inline-block" />
-            )}
-            {jobStatus?.status === 'failed' && (
-              <span className="ml-1 w-2 h-2 rounded-full bg-red-500 inline-block" />
-            )}
-          </button>
+              <button
+                onClick={() => (currentJobId || activeJobs.length > 0) && setShowLogPanel(!showLogPanel)}
+                disabled={!currentJobId && activeJobs.length === 0}
+                className={`px-3 py-1.5 border rounded-lg transition-colors flex items-center gap-1.5 text-xs ${
+                  !currentJobId && activeJobs.length === 0
+                    ? 'border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-600 cursor-not-allowed opacity-50'
+                    : showLogPanel
+                      ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+                      : 'border-gray-300 dark:border-gray-600 hover:bg-white dark:hover:bg-gray-800 bg-white dark:bg-gray-900'
+                }`}
+                title={currentJobId ? 'View update job logs and progress' : activeJobs.length > 0 ? 'View active jobs' : 'No active job — click Update first'}
+              >
+                <Eye className="w-3.5 h-3.5" />
+                <span>View Log</span>
+                {activeJobs.length > 1 && (
+                  <span className="ml-1 px-1.5 py-0.5 rounded-full bg-blue-500 text-white text-[9px] font-bold leading-none">{activeJobs.length}</span>
+                )}
+                {jobStatus?.status === 'running' && (
+                  <span className="ml-1 text-[10px] text-blue-500 tabular-nums">{jobStatus.progress.pct}%</span>
+                )}
+                {jobStatus?.status === 'done' && (
+                  <span className="ml-1 w-2 h-2 rounded-full bg-green-500 inline-block" />
+                )}
+                {jobStatus?.status === 'failed' && (
+                  <span className="ml-1 w-2 h-2 rounded-full bg-red-500 inline-block" />
+                )}
+              </button>
 
-          {/* Full Text Extract split-button */}
-          {(() => {
-            const [showFtMenu, setShowFtMenu] = React.useState(false);
-            const ftMenuRef = React.useRef<HTMLDivElement>(null);
+              {(() => {
+                const [showFtMenu, setShowFtMenu] = React.useState(false);
+                const ftMenuRef = React.useRef<HTMLDivElement>(null);
 
-            React.useEffect(() => {
-              if (!showFtMenu) return;
-              const handler = (e: MouseEvent) => {
-                if (ftMenuRef.current && !ftMenuRef.current.contains(e.target as Node)) setShowFtMenu(false);
-              };
-              document.addEventListener('mousedown', handler);
-              return () => document.removeEventListener('mousedown', handler);
-            }, [showFtMenu]);
+                React.useEffect(() => {
+                  if (!showFtMenu) return;
+                  const handler = (e: MouseEvent) => {
+                    if (ftMenuRef.current && !ftMenuRef.current.contains(e.target as Node)) setShowFtMenu(false);
+                  };
+                  document.addEventListener('mousedown', handler);
+                  return () => document.removeEventListener('mousedown', handler);
+                }, [showFtMenu]);
 
-            const ftLabel = ftUpdating
-              ? 'Extracting...'
-              : lastFtSourceType === 'rtpr' ? 'FT RTPR'
-              : lastFtSourceType === 'fmp_press_release' ? 'FT FMP PR'
-              : lastFtSourceType === 'fmp_sec_filing' ? 'FT SEC'
-              : lastFtSourceType === 'company_news' ? 'FT Co.'
-              : lastFtSourceType === 'press_release' ? 'FT PR'
-              : lastFtSourceType === 'market_news' ? 'FT Mkt.'
-              : 'Full Text';
+                const ftLabel = ftUpdating
+                  ? 'Extracting...'
+                  : lastFtSourceType === 'rtpr' ? 'FT RTPR'
+                  : lastFtSourceType === 'fmp_press_release' ? 'FT FMP PR'
+                  : lastFtSourceType === 'fmp_sec_filing' ? 'FT SEC'
+                  : lastFtSourceType === 'company_news' ? 'FT Co.'
+                  : lastFtSourceType === 'press_release' ? 'FT PR'
+                  : lastFtSourceType === 'market_news' ? 'FT Mkt.'
+                  : 'Full Text';
 
-            return (
-              <div className="relative flex" ref={ftMenuRef}>
+                return (
+                  <div className="relative flex" ref={ftMenuRef}>
                 {/* Main button — repeats last used sourceType */}
                 <button
                   onClick={() => handleFulltextUpdate(lastFtSourceType)}
                   disabled={updating || ftUpdating}
-                  className="px-3 py-1.5 border border-r-0 border-gray-300 dark:border-gray-600 rounded-l hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 text-xs disabled:opacity-50"
+                  className="px-3 py-1.5 border border-r-0 border-gray-300 dark:border-gray-600 rounded-l-lg hover:bg-white dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 text-xs disabled:opacity-50 bg-white dark:bg-gray-900"
                   title={lastFtSourceType === 'rtpr' ? 'Backfill RTPR full text from stored body' : `Extract full text (${getSourceTypeLabel(lastFtSourceType)})`}
                 >
                   <FileText className={`w-3.5 h-3.5 text-orange-500 ${ftUpdating ? 'animate-pulse' : ''}`} />
@@ -2130,7 +2201,7 @@ export function FinnhubNewsWindow({
                 <button
                   onClick={() => setShowFtMenu(!showFtMenu)}
                   disabled={updating || ftUpdating}
-                  className="px-1.5 py-1.5 border border-gray-300 dark:border-gray-600 rounded-r hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
+                  className="px-1.5 py-1.5 border border-gray-300 dark:border-gray-600 rounded-r-lg hover:bg-white dark:hover:bg-gray-800 transition-colors disabled:opacity-50 bg-white dark:bg-gray-900"
                   title="Choose source type for full text extraction"
                 >
                   <ChevronDown className="w-3 h-3" />
@@ -2176,117 +2247,74 @@ export function FinnhubNewsWindow({
                   </div>
                 )}
               </div>
-            );
-          })()}
+                );
+              })()}
 
-          {/* Refresh button */}
-          <button onClick={() => triggerSearch()} disabled={loading} className="p-2 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors" title="Refresh from DB">
-            <RotateCw className={`w-3.5 h-3.5 text-gray-600 dark:text-gray-400 ${loading ? 'animate-spin' : ''}`} />
-          </button>
+              <button onClick={() => triggerSearch()} disabled={loading} className="p-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-white dark:hover:bg-gray-800 transition-colors bg-white dark:bg-gray-900" title="Refresh from DB">
+                <RotateCw className={`w-3.5 h-3.5 text-gray-600 dark:text-gray-400 ${loading ? 'animate-spin' : ''}`} />
+              </button>
 
-          <button
-            onClick={() => setShowControlWindow(true)}
-            className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5"
-            title="Control window"
-          >
-            <Settings2 className="w-3.5 h-3.5" /><span className="text-xs">Control</span>
-          </button>
+              <button
+                onClick={() => setShowControlWindow(true)}
+                className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-white dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 bg-white dark:bg-gray-900"
+                title="Control window"
+              >
+                <Settings2 className="w-3.5 h-3.5" /><span className="text-xs">Control</span>
+              </button>
 
-          {/* Save */}
-          <button onClick={() => setShowSaveModal(true)} className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5" title="Save search settings">
-            <Save className="w-3.5 h-3.5" /><span className="text-xs">Save</span>
-          </button>
+              <button onClick={() => setShowSaveModal(true)} className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-white dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 bg-white dark:bg-gray-900" title="Save search settings">
+                <Save className="w-3.5 h-3.5" /><span className="text-xs">Save</span>
+              </button>
 
-          {/* Load */}
-          <div className="relative" ref={loadMenuRef}>
-            <button onClick={() => { setShowLoadMenu(!showLoadMenu); setShowFilterMenu(false); setShowWatchlistMenu(false); setShowDisplayModeMenu(false); }} className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5" title="Load search settings">
-              <FolderOpen className="w-3.5 h-3.5" /><span className="text-xs">Load</span>
-            </button>
-            {showLoadMenu && (
-              <div className="absolute top-full mt-1 right-0 w-56 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-lg z-30">
-                <div className="p-1.5">
-                  {savedSearches.length === 0
-                    ? <div className="px-3 py-2 text-xs text-gray-500">No saved searches</div>
-                    : savedSearches.map(s => (
-                      <button key={s.id} onClick={() => handleLoadSearch(s)} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center justify-between group">
-                        <span>{s.name}</span>
-                        <span onClick={(e) => handleDeleteSearch(s.id, e)} className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 text-xs">✕</span>
-                      </button>
-                    ))
-                  }
-                </div>
+              <div className="relative" ref={loadMenuRef}>
+                <button onClick={() => { setShowLoadMenu(!showLoadMenu); setShowFilterMenu(false); setShowWatchlistMenu(false); setShowDisplayModeMenu(false); }} className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-white dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 bg-white dark:bg-gray-900" title="Load search settings">
+                  <FolderOpen className="w-3.5 h-3.5" /><span className="text-xs">Load</span>
+                </button>
+                {showLoadMenu && (
+                  <div className="absolute top-full mt-1 right-0 w-56 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-lg z-30">
+                    <div className="p-1.5">
+                      {savedSearches.length === 0
+                        ? <div className="px-3 py-2 text-xs text-gray-500">No saved searches</div>
+                        : savedSearches.map(s => (
+                          <button key={s.id} onClick={() => handleLoadSearch(s)} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center justify-between group">
+                            <span>{s.name}</span>
+                            <span onClick={(e) => handleDeleteSearch(s.id, e)} className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 text-xs">✕</span>
+                          </button>
+                        ))
+                      }
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
+            </div>
           </div>
         </div>
 
-        {/* Row 2: Display Mode | Watch Lists */}
-        <div className="flex items-center gap-2">
-          {/* Display Mode Toggle */}
-          <div className="relative" ref={displayModeMenuRef}>
-            <button
-              onClick={() => { setShowDisplayModeMenu(!showDisplayModeMenu); setShowFilterMenu(false); setShowLoadMenu(false); setShowWatchlistMenu(false); }}
-              className="px-2.5 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5"
-              title="Display mode"
-            >
-              {displayMode === 'title-only'
-                ? <FileText className="w-3 h-3 text-gray-500" />
-                : <AlignLeft className="w-3 h-3 text-blue-500" />
-              }
-              <span className="whitespace-nowrap">{displayModeLabel}</span>
-              <ChevronDown className="w-3 h-3" />
-            </button>
-            {showDisplayModeMenu && (
-              <div className="absolute top-full mt-1 left-0 w-48 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-lg z-30">
-                <div className="p-1.5">
-                  <button
-                    onClick={() => { setDisplayMode('title-only'); setExpandedItems(new Set()); setShowDisplayModeMenu(false); }}
-                    className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 ${displayMode === 'title-only' ? 'bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : ''}`}
-                  >
-                    <FileText className="w-3.5 h-3.5 shrink-0" />
-                    <div>
-                      <div className="font-medium">Title Only</div>
-                      <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Click title to show body</div>
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => { setDisplayMode('title-abstract'); setExpandedItems(new Set()); setShowDisplayModeMenu(false); }}
-                    className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 ${displayMode === 'title-abstract' ? 'bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : ''}`}
-                  >
-                    <AlignLeft className="w-3.5 h-3.5 shrink-0" />
-                    <div>
-                      <div className="font-medium">Title + Body</div>
-                      <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Always show body excerpt</div>
-                    </div>
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Status indicator */}
-          <div className="flex items-center gap-1.5 text-[10px] text-gray-400">
+        <div className="flex flex-col lg:flex-row lg:items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-800/30 px-3 py-2">
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
             <span>{newsData.length} items{nextCursor ? '+' : ''}</span>
             {loading && <span className="text-blue-500">Loading...</span>}
             {loadingMore && <span className="text-blue-500">Loading more...</span>}
+            {selectedWatchlist !== 'All' && (
+              <span className="text-gray-500 dark:text-gray-400">Watch list: {selectedWatchlist}</span>
+            )}
           </div>
 
-          {/* Error message */}
           {error && (
-            <span className="text-[10px] text-red-500 truncate max-w-[200px]" title={error}>{error}</span>
+            <span className="text-[11px] text-red-500 truncate max-w-[320px]" title={error}>{error}</span>
           )}
 
           {isModel1SafeMode && (
-            <span className="text-[10px] text-emerald-600 dark:text-emerald-400 truncate" title="Current news is loaded from /api/model1/news without change fields.">
+            <span className="text-[11px] text-emerald-600 dark:text-emerald-400 truncate" title="Current news is loaded from /api/model1/news without change fields.">
               Model_1 safe payload active
             </span>
           )}
 
-          {/* Column visibility toggle */}
-          <div className="relative ml-auto" ref={columnMenuRef}>
+          <div className="flex items-center gap-2 lg:ml-auto">
+            <div className="relative" ref={columnMenuRef}>
             <button
               onClick={() => { setShowColumnMenu(!showColumnMenu); setShowFilterMenu(false); setShowLoadMenu(false); setShowDisplayModeMenu(false); setShowWatchlistMenu(false); }}
-              className="px-2.5 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5"
+              className="px-2.5 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-white dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 bg-white dark:bg-gray-900"
               title="Show/hide columns"
             >
               <Columns3 className="w-3.5 h-3.5 text-gray-500" />
@@ -2325,10 +2353,9 @@ export function FinnhubNewsWindow({
             )}
           </div>
 
-          {/* Watch Lists */}
           <div className="relative" ref={watchlistMenuRef}>
             <button onClick={() => { setShowWatchlistMenu(!showWatchlistMenu); setShowFilterMenu(false); setShowLoadMenu(false); setShowDisplayModeMenu(false); }}
-              className="px-3 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5">
+              className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-white dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 bg-white dark:bg-gray-900">
               <span>Watch Lists</span><ChevronDown className="w-3 h-3" />
             </button>
             {showWatchlistMenu && (
@@ -2346,6 +2373,7 @@ export function FinnhubNewsWindow({
           </div>
         </div>
       </div>
+      </div>
 
       {/* ─── Table Header ─── */}
       <div className="flex items-center border-b border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-xs font-semibold text-gray-600 dark:text-gray-300 select-none">
@@ -2358,9 +2386,9 @@ export function FinnhubNewsWindow({
               draggable
               onDragStart={handleDragStart(idx)}
               onDragOver={handleDragOver(idx)}
+              onClick={() => handleSortClick(col.id)}
               onDrop={handleDrop(idx)}
               onDragEnd={handleDragEnd}
-              onClick={() => handleSortClick(col.id)}
               className={[
                 'relative shrink-0 px-2 py-2 cursor-pointer flex items-center gap-1 group transition-colors hover:bg-gray-100 dark:hover:bg-gray-700',
                 isDragTarget ? 'bg-blue-50 dark:bg-blue-900/30' : '',

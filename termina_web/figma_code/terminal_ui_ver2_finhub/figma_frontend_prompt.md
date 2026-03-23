@@ -130,13 +130,13 @@ Vite dev proxy:
 백엔드 호출:
 
 ```text
-GET /api/news?source_names=FINNHUB&limit=500
+GET /api/news?source_names=FINNHUB,RTPR,FMP&limit=500
 ```
 
 추가 query:
 
 - `keyword`
-- `source_type` (`company_news | press_release | market_news`)
+- `source_type` (`company_news | press_release | fmp_press_release | fmp_sec_filing | market_news`)
 - `tickers` (ticker 전용 검색, 예: `AAPL,TSLA`)
 - `from`, `to` (YYYY-MM-DD 날짜 범위 필터)
 - `bookmarkFolderId` (북마크 폴더 필터)
@@ -152,13 +152,28 @@ GET /api/news?source_names=FINNHUB&limit=500
 
 ### 검색 UI
 
-검색 영역은 3줄 구조다:
+상단 툴바는 `좌측 검색 블록 + 우측 제어 블록 + 하단 유틸리티 줄` 3영역으로 재배치돼 있다.
 
-1. 일반 keyword 검색창 (돋보기 아이콘)
-2. Ticker 전용 검색창 (TrendingUp 아이콘)
-3. From / To 날짜 입력 (Calendar 아이콘)
+- 좌측 검색 블록
+  - 일반 keyword 검색창 (돋보기 아이콘)
+  - ticker 전용 검색창 (TrendingUp 아이콘)
+  - 넓은 From / To 날짜 입력 (Calendar 아이콘)
+- 우측 제어 블록
+  - source type filter 버튼 묶음
+  - `Full View` / `Model_1 Safe`, `Bookmark view`, `Display mode`
+  - `Update`, `View Log`, `Full Text`, `Refresh`, `Control`, `Save`, `Load`
+- 하단 유틸리티 줄
+  - item count / loading 상태
+  - 에러 메시지 / `Model_1 safe payload active`
+  - `Columns`, `Watch Lists`
 
-각 검색 필드 변경 시 300ms debounce 후 자동 재조회한다.
+검색 필드 자체는 여전히 아래 3개다:
+
+1. 일반 keyword 검색창
+2. Ticker 전용 검색창
+3. From / To 날짜 입력
+
+동작 트리거는 Enter 또는 discrete filter 변경 시 재조회다. 현재 구현은 프론트 내부 300ms debounce가 아니라, Enter 기반 검색 + source/bookmark/date 변경 시 즉시 재조회 조합에 가깝다.
 
 ### 테이블 컬럼
 

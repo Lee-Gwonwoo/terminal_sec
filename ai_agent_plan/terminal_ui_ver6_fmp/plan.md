@@ -53,6 +53,17 @@
   - universe ticker 수가 많으면 호출 수가 증가한다.
   - 하지만 ticker coverage hole을 줄이는 것이 이번 변경의 우선 목표다.
 
+### PLAN CHANGE — 2026-03-23 08:48 (Finnhub News 상단 툴바 재배치)
+- 사용자 요청에 따라 `FinnhubNewsWindow.tsx` 상단 툴바를 가로 1줄 과밀 구조에서 `좌측 검색 블록 + 우측 제어 블록 + 하단 유틸리티 줄` 구조로 재배치한다.
+- 핵심 목표는 아래 3개다.
+  - 일반 검색창 가로 폭 확대
+  - `From / To` 날짜 입력칸 확대
+  - `Update / View Log / Full Text / Control / Save / Load` 같은 액션 버튼을 위아래 공간을 써서 정리
+- 이번 리비전의 수정 파일은 아래 둘이다.
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+- backend API 계약은 변경하지 않고, frontend 레이아웃과 스펙 문서만 갱신한다.
+
 ### 목표
 - 뉴스 상단 필터에 `fmp pr` 버튼을 추가한다.
 - 업데이트 메뉴에 `recent fmp pr update`, `custom fmp pr update` 버튼을 추가한다.
@@ -306,6 +317,29 @@ npm.cmd run build
 ```
 사용자 확인 필요: 예
 
+#### ⏳ Step 6 — Finnhub News 상단 툴바 레이아웃 정리
+
+| 세부 단계 | 작업 | 주요 파일 | 검증 | 상태 |
+|-----------|------|----------|------|------|
+| 6-1 | 검색 블록 폭 확대 + 날짜 입력 가독성 개선 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | `get_errors` 0개, 프론트 build 성공 | ⏳ |
+| 6-2 | 상단 액션 버튼을 목적별 그룹으로 재배치 | 같은 파일 | JSX 구조/메뉴 동작 코드 리뷰 | ⏳ |
+| 6-3 | 프론트 스펙 문서를 현재 레이아웃과 동기화 | `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md` | 문서 검색 UI 섹션 확인 | ⏳ |
+
+- `6-1` 목적: 긴 검색어와 날짜 값이 한눈에 읽히게 하기 위함.
+  - 완료 조건: 좌측 검색 블록이 독립된 카드로 분리되고, 날짜 입력칸이 기존보다 넓어진다.
+- `6-2` 목적: 상단 버튼이 한 줄에 몰려 검색 영역을 압박하지 않게 하기 위함.
+  - 완료 조건: source filter, view context, action buttons가 서로 다른 줄/그룹으로 정리된다.
+- `6-3` 목적: 코드와 프론트 스펙 문서의 레이아웃 설명이 어긋나지 않게 하기 위함.
+  - 완료 조건: prompt 문서의 검색 UI 설명이 새 3영역 구조를 반영한다.
+
+검증 훅:
+```powershell
+Get-Content c:\github_coding\terminal_sec\termina_web\figma_code\terminal_ui_ver2_finhub\src\app\components\FinnhubNewsWindow.tsx | Select-String -Pattern "Search|Source Filter|Columns|Watch Lists"
+Set-Location c:\github_coding\terminal_sec\termina_web\figma_code\terminal_ui_ver2_finhub
+npm.cmd run build
+```
+사용자 확인 필요: 예
+
 ### 구현 순서 제안
 1. Step 1로 plan/log를 먼저 FMP PR 기준으로 고정한다.
 2. Step 2에서 backend FMP PR pull route를 추가한다.
@@ -335,4 +369,7 @@ npm.cmd run build
   - legacy route: `POST /api/news/pull-finhub-sec` → `404 Not Found`
   - DB purge: `source_type='sec_filing'` row `0`, `sec_filings` row `0`
   - FMP SEC: `source_type='fmp_sec_filing'` → 12건, `sec_filings` companion → 12건
+- 이번 리비전 추가:
+  - Finnhub News 상단 툴바를 `검색 블록 / 제어 블록 / 유틸리티 줄` 구조로 재배치했다.
+  - 검색창과 날짜 입력칸이 넓어졌고, action 버튼은 여러 줄로 그룹화됐다.
 - 남은 것은 사용자가 UI에서 `fmp pr` / `fmp sec` 관련 버튼 흐름을 직접 확인하는 수동 점검이다.
