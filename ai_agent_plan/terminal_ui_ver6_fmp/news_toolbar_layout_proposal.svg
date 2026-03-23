@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="920" viewBox="0 0 1440 920" fill="none">
+  <rect width="1440" height="920" fill="#0B1220"/>
+  <rect x="42" y="44" width="1356" height="832" rx="18" fill="#111A2B" stroke="#24324A"/>
+  <rect x="42" y="44" width="1356" height="56" rx="18" fill="#0F1727"/>
+  <text x="78" y="79" fill="#F8FAFC" font-family="Segoe UI, Arial, sans-serif" font-size="28" font-weight="700">Stock News Platform</text>
+  <circle cx="1356" cy="72" r="10" fill="#1F2B3F" stroke="#42526B"/>
+
+  <rect x="72" y="126" width="1296" height="92" rx="16" fill="#162133" stroke="#26364E"/>
+  <text x="98" y="161" fill="#E2E8F0" font-family="Segoe UI, Arial, sans-serif" font-size="24" font-weight="700">News Feed: Finnhub API</text>
+  <rect x="386" y="138" width="72" height="28" rx="10" fill="#2457D6"/>
+  <text x="404" y="157" fill="#EAF2FF" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="700">Link #1</text>
+  <text x="98" y="194" fill="#7F92B0" font-family="Segoe UI, Arial, sans-serif" font-size="15">Proposal: use vertical space for grouped controls instead of one long horizontal strip.</text>
+
+  <rect x="72" y="242" width="1296" height="252" rx="18" fill="#10192A" stroke="#223047"/>
+
+  <rect x="98" y="270" width="612" height="194" rx="16" fill="#0E1726" stroke="#2A3B57"/>
+  <text x="124" y="302" fill="#A8B6CC" font-family="Segoe UI, Arial, sans-serif" font-size="15" font-weight="700">SEARCH BLOCK</text>
+
+  <rect x="124" y="322" width="560" height="44" rx="12" fill="#162236" stroke="#30425F"/>
+  <circle cx="148" cy="344" r="8" fill="#6F85A6"/>
+  <text x="170" y="350" fill="#D9E4F2" font-family="Segoe UI, Arial, sans-serif" font-size="18">Search news, title, abstract...</text>
+
+  <rect x="124" y="382" width="560" height="44" rx="12" fill="#162236" stroke="#30425F"/>
+  <path d="M145 396 L151 390 L157 396 L154 399 L154 410 L148 410 L148 399 Z" fill="#6F85A6"/>
+  <text x="170" y="410" fill="#D9E4F2" font-family="Segoe UI, Arial, sans-serif" font-size="18">Ticker only: AAPL, TSLA, NVDA</text>
+
+  <text x="124" y="452" fill="#8CA0BE" font-family="Segoe UI, Arial, sans-serif" font-size="14">Date range is widened so the selected value is visible at a glance.</text>
+  <rect x="124" y="464" width="272" height="44" rx="12" fill="#162236" stroke="#3C79F5"/>
+  <rect x="412" y="464" width="272" height="44" rx="12" fill="#162236" stroke="#3C79F5"/>
+  <text x="144" y="492" fill="#EAF2FF" font-family="Segoe UI, Arial, sans-serif" font-size="18">From   2026-03-01</text>
+  <text x="432" y="492" fill="#EAF2FF" font-family="Segoe UI, Arial, sans-serif" font-size="18">To   2026-03-23</text>
+
+  <rect x="734" y="270" width="608" height="194" rx="16" fill="#0E1726" stroke="#2A3B57"/>
+  <text x="760" y="302" fill="#A8B6CC" font-family="Segoe UI, Arial, sans-serif" font-size="15" font-weight="700">GROUPED CONTROLS</text>
+
+  <text x="760" y="332" fill="#7F92B0" font-family="Segoe UI, Arial, sans-serif" font-size="13">Row A: filters and viewing context</text>
+  <rect x="760" y="344" width="582" height="50" rx="12" fill="#121D2E" stroke="#2B3B57"/>
+  <rect x="774" y="355" width="48" height="28" rx="8" fill="#19305D" stroke="#3F7EF6"/>
+  <text x="791" y="373" fill="#EEF4FF" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="700">ALL</text>
+  <rect x="830" y="355" width="114" height="28" rx="8" fill="#192434"/>
+  <text x="848" y="373" fill="#B8C7DC" font-family="Segoe UI, Arial, sans-serif" font-size="13">Company News</text>
+  <rect x="952" y="355" width="98" height="28" rx="8" fill="#192434"/>
+  <text x="969" y="373" fill="#B8C7DC" font-family="Segoe UI, Arial, sans-serif" font-size="13">Press Release</text>
+  <rect x="1058" y="355" width="74" height="28" rx="8" fill="#2457D6"/>
+  <text x="1080" y="373" fill="#EEF4FF" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="700">FMP PR</text>
+  <rect x="1140" y="355" width="78" height="28" rx="8" fill="#1C2850"/>
+  <text x="1161" y="373" fill="#D7E2F2" font-family="Segoe UI, Arial, sans-serif" font-size="13">FMP SEC</text>
+  <rect x="1226" y="355" width="102" height="28" rx="8" fill="#192434"/>
+  <text x="1246" y="373" fill="#B8C7DC" font-family="Segoe UI, Arial, sans-serif" font-size="13">Market News</text>
+
+  <text x="760" y="420" fill="#7F92B0" font-family="Segoe UI, Arial, sans-serif" font-size="13">Row B: actions and persistence</text>
+  <rect x="760" y="432" width="582" height="50" rx="12" fill="#121D2E" stroke="#2B3B57"/>
+  <rect x="774" y="443" width="122" height="28" rx="8" fill="#2457D6"/>
+  <text x="804" y="461" fill="#EEF4FF" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="700">Update</text>
+  <rect x="904" y="443" width="96" height="28" rx="8" fill="#192434"/>
+  <text x="927" y="461" fill="#D7E2F2" font-family="Segoe UI, Arial, sans-serif" font-size="13">View Log</text>
+  <rect x="1008" y="443" width="106" height="28" rx="8" fill="#192434"/>
+  <text x="1031" y="461" fill="#D7E2F2" font-family="Segoe UI, Arial, sans-serif" font-size="13">Full Text</text>
+  <rect x="1122" y="443" width="98" height="28" rx="8" fill="#192434"/>
+  <text x="1148" y="461" fill="#D7E2F2" font-family="Segoe UI, Arial, sans-serif" font-size="13">Control</text>
+  <rect x="1228" y="443" width="48" height="28" rx="8" fill="#192434"/>
+  <text x="1241" y="461" fill="#D7E2F2" font-family="Segoe UI, Arial, sans-serif" font-size="13">Save</text>
+  <rect x="1284" y="443" width="44" height="28" rx="8" fill="#192434"/>
+  <text x="1298" y="461" fill="#D7E2F2" font-family="Segoe UI, Arial, sans-serif" font-size="13">Load</text>
+
+  <rect x="98" y="516" width="1244" height="58" rx="14" fill="#10192A" stroke="#223047"/>
+  <text x="124" y="550" fill="#A8B6CC" font-family="Segoe UI, Arial, sans-serif" font-size="15" font-weight="700">UTILITY ROW</text>
+  <rect x="256" y="530" width="116" height="30" rx="8" fill="#182538" stroke="#30425F"/>
+  <text x="286" y="549" fill="#D8E2F0" font-family="Segoe UI, Arial, sans-serif" font-size="13">Full View</text>
+  <rect x="382" y="530" width="124" height="30" rx="8" fill="#182538" stroke="#30425F"/>
+  <text x="403" y="549" fill="#D8E2F0" font-family="Segoe UI, Arial, sans-serif" font-size="13">Model_1 Safe</text>
+  <rect x="518" y="530" width="154" height="30" rx="8" fill="#182538" stroke="#30425F"/>
+  <text x="546" y="549" fill="#D8E2F0" font-family="Segoe UI, Arial, sans-serif" font-size="13">Bookmark View</text>
+  <text x="700" y="549" fill="#6F85A6" font-family="Segoe UI, Arial, sans-serif" font-size="13">500 items+</text>
+  <rect x="1180" y="530" width="76" height="30" rx="8" fill="#182538" stroke="#30425F"/>
+  <text x="1203" y="549" fill="#D8E2F0" font-family="Segoe UI, Arial, sans-serif" font-size="13">Columns</text>
+  <rect x="1266" y="530" width="76" height="30" rx="8" fill="#182538" stroke="#30425F"/>
+  <text x="1283" y="549" fill="#D8E2F0" font-family="Segoe UI, Arial, sans-serif" font-size="13">Watch List</text>
+
+  <rect x="72" y="600" width="1296" height="240" rx="18" fill="#0F1726" stroke="#223047"/>
+  <rect x="96" y="624" width="1248" height="36" rx="10" fill="#152033"/>
+  <text x="120" y="647" fill="#AAB9CF" font-family="Segoe UI, Arial, sans-serif" font-size="14">Table keeps its width because the toolbar no longer pushes everything into one line.</text>
+
+  <rect x="96" y="676" width="1248" height="50" rx="10" fill="#121C2D" stroke="#233149"/>
+  <text x="124" y="707" fill="#DCE7F5" font-family="Segoe UI, Arial, sans-serif" font-size="16">Title + Abstract | 500 items+ | stable table width | better readability for dates and long search strings</text>
+
+  <rect x="96" y="738" width="1248" height="76" rx="10" fill="#101827" stroke="#1E2A3E"/>
+  <text x="124" y="769" fill="#E5EDF8" font-family="Segoe UI, Arial, sans-serif" font-size="18" font-weight="700">Why this layout works</text>
+  <text x="124" y="794" fill="#8FA4C1" font-family="Segoe UI, Arial, sans-serif" font-size="15">1. Search inputs become the visual primary area.</text>
+  <text x="124" y="817" fill="#8FA4C1" font-family="Segoe UI, Arial, sans-serif" font-size="15">2. Date inputs are wide enough to show exact values without truncation.</text>
+  <text x="700" y="794" fill="#8FA4C1" font-family="Segoe UI, Arial, sans-serif" font-size="15">3. Action buttons are grouped by purpose and stacked into two rows.</text>
+  <text x="700" y="817" fill="#8FA4C1" font-family="Segoe UI, Arial, sans-serif" font-size="15">4. Bottom utility row stays lightweight and does not compete with search.</text>
+</svg>

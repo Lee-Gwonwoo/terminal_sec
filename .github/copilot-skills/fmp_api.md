@@ -17,10 +17,16 @@
 ### 레포에서 현재 확인된 FMP 사용 지점
 - backend provider:
   - `terminal/backend/src/services/fmpCompanyProfileProvider.ts`
+  - `terminal/backend/src/services/fmpPressReleaseProvider.ts`
+  - `terminal/backend/src/services/fmpSecFilingProvider.ts`
 - backend route:
   - `POST /api/company-profiles/pull-fmp`
+  - `POST /api/news/pull-fmp-press-release`
+  - `POST /api/news/pull-fmp-sec-filing`
 - 현재 레포에서 실제 구현된 FMP 저장 대상:
   - 회사 description/profile 계열 (`company_profiles`의 `source='fmp'`)
+  - FMP press release (`news_items`의 `source='FMP' AND source_type='fmp_press_release'`)
+  - FMP SEC filing (`news_items`의 `source='FMP' AND source_type='fmp_sec_filing'` + `sec_filings` companion)
 - 현재 대화 기준 live probe로 접근 확인된 주요 뉴스/규제 계열:
   - `stable/news/general-latest`
   - `stable/news/stock-latest`
@@ -29,6 +35,9 @@
   - `stable/news/press-releases?symbols=AAPL`
   - `stable/fmp-articles`
   - `stable/sec-filings-financials`
+  - `stable/sec-filings-search/symbol?symbol=AAPL`
+  - `stable/sec-filings-search/form-type?formType=8-K`
+  - `stable/sec-filings-8k`
 
 ### Glossary
 - `data family`
@@ -114,6 +123,39 @@
   - 같은 press release 제목이어도 provider별 ticker 매핑이 달라질 수 있다.
   - 따라서 `symbols=RKLB` 같은 요청 결과를 “issuer 정답셋”이라고 가정하면 안 된다.
 
+#### FMP PR 데이터 수집 구조 (provider 기준)
+- 대표 조회 방식은 2개다.
+  - latest feed: `stable/news/press-releases-latest?page=0&limit=20`
+  - ticker search: `stable/news/press-releases?symbols=RKLB`
+- 현재 대화 기준 live probe에서 실제 payload는 아래 구조였다.
+  - `[][][]symbol[][][]`
+  - `[][][]title[][][]`
+  - `[][][]text[][][]`
+  - `[][][]publishedDate[][][]`
+  - `[][][]url[][][]`
+  - `[][][]publisher[][][]`
+  - `[][][]site[][][]`
+  - `[][][]image[][][]`
+- 운영적 의미:
+  - FMP PR는 “제목 + 짧은 발췌 + 원문 링크”를 주는 feed다.
+  - 본문 핵심은 `title`, `text`, `url` 조합이다.
+  - `text`는 미리보기/요약 용도로는 충분하지만 full text 저장용으로는 불충분할 수 있다.
+
+#### FMP PR 데이터 수집 구조 (현재 레포 구현 기준)
+- 현재 레포는 ticker universe를 순회하면서 `stable/news/press-releases?symbols={TICKER}&page={N}&limit={M}` 형태로 수집한다.
+- 저장 구조는 아래와 같다.
+  - `source='FMP'`
+  - `source_type='fmp_press_release'`
+  - `title = FMP title`
+  - `body = FMP text`
+  - `url = 원문 URL`
+  - `published_at = publishedDate`
+  - `publisher = publisher 또는 site`
+- 중요한 현재 구현 제약:
+  - provider 호출 URL에는 아직 `from/to`를 직접 붙이지 않고, 받은 응답을 앱 안에서 날짜로 다시 자른다.
+  - 즉 custom/recent는 “정확한 server-side 기간 검색”이 아니라 “latest/ticker search 응답 후 local filtering” 성격에 가깝다.
+  - recent mode는 ticker별 anchor 이후만 보는 증분 수집이라, 과거 누락분을 자동 복구하지 못할 수 있다.
+
 #### 5. FMP Articles
 - 대표 endpoint:
   - `stable/fmp-articles`
@@ -134,10 +176,67 @@
 #### 6. SEC Filings
 - 현재 live probe로 최소 접근 확인된 대표 endpoint:
   - `stable/sec-filings-financials`
+- 현재 대화 기준으로 추가 확인된 SEC endpoint:
+  - `stable/sec-filings-search/symbol?symbol=AAPL`
+  - `stable/sec-filings-search/form-type?formType=8-K`
+  - `stable/sec-filings-8k`
 - 주요 특성:
   - SEC/재무 filing 계열 데이터 family로 보인다.
   - 다만 현재 레포의 기존 Finnhub `/stock/filings`와 정확히 같은 입력 파라미터와 응답 shape인지는 아직 별도 고정이 필요하다.
   - SEC migration 작업에 쓰기 전에는 accession/form/cik/date/url 필드가 실제로 어떻게 오는지 추가 probe가 필요하다.
+
+#### FMP SEC 데이터 수집 구조 (provider 기준)
+- FMP SEC family는 하나의 endpoint만 있는 게 아니라 목적별로 나뉘어 있다.
+  - latest SEC feed: `stable/sec-filings-financials?from=...&to=...&page=...&limit=...`
+  - symbol search: `stable/sec-filings-search/symbol?symbol=RKLB&from=...&to=...&page=...&limit=...`
+  - form type search: `stable/sec-filings-search/form-type?formType=8-K&from=...&to=...&page=...&limit=...`
+  - 8-K 전용 feed: `stable/sec-filings-8k?from=...&to=...&page=...&limit=...`
+- 현재 대화 기준 live probe에서 `sec-filings-search/symbol` payload는 아래 7개 필드만 확인되었다.
+  - `[][][]symbol[][][]`
+  - `[][][]cik[][][]`
+  - `[][][]filingDate[][][]`
+  - `[][][]acceptedDate[][][]`
+  - `[][][]formType[][][]`
+  - `[][][]link[][][]`
+  - `[][][]finalLink[][][]`
+- 중요한 점:
+  - FMP SEC payload에는 `[][][]title[][][]`, `[][][]summary[][][]`, `[][][]text[][][]`, `[][][]description[][][]`, `[][][]body[][][]`가 없다.
+  - 즉 provider는 filing 메타데이터 + SEC 링크를 주고, 사람이 읽을 headline/summary는 주지 않는다.
+  - filing 내용을 알고 싶으면 `finalLink` 또는 `link`를 따라 SEC 원문을 직접 읽어야 한다.
+
+#### FMP SEC 데이터 수집 구조 (현재 레포 구현 기준)
+- 현재 레포의 primary SEC endpoint는 `stable/sec-filings-search/symbol`이다.
+- 동작 방식은 아래와 같다.
+  1. route가 default universe ticker 목록을 만든다.
+  2. provider가 ticker별로 `stable/sec-filings-search/symbol?symbol={TICKER}&from=...&to=...&page=...&limit=...`를 호출한다.
+  3. page를 순회하면서 filing을 모은다.
+  4. `acceptedDate`를 기준으로 앱에서 날짜 범위를 한 번 더 검증한다.
+  5. accession number를 dedupe key로 사용한다.
+  6. `news_items`와 `sec_filings` companion row를 함께 저장한다.
+- 현재 저장 규칙:
+  - `source='FMP'`
+  - `source_type='fmp_sec_filing'`
+  - `title = "{symbol}: {formType}"` 처럼 앱이 생성
+  - `body = "Filed {date}, accepted {date}. CIK: {cik}."` 처럼 앱이 생성
+  - `url = finalLink`
+  - `published_at = acceptedDate`
+  - `publisher = 'SEC/EDGAR'`
+- 운영적 의미:
+  - 현재 UI/DB에 보이는 제목/요약은 FMP 원문 필드가 아니라 앱이 만든 메타 요약이다.
+  - richer summary가 필요하면 SEC 원문 파싱 또는 후처리 요약 단계가 추가로 필요하다.
+  - ticker coverage는 이전 `sec-filings-financials` 단독 방식보다 개선됐지만, universe 규모만큼 API 호출 수는 증가한다.
+
+#### FMP SEC endpoint 선택 가이드 (이번 대화에서 검증됨)
+- `sec-filings-financials`는 문서상 유효한 latest feed지만, ticker coverage hole이 있을 수 있다.
+- 실제 반례:
+  - RKLB `2026-03-17 ~ 2026-03-18` offering 관련 filing은 `sec-filings-financials`에서는 `0건`이었다.
+  - 같은 기간 `sec-filings-search/symbol?symbol=RKLB`는 `8-K`, `424B5`를 반환했다.
+  - `sec-filings-search/form-type?formType=8-K`와 `sec-filings-8k`도 RKLB `8-K`를 반환했다.
+- 따라서 “특정 ticker의 filing을 놓치지 않는 수집” 목적이면:
+  - primary: `sec-filings-search/symbol`
+  - secondary: `8-K` 전용 sweep (`form-type=8-K` 또는 `sec-filings-8k`)
+  - 필요 시 `424B5`, `S-3`, `FWP` 등 offering 관련 form을 추가 감시
+- 반대로 “시장 전체 recent SEC 흐름 overview” 목적이면 `sec-filings-financials`도 여전히 쓸 수 있다.
 
 ### FMP news / press release 계열의 공통 특성
 - `title`, `publishedDate`, `publisher`, `site`, `url`, `image`, `text` 구조가 반복된다.
@@ -235,6 +334,10 @@
 - FMP PR를 앱에서 별도 데이터 타입으로 다루기로 결정했다면, `source='FMP'`, `source_type='fmp_press_release'`처럼 별도 source_type으로 승격하는 편이 query/filter/fulltext/job 구분에서 더 명확하다.
 - 이미 `source='FMP' AND source_type='press_release'`로 저장된 row가 있다면, 새 타입으로 마이그레이션한 뒤 수집을 이어가야 `(source, url)` dedupe 충돌을 피할 수 있다.
 - SEC migration 전에는 filing endpoint shape를 별도 probe해서 accession/form/date/url 필드를 먼저 고정한다.
+- SEC를 news headline feed처럼 다루면 안 된다.
+  - FMP SEC는 본질적으로 metadata + link feed다.
+  - title/summary가 필요하면 앱 생성 또는 SEC 원문 후처리가 필요하다.
+- 특정 ticker coverage가 중요하면 `sec-filings-financials`보다 `sec-filings-search/symbol`을 먼저 검토한다.
 
 ### 속도 / 운영 규칙
 - symbol별 독립 요청은 `.github/copilot-skills/finhub_other_api.md`의 병렬화 원칙을 따른다.

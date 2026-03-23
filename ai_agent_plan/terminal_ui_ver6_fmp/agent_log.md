@@ -261,6 +261,180 @@
 - 현재 상태는 구현 plan 재작성 완료다.
 - 다음 단계는 이 plan 기준으로 `Step 1 — FMP SEC 수집 스펙 고정`부터 실제 코드 작업에 들어가는 것이다.
 
+## 2026-03-23
+
+### FMP SEC endpoint 문서 재검증 + RKLB offering 누락 원인 확인 (2026-03-23 08:28)
+
+**작성 시각:** 2026-03-23 08:28 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. FMP 공식 docs에서 SEC filing family endpoint를 다시 확인했다.
+   - `stable/sec-filings-financials`
+   - `stable/sec-filings-search/symbol`
+   - `stable/sec-filings-search/form-type`
+   - `stable/sec-filings-8k`
+2. 현재 코드가 사용하는 endpoint와 live API 결과를 직접 비교했다.
+3. RKLB offering 관련 filing(`8-K`, `424B5`)이 어느 endpoint에서 실제로 보이는지 검증했다.
+4. FMP SEC payload에 title/summary 같은 서술형 필드가 있는지도 live 샘플로 확인했다.
+5. 결과를 `plan.md`에 반영해 primary endpoint 재선정 방향을 기록했다.
+
+#### 확인된 사실
+
+- 현재 코드의 FMP SEC provider는 `stable/sec-filings-financials`만 사용한다.
+- 공식 docs 기준 이 endpoint는 유효하며, 설명상 `8-K`, `10-K`, `10-Q` 등을 포함하는 latest SEC filings feed다.
+- 하지만 live probe 결과, RKLB `2026-03-17 ~ 2026-03-18` offering 관련 filing은 `sec-filings-financials`에서 누락됐다.
+- 같은 기간 아래 endpoint들은 RKLB filing을 반환했다.
+  - `stable/sec-filings-search/symbol?symbol=RKLB` → `8-K`, `424B5` 총 2건
+  - `stable/sec-filings-search/form-type?formType=8-K` → RKLB `8-K` 1건
+  - `stable/sec-filings-8k` → RKLB `8-K` 1건
+- live payload shape 확인 결과, `sec-filings-search/symbol` 응답의 실제 필드는 아래 7개뿐이었다.
+  - `symbol`
+  - `cik`
+  - `filingDate`
+  - `acceptedDate`
+  - `formType`
+  - `link`
+  - `finalLink`
+- 즉 FMP SEC payload에는 `title`, `summary`, `text`, `description`, `body`가 없다.
+- 따라서 현재 앱이 `title = "{symbol}: {formType}"`, `body = "Filed ... accepted ... CIK ..."`를 생성하는 방식은 payload 한계 때문에 불가피한 처리다.
+
+#### 결론
+
+1. 문제는 “문서에 없는 잘못된 API 사용”이 아니라, “coverage 목적에 맞지 않는 endpoint 선택”이다.
+2. 특정 ticker filing을 놓치지 않으려면 primary SEC endpoint는 `sec-filings-financials`보다 `sec-filings-search/symbol`이 적합하다.
+3. offering / material event 계열을 더 안전하게 잡으려면 `8-K` form-type sweep을 보강해야 한다.
+4. 제목/요약은 FMP가 주지 않으므로 앱 생성 또는 SEC 원문 파싱이 필요하다.
+
+#### 리스크 / 완화
+
+1. **리스크:** `sec-filings-financials`만 유지하면 RKLB 같은 ticker coverage hole이 다시 발생할 수 있다.
+   - 완화 1: primary endpoint를 `sec-filings-search/symbol`로 전환한다.
+   - 완화 2: `8-K`는 `form-type` 또는 `sec-filings-8k`로 보강 sweep 한다.
+2. **리스크:** title/body 자동 생성만으로는 offering, dilution, prospectus 같은 맥락이 UI에 약하게 보일 수 있다.
+   - 완화 1: `formType + accessionNumber`를 함께 표시한다.
+   - 완화 2: 필요 시 `finalLink` 본문을 별도 파싱해 summary를 backfill 한다.
+3. **리스크:** `424B5` 같은 form은 8-K 전용 feed만으로는 놓칠 수 있다.
+   - 완화 1: symbol search를 primary로 둔다.
+   - 완화 2: 필요 시 `formType=424B5` sweep도 추가한다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | Markdown 문서 수정만 수행 |
+| 빌드 | ✅ | 코드 변경 없음 |
+| 자동 테스트 | ✅ | 코드 변경 없음 |
+| 런타임 통합 | ✅ | FMP docs 재확인 + live `financials/search-symbol/form-type/8k` 비교 + payload field 확인 |
+
+#### 사용자 확인 요청
+
+- 현재 상태는 문서/plan 반영 완료이며, 구현 변경은 아직 하지 않았다.
+- 다음 단계 후보는 아래 둘이다.
+  1. FMP SEC provider를 `sec-filings-search/symbol` 기반으로 교체한다.
+  2. title/body를 더 풍부하게 만들기 위해 SEC 원문 파싱 또는 form-type별 summary 생성 규칙을 추가한다.
+
+### FMP API skill 문서에 PR/SEC 데이터 구조 상세 반영 (2026-03-23 08:30)
+
+**작성 시각:** 2026-03-23 08:30 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. `.github/copilot-skills/fmp_api.md`에 FMP PR / FMP SEC의 실제 데이터 수집 구조를 상세히 추가했다.
+2. provider가 주는 raw payload 구조와, 현재 레포가 그 payload를 어떻게 저장하는지 분리해서 문서화했다.
+3. FMP SEC에 title/summary가 없다는 점과, 왜 앱이 메타 제목/본문을 생성하는지 문서에 명시했다.
+4. RKLB offering 검증 결과를 반영해 SEC endpoint 선택 가이드도 추가했다.
+
+#### 문서에 반영한 핵심 내용
+
+- FMP PR:
+   - `latest` vs `ticker search` endpoint 구분
+   - 실제 payload 필드(`symbol`, `title`, `text`, `publishedDate`, `url`, `publisher`, `site`, `image`)
+   - 현재 레포가 `source='FMP'`, `source_type='fmp_press_release'`로 저장하는 구조
+   - current implementation이 provider URL에 `from/to`를 직접 붙이지 않고 local filtering 한다는 점
+- FMP SEC:
+   - `sec-filings-financials`, `sec-filings-search/symbol`, `sec-filings-search/form-type`, `sec-filings-8k` 구분
+   - 실제 payload 필드(`symbol`, `cik`, `filingDate`, `acceptedDate`, `formType`, `link`, `finalLink`)
+   - `title`, `summary`, `text`, `body`가 없다는 점
+   - 현재 레포가 `title = "{symbol}: {formType}"`, `body = Filed/accepted/CIK` 형태로 앱 생성한다는 점
+   - ticker coverage 목적이면 `sec-filings-search/symbol`을 primary로 두는 것이 더 안전하다는 점
+
+#### 리스크 / 완화
+
+1. **리스크:** 문서를 읽는 사람이 provider raw와 앱 generated field를 혼동할 수 있다.
+    - 완화 1: provider 기준 / 레포 구현 기준을 별도 소제목으로 분리했다.
+    - 완화 2: title/body는 앱 생성이라고 명시했다.
+2. **리스크:** `sec-filings-financials`가 틀린 endpoint라고 과하게 해석할 수 있다.
+    - 완화 1: 문서상 유효한 endpoint라는 점을 유지했다.
+    - 완화 2: 다만 ticker coverage 목적에는 부적절할 수 있다고 범위를 좁혀 서술했다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | Markdown 문서 수정만 수행 |
+| 빌드 | ✅ | 코드 변경 없음 |
+| 자동 테스트 | ✅ | 코드 변경 없음 |
+| 런타임 통합 | ✅ | 앞서 확보한 FMP live payload 및 docs 검증 결과를 문서 구조에 반영 |
+
+#### 사용자 확인 요청
+
+- 현재 상태는 `fmp_api.md` 문서 보강까지 완료다.
+- 원하면 다음 단계로는 문서 내용에 맞춰 실제 `fmpSecFilingProvider.ts` endpoint 전환 구현에 들어갈 수 있다.
+
+### FMP SEC provider를 symbol search 기반으로 전환 (2026-03-23 08:36)
+
+**작성 시각:** 2026-03-23 08:36 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. `terminal/backend/src/services/fmpSecFilingProvider.ts`의 수집 endpoint를 `stable/sec-filings-financials`에서 `stable/sec-filings-search/symbol`로 전환했다.
+2. default universe ticker를 순회하면서 symbol별 page 수집을 수행하도록 provider 루프 구조를 바꿨다.
+3. provider 응답 후 `acceptedDate` 기준 날짜 범위를 앱에서 다시 검증하도록 추가했다.
+4. `server.ts`와 문서들에 현재 구현이 `search/symbol` 기반이라는 사실을 반영했다.
+
+#### 구현 결과
+
+- 현재 FMP SEC 수집 흐름은 아래와 같다.
+  1. route가 default universe ticker 목록을 만든다.
+  2. provider가 각 ticker에 대해 `stable/sec-filings-search/symbol`을 호출한다.
+  3. page를 순회하면서 filing을 모은다.
+  4. accession number로 전역 dedupe 한다.
+  5. 앱 생성 title/body와 함께 `news_items` + `sec_filings` companion row를 저장한다.
+- route public API는 바꾸지 않았다.
+- `requestIntervalMs`와 `maxPages`는 그대로 유지된다.
+
+#### 리스크 / 완화
+
+1. **리스크:** ticker 수가 많으면 전체 API 호출 수가 증가한다.
+   - 완화 1: 기존 `requestIntervalMs` throttle을 유지했다.
+   - 완화 2: `maxPages` 상한을 그대로 둬 symbol별 과도한 page 순회를 막는다.
+2. **리스크:** FMP가 date filtering을 완벽하게 지키지 않으면 범위 밖 filing이 섞일 수 있다.
+   - 완화 1: provider 응답 후 `acceptedDate`를 기준으로 앱에서 한 번 더 날짜를 자른다.
+3. **리스크:** `8-K` 외 특정 form coverage는 여전히 추후 보강 sweep 여지가 있다.
+   - 완화 1: 이번 리비전은 primary endpoint 전환까지만 반영했다.
+   - 완화 2: 필요 시 후속으로 `form-type=8-K` 또는 `424B5` sweep을 추가한다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `get_errors` 기준 `fmpSecFilingProvider.ts`, `server.ts` 오류 0건 |
+| 빌드 | ✅ | backend `npm run build` 성공 |
+| 자동 테스트 | ✅ | backend vitest `10 files / 57 tests passed` |
+| 런타임 통합 | ✅ | built provider smoke test에서 RKLB `8-K`, `424B5` 2건 반환 확인 |
+
+#### 사용자 확인 요청
+
+- 현재 상태는 endpoint 전환 구현 반영 완료, 검증 진행 전이다.
+- 다음 단계는 build/test와 실제 route smoke 확인이다.
+
 ### FMP press release / RTPR 비교 / full text 확인 반영 (2026-03-20 19:13)
 
 **작성 시각:** 2026-03-20 19:13 (local)

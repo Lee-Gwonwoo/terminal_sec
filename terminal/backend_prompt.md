@@ -596,7 +596,7 @@ FMP press release를 수집한다.
 
 ### `POST /api/news/pull-fmp-sec-filing`
 
-FMP SEC filing을 수집한다. `stable/sec-filings-financials` 엔드포인트 사용.
+FMP SEC filing을 수집한다. primary endpoint는 `stable/sec-filings-search/symbol`이다.
 
 요청 body:
 
@@ -616,7 +616,7 @@ FMP SEC filing을 수집한다. `stable/sec-filings-financials` 엔드포인트 
 - `requestIntervalMs`: FMP API 호출 간격 (기본 300ms)
 - `maxPages`: 최대 페이지 수 (기본 20)
 - job key: `fmp_sec_filing`
-- 동작: FMP 글로벌 피드를 가져온 뒤 default universe ticker로 필터링. `sec_filings` companion 테이블에도 저장.
+- 동작: default universe ticker를 순회하면서 symbol search를 호출하고, accession number로 dedupe 한 뒤 `sec_filings` companion 테이블에도 저장.
 - 저장 규칙: `source='FMP'`, `source_type='fmp_sec_filing'`, `publisher='SEC/EDGAR'`, `url=finalLink`, `published_at=acceptedDate`
 
 응답 컬럼:

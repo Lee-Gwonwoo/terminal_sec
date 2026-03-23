@@ -29,6 +29,30 @@
   - 수정: `server.ts` (route `POST /api/news/pull-fmp-sec-filing` + Zod schema)
   - 수정: `FinnhubNewsWindow.tsx` (필터/업데이트/FT 메뉴 15곳 + FtSourceType 수정)
 
+### PLAN CHANGE — 2026-03-23 08:28 (FMP SEC endpoint 재평가)
+- live probe + FMP 공식 docs 재확인 결과, 현재 구현의 `stable/sec-filings-financials`는 문서상 유효한 endpoint이지만 RKLB `8-K`/`424B5` coverage를 보장하지 못했다.
+- 동일 기간 live 비교 결과:
+  - `stable/sec-filings-financials` → RKLB `0건`
+  - `stable/sec-filings-search/symbol?symbol=RKLB` → `8-K`, `424B5` `2건`
+  - `stable/sec-filings-search/form-type?formType=8-K` → RKLB `8-K` `1건`
+  - `stable/sec-filings-8k` → RKLB `8-K` `1건`
+- 따라서 FMP SEC 수집의 primary endpoint는 `sec-filings-financials`가 아니라 `sec-filings-search/symbol`로 재설계하는 것이 맞다.
+- `8-K` 중심 이벤트 감시는 `sec-filings-8k` 또는 `sec-filings-search/form-type?formType=8-K`를 보강 sweep으로 추가하는 것이 안전하다.
+- live payload 기준 `sec-filings-search/symbol` 응답 shape는 `{ symbol, cik, filingDate, acceptedDate, formType, link, finalLink }`이며, `title`, `summary`, `text`, `description`, `body`는 없다.
+- 즉 FMP SEC UI/DB에서 제목/요약이 필요하면 앱이 직접 생성해야 한다.
+
+### PLAN CHANGE — 2026-03-23 08:36 (FMP SEC provider 구현 전환)
+- `terminal/backend/src/services/fmpSecFilingProvider.ts`의 primary endpoint를 `stable/sec-filings-financials`에서 `stable/sec-filings-search/symbol`로 실제 전환한다.
+- 구현 방식은 default universe ticker를 순회하면서 `symbol + from/to + page + limit` 조합으로 요청하고, accession number로 전역 dedupe 한다.
+- provider 응답의 `acceptedDate`를 기준으로 앱 내부 날짜 재검증을 한 번 더 수행해 provider filtering 오차를 줄인다.
+- route public API는 유지한다.
+  - `POST /api/news/pull-fmp-sec-filing`
+  - request body: `mode`, `from`, `to`, `requestIntervalMs`, `maxPages`
+- 이번 리비전에서는 `8-K` / `424B5` 추가 보강 sweep은 넣지 않고, primary endpoint 전환만 우선 반영한다.
+- 남는 운영 리스크:
+  - universe ticker 수가 많으면 호출 수가 증가한다.
+  - 하지만 ticker coverage hole을 줄이는 것이 이번 변경의 우선 목표다.
+
 ### 목표
 - 뉴스 상단 필터에 `fmp pr` 버튼을 추가한다.
 - 업데이트 메뉴에 `recent fmp pr update`, `custom fmp pr update` 버튼을 추가한다.
@@ -102,6 +126,23 @@
 - 현재 확인 범위에서는 server-side date/window filtering을 신뢰하기 어렵다.
 - 따라서 `custom fmp pr update`는 provider 응답을 받은 뒤 앱에서 날짜 범위를 다시 필터하는 방식으로 구현하는 것이 안전하다.
 
+#### FMP SEC endpoint 재확인 (2026-03-23 08:28)
+- 공식 docs에는 아래 SEC family가 별도 endpoint로 문서화돼 있다.
+  - `stable/sec-filings-financials`
+  - `stable/sec-filings-search/symbol?symbol=AAPL`
+  - `stable/sec-filings-search/form-type?formType=8-K`
+  - `stable/sec-filings-8k`
+- docs 설명상 `sec-filings-financials`는 `8-K`, `10-K`, `10-Q` 등을 포함하는 “Latest SEC Filings” feed다.
+- 하지만 live probe 기준 RKLB `2026-03-17 ~ 2026-03-18` offering 관련 filing은 `sec-filings-financials`에서 누락됐다.
+- 같은 기간 `sec-filings-search/symbol?symbol=RKLB`는 아래 2건을 반환했다.
+  - `8-K` / accession `0001628280-26-018789`
+  - `424B5` / accession `0001628280-26-018770`
+- 같은 기간 `sec-filings-search/form-type?formType=8-K`와 `sec-filings-8k`도 RKLB `8-K`를 반환했다.
+- 따라서 “특정 ticker의 filing을 놓치지 않는 수집” 목적에는 `sec-filings-search/symbol`이 더 적합하다.
+- live payload shape 확인 결과, `sec-filings-search/symbol`도 서술형 필드를 주지 않았다.
+  - 실제 필드: `symbol`, `cik`, `filingDate`, `acceptedDate`, `formType`, `link`, `finalLink`
+  - 없음: `title`, `summary`, `text`, `description`, `body`
+
 ### 핵심 설계 원칙
 1. **FMP PR는 별도 데이터 타입으로 승격한다**
   - DB 저장값은 `source='FMP'`, `source_type='fmp_press_release'`로 둔다.
@@ -158,6 +199,10 @@
 3. 기존 DB에 이미 저장된 `source='FMP' AND source_type='press_release'` row는 새 타입으로 보정해야 한다.
 4. FMP PR custom/recent는 provider server-side date filtering을 신뢰하지 않고 앱에서 date cut을 다시 해야 한다.
 5. FMP SEC full text는 단순 provider text 재사용이 아니라 SEC 문서 파싱 문제이므로, PR full text와 같은 버튼 개념으로 즉시 붙이지 않는다.
+6. FMP SEC에서 ticker coverage를 우선해야 하면 `sec-filings-financials` 단독 사용을 피해야 한다.
+  - primary: `sec-filings-search/symbol`
+  - 보강 sweep: `sec-filings-search/form-type?formType=8-K`, 필요 시 `424B5`
+7. FMP SEC payload에는 제목/요약 필드가 없으므로, UI/DB title/body는 앱이 직접 생성해야 한다.
 
 ### 단계별 계획(각 단계: 구현 → 검증 → 사용자 확인 요청)
 

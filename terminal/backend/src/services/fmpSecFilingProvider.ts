@@ -41,6 +41,10 @@ export interface FmpSecFilingFetchOptions {
   universeSymbols?: Set<string>;
 }
 
+function encodeDateRangeValue(value: string): string {
+  return encodeURIComponent(value);
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -91,6 +95,11 @@ function normalizeDateTime(value: string | undefined | null): string {
   return trimmed;
 }
 
+function isDateWithinRange(value: string, fromDate: string, toDate: string): boolean {
+  const dateOnly = value.slice(0, 10);
+  return dateOnly >= fromDate && dateOnly <= toDate;
+}
+
 function mapRawItem(item: FmpSecFilingRawItem): FmpSecFilingMapped | null {
   const symbol = String(item.symbol ?? "").trim().toUpperCase();
   if (!symbol || symbol === "NONE") return null;
@@ -126,6 +135,7 @@ function mapRawItem(item: FmpSecFilingRawItem): FmpSecFilingMapped | null {
 }
 
 async function fetchPage(
+  symbol: string,
   fromDate: string,
   toDate: string,
   page: number,
@@ -137,7 +147,7 @@ async function fetchPage(
     throw new Error("FMP API key is not configured");
   }
 
-  const url = `${FMP_BASE}/sec-filings-financials?from=${encodeURIComponent(fromDate)}&to=${encodeURIComponent(toDate)}&page=${page}&limit=${limit}&apikey=${apiKey}`;
+  const url = `${FMP_BASE}/sec-filings-search/symbol?symbol=${encodeURIComponent(symbol)}&from=${encodeDateRangeValue(fromDate)}&to=${encodeDateRangeValue(toDate)}&page=${page}&limit=${limit}&apikey=${apiKey}`;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     await acquireSlot(requestIntervalMs);
@@ -167,8 +177,8 @@ async function fetchPage(
 }
 
 /**
- * Fetch FMP SEC filings for a date range. Returns mapped items filtered to
- * `universeSymbols` (if provided). Deduplicates by accession number.
+ * Fetch FMP SEC filings for a date range by walking FMP's symbol-search
+ * endpoint across the requested universe. Deduplicates by accession number.
  */
 export async function fetchFmpSecFilings(
   options: FmpSecFilingFetchOptions,
@@ -176,25 +186,31 @@ export async function fetchFmpSecFilings(
   const limit = Math.max(1, Math.min(Math.floor(options.limit ?? 100), 100));
   const maxPages = Math.max(1, Math.min(Math.floor(options.maxPages ?? 20), 100));
   const requestIntervalMs = Math.max(0, Math.min(Math.floor(options.requestIntervalMs ?? DEFAULT_REQUEST_INTERVAL_MS), 5_000));
-  const universe = options.universeSymbols;
+  const symbols = Array.from(options.universeSymbols ?? []).map((symbol) => symbol.trim().toUpperCase()).filter(Boolean);
+
+  if (symbols.length === 0) {
+    return [];
+  }
 
   const items: FmpSecFilingMapped[] = [];
   const seenAccessions = new Set<string>();
 
-  for (let page = 0; page < maxPages; page++) {
-    const rawItems = await fetchPage(options.fromDate, options.toDate, page, limit, requestIntervalMs);
-    if (rawItems.length === 0) break;
+  for (const symbol of symbols) {
+    for (let page = 0; page < maxPages; page++) {
+      const rawItems = await fetchPage(symbol, options.fromDate, options.toDate, page, limit, requestIntervalMs);
+      if (rawItems.length === 0) break;
 
-    for (const raw of rawItems) {
-      const mapped = mapRawItem(raw);
-      if (!mapped) continue;
-      if (universe && !universe.has(mapped.symbol)) continue;
-      if (seenAccessions.has(mapped.accessionNumber)) continue;
-      seenAccessions.add(mapped.accessionNumber);
-      items.push(mapped);
+      for (const raw of rawItems) {
+        const mapped = mapRawItem(raw);
+        if (!mapped) continue;
+        if (!isDateWithinRange(mapped.acceptedDate || mapped.filingDate, options.fromDate, options.toDate)) continue;
+        if (seenAccessions.has(mapped.accessionNumber)) continue;
+        seenAccessions.add(mapped.accessionNumber);
+        items.push(mapped);
+      }
+
+      if (rawItems.length < limit) break;
     }
-
-    if (rawItems.length < limit) break;
   }
 
   return items;

@@ -1481,7 +1481,7 @@ app.post("/api/news/pull-fmp-sec-filing", async (req, res, next) => {
     const jobId = createJob(0);
     activePullJobs.set(jobKey, jobId);
     appendLog(jobId, `Starting FMP SEC filing ${input.mode} pull — from=${effectiveFrom} to=${effectiveTo}`);
-    appendLog(jobId, `Universe: ${tickerList.length} tickers, maxPages=${input.maxPages}, requestIntervalMs=${input.requestIntervalMs}`);
+    appendLog(jobId, `Universe: ${tickerList.length} tickers, endpoint=sec-filings-search/symbol, maxPages=${input.maxPages}, requestIntervalMs=${input.requestIntervalMs}`);
 
     res.json({ jobId });
 
