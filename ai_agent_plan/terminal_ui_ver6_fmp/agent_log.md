@@ -258,6 +258,121 @@
 
 #### 런타임 확인 내용
 
+### DefaultTickerWindow 수급/source 확장 구현 + 재시작 검증 완료 (2026-03-24 19:13)
+
+**작성 시각:** 2026-03-24 19:13 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. `company_profiles`에 float / institutional / source 계열 컬럼을 추가하는 마이그레이션을 반영했다.
+2. backend에 아래 3개 배치 route를 완성했다.
+   - `POST /api/company-profiles/pull-market-cap`
+   - `POST /api/company-profiles/pull-float`
+   - `POST /api/company-profiles/pull-institutional`
+3. `GET /api/tickers`가 `floatPct`, `institutionalPct`, `marketCapSource`, `floatSource`, `institutionalSource`를 반환하도록 확장했다.
+4. `DefaultTickerWindow`에 아래 UI 변경을 반영했다.
+   - `Float %`, `Inst %` 컬럼 추가
+   - `Mkt Cap`, `Float %`, `Inst %` 값 옆 source badge 추가
+   - `Mkt Cap`, `Float`, `Inst` update 버튼 추가
+   - 각 update job polling/log panel 추가
+5. 기존 dev 서버를 정리한 뒤 포트 `8080`, `5173`에서 fresh restart로 다시 띄우고 실제 runtime 검증을 수행했다.
+
+#### 확정된 source 정책
+
+- `Market Cap`: `Finnhub`
+- `Float %`: `FMP`
+- `Institutional %`: `Finnhub`
+
+#### 런타임 검증 상세
+
+1. 포트 정리 후 backend / frontend dev 서버를 다시 시작했다.
+   - `8080` listen 확인
+   - `5173` listen 확인
+2. health check / frontend root 응답을 직접 확인했다.
+   - `GET /healthz` → `{"ok":true}`
+   - `GET http://localhost:5173` → `200 OK`
+3. 샘플 ticker `AAPL`, `RKLB`로 실제 update job을 돌렸다.
+   - market cap job: 두 ticker 모두 완료
+   - float job: `AAPL 99.77%`, `RKLB 92.37%`
+   - institutional job: `AAPL 50.78%`, `RKLB 50.93%`
+4. 마지막으로 `GET /api/tickers` 응답에서 샘플 row를 재조회해 아래를 확인했다.
+   - `AAPL`
+     - `marketCapSource = finnhub`
+     - `floatSource = fmp`
+     - `institutionalSource = finnhub`
+   - `RKLB`
+     - `marketCapSource = finnhub`
+     - `floatSource = fmp`
+     - `institutionalSource = finnhub`
+
+#### 변경 파일
+
+1. `terminal/backend/src/db.ts`
+2. `terminal/backend/src/services/companyProfileRepository.ts`
+3. `terminal/backend/src/services/fmpSharesFloatProvider.ts`
+4. `terminal/backend/src/services/finnhubOwnershipProvider.ts`
+5. `terminal/backend/src/server.ts`
+6. `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DefaultTickerWindow.tsx`
+7. `ai_agent_plan/terminal_ui_ver6_fmp/plan.md`
+8. `ai_agent_plan/terminal_ui_ver6_fmp/agent_log.md`
+
+#### 리스크 / 완화
+
+1. **리스크:** `institutional %`는 Finnhub top holder 기준이므로 provider가 바뀌면 값이 달라질 수 있다.
+   - 완화 1: UI에 source badge를 붙여 데이터 출처를 숨기지 않았다.
+   - 완화 2: route/job log에도 provider명이 드러나게 유지했다.
+2. **리스크:** 기존에 이미 저장된 market cap row는 source가 비어 있을 수 있다.
+   - 완화 1: 새 market cap update를 한 ticker부터 source가 채워진다.
+   - 완화 2: 필요하면 전체 market cap refresh를 한 번 돌리면 된다.
+3. **리스크:** 브라우저 내부 시각 렌더링은 agent 도구 제한으로 픽셀 단위 확인이 어렵다.
+   - 완화 1: fresh restart + API runtime 검증 + dev server 응답 확인까지 완료했다.
+   - 완화 2: 사용자는 브라우저에서 source badge와 새 컬럼이 보이는지만 마지막으로 눈으로 확인하면 된다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 변경 파일 `get_errors` 0개 |
+| 빌드 | ✅ | backend `npm run build`, frontend `vite build` 성공 |
+| 자동 테스트 | ✅ | backend vitest `12 files / 64 tests passed` |
+| 런타임 통합 | ✅ | fresh restart 후 `/healthz`, frontend root, 3개 update job, `GET /api/tickers` 샘플 row 확인 |
+
+#### 사용자 확인 요청
+
+- 현재 상태는 제가 직접 재시작과 API/runtime 검증까지 끝낸 상태다.
+- 사용자가 마지막으로 확인할 포인트는 아래 2개다.
+  1. `DefaultTickerWindow` 표에 `Float %`, `Inst %` 컬럼이 실제로 보이는지
+  2. `AAPL` 또는 `RKLB` 행에서 값 옆에 `Finnhub` / `Fmp` badge가 보이는지
+
+### backend/frontend prompt 문서 동기화 (2026-03-24 19:19)
+
+**작성 시각:** 2026-03-24 19:19 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. `terminal/backend_prompt.md`를 현재 `DefaultTickerWindow` backend 계약에 맞게 갱신했다.
+   - `GET /api/tickers` 새 필드 반영
+   - `POST /api/company-profiles/pull-float` 추가
+   - `POST /api/company-profiles/pull-institutional` 추가
+   - 24시간 skip + 같은 row update 규칙 명시
+2. `figma_frontend_prompt.md`를 현재 frontend UI에 맞게 갱신했다.
+   - `Mkt Cap`, `Float`, `Inst` 버튼 반영
+   - `Float %`, `Inst %` 컬럼 반영
+   - source badge와 사용 API 목록 반영
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 문서 수정만 수행 |
+| 빌드 | ✅ | 직전 검증 상태 유지: backend/frontend build 성공 |
+| 자동 테스트 | ✅ | 직전 검증 상태 유지: backend vitest pass |
+| 런타임 통합 | ✅ | 직전 검증 상태 유지: `GET /api/tickers`, `pull-market-cap`, `pull-float`, `pull-institutional` 실제 확인 후 문서 동기화 |
+
 1. `POST /api/news/pull-fmp-press-release`
    - 응답: `jobId` 정상 반환
    - job log 확인: `tickerConcurrency=10`, `requestIntervalMs=25`, `pageLimit=100`, `maxPages=12`

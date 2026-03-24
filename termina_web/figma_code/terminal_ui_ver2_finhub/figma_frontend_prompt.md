@@ -639,14 +639,19 @@ company data job contract:
 - CSV path 직접 수정
 - Reload
 - custom CSV를 default universe에 merge import (`Merge into Default`)
-- default universe 기준 Finnhub 시가총액 갱신 (`Market Cap Update`)
-  - 진행 상황 표시(completed/total, percent)
-  - **View Log 버튼**: 진행 바 옆에 토글 버튼. 클릭 시 아래에 job 로그 패널(최대 100줄)이 펼쳐짐
+- default universe 기준 수급/시총 갱신 버튼 3개
+  - `Mkt Cap`: Finnhub 시가총액 갱신
+  - `Float`: FMP float % 갱신
+  - `Inst`: Finnhub institutional % 갱신
+  - 세 버튼 모두 진행 상황 표시(completed/total, percent) + job polling을 사용한다.
+  - 각 버튼은 **View Log 버튼**을 통해 최대 100줄의 job 로그 패널을 토글한다.
   - job 404 감지: 서버 재시작 등으로 job이 사라지면 자동으로 에러 표시 + 상태 리셋
-  - 이미 24시간 내 market_cap이 있는 ticker는 서버에서 자동 skip
+  - 이미 24시간 내 값이 있는 ticker는 서버에서 자동 skip된다.
 - ticker 추가
 - filter 입력
-- table 표시: `Ticker | Name | Exchange | Industry | IPO Date | Market Cap | Del`
+- table 표시: `Ticker | Name | Exchange | Industry | IPO Date | Market Cap | Float % | Inst % | Del`
+- `Market Cap`, `Float %`, `Inst %` 셀에는 값 옆에 source badge가 붙는다.
+  - 현재 구현 기준 `Market Cap = Finnhub`, `Float % = Fmp`, `Inst % = Finnhub`
 - ticker 클릭 시 상위 `onTickerClick` 전달
 - 삭제 버튼으로 default universe에서 ticker 제거
 
@@ -657,6 +662,8 @@ API:
 - `POST /api/tickers/add`
 - `DELETE /api/tickers/remove`
 - `POST /api/company-profiles/pull-market-cap`
+- `POST /api/company-profiles/pull-float`
+- `POST /api/company-profiles/pull-institutional`
 
 `GET /api/tickers` 응답에서 프론트가 실제로 쓰는 row 필드:
 
@@ -667,13 +674,19 @@ API:
 - `[][][]industry[][][]`
 - `[][][]ipoDate[][][]`
 - `[][][]marketCap[][][]`
+- `[][][]floatPct[][][]`
+- `[][][]institutionalPct[][][]`
+- `[][][]marketCapSource[][][]`
+- `[][][]floatSource[][][]`
+- `[][][]institutionalSource[][][]`
 
 현재 제약:
 
 - 허용 경로는 backend allowlist에 의해 제한된다
 - UI는 어떤 CSV든 입력 가능해 보이지만, backend가 허용하지 않으면 error banner를 보여준다
 - custom CSV를 merge import해도 기존 default universe ticker는 제거되지 않고, 중복만 skip된다
-- `Market Cap Update`는 기본 default path일 때만 보인다. custom CSV view에서는 merge/import가 우선이다.
+- `Mkt Cap`, `Float`, `Inst` 버튼은 기본 default path일 때만 보인다. custom CSV view에서는 merge/import가 우선이다.
+- custom CSV view에서는 수급/시총 컬럼과 source badge가 대부분 `null`이라 `-`로 보일 수 있다.
 
 ## News Window
 
@@ -792,6 +805,8 @@ API:
 - `POST /api/tickers/add`
 - `DELETE /api/tickers/remove`
 - `POST /api/company-profiles/pull-market-cap`
+- `POST /api/company-profiles/pull-float`
+- `POST /api/company-profiles/pull-institutional`
 - `POST /api/company-profiles/pull-yahoo`
 - `POST /api/company-profiles/pull-peers`
 - `POST /api/company-profiles/pull-ipo-date`
@@ -819,7 +834,9 @@ API:
 
 - Finnhub 뉴스 검색 결과는 모두 backend DB 기반이다. provider raw response를 직접 렌더하지 않는다.
 - update, fulltext, change 계산은 모두 “job 시작 → polling → 완료 후 재조회” 패턴이다.
-- default ticker의 시가총액 보강도 `POST /api/company-profiles/pull-market-cap` job을 시작한 뒤 `GET /api/jobs/:jobId` polling으로 완료를 기다린다.
+- default ticker의 시가총액/float/institutional 보강도 각각 job을 시작한 뒤 `GET /api/jobs/:jobId` polling으로 완료를 기다린다.
+- default ticker의 market cap / float / institutional 값은 프론트 local state가 아니라 backend `company_profiles` 기반이다.
+- source badge는 프론트에서 계산하지 않고 backend가 내려주는 `marketCapSource`, `floatSource`, `institutionalSource` 값을 그대로 사용한다.
 - case research의 섹션/페이지 데이터는 localStorage가 아니라 backend DB에 저장된다.
 - 단, calendar update는 프론트는 job처럼 다루지만 backend는 아직 동기 응답형이다.
 - saved search, watchlist menu 선택값 등 일부 UI 상태는 메모리 state만 사용하고 영속 저장되지 않는다.

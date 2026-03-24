@@ -261,6 +261,7 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `company_profiles`는 현재 `fmp`, `finnhub`, `yahoo` source row가 공존할 수 있다.
 - ticker 심볼은 이 테이블 컬럼이 아니므로, raw SQL에서는 `securities`와 JOIN해서 읽는다.
 - `GET /api/news`, `GET /api/tickers`는 내부에서 대표 row를 골라 `companyDescription`, `peers`, `ipoDate`, `marketCap` 형태로 재노출한다.
+- `GET /api/tickers`의 default-universe row는 추가로 `[][][]floatPct[][][]`, `[][][]institutionalPct[][][]`, `[][][]marketCapSource[][][]`, `[][][]floatSource[][][]`, `[][][]institutionalSource[][][]`를 함께 재노출한다.
 
 #### `securities`
 
@@ -750,7 +751,23 @@ Control Window / localStorage 공통 설정:
 
 - `[][][]jobId[][][]`
 
-요청 body 옵션: `tickerConcurrency` (기본=1)
+요청 body 옵션: `[][][]tickers[][][]`, `[][][]maxTickers[][][]`, `[][][]tickerConcurrency[][][]` (기본=1)
+
+### `POST /api/company-profiles/pull-float`
+
+응답 컬럼:
+
+- `[][][]jobId[][][]`
+
+요청 body 옵션: `[][][]tickers[][][]`, `[][][]maxTickers[][][]`
+
+### `POST /api/company-profiles/pull-institutional`
+
+응답 컬럼:
+
+- `[][][]jobId[][][]`
+
+요청 body 옵션: `[][][]tickers[][][]`, `[][][]maxTickers[][][]`, `[][][]tickerConcurrency[][][]` (기본=1)
 
 ### `POST /api/company-profiles/pull-ipo-date`
 
@@ -776,7 +793,7 @@ Control Window / localStorage 공통 설정:
 
 - `NewsWindow`는 `GET /api/news`와 `POST /api/news/pull-eodhd`를 사용한다.
 - `FinnhubNewsWindow`는 뉴스 조회, Finnhub 적재, fulltext, change update, bookmarks, job polling을 사용한다.
-- `DefaultTickerWindow`는 `GET /api/tickers`, `POST /api/tickers/import-default`, `POST /api/tickers/add`, `DELETE /api/tickers/remove`, `POST /api/company-profiles/pull-market-cap`, `GET /api/jobs/:jobId`를 사용한다.
+- `DefaultTickerWindow`는 `GET /api/tickers`, `POST /api/tickers/import-default`, `POST /api/tickers/add`, `DELETE /api/tickers/remove`, `POST /api/company-profiles/pull-market-cap`, `POST /api/company-profiles/pull-float`, `POST /api/company-profiles/pull-institutional`, `GET /api/jobs/:jobId`를 사용한다.
 - `DataControlWindow`는 updates status, jobs, OHLC status/update, IBKR calendar update/update-custom, company profile pull, change update, DB inspect를 사용한다.
 - `CaseResearchWindow`는 `/api/research/*` 전체를 사용해 섹션/페이지 CRUD, reorder, 검색, 자동 저장을 수행한다.
 - 현재 `WatchlistWindow`, `CalendarWindow`는 백엔드 API를 직접 사용하지 않는다.
@@ -1588,7 +1605,12 @@ query:
       "sector": "Technology",
       "industry": "Consumer Electronics",
       "ipoDate": "1980-12-12",
-      "marketCap": 3560000000000
+      "marketCap": 3560000000000,
+      "floatPct": 99.77,
+      "institutionalPct": 50.78,
+      "marketCapSource": "finnhub",
+      "floatSource": "fmp",
+      "institutionalSource": "finnhub"
     }
   ]
 }
@@ -1597,9 +1619,14 @@ query:
 운영적 정의:
 
 1. 기본 CSV path일 때는 `ticker_universes/default` + `ticker_universe_items` + `securities` + 최신 `company_profiles`를 조회해 canonical default universe를 반환한다.
-2. `rows`의 각 원소는 `[][][]ticker[][][]`, `[][][]exchange[][][]`, `[][][]name[][][]`, `[][][]sector[][][]`, `[][][]industry[][][]`, `[][][]ipoDate[][][]`, `[][][]marketCap[][][]`를 포함한다.
-3. 다른 CSV path일 때는 CSV를 직접 읽어 `rows`를 만든다. 이 경우 `marketCap`과 `ipoDate`는 CSV 자체에는 없으므로 보통 `null`이다.
-4. `tickers`는 legacy 호환용 단순 배열이고, 신규 UI는 `rows`를 우선 사용한다.
+2. `rows`의 각 원소는 `[][][]ticker[][][]`, `[][][]exchange[][][]`, `[][][]name[][][]`, `[][][]sector[][][]`, `[][][]industry[][][]`, `[][][]ipoDate[][][]`, `[][][]marketCap[][][]`, `[][][]floatPct[][][]`, `[][][]institutionalPct[][][]`, `[][][]marketCapSource[][][]`, `[][][]floatSource[][][]`, `[][][]institutionalSource[][][]`를 포함한다.
+3. source 필드는 값의 출처를 나타낸다.
+  - `[][][]marketCapSource[][][]`: 현재 구현 기준 `finnhub`
+  - `[][][]floatSource[][][]`: 현재 구현 기준 `fmp`
+  - `[][][]institutionalSource[][][]`: 현재 구현 기준 `finnhub`
+4. 다른 CSV path일 때는 CSV를 직접 읽어 `rows`를 만든다. 이 경우 `marketCap`, `ipoDate`, `floatPct`, `institutionalPct`, 각 `*Source`는 CSV 자체에는 없으므로 보통 `null`이다.
+5. market cap / float / institutional update route는 최근 24시간 이내 값이 있으면 해당 ticker를 자동 skip한다. skip되지 않은 경우에는 같은 `security_id + source` row를 update해 기존 값을 덮어쓴다.
+6. `tickers`는 legacy 호환용 단순 배열이고, 신규 UI는 `rows`를 우선 사용한다.
 
 ### `POST /api/tickers/import-default`
 
@@ -2016,6 +2043,56 @@ job 완료 result 예시:
 5. `securities`의 `name`, `exchange`, `industry`를 best-effort로 upsert한다.
 6. `company_profiles`에 `source='finnhub'` row를 upsert하면서 `[][][]market_cap[][][]`에 USD 절대값을 저장한다. 같은 응답에 `ipo`가 있으면 `[][][]ipo_date[][][]`도 함께 보강한다.
 7. `update_status.company_profiles_market_cap`에 최근 실행 정보와 요약을 기록한다.
+
+### `POST /api/company-profiles/pull-float`
+
+FMP `stable/shares-float` API에서 float 관련 데이터를 가져와 `company_profiles`에 저장한다.
+
+요청 body:
+
+```json
+{ "tickers": ["AAPL", "RKLB"], "maxTickers": 100 }
+```
+
+- `tickers` 생략 시 `ticker_universes/default` 전체를 대상으로 한다.
+- **Skip 로직**: 최근 24시간 내 `float_pct`가 이미 저장된 ticker는 자동 건너뛴다.
+- 저장 필드: `[][][]float_shares[][][]`, `[][][]float_pct[][][]`, `[][][]outstanding_shares[][][]`, `[][][]float_source[][][]`, `[][][]fetched_at[][][]`
+- 현재 구현 기준 `[][][]float_source[][][] = 'fmp'`다.
+
+응답:
+
+```json
+{ "jobId": "..." }
+```
+
+job 완료 result 예시:
+
+```json
+{ "updated": 120, "total": 125, "skippedRecent": 50, "errors": 5 }
+```
+
+### `POST /api/company-profiles/pull-institutional`
+
+Finnhub `stock/ownership` API에서 institutional ownership 퍼센트를 계산해 `company_profiles`에 저장한다.
+
+요청 body:
+
+```json
+{ "tickers": ["AAPL", "RKLB"], "maxTickers": 100, "tickerConcurrency": 1 }
+```
+
+- `tickers` 생략 시 `ticker_universes/default` 전체를 대상으로 한다.
+- `[][][]tickerConcurrency[][][]`는 1~5 범위다. 기본값은 1이다.
+- **Skip 로직**: 최근 24시간 내 `institutional_pct`가 이미 저장된 ticker는 자동 건너뛴다.
+- 계산에는 같은 ticker의 최신 `[][][]outstanding_shares[][][]` 값이 필요하므로, float data가 먼저 있는 편이 정확하다.
+- 저장 필드: `[][][]institutional_pct[][][]`, `[][][]institutional_source[][][]`, `[][][]fetched_at[][][]`
+- 현재 구현 기준 `[][][]institutional_source[][][] = 'finnhub'`다.
+
+응답:
+
+```json
+{ "jobId": "..." }
+```
 8. background job 로그에는 ticker별 성공/실패와 진행률이 남는다.
 
 ### `POST /api/company-profiles/pull-ipo-date`

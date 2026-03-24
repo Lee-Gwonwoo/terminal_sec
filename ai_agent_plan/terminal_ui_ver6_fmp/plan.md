@@ -18,6 +18,31 @@
   - backend: `GET /api/tickers`가 최신 `company_profiles`에서 `float_pct`, `institutional_ownership_pct`도 같이 반환하도록 확장
   - docs: `backend_prompt.md`, `figma_frontend_prompt.md`, 본 `plan.md`를 함께 갱신
 
+### PLAN CHANGE — 2026-03-24 19:13 (수급 source 확정 + 재시작 검증 완료)
+- live probe 및 공식 docs 재확인 결과, 현재 구독에서는 FMP institutional ownership 전용 endpoint를 운영에 쓸 수 없다고 판단했다.
+- 따라서 `DefaultTickerWindow`의 source 정책은 최종적으로 아래처럼 확정한다.
+  - `Market Cap`: `Finnhub`
+  - `Float %`: `FMP`
+  - `Institutional %`: `Finnhub`
+- UI는 각 값 옆에 source badge를 붙여 어떤 플랫폼에서 온 값인지 바로 보이게 한다.
+- runtime 검증은 전체 universe가 아니라 `AAPL`, `RKLB` 샘플 ticker로 수행한다.
+  - `POST /api/company-profiles/pull-market-cap`
+  - `POST /api/company-profiles/pull-float`
+  - `POST /api/company-profiles/pull-institutional`
+  - `GET /api/tickers`
+- fresh restart 기준 검증 완료 조건은 아래와 같다.
+  - backend `http://localhost:8080/healthz` 응답 `{"ok":true}`
+  - frontend `http://localhost:5173` 응답 `200`
+  - 샘플 ticker row에 `marketCap`, `floatPct`, `institutionalPct`와 각 `*Source` 필드가 동시에 채워짐
+
+### PLAN CHANGE — 2026-03-24 19:19 (backend/frontend prompt 문서 동기화)
+- `terminal/backend_prompt.md`와 `figma_frontend_prompt.md`를 현재 `DefaultTickerWindow` 코드 기준으로 다시 맞춘다.
+- 이번 동기화 범위는 아래와 같다.
+  - `GET /api/tickers` 응답 필드 확장 반영
+  - `pull-float`, `pull-institutional` endpoint 설명 추가
+  - `DefaultTickerWindow`의 새 버튼(`Mkt Cap`, `Float`, `Inst`)과 source badge 설명 반영
+  - 24시간 skip + 같은 `security_id + source` row update 규칙을 문서화
+
 
 ### PLAN CHANGE — 2026-03-20 20:26
 - 사용자 결정에 따라 legacy `Finnhub SEC filing`은 유지하지 않고 제거한다.
