@@ -64,6 +64,69 @@
   - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
 - backend API 계약은 변경하지 않고, frontend 레이아웃과 스펙 문서만 갱신한다.
 
+### PLAN CHANGE — 2026-03-23 09:03 (FMP SEC update 시 summary 생성 추가)
+- 사용자 요청에 따라 기존 `Recent FMP SEC Filing`, `Custom FMP SEC Filing` 버튼 동작에 SEC filing summary 생성을 포함한다.
+- 이번 리비전의 설계 결정은 아래와 같다.
+  - summary 저장 위치는 새 컬럼이 아니라 기존 `news_items.body`를 재사용한다.
+  - summary 생성 시점은 별도 후처리 job이 아니라 `POST /api/news/pull-fmp-sec-filing` insert 직후다.
+  - summary source는 `finalLink` 우선, 실패 시 `link` 보조다.
+  - 요약 생성 실패 시 기존 metadata body(`Filed ..., accepted ..., CIK ...`)로 fallback 한다.
+- 구현 범위:
+  - backend SEC 요약 서비스 추가
+  - FMP SEC pull route에서 summary 생성 + `body` update
+  - frontend update 메뉴 설명을 현재 동작과 일치하게 수정
+  - 관련 문서(`backend_prompt.md`, `.github/copilot-skills/fmp_api.md`) 동기화
+- 이번 리비전의 비범위:
+  - 새 DB 컬럼/테이블 추가
+  - LLM 기반 생성 요약
+  - 별도 `FMP SEC summary only` 버튼 추가
+
+### PLAN CHANGE — 2026-03-24 08:55 (FMP SEC full text 실행 시 summary + 본문 동시 backfill)
+- 사용자 요청에 따라 `FMP SEC Filing Only` full text 작업이 `news_fulltext.full_text`만 채우는 것이 아니라, 같은 실행에서 `news_items.body` summary도 갱신하도록 확장한다.
+- 이번 리비전의 설계 결정은 아래와 같다.
+  - `source_type='fmp_sec_filing'` full text 작업은 일반 `unextracted only` 규칙을 그대로 쓰지 않고, `full text 없음` 또는 `body가 metadata fallback`인 row를 대상으로 삼는다.
+  - `SEC/EDGAR` publisher는 별도 extractor를 사용해 `finalLink/url` 문서를 직접 읽는다.
+  - full text fetch 성공 시 `news_fulltext`는 upsert 하고, 같은 텍스트에서 deterministic summary를 다시 계산해 `news_items.body`를 갱신한다.
+  - 이미 full text row가 있는 경우에도 `body`가 fallback이면 summary backfill 대상으로 포함할 수 있다.
+- 구현 범위:
+  - `SEC/EDGAR` full text extractor 추가
+  - FMP SEC 전용 full text backfill query 추가
+  - full text job에서 summary/body 동시 갱신
+  - full text 메뉴 설명 및 문서 동기화
+
+### PLAN CHANGE — 2026-03-24 09:03 (FMP 요청 속도 기본값 상향 + Control Window 노출)
+- 사용자 요청에 따라 FMP API 요청을 더 빠르게 내려받도록 기본 설정값을 조정한다.
+- 이번 리비전의 핵심은 기존 FMP 요청 설정을 `news/SEC filing pull`에도 연결하고, 기본값 자체를 더 빠르게 바꾸는 것이다.
+- 설계 결정:
+  - `DataControlWindow`와 `FinnhubNewsWindow` Control modal이 같은 `fmp-concurrency`, `fmp-request-interval-ms` 로컬 설정을 공유한다.
+  - `FinnhubNewsWindow`의 `pull-fmp-press-release`, `pull-fmp-sec-filing` 요청은 위 설정값을 body에 실어 보낸다.
+  - backend `pull-fmp-press-release`, `pull-fmp-sec-filing` 기본 요청 간격을 더 빠른 쪽으로 조정하고, `pull-fmp-sec-filing`에는 ticker worker concurrency 기본값을 추가한다.
+  - `FMP SEC filing` provider는 per-ticker worker pool로 병렬 처리해 기본 체감 속도를 개선한다.
+- 목표:
+  - 아무 설정을 바꾸지 않아도 기존보다 빠르게 FMP SEC를 다운로드한다.
+  - 사용자는 Control Window에서 FMP concurrency / request interval을 직접 조절할 수 있다.
+
+### PLAN CHANGE — 2026-03-24 09:16 (FMP PR/SEC paging 제어 추가 + 공격적 기본값 재조정)
+- 사용자 요청에 따라 `Control Window`에서 FMP 설정을 더 직접적으로 조절할 수 있도록 PR/SEC paging 값까지 노출한다.
+- 이번 리비전에서 추가로 확정한 설정은 아래와 같다.
+  - `fmp-pr-page-limit`
+  - `fmp-pr-max-pages`
+  - `fmp-sec-max-pages`
+- 기본값은 아래처럼 더 공격적으로 올린다.
+  - FMP concurrency: `10`
+  - FMP request interval: `25ms`
+  - FMP PR pageLimit: `100`
+  - FMP PR maxPages: `12`
+  - FMP SEC maxPages: `40`
+- 범위:
+  - `FinnhubNewsWindow`의 News Pull Control modal
+  - 별도 `DataControlWindow`
+  - backend route schema 기본값
+  - FMP provider fallback 기본값
+- 기대 효과:
+  - UI에서 설정 변경 후 바로 FMP PR/SEC pull body에 반영된다.
+  - localStorage 값이 없을 때도 이전보다 더 빠른 기본 동작으로 시작한다.
+
 ### 목표
 - 뉴스 상단 필터에 `fmp pr` 버튼을 추가한다.
 - 업데이트 메뉴에 `recent fmp pr update`, `custom fmp pr update` 버튼을 추가한다.

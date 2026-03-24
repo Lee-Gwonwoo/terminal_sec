@@ -553,6 +553,13 @@ export async function insertSecFilingCompanion(params: {
   return (result.changes ?? 0) > 0;
 }
 
+export async function updateNewsBodyById(newsId: string, body: string): Promise<void> {
+  await getDb().run(
+    `UPDATE news_items SET body = ? WHERE id = ?`,
+    [body, newsId],
+  );
+}
+
 export async function getNewsIdBySourceUrl(source: string, url: string): Promise<string | null> {
   const row = await getDb().get<{ id: string }>(
     `SELECT id FROM news_items WHERE source = ? AND url = ? LIMIT 1`,

@@ -329,6 +329,7 @@ SEC filing companion table.
 - `news_items`에 저장된 SEC filing의 추가 메타데이터를 저장하는 companion table이다.
 - 과거 `Finnhub SEC filing` 데이터는 startup purge가 `source='FINNHUB' AND source_type='sec_filing'` parent row를 삭제하며 함께 정리된다.
 - 2026-03-21 리비전부터 `FMP SEC filing` (`source='FMP'`, `source_type='fmp_sec_filing'`) ingestion path가 추가됐으며, 같은 테이블에 companion row를 저장한다.
+- 2026-03-23 리비전부터는 parent `news_items.body`에 SEC 원문 기반 deterministic summary를 저장하고, 추출 실패 시 metadata fallback을 유지한다.
 
 컬럼:
 
@@ -580,14 +581,20 @@ FMP press release를 수집한다.
   "mode": "recent",
   "from": "2026-03-01",
   "to": "2026-03-20",
-  "requestIntervalMs": 300
+  "tickerConcurrency": 10,
+  "requestIntervalMs": 25,
+  "pageLimit": 100,
+  "maxPages": 12
 }
 ```
 
 - `mode`: `recent | custom`
 - `recent`: DB의 마지막 `fmp_press_release` anchor 이후부터 수집
 - `custom`: `from/to` 범위로 수집
-- `requestIntervalMs`: FMP API 호출 간격 (기본 300ms)
+- `tickerConcurrency`: ticker worker 수 (기본 10)
+- `requestIntervalMs`: FMP API 호출 간격 (기본 25ms)
+- `pageLimit`: page당 최대 row 수 (기본 100)
+- `maxPages`: ticker당 최대 page 수 (기본 12)
 - job key: `fmp_press_release`
 
 응답 컬럼:
@@ -605,19 +612,29 @@ FMP SEC filing을 수집한다. primary endpoint는 `stable/sec-filings-search/s
   "mode": "recent",
   "from": "2026-03-01",
   "to": "2026-03-20",
-  "requestIntervalMs": 300,
-  "maxPages": 20
+  "tickerConcurrency": 10,
+  "requestIntervalMs": 25,
+  "maxPages": 40
 }
 ```
 
 - `mode`: `recent | custom`
 - `recent`: DB의 마지막 `fmp_sec_filing` published_at 이후(없으면 7일 전)부터 수집
 - `custom`: `from/to` 범위로 수집
-- `requestIntervalMs`: FMP API 호출 간격 (기본 300ms)
-- `maxPages`: 최대 페이지 수 (기본 20)
+- `tickerConcurrency`: ticker worker 수 (기본 10)
+- `requestIntervalMs`: FMP API 호출 간격 (기본 25ms)
+- `maxPages`: 최대 페이지 수 (기본 40)
 - job key: `fmp_sec_filing`
-- 동작: default universe ticker를 순회하면서 symbol search를 호출하고, accession number로 dedupe 한 뒤 `sec_filings` companion 테이블에도 저장.
-- 저장 규칙: `source='FMP'`, `source_type='fmp_sec_filing'`, `publisher='SEC/EDGAR'`, `url=finalLink`, `published_at=acceptedDate`
+- 동작: default universe ticker를 worker pool로 병렬 처리하면서 symbol search를 호출하고, accession number로 dedupe 한 뒤 `sec_filings` companion 테이블에도 저장한다. insert 직후 `finalLink` 우선, `link` 보조로 SEC 문서를 읽어 summary를 만들고 `news_items.body`를 갱신한다.
+- 저장 규칙: `source='FMP'`, `source_type='fmp_sec_filing'`, `publisher='SEC/EDGAR'`, `url=finalLink`, `published_at=acceptedDate`, `body=SEC summary 또는 metadata fallback`
+
+Control Window / localStorage 공통 설정:
+
+- `fmp-concurrency`: FMP 공통 ticker concurrency
+- `fmp-request-interval-ms`: FMP 공통 request interval
+- `fmp-pr-page-limit`: FMP PR page limit
+- `fmp-pr-max-pages`: FMP PR max pages
+- `fmp-sec-max-pages`: FMP SEC max pages
 
 응답 컬럼:
 
@@ -1408,6 +1425,7 @@ query:
 
 - 생략 또는 `all`: 전체 미추출 뉴스
 - `company_news`, `press_release`, `market_news`: 해당 `news_items.source_type`만 대상
+- `fmp_sec_filing`: 기본 미추출 row + metadata fallback body를 가진 SEC filing row를 포함할 수 있으며, 성공 시 `news_fulltext.full_text`와 `news_items.body` summary를 함께 갱신한다.
 
 사전 동작:
 

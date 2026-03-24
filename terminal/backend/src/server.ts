@@ -21,7 +21,7 @@ import { ensureSeedData } from "./seed.js";
 import { pullIbkrCalendar, pullIbkrCalendarCustom, getCalendarDateRange } from "./services/calendarIngestion.js";
 import type { CalendarUpdateMode } from "./services/calendarIngestion.js";
 import { pullEodhdNews, pullEodhdNewsAll } from "./services/eodhdNewsProvider.js";
-import { insertNewsItem, insertSecFilingCompanion } from "./services/newsRepository.js";
+import { insertNewsItem, insertSecFilingCompanion, updateNewsBodyById } from "./services/newsRepository.js";
 import { listUpdateStatuses, setLastSuccess } from "./services/updateStatusRepository.js";
 import { readTickersFromCsv, appendTickerToCsv, removeTickerFromCsv, readTickerRowsFromCsv, CsvServiceError } from "./services/tickerCsvService.js";
 import {
@@ -90,6 +90,7 @@ import { fetchFinnhubProfilesBatch } from "./services/finnhubProfile2Provider.js
 import { fetchRtprArticles, fetchRtprArticlesByTicker } from "./services/ptprNewsProvider.js";
 import { fetchFmpPressReleasesByTicker } from "./services/fmpPressReleaseProvider.js";
 import { fetchFmpSecFilings } from "./services/fmpSecFilingProvider.js";
+import { generateSecFilingSummary } from "./services/secFilingSummary.js";
 import { getEtDateString } from "./services/timeUtils.js";
 import {
   clampFinnhubCompanyDataConcurrency,
@@ -939,18 +940,19 @@ const pullFmpPressReleaseSchema = z.object({
   mode: z.enum(["recent", "custom"]).optional().default("recent"),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  tickerConcurrency: z.number().int().min(1).max(20).optional().default(5),
-  requestIntervalMs: z.number().int().min(0).max(5_000).optional().default(250),
-  pageLimit: z.number().int().min(1).max(100).optional().default(50),
-  maxPages: z.number().int().min(1).max(50).optional().default(8),
+  tickerConcurrency: z.number().int().min(1).max(20).optional().default(10),
+  requestIntervalMs: z.number().int().min(0).max(5_000).optional().default(25),
+  pageLimit: z.number().int().min(1).max(100).optional().default(100),
+  maxPages: z.number().int().min(1).max(50).optional().default(12),
 });
 
 const pullFmpSecFilingSchema = z.object({
   mode: z.enum(["recent", "custom"]).optional().default("recent"),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  requestIntervalMs: z.number().int().min(0).max(5_000).optional().default(300),
-  maxPages: z.number().int().min(1).max(100).optional().default(20),
+  tickerConcurrency: z.number().int().min(1).max(20).optional().default(10),
+  requestIntervalMs: z.number().int().min(0).max(5_000).optional().default(25),
+  maxPages: z.number().int().min(1).max(100).optional().default(40),
 });
 
 app.post("/api/news/pull-rtpr", async (req, res, next) => {
@@ -1478,24 +1480,27 @@ app.post("/api/news/pull-fmp-sec-filing", async (req, res, next) => {
       effectiveFrom = anchor?.max_acc?.slice(0, 10) ?? getEtDateString(new Date(Date.now() - 7 * 86_400_000));
     }
 
-    const jobId = createJob(0);
+    const jobId = createJob(tickerList.length);
     activePullJobs.set(jobKey, jobId);
     appendLog(jobId, `Starting FMP SEC filing ${input.mode} pull — from=${effectiveFrom} to=${effectiveTo}`);
-    appendLog(jobId, `Universe: ${tickerList.length} tickers, endpoint=sec-filings-search/symbol, maxPages=${input.maxPages}, requestIntervalMs=${input.requestIntervalMs}`);
+    appendLog(jobId, `Universe: ${tickerList.length} tickers, endpoint=sec-filings-search/symbol, tickerConcurrency=${input.tickerConcurrency}, maxPages=${input.maxPages}, requestIntervalMs=${input.requestIntervalMs}`);
 
     res.json({ jobId });
 
     (async () => {
-      const counters = { totalInserted: 0, totalSkipped: 0, companionInserted: 0 };
+      const counters = { totalInserted: 0, totalSkipped: 0, companionInserted: 0, filingSummary: 0, metadataSummary: 0 };
       const newItems: Array<{ id: string; tickers: string[]; publishedAt: string }> = [];
 
       try {
         const filings = await fetchFmpSecFilings({
           fromDate: effectiveFrom,
           toDate: effectiveTo,
+          concurrency: input.tickerConcurrency,
           maxPages: input.maxPages,
           requestIntervalMs: input.requestIntervalMs,
           universeSymbols: universeSet,
+          onProgress: (done, total) => updateProgress(jobId, done, total),
+          shouldCancel: () => isJobCancelled(jobId),
         });
 
         appendLog(jobId, `Fetched ${filings.length} filings matching universe`);
@@ -1524,6 +1529,28 @@ app.post("/api/news/pull-fmp-sec-filing", async (req, res, next) => {
               publishedAt: inserted.published_at,
             });
 
+            const summaryResult = await generateSecFilingSummary({
+              symbol: filing.symbol,
+              cik: filing.cik,
+              formType: filing.formType,
+              filingDate: filing.filingDate,
+              acceptedDate: filing.acceptedDate,
+              link: filing.link,
+              finalLink: filing.finalLink,
+            });
+
+            let publishedItem = inserted;
+            if (summaryResult.summary !== inserted.body) {
+              await updateNewsBodyById(inserted.id, summaryResult.summary);
+              publishedItem = { ...inserted, body: summaryResult.summary };
+            }
+
+            if (summaryResult.source === "filing-text") {
+              counters.filingSummary++;
+            } else {
+              counters.metadataSummary++;
+            }
+
             await insertSecFilingCompanion({
               newsId: inserted.id,
               accessionNumber: filing.accessionNumber,
@@ -1536,13 +1563,14 @@ app.post("/api/news/pull-fmp-sec-filing", async (req, res, next) => {
             });
             counters.companionInserted++;
 
-            streamHub.publishNews(inserted);
+            streamHub.publishNews(publishedItem);
           } else {
             counters.totalSkipped++;
           }
         }
 
         appendLog(jobId, `Insert: ${counters.totalInserted} new, ${counters.totalSkipped} skipped, ${counters.companionInserted} companion rows`);
+        appendLog(jobId, `SEC summary: ${counters.filingSummary} filing-text, ${counters.metadataSummary} metadata fallback`);
 
         let changeMergeResult = { merged: 0, skipped: 0 };
         if (newItems.length > 0 && !isJobCancelled(jobId)) {
@@ -1560,9 +1588,13 @@ app.post("/api/news/pull-fmp-sec-filing", async (req, res, next) => {
           mode: input.mode,
           from: effectiveFrom,
           to: effectiveTo,
+          tickerConcurrency: input.tickerConcurrency,
+          requestIntervalMs: input.requestIntervalMs,
           inserted: counters.totalInserted,
           skipped: counters.totalSkipped,
           companionInserted: counters.companionInserted,
+          filingSummary: counters.filingSummary,
+          metadataSummary: counters.metadataSummary,
           changeMerged: changeMergeResult.merged,
         });
 
@@ -1570,9 +1602,13 @@ app.post("/api/news/pull-fmp-sec-filing", async (req, res, next) => {
           source: "FMP",
           mode: input.mode,
           sourceType: "fmp_sec_filing",
+          tickerConcurrency: input.tickerConcurrency,
+          requestIntervalMs: input.requestIntervalMs,
           inserted: counters.totalInserted,
           skipped: counters.totalSkipped,
           companionInserted: counters.companionInserted,
+          filingSummary: counters.filingSummary,
+          metadataSummary: counters.metadataSummary,
           changeMerged: changeMergeResult.merged,
         });
         activePullJobs.delete(jobKey);

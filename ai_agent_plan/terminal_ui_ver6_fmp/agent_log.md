@@ -5,6 +5,9 @@
 | 일시 | 작업 | 핵심 결과 |
 |------|------|-----------|
 | 2026-03-20 18:04 | FMP 구독 범위 조사 plan 작성 시작 | docs 구조와 레포의 기존 FMP 사용 지점을 기준으로 `terminal_ui_ver6_fmp` 계획 문서를 생성 |
+| 2026-03-23 09:03 | FMP SEC summary 추가 작업 시작 | `pull-fmp-sec-filing`에 filing 기반 summary 생성을 붙이는 plan/code/doc 범위를 확정 |
+| 2026-03-24 08:55 | FMP SEC full text + summary backfill 작업 시작 | full text 실행 시 `news_fulltext`와 `news_items.body`를 함께 갱신하는 방향으로 확장 |
+| 2026-03-24 09:13 | FMP 요청 속도 기본값 상향 + Control Window 노출 완료 | FMP PR/SEC 기본 요청 간격을 `100ms`로 낮추고, SEC ticker concurrency 및 Control Window 공유 설정을 연결 |
 
 ## 2026-03-20
 
@@ -166,6 +169,120 @@
    1. UI에서 더 이상 SEC 필터/SEC update 메뉴가 보이지 않는지
    2. `fmp pr` 관련 버튼 흐름이 기존대로 보이고 동작하는지
 
+
+### FMP Control Window 확장 + 공격적 기본값 상향 (2026-03-24 09:16)
+
+**작성 시각:** 2026-03-24 09:16 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. `FinnhubNewsWindow.tsx`의 News Pull Control에 FMP PR/SEC paging 설정을 추가했다.
+   - `PR Page Limit`
+   - `PR Max Pages`
+   - `SEC Max Pages`
+2. FMP update 요청 body를 확장했다.
+   - FMP PR pull: `tickerConcurrency`, `requestIntervalMs`, `pageLimit`, `maxPages`
+   - FMP SEC pull: `tickerConcurrency`, `requestIntervalMs`, `maxPages`
+3. `DataControlWindow.tsx`에도 같은 localStorage key를 읽고 쓰는 입력을 추가했다.
+4. frontend/backend 기본값을 더 공격적으로 상향했다.
+   - concurrency `10`
+   - request interval `25ms`
+   - PR `100 x 12 pages`
+   - SEC `40 pages`
+5. 관련 문서를 현재 기본값 기준으로 동기화했다.
+   - `terminal/backend_prompt.md`
+   - `.github/copilot-skills/fmp_api.md`
+   - `plan.md`
+
+#### 변경 파일
+
+1. `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+2. `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx`
+3. `terminal/backend/src/server.ts`
+4. `terminal/backend/src/services/fmpPressReleaseProvider.ts`
+5. `terminal/backend/src/services/fmpSecFilingProvider.ts`
+6. `terminal/backend_prompt.md`
+7. `.github/copilot-skills/fmp_api.md`
+8. `ai_agent_plan/terminal_ui_ver6_fmp/plan.md`
+
+#### 사용자가 직접 확인할 수 있는 방법
+
+1. News 창에서 `Control`을 열고 FMP 섹션에 아래 입력이 보이는지 확인한다.
+   - `Ticker Concurrency`
+   - `Request Interval (ms)`
+   - `PR Page Limit`
+   - `PR Max Pages`
+   - `SEC Max Pages`
+2. 별도 Data Control 창에서도 같은 FMP PR/SEC paging 설정이 보이는지 확인한다.
+3. Control에서 값을 바꾼 뒤 `Recent FMP PR` 또는 `Recent FMP SEC Filing`을 실행하고, job log 시작부의 파라미터가 바뀐 값으로 찍히는지 확인한다.
+
+#### 리스크 / 완화
+
+1. **리스크:** 기본값이 더 공격적이라 FMP rate limit에 더 빨리 닿을 수 있다.
+   - 완화 1: Control Window에서 즉시 값을 낮출 수 있게 했다.
+   - 완화 2: backend retry/backoff 로직은 그대로 유지했다.
+2. **리스크:** `DataControlWindow`와 News control modal이 서로 다른 값을 저장하면 혼란이 생길 수 있다.
+   - 완화 1: 둘 다 동일한 localStorage key를 공유하게 했다.
+3. **리스크:** page 설정이 너무 크면 custom range pull 시간이 길어질 수 있다.
+   - 완화 1: PR/SEC를 별도 key로 분리해 각각 조절 가능하게 했다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ⏳ | 변경 직후 `get_errors` 확인 완료, build/test/runtime는 이어서 수행 |
+| 빌드 | ⏳ | frontend/backend build 예정 |
+| 자동 테스트 | ⏳ | workspace test 예정 |
+| 런타임 통합 | ⏳ | dev backend route 호출 + UI 설정 반영 확인 예정 |
+
+#### 사용자 확인 요청
+
+- 우선 구현은 반영됐고, 다음 단계는 build/test와 실제 route 호출 검증이다.
+- 이후 사용자가 직접 볼 포인트는 `Control` 창에서 새 입력 3개가 보이는지와 기본값이 `10 / 25 / 100 / 12 / 40`으로 시작하는지다.
+
+### FMP Control Window 확장 검증 완료 (2026-03-24 09:21)
+
+**작성 시각:** 2026-03-24 09:21 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. backend build를 다시 실행해 route schema / provider 기본값 변경이 깨지지 않는지 확인했다.
+2. frontend build를 다시 실행해 News control UI와 Data Control UI 확장이 production build에서 통과하는지 확인했다.
+3. workspace test를 재실행해 backend vitest 전체가 계속 pass 하는지 확인했다.
+4. dev backend에 실제 FMP PR / FMP SEC route 요청을 보내 새 파라미터가 runtime에서 받아들여지는지 확인했다.
+5. runtime 검증용으로 내가 시작한 FMP PR job은 cancel endpoint로 정리했다.
+
+#### 런타임 확인 내용
+
+1. `POST /api/news/pull-fmp-press-release`
+   - 응답: `jobId` 정상 반환
+   - job log 확인: `tickerConcurrency=10`, `requestIntervalMs=25`, `pageLimit=100`, `maxPages=12`
+2. `POST /api/news/pull-fmp-sec-filing`
+   - 응답: 기존 실행 중 job이 있어 `409 + existingJobId` 반환
+   - 같은 job status 조회 결과 log에 `tickerConcurrency=10`, `maxPages=40`, `requestIntervalMs=25`가 찍혀 있었다.
+3. validation용 FMP PR job
+   - `POST /api/jobs/:jobId/cancel`로 취소
+   - 최종 status: `cancelled`
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 변경 파일 기준 `get_errors` 0개 |
+| 빌드 | ✅ | backend `npm run build`, frontend `npm run build` 성공 |
+| 자동 테스트 | ✅ | backend vitest `12 files / 64 tests passed` |
+| 런타임 통합 | ✅ | PR route 실호출 + job log 파라미터 확인, SEC route duplicate guard + active job log 파라미터 확인, validation PR job cancel 확인 |
+
+#### 사용자 확인 요청
+
+- 이제 사용자가 직접 볼 핵심 포인트는 아래 3개다.
+  1. News 창 `Control`에서 FMP 새 입력 3개가 보이는지
+  2. 기본값이 `Concurrency 10 / Interval 25ms / PR 100 x 12 / SEC 40`으로 보이는지
+  3. 값을 바꾼 뒤 `Recent FMP PR` 또는 `Recent FMP SEC Filing` 실행 시 로그 첫 줄 파라미터가 바뀐 값으로 찍히는지
 ### Finnhub News 상단 툴바 재배치 구현 (2026-03-23 08:48)
 
 **작성 시각:** 2026-03-23 08:48 (local)
@@ -579,6 +696,169 @@
 
 - 현재 상태는 FMP API skill 문서 생성 완료다.
 - 원하면 다음으로는 이 skill 문서를 참조해 실제 FMP news/press release provider 구현에 들어갈 수 있다.
+
+### FMP SEC full text 실행 시 summary + 본문 동시 backfill (2026-03-24 08:55)
+
+**작성 시각:** 2026-03-24 08:55 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. `FMP SEC Filing Only` full text 작업이 `news_fulltext.full_text`만 채우지 않고, 같은 실행에서 `news_items.body` summary도 갱신하도록 확장했다.
+2. `SEC/EDGAR` publisher 전용 extractor를 추가해 SEC 원문 HTML/TXT를 직접 읽도록 했다.
+3. `fmp_sec_filing` full text 대상 선택을 일반 미추출 row에서 확장해, metadata fallback body 또는 이전에 잘못 채워진 XBRL/boilerplate body도 재처리하도록 바꿨다.
+4. full text 성공 시 `news_fulltext`는 upsert 하고, 같은 텍스트에서 deterministic summary를 다시 계산해 `news_items.body`를 갱신하도록 연결했다.
+5. `10-K`류에서 `us-gaap:` 토큰, SEC 표지 boilerplate가 summary로 들어가는 문제를 줄이기 위해 summary 필터를 강화했다.
+6. full text 메뉴 설명과 backend/FMP 문서를 현재 동작에 맞게 동기화했다.
+
+#### 변경 파일
+
+1. `terminal/backend/src/services/fulltextRepository.ts`
+2. `terminal/backend/src/services/fulltextExtractors.ts`
+3. `terminal/backend/src/services/fulltextUpdateService.ts`
+4. `terminal/backend/src/services/secFilingSummary.ts`
+5. `terminal/backend/tests/fulltextExtractors.test.ts`
+6. `terminal/backend/tests/secFilingSummary.test.ts`
+7. `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+8. `terminal/backend_prompt.md`
+9. `.github/copilot-skills/fmp_api.md`
+10. `ai_agent_plan/terminal_ui_ver6_fmp/plan.md`
+
+#### 리스크 / 완화
+
+1. **리스크:** `10-K`, `10-Q`는 문서가 길고 boilerplate가 많아 핵심 summary 대신 표지 문장이 선택될 수 있다.
+   - 완화 1: inline XBRL 토큰, cover-page boilerplate, check-mark 문구를 summary 후보에서 제외했다.
+   - 완화 2: 그래도 깨끗한 문장을 못 찾으면 metadata fallback으로 유지되게 했다.
+2. **리스크:** 기존에 이미 잘못 채워진 SEC body는 일반 `unextracted` 조건만으로는 다시 잡히지 않는다.
+   - 완화 1: `us-gaap:`, `dei:`, `telephone number`, `well-known seasoned issuer` 패턴을 repair 대상 조건에 추가했다.
+3. **리스크:** SEC 원문 fetch가 추가되면서 full text job 시간이 길어질 수 있다.
+   - 완화 1: `sourceType='fmp_sec_filing'`에만 특수 backfill 조건을 적용했다.
+   - 완화 2: concurrency 옵션은 그대로 유지한다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `get_errors` 기준 변경 파일 오류 0건 |
+| 빌드 | ✅ | backend `npm run build`, frontend `npm run build` 성공 |
+| 자동 테스트 | ✅ | backend vitest `12 files / 64 tests passed` |
+| 런타임 통합 | ✅ | dev backend에서 `POST /api/news/fulltext/update` (`sourceType=fmp_sec_filing`) 실행, job 로그에 `summary` 카운트 확인, 최신 FMP SEC row body가 XBRL 토큰 문자열에서 사람이 읽을 수 있는 문장으로 갱신된 것 확인 |
+
+#### 사용자 확인 요청
+
+- 현재 상태는 `FMP SEC Filing Only` full text 실행 시 full text + summary/body 동시 backfill까지 반영된 상태다.
+- 사용자가 직접 확인할 포인트는 아래 2개다.
+  1. `FMP SEC Filing Only`를 실행했을 때 job log에 summary 갱신 수가 보이는지
+  2. 기존 summary 없는 SEC row 또는 깨진 body row가 다시 읽을 만한 문장으로 바뀌는지
+
+### FMP 요청 속도 기본값 상향 + Control Window 노출 (2026-03-24 09:13)
+
+**작성 시각:** 2026-03-24 09:13 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. FMP press release, FMP SEC filing의 backend 기본 요청 간격을 기존보다 빠른 `100ms`로 조정했다.
+2. FMP SEC filing provider를 ticker 순차 처리에서 worker-pool 병렬 처리로 바꿔 기본 다운로드 속도를 올렸다.
+3. `FinnhubNewsWindow` Control modal에 FMP concurrency / request interval 입력값을 추가하고 localStorage에 저장하도록 연결했다.
+4. `DataControlWindow`의 기존 FMP 설정 설명과 기본값을 현재 동작에 맞게 갱신해, Company Description뿐 아니라 FMP PR/SEC pull에도 같은 설정이 적용된다는 점을 명확히 했다.
+5. frontend FMP PR / SEC update 요청이 위 Control 설정값을 실제 request body로 보내도록 연결했다.
+6. backend/frontend prompt 문서를 현재 기본값과 동작 방식에 맞게 동기화했다.
+
+#### 변경 파일
+
+1. `terminal/backend/src/services/fmpPressReleaseProvider.ts`
+2. `terminal/backend/src/services/fmpSecFilingProvider.ts`
+3. `terminal/backend/src/server.ts`
+4. `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+5. `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx`
+6. `terminal/backend_prompt.md`
+7. `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+8. `ai_agent_plan/terminal_ui_ver6_fmp/plan.md`
+
+#### 리스크 / 완화
+
+1. **리스크:** FMP request interval을 낮추고 SEC를 병렬화하면 FMP 쪽 rate limit에 더 빨리 닿을 수 있다.
+   - 완화 1: concurrency를 `1~20`, interval을 `0~5000ms` 범위로 UI에서 바로 조절할 수 있게 했다.
+   - 완화 2: 기본 concurrency는 `5`로 제한해 과도한 burst를 피했다.
+2. **리스크:** `DataControlWindow`와 News Control modal이 같은 localStorage key를 공유하므로, 한쪽에서 저장한 값이 다른 쪽에도 즉시 반영된다.
+   - 완화 1: frontend prompt와 UI 설명에 공유 설정이라는 점을 문서화했다.
+   - 완화 2: label을 FMP 공통 요청 설정 기준으로 정리했다.
+3. **리스크:** FMP SEC custom/recent job은 여전히 universe 전체를 훑기 때문에 빠른 기본값이어도 작업량 자체는 클 수 있다.
+   - 완화 1: smoke test 기준으로도 job 생성 직후 cancel이 정상 동작함을 확인했다.
+   - 완화 2: 필요하면 interval/concurrency를 Control modal에서 즉시 낮춰 보수적으로 운용할 수 있다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `get_errors` 기준 변경 파일 오류 0건 |
+| 빌드 | ✅ | backend `npm run build`, frontend `npm run build` 성공 |
+| 자동 테스트 | ✅ | backend vitest `12 files / 64 tests passed` |
+| 런타임 통합 | ✅ | `GET /healthz` 200, `POST /api/news/pull-fmp-sec-filing` 기본값 smoke에서 `tickerConcurrency=5`, `requestIntervalMs=100` 로그/결과 확인, `POST /api/news/pull-fmp-press-release` configurable smoke에서 `tickerConcurrency=3`, `requestIntervalMs=250` 반영 확인 |
+
+#### 사용자 확인 요청
+
+- 현재 상태는 기본값 상향, Control Window 연결, build/test/API smoke까지 끝난 상태다.
+- 사용자가 직접 확인할 포인트는 아래 3개다.
+  1. News 화면 `Control`에서 FMP 값을 저장한 뒤 다시 열었을 때 저장값이 유지되는지
+  2. `Recent FMP PR` 또는 `Recent FMP SEC Filing` 실행 시 job log에 설정값이 반영되는지
+  3. 기본값을 건드리지 않았을 때도 기존보다 빠르게 FMP 작업이 진행되는지
+
+### FMP SEC filing summary 생성 추가 (2026-03-23 09:03)
+
+**작성 시각:** 2026-03-23 09:03 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. `pull-fmp-sec-filing` 흐름에 SEC 문서 기반 summary 생성 단계를 추가했다.
+2. summary는 새 컬럼을 만들지 않고 기존 `news_items.body`를 재사용하도록 설계했다.
+3. 요약 소스는 `finalLink` 우선, 실패 시 `link`, 둘 다 실패하면 metadata fallback으로 정했다.
+4. `Recent FMP SEC Filing`, `Custom FMP SEC Filing` 메뉴 설명을 “summary 포함” 기준으로 갱신했다.
+5. 관련 스펙 문서와 skill 문서를 현재 구현 기준으로 동기화했다.
+
+#### 변경 파일
+
+1. `terminal/backend/src/services/secFilingSummary.ts`
+2. `terminal/backend/src/services/newsRepository.ts`
+3. `terminal/backend/src/server.ts`
+4. `terminal/backend/tests/secFilingSummary.test.ts`
+5. `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+6. `terminal/backend_prompt.md`
+7. `.github/copilot-skills/fmp_api.md`
+8. `ai_agent_plan/terminal_ui_ver6_fmp/plan.md`
+
+#### 리스크 / 완화
+
+1. **리스크:** SEC 원문 구조가 form마다 달라 deterministic summary가 빈약할 수 있다.
+   - 완화 1: `8-K`는 item section 우선, `424B5/S-1/S-3/FWP`는 offering keyword 우선으로 분기했다.
+   - 완화 2: 추출 실패 시 metadata fallback을 유지해 body 공백을 막았다.
+2. **리스크:** SEC 문서 fetch가 추가되면서 FMP SEC pull 시간이 늘어날 수 있다.
+   - 완화 1: duplicate row는 insert 후에만 summary를 만들도록 해서 기존 row 재수집 비용을 피했다.
+   - 완화 2: fetch 실패는 retry 후 fallback 처리해 job 전체 실패로 번지지 않게 했다.
+3. **리스크:** UI가 새 컬럼 없이 기존 `body`를 그대로 보여주기 때문에 summary 길이가 길면 가독성이 떨어질 수 있다.
+   - 완화 1: 최대 길이를 제한했다.
+   - 완화 2: 최대 3개 section / lead sentence 위주로만 합성했다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `get_errors` 기준 변경 파일 오류 0건 |
+| 빌드 | ✅ | backend `npm run build`, frontend `npm run build` 성공 |
+| 자동 테스트 | ✅ | backend vitest `11 files / 60 tests passed` |
+| 런타임 통합 | ✅ | `GET /healthz` 200, `POST /api/news/pull-fmp-sec-filing`가 `jobId` 반환, `GET /api/jobs/:jobId`에서 running 후 cancel 로그 확인 |
+
+#### 사용자 확인 요청
+
+- 현재 상태는 코드 반영과 build/test/API smoke까지 끝난 상태다.
+- 사용자가 직접 확인할 포인트는 아래 2개다.
+  1. `Recent FMP SEC Filing` 또는 `Custom FMP SEC Filing` 실행 후 새로 들어오는 row의 body가 metadata 한 줄이 아니라 filing summary처럼 보이는지
+  2. update 메뉴 설명이 summary 포함 문구로 바뀌었는지
 
 ### FMP PR 필터 / recent-custom update / full text plan 재작성 (2026-03-20 19:20)
 

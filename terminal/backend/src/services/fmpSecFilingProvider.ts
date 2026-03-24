@@ -4,7 +4,9 @@ const FMP_BASE = "https://financialmodelingprep.com/stable";
 const MAX_RETRIES = 10;
 const BASE_DELAY_MS = 300;
 const MAX_BACKOFF_MS = 30_000;
-const DEFAULT_REQUEST_INTERVAL_MS = 300;
+const DEFAULT_REQUEST_INTERVAL_MS = 25;
+const DEFAULT_CONCURRENCY = 10;
+const MAX_CONCURRENCY = 20;
 
 export type FmpSecFilingRawItem = {
   symbol?: string;
@@ -37,8 +39,18 @@ export interface FmpSecFilingFetchOptions {
   toDate: string;
   limit?: number;
   maxPages?: number;
+  concurrency?: number;
   requestIntervalMs?: number;
   universeSymbols?: Set<string>;
+  onProgress?: (done: number, total: number) => void;
+  shouldCancel?: () => boolean;
+}
+
+function clampConcurrency(value: number | undefined): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_CONCURRENCY;
+  }
+  return Math.max(1, Math.min(MAX_CONCURRENCY, Math.floor(value as number)));
 }
 
 function encodeDateRangeValue(value: string): string {
@@ -184,7 +196,8 @@ export async function fetchFmpSecFilings(
   options: FmpSecFilingFetchOptions,
 ): Promise<FmpSecFilingMapped[]> {
   const limit = Math.max(1, Math.min(Math.floor(options.limit ?? 100), 100));
-  const maxPages = Math.max(1, Math.min(Math.floor(options.maxPages ?? 20), 100));
+  const maxPages = Math.max(1, Math.min(Math.floor(options.maxPages ?? 40), 100));
+  const concurrency = clampConcurrency(options.concurrency);
   const requestIntervalMs = Math.max(0, Math.min(Math.floor(options.requestIntervalMs ?? DEFAULT_REQUEST_INTERVAL_MS), 5_000));
   const symbols = Array.from(options.universeSymbols ?? []).map((symbol) => symbol.trim().toUpperCase()).filter(Boolean);
 
@@ -194,24 +207,48 @@ export async function fetchFmpSecFilings(
 
   const items: FmpSecFilingMapped[] = [];
   const seenAccessions = new Set<string>();
+  let nextIndex = 0;
+  let completedSymbols = 0;
 
-  for (const symbol of symbols) {
-    for (let page = 0; page < maxPages; page++) {
-      const rawItems = await fetchPage(symbol, options.fromDate, options.toDate, page, limit, requestIntervalMs);
-      if (rawItems.length === 0) break;
-
-      for (const raw of rawItems) {
-        const mapped = mapRawItem(raw);
-        if (!mapped) continue;
-        if (!isDateWithinRange(mapped.acceptedDate || mapped.filingDate, options.fromDate, options.toDate)) continue;
-        if (seenAccessions.has(mapped.accessionNumber)) continue;
-        seenAccessions.add(mapped.accessionNumber);
-        items.push(mapped);
+  const worker = async () => {
+    while (true) {
+      if (options.shouldCancel?.()) {
+        return;
       }
 
-      if (rawItems.length < limit) break;
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      if (currentIndex >= symbols.length) {
+        return;
+      }
+
+      const symbol = symbols[currentIndex];
+      for (let page = 0; page < maxPages; page++) {
+        if (options.shouldCancel?.()) {
+          return;
+        }
+
+        const rawItems = await fetchPage(symbol, options.fromDate, options.toDate, page, limit, requestIntervalMs);
+        if (rawItems.length === 0) break;
+
+        for (const raw of rawItems) {
+          const mapped = mapRawItem(raw);
+          if (!mapped) continue;
+          if (!isDateWithinRange(mapped.acceptedDate || mapped.filingDate, options.fromDate, options.toDate)) continue;
+          if (seenAccessions.has(mapped.accessionNumber)) continue;
+          seenAccessions.add(mapped.accessionNumber);
+          items.push(mapped);
+        }
+
+        if (rawItems.length < limit) break;
+      }
+
+      completedSymbols += 1;
+      options.onProgress?.(completedSymbols, symbols.length);
     }
-  }
+  };
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, symbols.length) }, () => worker()));
 
   return items;
 }

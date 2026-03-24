@@ -5,7 +5,7 @@ const FMP_BASE = "https://financialmodelingprep.com/stable";
 const MAX_RETRIES = 10;
 const BASE_DELAY_MS = 300;
 const MAX_BACKOFF_MS = 30_000;
-const DEFAULT_REQUEST_INTERVAL_MS = 250;
+const DEFAULT_REQUEST_INTERVAL_MS = 25;
 
 type FmpPressReleaseRawItem = {
   symbol?: string;
@@ -126,8 +126,8 @@ export async function fetchFmpPressReleasesByTicker(
   ticker: string,
   options: FmpPressReleaseFetchOptions = {},
 ): Promise<FinnhubMappedItem[]> {
-  const pageLimit = Math.max(1, Math.min(Math.floor(options.pageLimit ?? 50), 100));
-  const maxPages = Math.max(1, Math.min(Math.floor(options.maxPages ?? 8), 50));
+  const pageLimit = Math.max(1, Math.min(Math.floor(options.pageLimit ?? 100), 100));
+  const maxPages = Math.max(1, Math.min(Math.floor(options.maxPages ?? 12), 50));
   const requestIntervalMs = Math.max(0, Math.min(Math.floor(options.requestIntervalMs ?? DEFAULT_REQUEST_INTERVAL_MS), 5_000));
   const fromDate = options.fromDate;
   const toDate = options.toDate;

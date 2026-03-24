@@ -59,13 +59,15 @@
 
 - `Model_1`에서는 뉴스 사건 자체와 과거 유사사례 분포가 1차 판단 기준이고, **기관보유비중(`institutional ownership %`)이 낮고 유동물량 비중(`float %`)이 높은 구조**는 그 뒤에 붙는 **가산점**으로 사용한다. 특히 `강한 가산점`은 final 후보군 안에서는 단순 참고가 아니라 **최종 등급과 최종 순위 재조정에 직접 반영하는 강화 요인**으로 취급한다.
 - 여기에 `insider ownership %`와 `short interest %`도 함께 본다. 다만 이 둘도 사건 자체를 덮어쓰는 주근거가 아니라, 뉴스 이후 수급 반응의 증폭 가능성 또는 잠김 구조를 해석하는 **보조 수급 지표**로 사용한다.
-- `float %`와 `institutional ownership %`는 가능하면 **Finnhub 기준으로 직접 받거나 계산해서 사용**한다. 이 둘은 아래처럼 source와 계산 규칙을 고정한다.
-  - `float %`: Finnhub `stock/profile2`의 `floatingShare`와 `shareOutstanding`을 사용해 계산한다. 기본 계산식은 `float % = floatingShare / shareOutstanding * 100` 이다.
-  - `institutional ownership %`: Finnhub `stock/ownership`의 기관별 `share`를 모두 합산한 뒤, Finnhub `stock/profile2.shareOutstanding`으로 나눠 계산한다. 기본 계산식은 `institutional ownership % estimate = sum(stock/ownership.share) / shareOutstanding * 100` 이다.
-  - Finnhub `profile2.shareOutstanding`은 백만 주 단위로 들어올 수 있으므로, 실제 계산 시에는 API 응답 단위를 먼저 맞춘 뒤 계산한다. 예를 들어 현재 구현 검증 기준에서는 `shareOutstanding * 1,000,000`으로 실제 주식 수로 환산한 뒤 분모로 썼다.
-  - `institutional ownership %`는 위 방식으로 계산하더라도 **실시간 확정치가 아니라 filing-based estimate**로 간주한다. 즉 note에는 가능하면 `institutional ownership estimate %` 또는 `기관보유 비중 추정치`라고 적는다.
-  - Finnhub `stock/ownership` 응답이 없거나 비정상이면 `institutional ownership %`를 억지 추정하지 말고 `데이터 없음`으로 남긴다.
-  - Finnhub `floatingShare` 또는 `shareOutstanding`이 없으면 `float %`도 계산하지 말고 `데이터 없음`으로 남긴다.
+- 수급 데이터 조사의 기본 우선순위는 **FMP API 우선 -> Finnhub fallback -> 웹/SEC 보조 source** 로 둔다. 즉 `Model_1`에서는 수급 관련 숫자를 조사할 때 먼저 FMP API에서 확보 가능한 필드를 확인하고, FMP에서 안정적으로 안 나오는 항목만 Finnhub나 다른 보조 source로 보강한다.
+- `market_cap`, `shareOutstanding`처럼 FMP company/profile 계열에서 직접 받을 수 있는 항목은 가능하면 **FMP API를 우선 source of truth**로 사용한다.
+- `float %`와 `institutional ownership %`는 현재 레포/대화 기준으로 FMP 단일 endpoint만으로 안정적으로 닫히지 않을 수 있으므로, **FMP에서 바로 확보 가능한 수급 필드가 없으면 Finnhub 기준으로 직접 받거나 계산해서 사용**한다. 이 둘은 아래처럼 fallback 계산 규칙을 둔다.
+  - `float %`: 기본은 FMP API 확인 우선, FMP에서 직접 계산 가능한 canonical 값이 없으면 Finnhub `stock/profile2`의 `floatingShare`와 `shareOutstanding`을 사용해 계산한다. fallback 계산식은 `float % = floatingShare / shareOutstanding * 100` 이다.
+  - `institutional ownership %`: 기본은 FMP API 확인 우선, FMP에서 안정적인 ownership 숫자를 못 받으면 Finnhub `stock/ownership`의 기관별 `share`를 모두 합산한 뒤, Finnhub `stock/profile2.shareOutstanding`으로 나눠 계산한다. fallback 계산식은 `institutional ownership % estimate = sum(stock/ownership.share) / shareOutstanding * 100` 이다.
+  - Finnhub `profile2.shareOutstanding`은 백만 주 단위로 들어올 수 있으므로, fallback 계산 시에는 API 응답 단위를 먼저 맞춘 뒤 계산한다. 예를 들어 현재 구현 검증 기준에서는 `shareOutstanding * 1,000,000`으로 실제 주식 수로 환산한 뒤 분모로 썼다.
+  - `institutional ownership %`는 위 fallback 방식으로 계산하더라도 **실시간 확정치가 아니라 filing-based estimate**로 간주한다. 즉 note에는 가능하면 `institutional ownership estimate %` 또는 `기관보유 비중 추정치`라고 적는다.
+  - FMP와 Finnhub 모두에서 적절한 값이 없거나 응답이 비정상이면 `institutional ownership %`를 억지 추정하지 말고 `데이터 없음`으로 남긴다.
+  - FMP와 Finnhub 모두에서 `floatingShare` 또는 `shareOutstanding` 계열 정보를 충분히 확보하지 못하면 `float %`도 계산하지 말고 `데이터 없음`으로 남긴다.
 - `insider ownership %`는 Finnhub에서 기관보유비중처럼 바로 계산되는 canonical 숫자가 아니므로, **토큰을 가장 적게 쓰는 기본 source는 GuruFocus 같은 웹 aggregate page**로 둔다.
   - 기본 우선순위는 `GuruFocus 등 웹 aggregate 단일 숫자 -> SEC DEF 14A ownership table 교차검증 -> 필요시 개별 Form 3/4 추가 확인` 순서로 둔다.
   - 토큰 효율만 보면 `GuruFocus`가 `DEF 14A`보다 우선이다. 이유는 page에 `Insider Ownership 0.12%`처럼 완성된 숫자가 바로 노출되기 때문이다.
@@ -92,9 +94,9 @@
   - `약한 가산점`: 본문 코멘트와 상단 표에는 표시하되, 보통은 동급 내 선호도 조정 정도로만 사용한다.
   - `가산점 없음`: 수급 구조 때문에 별도 상향 근거를 주지 않는다.
 - 다만 이 가산점만으로 약한 사건이나 부정적 유사사례 분포를 억지 상향하면 안 된다. 즉 **수급 가산점은 독립적인 1차 판정기가 아니라, 이미 의미 있는 뉴스 후보의 최종 평가를 강화하는 조정 규칙**으로 사용한다.
-- `Model_1` 최종 서술에서는 해당 ticker의 `float %`, `institutional ownership %`, `insider ownership %`, `short interest %`를 **가능한 한 숫자로 명시**해야 한다. 가능하면 `Float 82.7% (Finnhub profile2 calc)`, `Institutional Ownership Estimate 24.1% (Finnhub ownership sum / shares outstanding)`, `Insider Ownership 11.4%`, `Short Interest 23.8%`처럼 본문 또는 표에 바로 적고, 이 수치들이 왜 가산점 또는 경고 메모로 이어졌는지 짧게 설명한다.
+- `Model_1` 최종 서술에서는 해당 ticker의 `float %`, `institutional ownership %`, `insider ownership %`, `short interest %`를 **가능한 한 숫자로 명시**해야 한다. 가능하면 `Float 82.7% (FMP/Finnhub calc)`, `Institutional Ownership Estimate 24.1% (FMP 확인 후 Finnhub ownership sum / shares outstanding fallback)`, `Insider Ownership 11.4%`, `Short Interest 23.8%`처럼 본문 또는 표에 바로 적고, 이 수치들이 왜 가산점 또는 경고 메모로 이어졌는지 짧게 설명한다.
 - 위 수치들 중 일부가 없으면 값을 추정하지 말고 `데이터 없음`으로 적은 뒤, 그 때문에 수급 보조 판단 또는 squeeze/잠김 구조 해석에 한계가 있다고 명시한다.
-- 이 수치들은 현재 `app.db`의 canonical 뉴스 테이블에 항상 들어 있다고 가정하지 않는다. `float %`와 `institutional ownership %`는 기본적으로 Finnhub 기반으로 직접 받거나 계산하고, 다른 보조 source를 썼다면 최종 note에 그 source를 함께 적는다.
+- 이 수치들은 현재 `app.db`의 canonical 뉴스 테이블에 항상 들어 있다고 가정하지 않는다. 수급 데이터는 기본적으로 FMP API를 먼저 확인하고, FMP만으로 닫히지 않는 항목은 Finnhub 기반 계산 또는 다른 보조 source로 보강하며, 최종 note에는 실제 사용 source를 함께 적는다.
 
 **Model_1 상단 요약 표 수급/등급 표기 규칙 (필수)**
 
@@ -337,8 +339,8 @@
   - `[][][]industry[][][]`는 `company_profiles` 컬럼이 아니라 주로 `securities.industry` 또는 `industryLookup.ts`의 CSV cache fallback에서 온다.
   - API 응답을 사용할 때는 `/api/news`가 내려주는 `[][][]companyDescription[][][]`, `[][][]peers[][][]`, `[][][]ipoDate[][][]`, `[][][]marketCap[][][]`, `[][][]industry[][][]`를 우선 source of truth로 본다.
   - `[][][]float %[][][]`, `[][][]institutional ownership %[][][]`, `[][][]insider ownership %[][][]`, `[][][]short interest %[][][]`는 `Model_1` 수급 보조 가산점용 보조 지표로 취급한다.
-  - `[][][]float %[][][]`는 기본적으로 Finnhub `stock/profile2`의 `floatingShare`, `shareOutstanding` 기반 계산값을 우선 사용한다.
-  - `[][][]institutional ownership %[][][]`는 기본적으로 Finnhub `stock/ownership`의 기관별 `share` 합계와 Finnhub `stock/profile2.shareOutstanding`을 결합해 계산한 `estimate`를 우선 사용한다.
+  - `[][][]float %[][][]`는 기본적으로 FMP API를 먼저 확인하고, FMP에서 canonical 계산값을 안정적으로 못 닫으면 Finnhub `stock/profile2`의 `floatingShare`, `shareOutstanding` 기반 계산값을 fallback으로 사용한다.
+  - `[][][]institutional ownership %[][][]`는 기본적으로 FMP API를 먼저 확인하고, FMP에서 안정적인 ownership 숫자를 못 받으면 Finnhub `stock/ownership`의 기관별 `share` 합계와 Finnhub `stock/profile2.shareOutstanding`을 결합해 계산한 `estimate`를 fallback으로 사용한다.
   - `[][][]insider ownership %[][][]`는 토큰 효율상 기본적으로 GuruFocus 같은 웹 aggregate 단일 숫자를 우선 확인하고, 중요한 케이스만 SEC `DEF 14A` ownership table로 교차검증한다.
   - canonical app DB에 항상 있다고 가정하지 말고, 값이 실제로 계산됐는지와 source/Finnhub 계산 여부를 함께 적는다.
 - 단계별 활용 방식:
@@ -379,7 +381,7 @@
   2. `other-ticker 유사사례`: 다른 ticker에서 비슷한 이슈가 있었는지, 그때 주가가 어떻게 반응했는지
 - 또한 현재 분석 대상 ticker의 `[][][]market_cap[][][]`를 현재 뉴스 요약 섹션에서 반드시 적고, 다른 사례와 비교할 때 기준 cap으로 삼는다.
 - 또한 각 ticker마다 `[][][]float %[][][]`, `[][][]institutional ownership %[][][]`, `[][][]insider ownership %[][][]`, `[][][]short interest %[][][]`를 함께 적고, 그 조합이 왜 `가산점`, `중립`, `가산점 없음`, `squeeze 가능`, `유동성 왜곡 주의` 중 무엇으로 이어지는지 한 줄 설명을 붙인다.
-- 이때 `[][][]float %[][][]`와 `[][][]institutional ownership %[][][]`는 가능하면 source 라벨까지 같이 적는다. 예: `Float 82.7% (Finnhub profile2 calc)`, `Institutional Ownership Estimate 24.1% (Finnhub ownership sum / shares outstanding)`.
+- 이때 `[][][]float %[][][]`와 `[][][]institutional ownership %[][][]`는 가능하면 source 라벨까지 같이 적는다. 예: `Float 82.7% (FMP 확인 후 Finnhub profile2 calc fallback)`, `Institutional Ownership Estimate 24.1% (FMP 확인 후 Finnhub ownership sum / shares outstanding fallback)`.
 - 여러 ticker를 같은 날짜 구간 안에서 서로 비교해 `Primary 1`, `Primary 2`처럼 순서를 매길 때는, **해당 경쟁 ticker들에 대한 수급 가산점 반영이 끝난 뒤에만** 최종 순서를 쓴다. 수급 보강이 사후에 들어갔다면 기존 ranking을 그대로 두지 말고 순서를 다시 검토한다.
 - `same-ticker 유사사례`를 적을 때는 가능하면 아래 항목을 함께 남긴다.
   - 유사 뉴스의 `[][][]date[][][]`

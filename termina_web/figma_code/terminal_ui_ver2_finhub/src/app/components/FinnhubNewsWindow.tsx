@@ -115,6 +115,57 @@ function getFinnhubRequestIntervalMs(): number {
   }
 }
 
+const DEFAULT_FMP_TICKER_CONCURRENCY = 10;
+const DEFAULT_FMP_REQUEST_INTERVAL_MS = 25;
+const DEFAULT_FMP_PR_PAGE_LIMIT = 100;
+const DEFAULT_FMP_PR_MAX_PAGES = 12;
+const DEFAULT_FMP_SEC_MAX_PAGES = 40;
+
+function getFmpTickerConcurrency(): number {
+  try {
+    const value = parseInt(localStorage.getItem('fmp-concurrency') ?? '', 10);
+    return Number.isFinite(value) && value >= 1 && value <= 20 ? value : DEFAULT_FMP_TICKER_CONCURRENCY;
+  } catch {
+    return DEFAULT_FMP_TICKER_CONCURRENCY;
+  }
+}
+
+function getFmpRequestIntervalMs(): number {
+  try {
+    const value = parseInt(localStorage.getItem('fmp-request-interval-ms') ?? '', 10);
+    return Number.isFinite(value) && value >= 0 && value <= 5000 ? value : DEFAULT_FMP_REQUEST_INTERVAL_MS;
+  } catch {
+    return DEFAULT_FMP_REQUEST_INTERVAL_MS;
+  }
+}
+
+function getFmpPrPageLimit(): number {
+  try {
+    const value = parseInt(localStorage.getItem('fmp-pr-page-limit') ?? '', 10);
+    return Number.isFinite(value) && value >= 1 && value <= 100 ? value : DEFAULT_FMP_PR_PAGE_LIMIT;
+  } catch {
+    return DEFAULT_FMP_PR_PAGE_LIMIT;
+  }
+}
+
+function getFmpPrMaxPages(): number {
+  try {
+    const value = parseInt(localStorage.getItem('fmp-pr-max-pages') ?? '', 10);
+    return Number.isFinite(value) && value >= 1 && value <= 50 ? value : DEFAULT_FMP_PR_MAX_PAGES;
+  } catch {
+    return DEFAULT_FMP_PR_MAX_PAGES;
+  }
+}
+
+function getFmpSecMaxPages(): number {
+  try {
+    const value = parseInt(localStorage.getItem('fmp-sec-max-pages') ?? '', 10);
+    return Number.isFinite(value) && value >= 1 && value <= 100 ? value : DEFAULT_FMP_SEC_MAX_PAGES;
+  } catch {
+    return DEFAULT_FMP_SEC_MAX_PAGES;
+  }
+}
+
 function getRtprTickerConcurrency(): number {
   try {
     const value = parseInt(localStorage.getItem('rtpr-ticker-concurrency') ?? '', 10);
@@ -462,6 +513,11 @@ export function FinnhubNewsWindow({
   const [showControlWindow, setShowControlWindow] = useState(false);
   const [finnhubTickerConcurrencyInput, setFinnhubTickerConcurrencyInput] = useState(() => String(getFinnhubTickerConcurrency()));
   const [finnhubRequestIntervalSecInput, setFinnhubRequestIntervalSecInput] = useState(() => String(getFinnhubRequestIntervalMs() / 1000));
+  const [fmpTickerConcurrencyInput, setFmpTickerConcurrencyInput] = useState(() => String(getFmpTickerConcurrency()));
+  const [fmpRequestIntervalMsInput, setFmpRequestIntervalMsInput] = useState(() => String(getFmpRequestIntervalMs()));
+  const [fmpPrPageLimitInput, setFmpPrPageLimitInput] = useState(() => String(getFmpPrPageLimit()));
+  const [fmpPrMaxPagesInput, setFmpPrMaxPagesInput] = useState(() => String(getFmpPrMaxPages()));
+  const [fmpSecMaxPagesInput, setFmpSecMaxPagesInput] = useState(() => String(getFmpSecMaxPages()));
   const [rtprTickerConcurrencyInput, setRtprTickerConcurrencyInput] = useState(() => String(getRtprTickerConcurrency()));
   const [showPreflightModal, setShowPreflightModal] = useState(false);
   const [preflightData, setPreflightData] = useState<{ totalTickers: number; fallbackCount: number; fallbackTickers: string[] } | null>(null);
@@ -789,7 +845,13 @@ export function FinnhubNewsWindow({
     setJobStatus(null);
     try {
       if (sourceType === 'fmp_press_release') {
-        const body: Record<string, unknown> = { mode };
+        const body: Record<string, unknown> = {
+          mode,
+          tickerConcurrency: getFmpTickerConcurrency(),
+          requestIntervalMs: getFmpRequestIntervalMs(),
+          pageLimit: getFmpPrPageLimit(),
+          maxPages: getFmpPrMaxPages(),
+        };
         if (from) body.from = from;
         if (to) body.to = to;
         const res = await fetch(`${API_BASE}/api/news/pull-fmp-press-release`, {
@@ -814,7 +876,12 @@ export function FinnhubNewsWindow({
       }
 
       if (sourceType === 'fmp_sec_filing') {
-        const body: Record<string, unknown> = { mode };
+        const body: Record<string, unknown> = {
+          mode,
+          tickerConcurrency: getFmpTickerConcurrency(),
+          requestIntervalMs: getFmpRequestIntervalMs(),
+          maxPages: getFmpSecMaxPages(),
+        };
         if (from) body.from = from;
         if (to) body.to = to;
         const res = await fetch(`${API_BASE}/api/news/pull-fmp-sec-filing`, {
@@ -945,11 +1012,21 @@ export function FinnhubNewsWindow({
   const handleSaveControlWindow = () => {
     const finnhubTickerConcurrency = Math.max(1, Math.min(20, parseInt(finnhubTickerConcurrencyInput, 10) || 5));
     const finnhubRequestIntervalSec = Math.max(0, Math.min(10, parseFloat(finnhubRequestIntervalSecInput) || 1));
+    const fmpTickerConcurrency = Math.max(1, Math.min(20, parseInt(fmpTickerConcurrencyInput, 10) || DEFAULT_FMP_TICKER_CONCURRENCY));
+    const fmpRequestIntervalMs = Math.max(0, Math.min(5000, parseInt(fmpRequestIntervalMsInput, 10) || DEFAULT_FMP_REQUEST_INTERVAL_MS));
+    const fmpPrPageLimit = Math.max(1, Math.min(100, parseInt(fmpPrPageLimitInput, 10) || DEFAULT_FMP_PR_PAGE_LIMIT));
+    const fmpPrMaxPages = Math.max(1, Math.min(50, parseInt(fmpPrMaxPagesInput, 10) || DEFAULT_FMP_PR_MAX_PAGES));
+    const fmpSecMaxPages = Math.max(1, Math.min(100, parseInt(fmpSecMaxPagesInput, 10) || DEFAULT_FMP_SEC_MAX_PAGES));
     const rtprTickerConcurrency = Math.max(1, Math.min(20, parseInt(rtprTickerConcurrencyInput, 10) || 5));
 
     try {
       localStorage.setItem('finnhub-ticker-concurrency', String(finnhubTickerConcurrency));
       localStorage.setItem('finnhub-request-interval-sec', String(finnhubRequestIntervalSec));
+      localStorage.setItem('fmp-concurrency', String(fmpTickerConcurrency));
+      localStorage.setItem('fmp-request-interval-ms', String(fmpRequestIntervalMs));
+      localStorage.setItem('fmp-pr-page-limit', String(fmpPrPageLimit));
+      localStorage.setItem('fmp-pr-max-pages', String(fmpPrMaxPages));
+      localStorage.setItem('fmp-sec-max-pages', String(fmpSecMaxPages));
       localStorage.setItem('rtpr-ticker-concurrency', String(rtprTickerConcurrency));
     } catch {
       // ignore localStorage failures
@@ -957,6 +1034,11 @@ export function FinnhubNewsWindow({
 
     setFinnhubTickerConcurrencyInput(String(finnhubTickerConcurrency));
     setFinnhubRequestIntervalSecInput(String(finnhubRequestIntervalSec));
+    setFmpTickerConcurrencyInput(String(fmpTickerConcurrency));
+    setFmpRequestIntervalMsInput(String(fmpRequestIntervalMs));
+    setFmpPrPageLimitInput(String(fmpPrPageLimit));
+    setFmpPrMaxPagesInput(String(fmpPrMaxPages));
+    setFmpSecMaxPagesInput(String(fmpSecMaxPages));
     setRtprTickerConcurrencyInput(String(rtprTickerConcurrency));
     setShowControlWindow(false);
   };
@@ -2054,7 +2136,7 @@ export function FinnhubNewsWindow({
                       </button>
                       <button onClick={() => { setShowUpdateMenu(false); handleRecentWithPreflight('fmp_sec_filing'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <RotateCw className="w-3.5 h-3.5 shrink-0 text-violet-500" />
-                        <div><div className="font-medium">Recent FMP SEC Filing</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Global feed · universe filter · SEC filings only</div></div>
+                        <div><div className="font-medium">Recent FMP SEC Filing</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Per-ticker SEC fetch · filing summary included</div></div>
                       </button>
                       <button onClick={() => { setShowUpdateMenu(false); handleRecentWithPreflight('market_news'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <RotateCw className="w-3.5 h-3.5 shrink-0 text-amber-500" />
@@ -2082,7 +2164,7 @@ export function FinnhubNewsWindow({
                       </button>
                       <button onClick={() => { setShowUpdateMenu(false); handleCustomStart('fmp_sec_filing'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <Calendar className="w-3.5 h-3.5 shrink-0 text-violet-500" />
-                        <div><div className="font-medium">Custom FMP SEC Filing</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick date range · SEC filings from FMP global feed</div></div>
+                        <div><div className="font-medium">Custom FMP SEC Filing</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick date range · filing summary included</div></div>
                       </button>
                       <button onClick={() => { setShowUpdateMenu(false); handleCustomStart('market_news'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <Calendar className="w-3.5 h-3.5 shrink-0 text-amber-500" />
@@ -2228,7 +2310,7 @@ export function FinnhubNewsWindow({
                       </button>
                       <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('fmp_sec_filing'); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <FileText className="w-3.5 h-3.5 shrink-0 text-violet-500" />
-                        <div><div className="font-medium">FMP SEC Filing Only</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Extract from SEC/EDGAR finalLink for filing items</div></div>
+                        <div><div className="font-medium">FMP SEC Filing Only</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Extract full text and refresh summary/body for SEC filing items</div></div>
                       </button>
                       <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('market_news'); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <FileText className="w-3.5 h-3.5 shrink-0 text-amber-500" />
@@ -2706,6 +2788,71 @@ export function FinnhubNewsWindow({
                   />
                 </div>
                 <p className="text-[10px] text-gray-400">Default 5. RTPR provider still respects the internal 55 req/min token bucket under the documented 60 rpm limit.</p>
+              </div>
+              <div className="rounded border border-gray-200 dark:border-gray-700 p-3 space-y-3">
+                <div className="text-xs font-medium text-gray-700 dark:text-gray-200">FMP</div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Ticker Concurrency</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={fmpTickerConcurrencyInput}
+                    onChange={(e) => setFmpTickerConcurrencyInput(e.target.value)}
+                    className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Request Interval (ms)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={5000}
+                    step="50"
+                    value={fmpRequestIntervalMsInput}
+                    onChange={(e) => setFmpRequestIntervalMsInput(e.target.value)}
+                    className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">PR Page Limit</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      step="1"
+                      value={fmpPrPageLimitInput}
+                      onChange={(e) => setFmpPrPageLimitInput(e.target.value)}
+                      className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">PR Max Pages</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={50}
+                      step="1"
+                      value={fmpPrMaxPagesInput}
+                      onChange={(e) => setFmpPrMaxPagesInput(e.target.value)}
+                      className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">SEC Max Pages</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    step="1"
+                    value={fmpSecMaxPagesInput}
+                    onChange={(e) => setFmpSecMaxPagesInput(e.target.value)}
+                    className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+                <p className="text-[10px] text-gray-400">Applies to FMP company profile, FMP PR, and FMP SEC pulls. Aggressive defaults: concurrency 10, interval 25ms, PR 100 x 12 pages, SEC 40 pages.</p>
               </div>
             </div>
             <div className="flex justify-end gap-2 mt-4">

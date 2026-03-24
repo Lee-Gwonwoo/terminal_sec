@@ -217,14 +217,34 @@
   - `source='FMP'`
   - `source_type='fmp_sec_filing'`
   - `title = "{symbol}: {formType}"` 처럼 앱이 생성
-  - `body = "Filed {date}, accepted {date}. CIK: {cik}."` 처럼 앱이 생성
+  - `body = SEC filing 원문에서 deterministic summary 생성, 실패 시 "Filed {date}, accepted {date}. CIK: {cik}."` fallback
   - `url = finalLink`
   - `published_at = acceptedDate`
   - `publisher = 'SEC/EDGAR'`
 - 운영적 의미:
-  - 현재 UI/DB에 보이는 제목/요약은 FMP 원문 필드가 아니라 앱이 만든 메타 요약이다.
-  - richer summary가 필요하면 SEC 원문 파싱 또는 후처리 요약 단계가 추가로 필요하다.
+  - 현재 UI title은 앱 생성 값이고, body는 SEC 원문 파싱 결과를 최대 3개 핵심 section 기준으로 요약한 deterministic summary다.
+  - SEC 원문 파싱 실패 시에는 metadata fallback body가 남는다.
+  - 이후 `full text` 작업에서 `source_type='fmp_sec_filing'`을 다시 돌리면 `news_fulltext.full_text`를 채우면서 `body` summary도 함께 backfill 할 수 있다.
   - ticker coverage는 이전 `sec-filings-financials` 단독 방식보다 개선됐지만, universe 규모만큼 API 호출 수는 증가한다.
+
+#### FMP pull 속도 기본값 / Control Window 공유 키
+- 현재 레포 기본값은 이전보다 공격적으로 상향됐다.
+  - `[][][]tickerConcurrency[][][]`: 기본 `10`
+  - `[][][]requestIntervalMs[][][]`: 기본 `25`
+  - `[][][]pageLimit[][][]` for FMP PR: 기본 `100`
+  - `[][][]maxPages[][][]` for FMP PR: 기본 `12`
+  - `[][][]maxPages[][][]` for FMP SEC: 기본 `40`
+- frontend에서 아래 localStorage key를 공통으로 사용한다.
+  - `[][][]fmp-concurrency[][][]`
+  - `[][][]fmp-request-interval-ms[][][]`
+  - `[][][]fmp-pr-page-limit[][][]`
+  - `[][][]fmp-pr-max-pages[][][]`
+  - `[][][]fmp-sec-max-pages[][][]`
+- `FinnhubNewsWindow`의 News Pull Control과 `DataControlWindow`가 위 key를 함께 본다.
+- 중요한 점:
+  - `FMP Company Description`은 `concurrency`, `requestIntervalMs`만 사용한다.
+  - `FMP Press Release`는 `concurrency`, `requestIntervalMs`, `pageLimit`, `maxPages`를 사용한다.
+  - `FMP SEC Filing`은 `concurrency`, `requestIntervalMs`, `maxPages`를 사용한다.
 
 #### FMP SEC endpoint 선택 가이드 (이번 대화에서 검증됨)
 - `sec-filings-financials`는 문서상 유효한 latest feed지만, ticker coverage hole이 있을 수 있다.

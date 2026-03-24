@@ -11,6 +11,7 @@ import * as cheerio from "cheerio";
 const MAX_RETRIES = 10;
 const BASE_DELAY_MS = 500;
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0";
+const MIN_SEC_FULLTEXT_LEN = 200;
 
 // ─── Types ───
 
@@ -275,6 +276,37 @@ function bodyFallback(body: string | null, note: string): ExtractionResult {
   };
 }
 
+export async function extractSecEdgar(url: string, body?: string | null): Promise<ExtractionResult> {
+  try {
+    const res = await fetchWithRetry(url, {
+      headers: {
+        "User-Agent": UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml,text/plain;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+      },
+    });
+
+    if (!res.ok) {
+      return bodyFallback(body ?? null, `sec-edgar-http-${res.status}`);
+    }
+
+    const raw = await res.text();
+    const plainText = /<[a-z][\s\S]*>/i.test(raw) ? htmlToPlainText(raw) : raw.trim();
+    if (plainText.length < MIN_SEC_FULLTEXT_LEN) {
+      return bodyFallback(body ?? null, "sec-edgar-too-short");
+    }
+
+    return {
+      fullText: plainText,
+      extractionStatus: "success",
+      extractionNote: "sec-edgar-fetch",
+      wordCount: countWords(plainText),
+    };
+  } catch (err: any) {
+    return bodyFallback(body ?? null, `sec-edgar-${err.message?.slice(0, 200) ?? "fetch-failed"}`);
+  }
+}
+
 // ─── Domain Dispatcher ───
 
 export async function extractByDomain(
@@ -304,6 +336,9 @@ export async function extractByDomain(
 
     case "FINNHUB":
       return bodyFallback(body ?? null, "finnhub-no-external-page");
+
+    case "SEC/EDGAR":
+      return extractSecEdgar(url, body ?? null);
 
     default:
       return bodyFallback(body ?? null, `no-scraper: ${pub || "(empty)"}`);

@@ -5,12 +5,13 @@
  * extractors, and persists results to news_fulltext table.
  */
 
-import { getRtprBodyBackfillRows, getUnextractedNewsIds, insertFulltext, upsertProvidedFulltext } from "./fulltextRepository.js";
+import { getFmpSecFulltextBackfillRows, getRtprBodyBackfillRows, getUnextractedNewsIds, insertFulltext, upsertProvidedFulltext } from "./fulltextRepository.js";
 import { extractByDomain, htmlToPlainText } from "./fulltextExtractors.js";
 import { updateProgress, appendLog, completeJob, failJob, isJobCancelled } from "./jobManager.js";
 import { getDb } from "../db.js";
 import { fetchRtprArticlesByTicker } from "./ptprNewsProvider.js";
 import { extractOriginUrl } from "./rtprOriginUrlExtractor.js";
+import { buildSecFilingMetadataSummary, summarizeSecDocumentText } from "./secFilingSummary.js";
 
 /** Default concurrency for full text extraction */
 const DEFAULT_CONCURRENCY = 10;
@@ -28,7 +29,9 @@ export async function runFulltextUpdate(
 ): Promise<void> {
   const effectiveConcurrency = Math.max(1, Math.min(concurrency, MAX_CONCURRENCY));
   try {
-    const unextracted = await getUnextractedNewsIds(sourceType, sourceName);
+    const unextracted = sourceType === "fmp_sec_filing"
+      ? await getFmpSecFulltextBackfillRows(sourceName)
+      : await getUnextractedNewsIds(sourceType, sourceName);
     const total = unextracted.length;
 
     appendLog(
@@ -46,6 +49,7 @@ export async function runFulltextUpdate(
     let successCount = 0;
     let skippedCount = 0;
     let failedCount = 0;
+    let summaryUpdatedCount = 0;
     let processed = 0;
     let lastLogAt = 0;
 
@@ -57,12 +61,49 @@ export async function runFulltextUpdate(
       try {
         const result = await extractByDomain(item.url, item.publisher, item.body);
 
-        await insertFulltext(item.id, {
-          fullText: result.fullText,
-          extractionStatus: result.extractionStatus,
-          extractionNote: result.extractionNote,
-          wordCount: result.wordCount,
-        });
+        let summaryText: string | null = null;
+        if (item.source_type === "fmp_sec_filing") {
+          const sourceFullText = result.extractionStatus === "success"
+            ? result.fullText
+            : (item.existing_full_text ?? "");
+          const plainFullText = /<[a-z][\s\S]*>/i.test(sourceFullText) ? htmlToPlainText(sourceFullText) : sourceFullText;
+          const metadataFallback = item.form_type && item.cik && item.filed_at && item.accepted_at
+            ? buildSecFilingMetadataSummary({
+                symbol: "",
+                cik: item.cik,
+                formType: item.form_type,
+                filingDate: item.filed_at,
+                acceptedDate: item.accepted_at,
+                link: item.url,
+                finalLink: item.url,
+              })
+            : (item.body ?? "");
+          if (plainFullText.trim() && item.form_type) {
+            summaryText = summarizeSecDocumentText(item.form_type, plainFullText) ?? metadataFallback;
+          } else if (metadataFallback.trim()) {
+            summaryText = metadataFallback;
+          }
+        }
+
+        if (item.source_type === "fmp_sec_filing" && result.extractionStatus === "success") {
+          await upsertProvidedFulltext(item.id, {
+            fullText: result.fullText,
+            extractionNote: result.extractionNote,
+            wordCount: result.wordCount,
+          });
+        } else {
+          await insertFulltext(item.id, {
+            fullText: result.fullText,
+            extractionStatus: result.extractionStatus,
+            extractionNote: result.extractionNote,
+            wordCount: result.wordCount,
+          });
+        }
+
+        if (item.source_type === "fmp_sec_filing" && summaryText) {
+          await getDb().run(`UPDATE news_items SET body = ? WHERE id = ?`, [summaryText, item.id]);
+          summaryUpdatedCount++;
+        }
 
         if (result.extractionStatus === "success") successCount++;
         else if (result.extractionStatus === "skipped") skippedCount++;
@@ -84,7 +125,7 @@ export async function runFulltextUpdate(
         lastLogAt = processed;
         appendLog(
           jobId,
-          `[${processed}/${total}] ${successCount} ok, ${skippedCount} skip, ${failedCount} fail`,
+          `[${processed}/${total}] ${successCount} ok, ${skippedCount} skip, ${failedCount} fail, ${summaryUpdatedCount} summary`,
         );
       }
     }
@@ -111,13 +152,14 @@ export async function runFulltextUpdate(
 
     appendLog(
       jobId,
-      `Extraction complete: ${successCount} success, ${skippedCount} skipped, ${failedCount} failed (total ${total})`,
+      `Extraction complete: ${successCount} success, ${skippedCount} skipped, ${failedCount} failed, ${summaryUpdatedCount} summary updated (total ${total})`,
     );
     completeJob(jobId, {
       processed: total,
       success: successCount,
       skipped: skippedCount,
       failed: failedCount,
+      summaryUpdated: summaryUpdatedCount,
     });
   } catch (err: any) {
     failJob(jobId, err.message ?? "Unknown error in runFulltextUpdate");

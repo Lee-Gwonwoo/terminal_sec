@@ -19,6 +19,13 @@ export interface UnextractedNewsRow {
   url: string;
   publisher: string | null;
   body: string | null;
+  source_type?: string;
+  form_type?: string | null;
+  cik?: string | null;
+  filed_at?: string | null;
+  accepted_at?: string | null;
+  existing_full_text?: string | null;
+  existing_extraction_status?: string | null;
 }
 
 export interface RtprBodyBackfillRow {
@@ -114,10 +121,46 @@ export async function getUnextractedNewsIds(
     params.push(sourceName);
   }
   return getDb().all<UnextractedNewsRow[]>(
-    `SELECT ni.id, ni.url, ni.publisher, ni.body
+    `SELECT ni.id, ni.url, ni.publisher, ni.body, ni.source_type, sf.form_type, sf.cik, sf.filed_at, sf.accepted_at,
+            nf.full_text AS existing_full_text, nf.extraction_status AS existing_extraction_status
      FROM news_items ni
+     LEFT JOIN sec_filings sf ON sf.news_id = ni.id
      LEFT JOIN news_fulltext nf ON nf.news_id = ni.id
      WHERE nf.news_id IS NULL${whereExtra}
+     ORDER BY ni.published_at DESC`,
+    params,
+  );
+}
+
+export async function getFmpSecFulltextBackfillRows(
+  sourceName?: string,
+): Promise<UnextractedNewsRow[]> {
+  const params: string[] = [];
+  let sourceClause = "";
+  if (sourceName && sourceName !== "all") {
+    sourceClause = " AND ni.source = ?";
+    params.push(sourceName);
+  }
+
+  return getDb().all<UnextractedNewsRow[]>(
+    `SELECT ni.id, ni.url, ni.publisher, ni.body, ni.source_type, sf.form_type, sf.cik, sf.filed_at, sf.accepted_at,
+            nf.full_text AS existing_full_text, nf.extraction_status AS existing_extraction_status
+     FROM news_items ni
+     JOIN sec_filings sf ON sf.news_id = ni.id
+     LEFT JOIN news_fulltext nf ON nf.news_id = ni.id
+     WHERE ni.source_type = 'fmp_sec_filing'${sourceClause}
+       AND (
+         nf.news_id IS NULL
+         OR nf.extraction_status IN ('failed', 'unavailable')
+         OR TRIM(COALESCE(nf.full_text, '')) = ''
+         OR COALESCE(nf.word_count, 0) = 0
+         OR ni.body LIKE 'Filed % accepted % CIK:%'
+         OR ni.body LIKE '%us-gaap:%'
+         OR ni.body LIKE '%dei:%'
+         OR ni.body LIKE '%telephone number, including area code%'
+         OR ni.body LIKE '%Indicate by check mark%'
+         OR ni.body LIKE '%well-known seasoned issuer%'
+       )
      ORDER BY ni.published_at DESC`,
     params,
   );

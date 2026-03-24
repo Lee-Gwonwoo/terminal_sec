@@ -123,15 +123,22 @@ export function DataControlWindow({
     try { localStorage.setItem('finnhub-ticker-concurrency', String(v)); } catch { /* SSR */ }
   };
 
+  const DEFAULT_FMP_CONCURRENCY = 10;
+  const DEFAULT_FMP_REQUEST_INTERVAL_MS = 25;
+  const DEFAULT_FMP_PR_PAGE_LIMIT = 100;
+  const DEFAULT_FMP_PR_MAX_PAGES = 12;
+  const DEFAULT_FMP_SEC_MAX_PAGES = 40;
+
   // ─── FMP Concurrency ───
   const [fmpConcurrency, setFmpConcurrency] = useState(() => {
     try {
       const v = parseInt(localStorage.getItem('fmp-concurrency') ?? '', 10);
-      return v >= 1 && v <= 20 ? v : 5;
-    } catch { return 5; }
+      return v >= 1 && v <= 20 ? v : DEFAULT_FMP_CONCURRENCY;
+    } catch { return DEFAULT_FMP_CONCURRENCY; }
   });
   const saveFmpConcurrency = (n: number) => {
-    const v = Math.max(1, Math.min(20, n));
+    const safe = Number.isFinite(n) ? n : DEFAULT_FMP_CONCURRENCY;
+    const v = Math.max(1, Math.min(20, safe));
     setFmpConcurrency(v);
     try { localStorage.setItem('fmp-concurrency', String(v)); } catch { /* SSR */ }
   };
@@ -140,13 +147,53 @@ export function DataControlWindow({
   const [fmpRequestIntervalMs, setFmpRequestIntervalMs] = useState(() => {
     try {
       const v = parseInt(localStorage.getItem('fmp-request-interval-ms') ?? '', 10);
-      return Number.isFinite(v) && v >= 0 && v <= 5000 ? v : 250;
-    } catch { return 250; }
+      return Number.isFinite(v) && v >= 0 && v <= 5000 ? v : DEFAULT_FMP_REQUEST_INTERVAL_MS;
+    } catch { return DEFAULT_FMP_REQUEST_INTERVAL_MS; }
   });
   const saveFmpRequestIntervalMs = (n: number) => {
-    const v = Math.max(0, Math.min(5000, Math.round(n)));
+    const safe = Number.isFinite(n) ? n : DEFAULT_FMP_REQUEST_INTERVAL_MS;
+    const v = Math.max(0, Math.min(5000, Math.round(safe)));
     setFmpRequestIntervalMs(v);
     try { localStorage.setItem('fmp-request-interval-ms', String(v)); } catch { /* SSR */ }
+  };
+
+  const [fmpPrPageLimit, setFmpPrPageLimit] = useState(() => {
+    try {
+      const v = parseInt(localStorage.getItem('fmp-pr-page-limit') ?? '', 10);
+      return Number.isFinite(v) && v >= 1 && v <= 100 ? v : DEFAULT_FMP_PR_PAGE_LIMIT;
+    } catch { return DEFAULT_FMP_PR_PAGE_LIMIT; }
+  });
+  const saveFmpPrPageLimit = (n: number) => {
+    const safe = Number.isFinite(n) ? n : DEFAULT_FMP_PR_PAGE_LIMIT;
+    const v = Math.max(1, Math.min(100, Math.round(safe)));
+    setFmpPrPageLimit(v);
+    try { localStorage.setItem('fmp-pr-page-limit', String(v)); } catch { /* SSR */ }
+  };
+
+  const [fmpPrMaxPages, setFmpPrMaxPages] = useState(() => {
+    try {
+      const v = parseInt(localStorage.getItem('fmp-pr-max-pages') ?? '', 10);
+      return Number.isFinite(v) && v >= 1 && v <= 50 ? v : DEFAULT_FMP_PR_MAX_PAGES;
+    } catch { return DEFAULT_FMP_PR_MAX_PAGES; }
+  });
+  const saveFmpPrMaxPages = (n: number) => {
+    const safe = Number.isFinite(n) ? n : DEFAULT_FMP_PR_MAX_PAGES;
+    const v = Math.max(1, Math.min(50, Math.round(safe)));
+    setFmpPrMaxPages(v);
+    try { localStorage.setItem('fmp-pr-max-pages', String(v)); } catch { /* SSR */ }
+  };
+
+  const [fmpSecMaxPages, setFmpSecMaxPages] = useState(() => {
+    try {
+      const v = parseInt(localStorage.getItem('fmp-sec-max-pages') ?? '', 10);
+      return Number.isFinite(v) && v >= 1 && v <= 100 ? v : DEFAULT_FMP_SEC_MAX_PAGES;
+    } catch { return DEFAULT_FMP_SEC_MAX_PAGES; }
+  });
+  const saveFmpSecMaxPages = (n: number) => {
+    const safe = Number.isFinite(n) ? n : DEFAULT_FMP_SEC_MAX_PAGES;
+    const v = Math.max(1, Math.min(100, Math.round(safe)));
+    setFmpSecMaxPages(v);
+    try { localStorage.setItem('fmp-sec-max-pages', String(v)); } catch { /* SSR */ }
   };
 
   // ─── FMP skip-existing toggle ───
@@ -808,12 +855,12 @@ export function DataControlWindow({
             </div>
           </div>
           <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">
-            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">FMP Concurrency</h3>
+            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">FMP Request Concurrency</h3>
             <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3">
-              FMP Company Description 다운로드 시 병렬 요청 수. 높을수록 빠르지만 API rate limit 위험. 프로세스 전역 throttle로 실제 요청 간격을 제어합니다.
+              FMP Company Description, FMP Press Release, FMP SEC Filing pull이 공통으로 참조하는 병렬 요청 수입니다. 높을수록 빠르지만 API rate limit 위험이 커집니다.
             </p>
             <div className="flex gap-2 mb-3 flex-wrap">
-              {[1, 3, 5, 10].map(preset => (
+              {[3, 5, 10, 15].map(preset => (
                 <button
                   key={`fmp-c-${preset}`}
                   onClick={() => saveFmpConcurrency(preset)}
@@ -845,10 +892,10 @@ export function DataControlWindow({
           <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">
             <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">FMP Request Interval</h3>
             <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3">
-              FMP 요청 사이 최소 간격(ms). 기본 250ms. 프로세스 전역 throttle이 걸립니다.
+              FMP 요청 사이 최소 간격(ms). 기본 25ms. Company Description, FMP Press Release, FMP SEC Filing pull이 공통으로 사용합니다.
             </p>
             <div className="flex gap-2 mb-3 flex-wrap">
-              {[0, 100, 250, 500, 1000].map(preset => (
+              {[0, 25, 50, 100, 250].map(preset => (
                 <button
                   key={`fmp-interval-${preset}`}
                   onClick={() => saveFmpRequestIntervalMs(preset)}
@@ -876,6 +923,56 @@ export function DataControlWindow({
               <span className="text-[11px] text-gray-500 w-10 text-right">5000</span>
               <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300 w-14 text-right">{fmpRequestIntervalMs}ms</span>
             </div>
+          </div>
+          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">
+            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">FMP PR Paging</h3>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3">
+              FMP press release pull에서 ticker당 얼마나 깊게 page를 탐색할지 정합니다. 기본값은 더 공격적인 100 rows x 12 pages입니다.
+            </p>
+            <div className="grid grid-cols-2 gap-4">
+              <label className="text-xs text-gray-600 dark:text-gray-300">
+                <span className="block mb-1">Page Limit</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  step={1}
+                  value={fmpPrPageLimit}
+                  onChange={e => saveFmpPrPageLimit(parseInt(e.target.value, 10))}
+                  className="w-full rounded border border-gray-300 dark:border-gray-600 px-2 py-1.5 bg-white dark:bg-gray-800"
+                />
+              </label>
+              <label className="text-xs text-gray-600 dark:text-gray-300">
+                <span className="block mb-1">Max Pages</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  step={1}
+                  value={fmpPrMaxPages}
+                  onChange={e => saveFmpPrMaxPages(parseInt(e.target.value, 10))}
+                  className="w-full rounded border border-gray-300 dark:border-gray-600 px-2 py-1.5 bg-white dark:bg-gray-800"
+                />
+              </label>
+            </div>
+          </div>
+          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">
+            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">FMP SEC Paging</h3>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3">
+              FMP SEC filing pull에서 symbol별 최대 몇 페이지까지 조회할지 정합니다. 기본값은 40 pages입니다.
+            </p>
+            <label className="text-xs text-gray-600 dark:text-gray-300">
+              <span className="block mb-1">Max Pages</span>
+              <input
+                type="number"
+                min={1}
+                max={100}
+                step={1}
+                value={fmpSecMaxPages}
+                onChange={e => saveFmpSecMaxPages(parseInt(e.target.value, 10))}
+                className="w-full rounded border border-gray-300 dark:border-gray-600 px-2 py-1.5 bg-white dark:bg-gray-800"
+              />
+            </label>
           </div>
           <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">
             <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">FMP Skip Existing</h3>
