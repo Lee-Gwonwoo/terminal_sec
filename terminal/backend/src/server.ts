@@ -127,6 +127,11 @@ type TickerListRow = {
   industry: string | null;
   ipoDate: string | null;
   marketCap: number | null;
+  floatPct: number | null;
+  institutionalPct: number | null;
+  marketCapSource: string | null;
+  floatSource: string | null;
+  institutionalSource: string | null;
 };
 
 function parseList(input: unknown): string[] | undefined {
@@ -354,6 +359,11 @@ function mapCsvTickerRowsToListRows(rows: Array<{ ticker: string; name: string |
     industry: row.industry,
     ipoDate: null,
     marketCap: null,
+    floatPct: null,
+    institutionalPct: null,
+    marketCapSource: null,
+    floatSource: null,
+    institutionalSource: null,
   }));
 }
 
@@ -390,6 +400,11 @@ async function getDefaultUniverseRows(): Promise<TickerListRow[]> {
         industry: string | null;
         ipo_date: string | null;
         market_cap: number | null;
+        float_pct: number | null;
+        institutional_pct: number | null;
+        market_cap_source: string | null;
+        float_source: string | null;
+        institutional_source: string | null;
       }>>(
         `SELECT s.ticker, s.exchange, s.name, s.sector, s.industry,
                 (
@@ -405,7 +420,42 @@ async function getDefaultUniverseRows(): Promise<TickerListRow[]> {
                   WHERE cp.security_id = s.id
                   ORDER BY cp.fetched_at DESC
                   LIMIT 1
-                ) AS market_cap
+                ) AS market_cap,
+                (
+                  SELECT cp.float_pct
+                  FROM company_profiles cp
+                  WHERE cp.security_id = s.id AND cp.float_pct IS NOT NULL
+                  ORDER BY cp.fetched_at DESC
+                  LIMIT 1
+                ) AS float_pct,
+                (
+                  SELECT cp.institutional_pct
+                  FROM company_profiles cp
+                  WHERE cp.security_id = s.id AND cp.institutional_pct IS NOT NULL
+                  ORDER BY cp.fetched_at DESC
+                  LIMIT 1
+                ) AS institutional_pct,
+                (
+                  SELECT cp.market_cap_source
+                  FROM company_profiles cp
+                  WHERE cp.security_id = s.id AND cp.market_cap IS NOT NULL
+                  ORDER BY cp.fetched_at DESC
+                  LIMIT 1
+                ) AS market_cap_source,
+                (
+                  SELECT cp.float_source
+                  FROM company_profiles cp
+                  WHERE cp.security_id = s.id AND cp.float_pct IS NOT NULL
+                  ORDER BY cp.fetched_at DESC
+                  LIMIT 1
+                ) AS float_source,
+                (
+                  SELECT cp.institutional_source
+                  FROM company_profiles cp
+                  WHERE cp.security_id = s.id AND cp.institutional_pct IS NOT NULL
+                  ORDER BY cp.fetched_at DESC
+                  LIMIT 1
+                ) AS institutional_source
          FROM ticker_universe_items ui
          JOIN securities s ON s.id = ui.security_id
          WHERE ui.universe_id = ?
@@ -421,6 +471,11 @@ async function getDefaultUniverseRows(): Promise<TickerListRow[]> {
           industry: row.industry ?? null,
           ipoDate: row.ipo_date ?? null,
           marketCap: row.market_cap ?? null,
+          floatPct: row.float_pct ?? null,
+          institutionalPct: row.institutional_pct ?? null,
+          marketCapSource: row.market_cap_source ?? null,
+          floatSource: row.float_source ?? null,
+          institutionalSource: row.institutional_source ?? null,
         }));
       }
     }
@@ -440,6 +495,11 @@ async function getDefaultUniverseRows(): Promise<TickerListRow[]> {
       industry: null,
       ipoDate: null,
       marketCap: null,
+      floatPct: null,
+      institutionalPct: null,
+      marketCapSource: null,
+      floatSource: null,
+      institutionalSource: null,
     }));
   }
 }
@@ -3208,6 +3268,135 @@ app.post("/api/company-profiles/pull-market-cap", async (req, res) => {
           skippedRecent: skippedCount,
           errors: errors.size,
         });
+      } catch (error) {
+        failJob(jobId, error instanceof Error ? error.message : String(error));
+      }
+    })();
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Unknown error" });
+  }
+});
+
+// ── Pull FMP Float Data ────────────────────────────────────────────────────
+app.post("/api/company-profiles/pull-float", async (req, res) => {
+  try {
+    const body = req.body as { tickers?: string[]; maxTickers?: number };
+    let tickers = body.tickers;
+    if (!tickers || tickers.length === 0) {
+      tickers = await getDefaultUniverseTickers();
+    }
+    const max = body.maxTickers ?? tickers.length;
+    const target = tickers.slice(0, max);
+
+    const { getTickersWithRecentFloat } = await import("./services/companyProfileRepository.js");
+    const recentSet = await getTickersWithRecentFloat(24);
+    const filtered = target.filter((t) => !recentSet.has(t.toUpperCase()));
+    const skippedCount = target.length - filtered.length;
+
+    const jobId = createJob(filtered.length);
+    appendLog(jobId, `Starting FMP float update: ${filtered.length} tickers to fetch (${skippedCount} skipped)`);
+    res.json({ jobId });
+
+    void (async () => {
+      try {
+        const { fetchFmpSharesFloatBatch } = await import("./services/fmpSharesFloatProvider.js");
+        const { results, errors, cancelled } = await fetchFmpSharesFloatBatch(filtered, {
+          onProgress: (done, total) => { updateProgress(jobId, done, total); },
+          shouldCancel: () => isJobCancelled(jobId),
+        });
+
+        if (cancelled) { appendLog(jobId, `Job cancelled after ${results.size} tickers`); return; }
+
+        let updated = 0;
+        for (const [ticker, data] of results) {
+          const existingSec = await getDb().get<{ id: number }>(
+            "SELECT id FROM securities WHERE ticker = ? ORDER BY id ASC LIMIT 1",
+            [ticker.toUpperCase()],
+          );
+          if (!existingSec) continue;
+          const { upsertFloat } = await import("./services/companyProfileRepository.js");
+          await upsertFloat(existingSec.id, "fmp", data.floatShares, data.freeFloat, data.outstandingShares, "fmp");
+          updated++;
+          appendLog(jobId, `${ticker}: float ${data.freeFloat != null ? data.freeFloat.toFixed(2) + "%" : "N/A"}`);
+        }
+
+        for (const [ticker, message] of errors) {
+          appendLog(jobId, `${ticker}: error - ${message}`);
+        }
+
+        completeJob(jobId, { updated, total: filtered.length, skippedRecent: skippedCount, errors: errors.size });
+      } catch (error) {
+        failJob(jobId, error instanceof Error ? error.message : String(error));
+      }
+    })();
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Unknown error" });
+  }
+});
+
+// ── Pull Finnhub Institutional Ownership ───────────────────────────────────
+app.post("/api/company-profiles/pull-institutional", async (req, res) => {
+  try {
+    const body = req.body as { tickers?: string[]; maxTickers?: number; tickerConcurrency?: number };
+    let tickers = body.tickers;
+    if (!tickers || tickers.length === 0) {
+      tickers = await getDefaultUniverseTickers();
+    }
+    const max = body.maxTickers ?? tickers.length;
+    const target = tickers.slice(0, max);
+    const tickerConcurrency = clampFinnhubCompanyDataConcurrency(body.tickerConcurrency);
+
+    const { getTickersWithRecentInstitutional } = await import("./services/companyProfileRepository.js");
+    const recentSet = await getTickersWithRecentInstitutional(24);
+    const filtered = target.filter((t) => !recentSet.has(t.toUpperCase()));
+    const skippedCount = target.length - filtered.length;
+
+    const jobId = createJob(filtered.length);
+    appendLog(jobId, `Starting Finnhub institutional update: ${filtered.length} tickers (${skippedCount} skipped, concurrency=${tickerConcurrency})`);
+    res.json({ jobId });
+
+    void (async () => {
+      try {
+        // Build outstanding shares map from existing DB data (FMP float rows)
+        const outstandingMap = new Map<string, number>();
+        for (const ticker of filtered) {
+          const row = await getDb().get<{ outstanding_shares: number | null }>(
+            `SELECT cp.outstanding_shares FROM company_profiles cp
+             JOIN securities s ON s.id = cp.security_id
+             WHERE s.ticker = ? AND cp.outstanding_shares IS NOT NULL
+             ORDER BY cp.fetched_at DESC LIMIT 1`,
+            [ticker.toUpperCase()],
+          );
+          if (row?.outstanding_shares) outstandingMap.set(ticker.toUpperCase(), row.outstanding_shares);
+        }
+
+        const { fetchFinnhubOwnershipBatch } = await import("./services/finnhubOwnershipProvider.js");
+        const { results, errors, cancelled } = await fetchFinnhubOwnershipBatch(filtered, outstandingMap, {
+          concurrency: tickerConcurrency,
+          onProgress: (done, total) => { updateProgress(jobId, done, total); },
+          shouldCancel: () => isJobCancelled(jobId),
+        });
+
+        if (cancelled) { appendLog(jobId, `Job cancelled after ${results.size} tickers`); return; }
+
+        let updated = 0;
+        for (const [ticker, data] of results) {
+          const existingSec = await getDb().get<{ id: number }>(
+            "SELECT id FROM securities WHERE ticker = ? ORDER BY id ASC LIMIT 1",
+            [ticker.toUpperCase()],
+          );
+          if (!existingSec) continue;
+          const { upsertInstitutional } = await import("./services/companyProfileRepository.js");
+          await upsertInstitutional(existingSec.id, "finnhub", data.institutionalPct, "finnhub");
+          updated++;
+          appendLog(jobId, `${ticker}: institutional ${data.institutionalPct != null ? data.institutionalPct.toFixed(2) + "%" : "N/A"} (${data.holderCount} holders)`);
+        }
+
+        for (const [ticker, message] of errors) {
+          appendLog(jobId, `${ticker}: error - ${message}`);
+        }
+
+        completeJob(jobId, { updated, total: filtered.length, skippedRecent: skippedCount, errors: errors.size });
       } catch (error) {
         failJob(jobId, error instanceof Error ? error.message : String(error));
       }

@@ -2,6 +2,23 @@
 
 > 이 문서는 2026-03-20 기준 `terminal_ui_ver6_fmp` 작업의 구현 계획서다. 현재 목표는 `FMP press release` 전용 흐름을 유지하면서, 기존 `Finnhub SEC filing` 데이터와 수집 경로를 안전하게 제거하는 것이다.
 
+### PLAN CHANGE — 2026-03-24 18:33 (DefaultTickerWindow 수급 데이터 확장)
+- 사용자 요청에 따라 `DefaultTickerWindow`에 `Float %`, `Institutional %`를 추가로 표시하고, 각각의 update 버튼을 제공한다.
+- 기본 source 원칙은 아래처럼 고정한다.
+  - `Float %`: 기본적으로 FMP에서 조회
+  - `Institutional %`: 기본적으로 FMP에서 조회
+  - source 데이터가 비거나 canonical 퍼센트로 바로 닫히지 않으면 그 사실을 UI/로그에 숨기지 않고 남긴다.
+- DB는 **market cap과 같은 앱 DB(`terminal/backend/backend/data/app.db`)를 계속 사용**한다.
+  - 다만 단순히 `market_cap`이 있는 현재 컬럼을 재활용하는 것이 아니라, 같은 company profile 계열 저장소인 `company_profiles`에 수급용 컬럼을 확장하는 방향으로 설계한다.
+  - 즉 “같은 DB/같은 테이블 family”는 맞지만, `market_cap`과 동일 컬럼에 덮어쓰는 방식은 사용하지 않는다.
+- 이번 리비전의 핵심 결정은 아래와 같다.
+  - frontend: `DefaultTickerWindow` 표에 `Float %`, `Institutional %`, 가능하면 `Source` 또는 `Updated` 힌트를 추가
+  - frontend: 기존 `Market Cap Update`와 별도로 `Float Update`, `Institutional Update` 버튼 추가
+  - backend: FMP 전용 supply metric route를 추가하고 background job + polling 패턴을 유지
+  - backend: `GET /api/tickers`가 최신 `company_profiles`에서 `float_pct`, `institutional_ownership_pct`도 같이 반환하도록 확장
+  - docs: `backend_prompt.md`, `figma_frontend_prompt.md`, 본 `plan.md`를 함께 갱신
+
+
 ### PLAN CHANGE — 2026-03-20 20:26
 - 사용자 결정에 따라 legacy `Finnhub SEC filing`은 유지하지 않고 제거한다.
 - 이번 리비전의 제거 대상은 아래 둘이다.
@@ -453,3 +470,196 @@ npm.cmd run build
   - Finnhub News 상단 툴바를 `검색 블록 / 제어 블록 / 유틸리티 줄` 구조로 재배치했다.
   - 검색창과 날짜 입력칸이 넓어졌고, action 버튼은 여러 줄로 그룹화됐다.
 - 남은 것은 사용자가 UI에서 `fmp pr` / `fmp sec` 관련 버튼 흐름을 직접 확인하는 수동 점검이다.
+
+### 추가 구현 계획 — DefaultTickerWindow 수급 데이터(FMP 우선)
+
+### 목표
+- `DefaultTickerWindow` 표에 `Float %`, `Institutional %`를 표시한다.
+- 사용자가 각 항목을 별도 job으로 갱신할 수 있게 `Float Update`, `Institutional Update` 버튼을 추가한다.
+- 수급 데이터는 기본적으로 FMP를 우선 source로 사용한다.
+- 저장 위치는 기존 market cap과 같은 `app.db`의 `company_profiles` 계열로 통합한다.
+
+### 현재 레포 상태(중요, 확인됨)
+- 현재 `DefaultTickerWindow`는 `Ticker | Name | Exchange | Industry | IPO Date | Market Cap | Del`만 표시한다.
+- 현재 update 버튼은 `Market Cap Update` 하나뿐이고, `POST /api/company-profiles/pull-market-cap`를 호출한다.
+- `GET /api/tickers`는 default universe row를 만들 때 최신 `company_profiles`에서 `ipo_date`, `market_cap`만 읽는다.
+- 현재 FMP provider는 `stable/profile`만 사용하며 `mktCap`는 저장하지만, `float %`, `institutional %`는 아직 저장/반환하지 않는다.
+- 현재 Model_1/뉴스 enrichment에서도 수급 지표는 아직 API 응답으로 노출하지 않는다.
+
+### 제약 / 비범위
+- 이번 리비전에서는 `insider ownership %`, `short interest %`까지 한 번에 넣지 않는다.
+- 이번 리비전에서는 market cap update source를 Finnhub에서 FMP로 교체하지 않는다.
+- 이번 리비전에서는 별도 신규 DB 파일을 만들지 않는다.
+- 이번 리비전에서는 research note 자동 계산 또는 Model_1 ranking 로직까지 바로 연결하지 않는다.
+
+### 읽는 방법(비개발자/일반인 기준)
+- 이 리비전은 `DefaultTickerWindow` 표와 update 버튼 2개를 추가하는 작업이다.
+- 사용자가 눈으로 확인할 핵심은 아래 3개다.
+  1. 표에 `Float %`, `Institutional %` 칼럼이 생겼는지
+  2. `Float Update`, `Institutional Update` 버튼이 보이는지
+  3. 버튼 실행 후 숫자가 채워지고 로그가 정상 표시되는지
+
+### 프로세스 템플릿(plan 변경 + 단계 완료 확인)
+- Step 1: FMP endpoint와 저장 스키마를 확정
+- Step 2: backend route/provider/DB 조회 확장
+- Step 3: frontend 표/버튼 확장
+- Step 4: build/test/runtime 검증
+- 각 Step 완료 후 검증 결과와 사용자 확인 포인트를 별도로 보고한다.
+
+### 아키텍처(상위)
+- source fetch:
+  - FMP `shares-float` 계열 endpoint로 float/outstanding 계열 수집
+  - FMP `institutional-ownership` 계열 endpoint로 institutional ownership summary 수집
+- persistence:
+  - `app.db`의 `company_profiles`에 수급용 컬럼을 추가 저장
+  - source는 기존처럼 `security_id + source` 기준 row를 유지하고 `source='fmp'` row를 우선 사용
+- read path:
+  - `GET /api/tickers`가 최신 non-null `float_pct`, `institutional_ownership_pct`를 함께 반환
+  - `DefaultTickerWindow`는 새 row 필드를 그대로 렌더
+
+### 결정/선행조건(초기에 확정 필요)
+| 결정 | 현재 선택 | 이유 |
+|------|-----------|------|
+| 수급 데이터 저장 위치 | `company_profiles` 확장 | 기존 market cap/ipo/company profile 저장 위치와 일관됨 |
+| update 버튼 구조 | `Float Update`, `Institutional Update` 분리 | 실패/coverage/속도가 다를 수 있어 로그와 재실행을 분리하는 편이 안전 |
+| 기본 source | FMP 우선 | 사용자 요청 + Model_1 지침과 일치 |
+| fallback 표기 | 숫자 없음은 `-`, 로그에는 `missing / unsupported / no data` 명시 | 데이터 부재를 숨기지 않기 위함 |
+
+### 계획 중간 필수 확인
+1. FMP `shares-float` 응답이 `float shares`, `outstanding shares`, `float %`를 직접 주는지 확인
+2. FMP `institutional-ownership/symbol-positions-summary` 또는 대체 summary endpoint가 종목별 `%`를 직접 주는지 확인
+3. 직접 `%`가 없으면 앱에서 계산 가능한지, 아니면 summary value만 저장해야 하는지 확인
+4. 최신 `company_profiles` 대표 row 선택이 source 혼합 때문에 흔들리지 않는지 확인
+
+### 제안하는 구현 순서(이유)
+1. FMP 응답 shape를 먼저 고정해야 DB 컬럼과 UI 표기 형식을 정확히 정할 수 있다.
+2. 그 다음 backend 저장/조회 경로를 닫아야 frontend가 단순 row 렌더로 끝난다.
+3. 마지막에 UI 버튼/표를 붙이면 검증 범위가 가장 작다.
+
+### 단계별 계획(각 단계: 구현 → 검증)
+
+#### ⬜ Step 1 — FMP supply metric source와 저장 스키마 확정
+
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 1-1 | FMP `shares-float` endpoint payload를 확인해 `float_pct` 계산/저장 규칙을 확정 | `terminal/backend/src/services/*`, `plan.md` | endpoint field 목록 정리 | ⬜ |
+| 1-2 | FMP institutional ownership summary endpoint payload를 확인해 `%` 저장 규칙을 확정 | `terminal/backend/src/services/*`, `plan.md` | endpoint field 목록 정리 | ⬜ |
+| 1-3 | `company_profiles`에 추가할 컬럼 집합을 확정 | `terminal/backend/src/db.ts`, `plan.md` | 컬럼 정의 검토 | ⬜ |
+
+1-1 목적: Float 데이터를 FMP에서 직접 받을지, shares 기반 계산할지 먼저 고정한다.
+1-2 목적: Institutional 값을 raw filing extract가 아니라 summary 값으로 받을 수 있는지 확인한다.
+1-3 목적: 같은 DB를 쓰되 market cap과 다른 수급 컬럼을 명확히 분리한다.
+
+검증 훅:
+```powershell
+rg -n "shares-float|institutional-ownership|company_profiles" c:\github_coding\terminal_sec
+```
+사용자 확인 필요: **예**
+
+#### ⬜ Step 2 — Backend 저장/조회 경로 추가
+
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 2-1 | FMP float provider/helper 추가 | `terminal/backend/src/services/` | provider unit mapping 확인 | ⬜ |
+| 2-2 | FMP institutional provider/helper 추가 | `terminal/backend/src/services/` | provider unit mapping 확인 | ⬜ |
+| 2-3 | `company_profiles` upsert와 schema 확장 | `terminal/backend/src/db.ts`, `terminal/backend/src/services/companyProfileRepository.ts` | DB 컬럼/업데이트 확인 | ⬜ |
+| 2-4 | `GET /api/tickers` 응답에 `floatPct`, `institutionalPct` 추가 | `terminal/backend/src/server.ts` | API 응답 샘플 확인 | ⬜ |
+| 2-5 | `POST /api/company-profiles/pull-fmp-float`, `POST /api/company-profiles/pull-fmp-institutional` route 추가 | `terminal/backend/src/server.ts` | job 생성/로그 확인 | ⬜ |
+
+2-1 목적: Float 데이터 수집 책임을 route와 분리한다.
+2-2 목적: Institutional 수집 로직을 별도 job으로 분리해 실패/속도 차이를 독립 처리한다.
+2-3 목적: market cap과 같은 저장소를 쓰되 수급 전용 필드를 추가한다.
+2-4 목적: frontend가 별도 추가 fetch 없이 기존 `/api/tickers`로 수급 컬럼을 받게 한다.
+2-5 목적: DefaultTickerWindow에서 market cap과 같은 job UX를 재사용한다.
+
+검증 훅:
+```powershell
+Get-Content c:\github_coding\terminal_sec\terminal\backend\src\server.ts | Select-String -Pattern "pull-fmp-float|pull-fmp-institutional|/api/tickers"
+```
+사용자 확인 필요: **예**
+
+#### ⬜ Step 3 — DefaultTickerWindow 표와 버튼 확장
+
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 3-1 | `TickerRow`에 `floatPct`, `institutionalPct` 필드 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DefaultTickerWindow.tsx` | 타입 에러 0개 | ⬜ |
+| 3-2 | 표 컬럼에 `Float %`, `Institutional %` 추가 | 같은 파일 | 테이블 렌더 확인 | ⬜ |
+| 3-3 | `Float Update`, `Institutional Update` 버튼과 job polling 추가 | 같은 파일 | 버튼/로그 표시 확인 | ⬜ |
+| 3-4 | 프론트 스펙 문서 동기화 | `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md` | 문서 반영 확인 | ⬜ |
+
+3-1 목적: backend 응답 필드를 프론트 타입에 반영한다.
+3-2 목적: 사용자가 market cap 옆에서 바로 수급 퍼센트를 볼 수 있게 한다.
+3-3 목적: market cap update와 같은 패턴으로 FMP 수급 업데이트를 실행하게 한다.
+3-4 목적: UI와 스펙 문서 간 드리프트를 막는다.
+
+검증 훅:
+```powershell
+Get-Content c:\github_coding\terminal_sec\termina_web\figma_code\terminal_ui_ver2_finhub\src\app\components\DefaultTickerWindow.tsx | Select-String -Pattern "Float|Institutional|Update"
+```
+사용자 확인 필요: **예**
+
+#### ⬜ Step 4 — 검증 및 운영 문서 반영
+
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 4-1 | 정적 분석 확인 | 변경 파일 전체 | `get_errors` 0개 | ⬜ |
+| 4-2 | backend/frontend build 실행 | `terminal`, 프론트 프로젝트 | build 성공 | ⬜ |
+| 4-3 | workspace test 실행 | `terminal` | test pass | ⬜ |
+| 4-4 | runtime에서 두 update route와 `/api/tickers` 응답 검증 | dev server | job + API 응답 확인 | ⬜ |
+| 4-5 | backend 스펙 문서 동기화 | `terminal/backend_prompt.md` | 문서 반영 확인 | ⬜ |
+
+4-1 목적: 타입/문법 회귀를 먼저 막는다.
+4-2 목적: backend/frontend 번들 수준에서 기능이 닫히는지 확인한다.
+4-3 목적: 기존 테스트 회귀를 확인한다.
+4-4 목적: 실제 버튼이 누를 route와 row 데이터가 런타임에서 맞는지 본다.
+4-5 목적: backend 계약 문서를 현재 응답 shape에 맞춘다.
+
+검증 훅:
+```powershell
+Set-Location c:\github_coding\terminal_sec\terminal
+npm.cmd run build
+npm.cmd run test
+```
+사용자 확인 필요: **예**
+
+### 미확정 사항(명시 결정 필요)
+| ID | 내용 | 선택지 | 차단 대상 Step |
+|----|------|--------|----------------|
+| U1 | FMP institutional endpoint가 직접 `%`를 주지 않을 때 저장 형식 | `앱 계산 % 저장` / `provider summary value 저장` | Step 1, Step 2 |
+| U2 | UI에 source/updated_at 힌트를 같이 노출할지 | `숫자만` / `숫자 + source` | Step 3 |
+
+### 실행 의존성 그래프
+Legend: `⬜ 미착수` `⏳ 구현완료-확인대기` `✅ 사용자확인완료` `🚫 차단`
+
+Track A — Source/Schema
+- ⬜ 1-1 FMP float endpoint 확인
+- ⬜ 1-2 FMP institutional endpoint 확인
+- ⬜ 1-3 company_profiles 컬럼 확정
+- ⬜ 2-1 float provider/helper 추가
+- ⬜ 2-2 institutional provider/helper 추가
+- ⬜ 2-3 schema/upsert 확장
+
+Track B — API/UI
+- 🚫 2-4 `/api/tickers` 응답 확장
+- 🚫 2-5 update route 2개 추가
+- 🚫 3-1 프론트 타입 확장
+- 🚫 3-2 표 컬럼 추가
+- 🚫 3-3 update 버튼/polling 추가
+- 🚫 3-4 프론트 문서 동기화
+
+Track C — 검증/문서
+- 🚫 4-1 정적 분석
+- 🚫 4-2 build
+- 🚫 4-3 test
+- 🚫 4-4 runtime 통합
+- 🚫 4-5 backend 문서 동기화
+
+병렬 트랙 요약
+- Track A가 먼저 끝나야 Track B가 안전하게 진행된다.
+- Track C는 Track B 완료 후 수행한다.
+
+차단 요약 테이블
+| 결정 | 차단 대상 | 선택지 |
+|------|-----------|--------|
+| U1 institutional 저장 형식 | 2-2, 2-3, 2-4 | 앱 계산 / provider summary |
+| U2 UI source 힌트 노출 여부 | 3-2, 3-3 | 숫자만 / 숫자+source |

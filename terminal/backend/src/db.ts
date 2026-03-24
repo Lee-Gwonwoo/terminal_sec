@@ -306,6 +306,23 @@ export async function initDb(): Promise<void> {
     // Column already exists — ignore
   }
 
+  // Migration: add float / institutional ownership columns
+  for (const col of [
+    ["float_shares", "REAL"],
+    ["float_pct", "REAL"],
+    ["outstanding_shares", "REAL"],
+    ["institutional_pct", "REAL"],
+    ["market_cap_source", "TEXT"],
+    ["float_source", "TEXT"],
+    ["institutional_source", "TEXT"],
+  ] as const) {
+    try {
+      await db.exec(`ALTER TABLE company_profiles ADD COLUMN ${col[0]} ${col[1]}`);
+    } catch {
+      // Column already exists — ignore
+    }
+  }
+
   await db.exec(`
     CREATE TABLE IF NOT EXISTS ticker_universes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

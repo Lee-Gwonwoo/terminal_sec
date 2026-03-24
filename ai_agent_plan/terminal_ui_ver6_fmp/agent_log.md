@@ -619,6 +619,48 @@
 
 **Status: awaiting user confirmation**
 
+## 2026-03-24
+
+### DefaultTickerWindow float / institutional % 표시 + FMP update 계획 추가 (2026-03-24 18:33)
+
+**작성 시각:** 2026-03-24 18:33 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. `ai_agent_plan/terminal_ui_ver6_fmp/plan.md`에 `DefaultTickerWindow` 수급 데이터 확장용 `PLAN CHANGE`를 추가했다.
+2. 아래 기능을 이번 workstream의 목표로 고정했다.
+   - 표에 `Float %`, `Institutional %` 표시
+   - `Float Update`, `Institutional Update` 버튼 추가
+   - 기본 source는 FMP 우선
+3. DB 방향도 명확히 적었다.
+   - 기존 market cap과 같은 `app.db`를 계속 사용
+   - 저장 위치는 `company_profiles` family 확장
+   - `market_cap` 컬럼 재활용이 아니라 수급 전용 컬럼 추가
+4. backend / frontend / docs / validation 단계를 Step 1~4로 분리해 적었다.
+
+#### 이번에 plan에 반영한 핵심 결정
+
+- `DefaultTickerWindow`는 기존 `GET /api/tickers` 응답을 확장해 새 수급 필드를 함께 받는다.
+- update 버튼은 market cap처럼 job 기반으로 돌리되, `Float`와 `Institutional`을 분리한다.
+- source가 비거나 FMP payload가 직접 `%`를 주지 않으면, 그 불확실성을 로그에 숨기지 않는다.
+- 이번 리비전 범위에는 `insider ownership %`, `short interest %`는 포함하지 않는다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `plan.md` 문서 변경만 수행 |
+| 빌드 | ✅ | 코드 변경 없음 |
+| 자동 테스트 | ✅ | 코드 변경 없음 |
+| 런타임 통합 | ✅ | 현재 코드 경로(`DefaultTickerWindow`, `/api/tickers`, `company_profiles`)를 다시 읽고 plan에 반영 |
+
+#### 사용자 확인 요청
+
+- 현재는 구현이 아니라 계획서 갱신까지 완료된 상태다.
+- 다음 단계는 이 plan 기준으로 `Step 1 — FMP endpoint / 저장 스키마 확정`부터 실제 코드 작업에 들어가는 것이다.
+
 #### 작업 요약
 
 1. `.github/copilot-skills/fmp_api.md`에 FMP PR / FMP SEC의 실제 데이터 수집 구조를 상세히 추가했다.
