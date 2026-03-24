@@ -11,6 +11,83 @@
 
 `Model_1`은 아래 3단계를 순서대로 수행한다. 각 단계의 역할이 다르므로 단계를 건너뛰거나 합치지 않는다.
 
+**Model_1 후속 확장 기능: `model_1_2_investing` (필수 규칙 추가)**
+
+- `model_1_2_investing`은 `Model_1`의 기본 3단계를 대체하는 별도 모델이 아니라, **DB 기반 Model_1 분석을 끝낸 뒤 마지막에 수행하는 후속 보강 단계**다.
+- 즉 실행 순서는 아래처럼 고정한다.
+  1. `Model_1` 기본 3단계로 `app.db` 중심 분석을 먼저 끝낸다.
+  2. 그 다음 `model_1_2_investing`으로 **Investing 웹사이트의 시황/정책/섹터 기사**를 추가 조사한다.
+  3. 마지막에 DB 기반 결론과 Investing 보강 결과를 합쳐, `놓친 macro/theme 기사`, `ticker 비직접 기사`, `추가 watch 후보`가 있는지 재점검한다.
+- 이 확장 단계의 목적은 **DB에 직접 적재되지 않았거나 ticker에 직접 매핑되지 않아 놓치기 쉬운 기사**를 보강하는 것이다. 특히 아래 유형을 우선 대상으로 본다.
+  - `macro / market structure / regulation / legislation`
+  - `sector-wide risk-on / risk-off`
+  - `theme 기사인데 개별 ticker가 headline에 직접 안 붙은 경우`
+  - `한 ticker 기사로는 안 보이지만 여러 peer에 동시에 영향을 줄 수 있는 경우`
+- `model_1_2_investing`은 기존 `same-ticker / other-ticker` 유사사례 비교를 덮어쓰지 않는다. **기본 Model_1 결론을 보강하거나 누락을 줄이는 보조 확장 단계**로만 사용한다.
+
+**`model_1_2_investing` 조사 범위 규칙 (필수)**
+
+- 조사 source는 기본적으로 **Investing 웹사이트**로 한정한다.
+- 우선적으로 확인할 기사 범주는 아래를 기본값으로 둔다.
+  - `Stock Markets`
+  - `Company News`
+  - `Cryptocurrency`
+  - `Economy`
+  - `Breaking News`
+- 단, 모든 기사를 전수로 읽는 것이 아니라 **현재 분석 기간과 직접 연결될 가능성이 높은 시황/정책/섹터 기사**부터 본다.
+- 우선 검색 키워드는 현재 날짜 이슈와 연결되는 **테마 단어**를 중심으로 잡는다. 예:
+  - `stablecoin`, `crypto bill`, `Clarity Act`, `yield restriction`, `AI regulation`, `FDA sector readthrough`, `tariff`, `export control`
+- `ticker 직접 언급`이 없는 기사라도 아래 중 하나를 만족하면 조사 대상으로 올린다.
+  - 특정 산업/테마 바스켓 전체에 영향을 줄 수 있는 규제/법안/정책 기사
+  - 동일 날짜에 여러 관련주가 함께 움직였는데, DB 기사만으로는 공통 원인이 설명되지 않는 경우
+  - FMP `stock/general/press release`나 DB canonical source에는 없지만, 시장 내러티브를 실제로 형성한 것으로 보이는 기사
+
+**`model_1_2_investing` 시간 / 시각 해석 규칙 (필수)**
+
+- Investing 기사 페이지에 표시된 시각은 **timezone이 명시되지 않을 수 있으므로**, 그대로 절대시각으로 단정하지 않는다.
+- 가능하면 아래 3개를 분리해서 기록한다.
+  1. `page displayed time`: 원문 페이지에 보이는 발행 시각
+  2. `rss / aggregator time`: Bing News RSS 등 외부 feed에서 확인한 시각
+  3. `timezone status`: `명시됨`, `미확정`, `확인 필요`
+- `page displayed time`과 `rss time`이 충돌하면, **절대시각 비교는 timezone이 명시된 값이 우선**이다.
+- 단, RSS 시각도 `원문 최초 게시 시각`과 100% 동일하다고 단정하지 않는다. 따라서 최종 note에는 가능하면 `RSS 기준 earliest candidate`, `page displayed time (timezone unspecified)`처럼 **증거 레벨을 구분해 적는다.**
+
+**`model_1_2_investing` 영향 전파 규칙 (필수)**
+
+- Investing 기사에서 직접 ticker가 안 보여도, **경제 사건이 특정 테마/산업 바스켓에 영향을 줄 수 있으면 impacted ticker 후보를 명시적으로 적는다.**
+- 이때 impacted ticker는 아래 3축으로 적는다.
+  1. `directly mentioned ticker`
+  2. `theme-linked ticker`
+  3. `watch-only peer`
+- 예:
+  - `stablecoin regulation -> CRCL, COIN, HOOD`
+  - `AI chip export control -> NVDA, AMD, SMCI, AI infra peers`
+- 이 전파는 어디까지나 **해석 가능한 영향 경로를 설명하기 위한 것**이지, 기사에 없는 ticker를 임의로 추가 source처럼 꾸미는 용도로 사용하면 안 된다.
+- 따라서 전파 결과를 적을 때는 반드시 `왜 이 ticker가 영향권이라고 보는지`를 짧게 남긴다. 예: `stablecoin 수익모델`, `exchange rewards exposure`, `peer repricing basket`.
+
+**`model_1_2_investing` 산출물 규칙 (필수)**
+
+- `model_1_2_investing`을 수행했다면, 최종 note 또는 research page 본문에 최소한 아래 항목을 추가한다.
+  1. `Investing 보강 조사 여부`
+  2. `조사한 핵심 기사 목록` (제목, source, time evidence)
+  3. `직접 ticker 언급이 없지만 영향 가능성이 있다고 본 ticker 바스켓`
+  4. `기존 DB 분석 대비 추가로 발견한 내용`
+  5. `시간 정보의 확실성 수준` (`확정`, `RSS 기준`, `timezone 미확정` 등)
+- 이 섹션은 가능하면 `📰 model_1_2_investing` 같은 별도 소제목으로 분리한다.
+- 최종 결론에는 아래 중 무엇이 바뀌었는지 명시해야 한다.
+  - `기존 결론 유지`
+  - `watch 후보 추가`
+  - `primary/secondary 재검토 필요`
+  - `시장 내러티브 설명력 보강`
+
+**`model_1_2_investing` 가드레일 (필수)**
+
+- Investing 확장 조사는 **DB canonical source를 대체하지 않는다.** 기본 source of truth는 여전히 `app.db`와 기존 `Model_1` 조사 결과다.
+- Investing 기사만 보고 `same-ticker / other-ticker` 유사사례 조사 없이 강한 등급 상향을 하면 안 된다.
+- Investing 기사에서 강한 내러티브가 보이더라도, 그것이 현재 뉴스 사건의 핵심 경제 성격과 다르면 `reference macro article`, `theme context`, `watch reason`으로만 남긴다.
+- 한 날짜에 Investing 기사 수가 많더라도, **주가 영향 경로가 명확한 기사만 채택**한다. generic market wrap, 얕은 commentary, 정보량이 낮은 recap은 제외한다.
+- `model_1_2_investing`까지 끝나야만 Model_1이 완료된다고 강제하지는 않는다. 다만 사용자가 Investing 보강을 명시적으로 요청했거나, DB 기사만으로 공통 내러티브 설명이 비어 있는 경우에는 **사실상 필수 보강 단계**로 본다.
+
 **Model_1 소스 커버리지 규칙 (필수)**
 
 - DB 구조 변경 이후 `Model_1`에서 현재 뉴스와 관련 공시/보도자료를 볼 때는 **아래 3개 소스를 함께 확인하는 것**을 기본값으로 둔다.
@@ -431,5 +508,7 @@
   - `primary`: 위 전체 구조를 모두 수행하고, 상단 확정 표 + 상세 본문에 모두 포함한다.
   - `secondary`: 위 전체 구조를 동일하게 수행하고, 상단 보조 표 + 상세 본문에 모두 포함한다.
   - `watch`: 상세 본문은 선택 사항이지만, `ticker / headline 요약 / watch 이유`는 반드시 사용자에게 보이게 남긴다.
+
+`model_1_2_investing`을 수행한 경우에는 위 최종 출력 뒤에 별도 보강 섹션을 덧붙여, `DB source에는 없지만 Investing에서 확인된 시장 기사`, `영향 가능 ticker 바스켓`, `시간 정보 확실성 수준`을 함께 남긴다. 이 보강 섹션은 `Model_1`의 기본 구조를 대체하지 않고, 누락된 macro/theme 설명을 덧붙이는 형태여야 한다.
 
 이 모델은 현재 뉴스를 해석할 때 참고하는 **유사사례 비교 모델**이다.

@@ -15,6 +15,8 @@
 
 기존에 문서에 있던 단일 뉴스 `Score / Score Evidence / Keywords` 생성 방식은 이제 `Model_3`로 분류한다.
 
+추가로 `Model_1`에는 필요시 **후속 보강 확장 단계**인 `model_1_2_investing`을 붙일 수 있다. 이는 별도 4번째 모델이 아니라, `Model_1`의 DB 기반 분석을 끝낸 뒤 Investing 웹사이트의 시황/정책/테마 기사를 추가 조사해 ticker 직접 매핑이 없는 시장 내러티브를 보강하는 규칙이다. 상세 정의는 [ai-news-research_model1.md](ai-news-research_model1.md)에 둔다.
+
 ### plan / log 문서 작성 예외
 
 - 이 스킬이 적용되는 작업은 기본적으로 `ai_agent_plan/.../plan.md`, `agent_log.md` 작성 대상이 아니다.
@@ -227,5 +229,6 @@ AI news research 작업에서는 모든 저장소를 동일하게 취급하면 �
 각 모델의 상세 규칙은 아래 별도 파일에 정의되어 있다. 공통 규칙(이 파일의 위 섹션들)은 모든 모델에 동일하게 적용된다.
 
 - 🟦 **Model_1** (유사사례 비교 모델): [ai-news-research_model1.md](ai-news-research_model1.md)
+- `Model_1` 확장 보강: `model_1_2_investing` (DB 기반 분석 후 Investing 웹 기사로 macro/theme 누락 보강)
 - 🟧 **Model_2** (기간 전체 case 분류 메타 모델): [ai-news-research_model2.md](ai-news-research_model2.md)
 - 🟥 **Model_3** (단일 뉴스 Score/Evidence/Keywords 생성): [ai-news-research_model3.md](ai-news-research_model3.md)
