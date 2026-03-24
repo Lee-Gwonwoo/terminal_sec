@@ -41,7 +41,7 @@ import type { FinnhubMappedItem } from "./services/finnhubNewsProvider.js";
 import { mergeChangeForNewItems, bulkUpdateRecentChange, bulkUpdateCustomChange, type IbkrFallbackOptions } from "./services/newsChangeMerger.js";
 import { createJob, getJob, getActiveJobs, updateProgress, appendLog, completeJob, failJob, cancelJob, isJobCancelled } from "./services/jobManager.js";
 import { getFulltext, getUnextractedNewsIds, deleteFailedFulltextRows, getFulltextStats, upsertProvidedFulltext } from "./services/fulltextRepository.js";
-import { runFulltextUpdate, runFulltextPlainTextBackfill, runRtprBodyBackfill, runOriginUrlBackfill } from "./services/fulltextUpdateService.js";
+import { runFulltextUpdate, runFulltextPlainTextBackfill, runRtprBodyBackfill, runOriginUrlBackfill, extractAndPersistFulltext } from "./services/fulltextUpdateService.js";
 import { extractOriginUrl } from "./services/rtprOriginUrlExtractor.js";
 import { htmlToPlainText } from "./services/fulltextExtractors.js";
 import { backfillPublisher } from "./services/finnhubNewsProvider.js";
@@ -1248,6 +1248,7 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
     (async () => {
       const counters = { totalInserted: 0, totalSkipped: 0 };
       const newItems: Array<{ id: string; tickers: string[]; publishedAt: string }> = [];
+      const newFulltextTargets: Array<{ id: string; url: string; publisher: string | null; body: string | null; source_type: string }> = [];
       const confirmedEmptyKey = "fmp_press_release";
       const yesterday = getEtDateString(new Date(Date.now() - 86_400_000));
       let completedTickers = 0;
@@ -1325,6 +1326,13 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
                     tickers: inserted.tickers,
                     publishedAt: inserted.published_at,
                   });
+                  newFulltextTargets.push({
+                    id: inserted.id,
+                    url: rawItem.url,
+                    publisher: rawItem.publisher ?? null,
+                    body: rawItem.body,
+                    source_type: rawItem.sourceType,
+                  });
                   streamHub.publishNews(inserted);
                 } else {
                   counters.totalSkipped++;
@@ -1372,6 +1380,13 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
                     tickers: inserted.tickers,
                     publishedAt: inserted.published_at,
                   });
+                  newFulltextTargets.push({
+                    id: inserted.id,
+                    url: rawItem.url,
+                    publisher: rawItem.publisher ?? null,
+                    body: rawItem.body,
+                    source_type: rawItem.sourceType,
+                  });
                   streamHub.publishNews(inserted);
                 } else {
                   counters.totalSkipped++;
@@ -1402,6 +1417,39 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
           }
         }
 
+        let fulltextResult = { success: 0, skipped: 0, failed: 0 };
+        if (newFulltextTargets.length > 0 && !isJobCancelled(jobId)) {
+          appendLog(jobId, `Extracting full text for ${newFulltextTargets.length} new FMP PR items...`);
+          const workerCount = Math.max(1, Math.min(input.tickerConcurrency, newFulltextTargets.length));
+          let fulltextCursor = 0;
+          let lastFulltextLogAt = 0;
+
+          const processFulltextTarget = async (target: typeof newFulltextTargets[number]) => {
+            const result = await extractAndPersistFulltext(target);
+            if (result.extractionStatus === "success") fulltextResult.success++;
+            else if (result.extractionStatus === "skipped") fulltextResult.skipped++;
+            else fulltextResult.failed++;
+
+            const completed = fulltextResult.success + fulltextResult.skipped + fulltextResult.failed;
+            if (completed - lastFulltextLogAt >= 20 || completed === newFulltextTargets.length) {
+              lastFulltextLogAt = completed;
+              appendLog(jobId, `[fulltext ${completed}/${newFulltextTargets.length}] ${fulltextResult.success} ok, ${fulltextResult.skipped} skip, ${fulltextResult.failed} fail`);
+            }
+          };
+
+          const fulltextWorker = async () => {
+            while (!isJobCancelled(jobId)) {
+              const currentIndex = fulltextCursor;
+              fulltextCursor += 1;
+              if (currentIndex >= newFulltextTargets.length) return;
+              await processFulltextTarget(newFulltextTargets[currentIndex]);
+            }
+          };
+
+          await Promise.all(Array.from({ length: workerCount }, () => fulltextWorker()));
+          appendLog(jobId, `Full text during pull: ${fulltextResult.success} success, ${fulltextResult.skipped} skipped, ${fulltextResult.failed} failed`);
+        }
+
         await setLastSuccess("fmp_press_release", new Date().toISOString(), {
           mode: input.mode,
           tickerCount: tickerList.length,
@@ -1412,6 +1460,9 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
           inserted: counters.totalInserted,
           skipped: counters.totalSkipped,
           changeMerged: changeMergeResult.merged,
+          fulltextSuccess: fulltextResult.success,
+          fulltextSkipped: fulltextResult.skipped,
+          fulltextFailed: fulltextResult.failed,
         });
 
         completeJob(jobId, {
@@ -1422,6 +1473,9 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
           inserted: counters.totalInserted,
           skipped: counters.totalSkipped,
           changeMerged: changeMergeResult.merged,
+          fulltextSuccess: fulltextResult.success,
+          fulltextSkipped: fulltextResult.skipped,
+          fulltextFailed: fulltextResult.failed,
         });
         activePullJobs.delete(jobKey);
       } catch (err: any) {

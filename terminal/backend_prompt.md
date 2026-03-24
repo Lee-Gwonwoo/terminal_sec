@@ -596,6 +596,8 @@ FMP press release를 수집한다.
 - `pageLimit`: page당 최대 row 수 (기본 100)
 - `maxPages`: ticker당 최대 page 수 (기본 12)
 - job key: `fmp_press_release`
+- 동작: 새 `news_items` row를 insert한 뒤, 같은 job 안에서 원문 URL을 다시 추출해 `news_fulltext.full_text`도 함께 채운다.
+- 중요한 점: full text 추출은 기존 `extractByDomain` 경로를 재사용하므로, publisher scraper가 없는 경우에는 body fallback 또는 `unavailable/failed` status가 저장될 수 있다.
 
 응답 컬럼:
 

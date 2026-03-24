@@ -341,6 +341,108 @@
   2. 우측 버튼 그룹이 이전보다 덜 답답하게 느껴지는지
   3. `Update`, `View Log`, `Full Text`, `Columns`, `Watch Lists` 메뉴 접근이 불편해지지 않았는지
 
+### FMP PR update 시 full text 동시 저장 구현 (2026-03-24 09:28)
+
+**작성 시각:** 2026-03-24 09:28 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. `pull-fmp-press-release` route가 새로 insert한 FMP PR row를 모은 뒤, 같은 job 안에서 full text를 추가로 추출하도록 확장했다.
+2. 기존 full text update job과 같은 로직을 재사용하기 위해 `extractAndPersistFulltext(...)` 공용 helper를 `fulltextUpdateService.ts`에 분리했다.
+3. FMP PR update job 결과에 full text 성공/skip/fail count를 포함하도록 확장했다.
+4. News 창의 `Recent FMP PR`, `Custom FMP PR` 설명을 “new rows에 full text 포함”으로 수정했다.
+5. 관련 문서를 현재 동작 기준으로 갱신했다.
+
+#### 변경 파일
+
+1. `terminal/backend/src/services/fulltextUpdateService.ts`
+2. `terminal/backend/src/server.ts`
+3. `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+4. `terminal/backend_prompt.md`
+5. `.github/copilot-skills/fmp_api.md`
+6. `ai_agent_plan/terminal_ui_ver6_fmp/plan.md`
+
+#### 사용자가 직접 확인할 수 있는 방법
+
+1. `Recent FMP PR` 또는 `Custom FMP PR`를 실행한다.
+2. job log에 아래 흐름이 보이는지 확인한다.
+   - `Starting FMP press release ...`
+   - `Extracting full text for ... new FMP PR items...`
+   - `Full text during pull: ...`
+3. 실행 후 FMP PR row 하나를 열어 `hasFullText`가 `true`로 바뀌었는지 확인한다.
+
+#### 리스크 / 완화
+
+1. **리스크:** update job이 원문 추출까지 하므로 이전보다 오래 걸릴 수 있다.
+   - 완화 1: ticker concurrency 범위 안에서만 full text worker를 돌리도록 했다.
+2. **리스크:** scraper가 없는 PR publisher는 여전히 완전한 원문 대신 body fallback이 저장될 수 있다.
+   - 완화 1: 기존 extractor 경로와 status 기록을 그대로 재사용해 성공/실패 원인을 남긴다.
+3. **리스크:** 기존 row까지 자동 backfill 되는 것은 아니다.
+   - 완화 1: 이번 리비전 범위는 새로 insert된 row 우선으로 제한했다.
+   - 완화 2: 기존 row는 여전히 `FMP PR full text` job으로 backfill 가능하다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ⏳ | 변경 직후 `get_errors` 확인 중 |
+| 빌드 | ⏳ | backend/frontend build 예정 |
+| 자동 테스트 | ⏳ | backend vitest 예정 |
+| 런타임 통합 | ⏳ | dev backend에서 FMP PR pull + job log 확인 예정 |
+
+#### 사용자 확인 요청
+
+- 구현은 들어갔고, 다음 단계는 build/test와 실제 `pull-fmp-press-release` runtime 검증이다.
+- 사용자는 최종적으로 job log에 full text 단계가 추가됐는지와 새 FMP PR row의 full text 보유 여부를 보면 된다.
+
+### FMP PR update full text 검증 완료 (2026-03-24 09:31)
+
+**작성 시각:** 2026-03-24 09:31 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. 변경 파일 정적 분석을 다시 확인했고 에러 0개였다.
+2. backend build, frontend build를 다시 실행해 모두 성공했다.
+3. backend vitest를 다시 실행해 `12 files / 64 tests passed`를 확인했다.
+4. dev backend에서 `POST /api/news/pull-fmp-press-release`를 실제로 호출해 full text 동시 저장 흐름을 검증했다.
+5. 같은 job의 완료 로그와 결과 payload에서 full text 후처리 단계가 실제로 실행됐음을 확인했다.
+
+#### 런타임 확인 내용
+
+1. `POST /api/news/pull-fmp-press-release`
+   - 응답: `jobId=a1d3dadf-e821-4dce-930d-0ccbcfd800fd`
+2. job 완료 로그 핵심 라인
+   - `Total: inserted=15, skipped=181`
+   - `Extracting full text for 15 new FMP PR items...`
+   - `[fulltext 15/15] 15 ok, 0 skip, 0 fail`
+   - `Full text during pull: 15 success, 0 skipped, 0 failed`
+3. job result payload
+   - `fulltextSuccess=15`
+   - `fulltextSkipped=0`
+   - `fulltextFailed=0`
+4. 최신 FMP PR 조회 확인
+   - 방금 insert된 row들의 `hasFullText`가 `true`로 조회됐다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `fulltextUpdateService.ts`, `server.ts`, `FinnhubNewsWindow.tsx` 기준 0 errors |
+| 빌드 | ✅ | backend `npm run build`, frontend `npm run build` 성공 |
+| 자동 테스트 | ✅ | backend vitest `12 files / 64 tests passed` |
+| 런타임 통합 | ✅ | 실제 `pull-fmp-press-release` 호출 후 job log에 full text 단계 확인, result에 fulltext counters 확인, 최신 FMP PR row `hasFullText=true` 확인 |
+
+#### 사용자 확인 요청
+
+- 이제 사용자가 직접 볼 포인트는 아래 3개다.
+  1. `Recent FMP PR` 또는 `Custom FMP PR` 실행 후 log에 `Extracting full text for ...`가 보이는지
+  2. 완료 result에 `fulltextSuccess/fulltextSkipped/fulltextFailed`가 보이는지
+  3. 방금 들어온 FMP PR row를 열었을 때 full text 보기(`hasFullText`)가 바로 가능한지
+
 ### plan.md 확인 사실 반영 (2026-03-20 18:24)
 
 **작성 시각:** 2026-03-20 18:24 (local)

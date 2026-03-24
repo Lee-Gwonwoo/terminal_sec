@@ -155,6 +155,8 @@
   - provider 호출 URL에는 아직 `from/to`를 직접 붙이지 않고, 받은 응답을 앱 안에서 날짜로 다시 자른다.
   - 즉 custom/recent는 “정확한 server-side 기간 검색”이 아니라 “latest/ticker search 응답 후 local filtering” 성격에 가깝다.
   - recent mode는 ticker별 anchor 이후만 보는 증분 수집이라, 과거 누락분을 자동 복구하지 못할 수 있다.
+  - 현재 `pull-fmp-press-release`는 새 row를 insert한 뒤 같은 job 안에서 `news_fulltext.full_text`도 즉시 추출/저장한다.
+  - 단, full text 추출 품질은 publisher별 extractor 가용성에 따라 달라지며, scraper가 없는 도메인은 body fallback 또는 `unavailable` status가 남을 수 있다.
 
 #### 5. FMP Articles
 - 대표 endpoint:

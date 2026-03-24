@@ -127,6 +127,23 @@
   - UI에서 설정 변경 후 바로 FMP PR/SEC pull body에 반영된다.
   - localStorage 값이 없을 때도 이전보다 더 빠른 기본 동작으로 시작한다.
 
+### PLAN CHANGE — 2026-03-24 09:28 (FMP PR update 시 full text 동시 저장)
+- 사용자 요청에 따라 `Recent FMP PR`, `Custom FMP PR` update 실행이 새 row insert로 끝나는 것이 아니라, 같은 job 안에서 `news_fulltext.full_text`도 함께 채우도록 확장한다.
+- 설계 결정:
+  - 대상은 이번 pull에서 **새로 insert된 FMP PR row만** 우선 처리한다.
+  - 원문 추출 로직은 기존 full text update와 같은 `extractByDomain` 경로를 재사용한다.
+  - 추출 성공 시 `news_fulltext`를 즉시 upsert 한다.
+  - 추출 실패/미지원이면 해당 status를 `news_fulltext`에 기록한다.
+  - 기존 `body`는 FMP `text` preview 그대로 두고, 이번 리비전에서는 PR summary 재작성은 하지 않는다.
+- 범위:
+  - `pull-fmp-press-release` route 후처리
+  - 공용 full text 추출/저장 helper 분리
+  - frontend update 메뉴 문구 수정
+  - 관련 문서 동기화
+- 기대 효과:
+  - 별도 `FMP PR full text` job을 기다리지 않아도 새로 들어온 PR row는 update 직후 full text를 가질 수 있다.
+  - 같은 extractor 경로를 재사용하므로 pull/update와 fulltext update 결과가 덜 어긋난다.
+
 ### 목표
 - 뉴스 상단 필터에 `fmp pr` 버튼을 추가한다.
 - 업데이트 메뉴에 `recent fmp pr update`, `custom fmp pr update` 버튼을 추가한다.

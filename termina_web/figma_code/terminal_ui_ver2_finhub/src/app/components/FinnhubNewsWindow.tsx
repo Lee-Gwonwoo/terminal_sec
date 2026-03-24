@@ -2132,7 +2132,7 @@ export function FinnhubNewsWindow({
                       </button>
                       <button onClick={() => { setShowUpdateMenu(false); handleRecentWithPreflight('fmp_press_release'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <RotateCw className="w-3.5 h-3.5 shrink-0 text-emerald-500" />
-                        <div><div className="font-medium">Recent FMP PR</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Per-ticker incremental · FMP press release only</div></div>
+                        <div><div className="font-medium">Recent FMP PR</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Per-ticker incremental · full text included for new rows</div></div>
                       </button>
                       <button onClick={() => { setShowUpdateMenu(false); handleRecentWithPreflight('fmp_sec_filing'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <RotateCw className="w-3.5 h-3.5 shrink-0 text-violet-500" />
@@ -2160,7 +2160,7 @@ export function FinnhubNewsWindow({
                       </button>
                       <button onClick={() => { setShowUpdateMenu(false); handleCustomStart('fmp_press_release'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <Calendar className="w-3.5 h-3.5 shrink-0 text-emerald-500" />
-                        <div><div className="font-medium">Custom FMP PR</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick date range · FMP press release only</div></div>
+                        <div><div className="font-medium">Custom FMP PR</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick date range · full text included for new rows</div></div>
                       </button>
                       <button onClick={() => { setShowUpdateMenu(false); handleCustomStart('fmp_sec_filing'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <Calendar className="w-3.5 h-3.5 shrink-0 text-violet-500" />

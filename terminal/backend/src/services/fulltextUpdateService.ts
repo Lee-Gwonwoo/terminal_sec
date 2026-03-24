@@ -5,7 +5,7 @@
  * extractors, and persists results to news_fulltext table.
  */
 
-import { getFmpSecFulltextBackfillRows, getRtprBodyBackfillRows, getUnextractedNewsIds, insertFulltext, upsertProvidedFulltext } from "./fulltextRepository.js";
+import { getFmpSecFulltextBackfillRows, getRtprBodyBackfillRows, getUnextractedNewsIds, insertFulltext, upsertProvidedFulltext, type UnextractedNewsRow } from "./fulltextRepository.js";
 import { extractByDomain, htmlToPlainText } from "./fulltextExtractors.js";
 import { updateProgress, appendLog, completeJob, failJob, isJobCancelled } from "./jobManager.js";
 import { getDb } from "../db.js";
@@ -19,6 +19,74 @@ const MAX_CONCURRENCY = 200;
 
 function countWords(text: string): number {
   return text.split(/\s+/).filter(Boolean).length;
+}
+
+export async function extractAndPersistFulltext(
+  item: UnextractedNewsRow,
+): Promise<{ extractionStatus: "success" | "failed" | "skipped" | "unavailable"; summaryUpdated: boolean }> {
+  try {
+    const result = await extractByDomain(item.url, item.publisher, item.body);
+
+    let summaryText: string | null = null;
+    if (item.source_type === "fmp_sec_filing") {
+      const sourceFullText = result.extractionStatus === "success"
+        ? result.fullText
+        : (item.existing_full_text ?? "");
+      const plainFullText = /<[a-z][\s\S]*>/i.test(sourceFullText) ? htmlToPlainText(sourceFullText) : sourceFullText;
+      const metadataFallback = item.form_type && item.cik && item.filed_at && item.accepted_at
+        ? buildSecFilingMetadataSummary({
+            symbol: "",
+            cik: item.cik,
+            formType: item.form_type,
+            filingDate: item.filed_at,
+            acceptedDate: item.accepted_at,
+            link: item.url,
+            finalLink: item.url,
+          })
+        : (item.body ?? "");
+      if (plainFullText.trim() && item.form_type) {
+        summaryText = summarizeSecDocumentText(item.form_type, plainFullText) ?? metadataFallback;
+      } else if (metadataFallback.trim()) {
+        summaryText = metadataFallback;
+      }
+    }
+
+    if (result.extractionStatus === "success") {
+      await upsertProvidedFulltext(item.id, {
+        fullText: result.fullText,
+        extractionNote: result.extractionNote,
+        wordCount: result.wordCount ?? countWords(result.fullText),
+      });
+    } else {
+      await insertFulltext(item.id, {
+        fullText: result.fullText,
+        extractionStatus: result.extractionStatus,
+        extractionNote: result.extractionNote,
+        wordCount: result.wordCount,
+      });
+    }
+
+    let summaryUpdated = false;
+    if (item.source_type === "fmp_sec_filing" && summaryText) {
+      await getDb().run(`UPDATE news_items SET body = ? WHERE id = ?`, [summaryText, item.id]);
+      summaryUpdated = true;
+    }
+
+    return {
+      extractionStatus: result.extractionStatus,
+      summaryUpdated,
+    };
+  } catch (err: any) {
+    await insertFulltext(item.id, {
+      fullText: "",
+      extractionStatus: "failed",
+      extractionNote: `unexpected: ${err.message?.slice(0, 200)}`,
+    });
+    return {
+      extractionStatus: "failed",
+      summaryUpdated: false,
+    };
+  }
 }
 
 export async function runFulltextUpdate(
@@ -56,66 +124,12 @@ export async function runFulltextUpdate(
     /** Process a single news item */
     async function processOne(item: typeof unextracted[0]) {
       if (isJobCancelled(jobId)) return;
-      const publisher = item.publisher ?? "UNKNOWN";
+      const result = await extractAndPersistFulltext(item);
+      if (result.summaryUpdated) summaryUpdatedCount++;
 
-      try {
-        const result = await extractByDomain(item.url, item.publisher, item.body);
-
-        let summaryText: string | null = null;
-        if (item.source_type === "fmp_sec_filing") {
-          const sourceFullText = result.extractionStatus === "success"
-            ? result.fullText
-            : (item.existing_full_text ?? "");
-          const plainFullText = /<[a-z][\s\S]*>/i.test(sourceFullText) ? htmlToPlainText(sourceFullText) : sourceFullText;
-          const metadataFallback = item.form_type && item.cik && item.filed_at && item.accepted_at
-            ? buildSecFilingMetadataSummary({
-                symbol: "",
-                cik: item.cik,
-                formType: item.form_type,
-                filingDate: item.filed_at,
-                acceptedDate: item.accepted_at,
-                link: item.url,
-                finalLink: item.url,
-              })
-            : (item.body ?? "");
-          if (plainFullText.trim() && item.form_type) {
-            summaryText = summarizeSecDocumentText(item.form_type, plainFullText) ?? metadataFallback;
-          } else if (metadataFallback.trim()) {
-            summaryText = metadataFallback;
-          }
-        }
-
-        if (item.source_type === "fmp_sec_filing" && result.extractionStatus === "success") {
-          await upsertProvidedFulltext(item.id, {
-            fullText: result.fullText,
-            extractionNote: result.extractionNote,
-            wordCount: result.wordCount,
-          });
-        } else {
-          await insertFulltext(item.id, {
-            fullText: result.fullText,
-            extractionStatus: result.extractionStatus,
-            extractionNote: result.extractionNote,
-            wordCount: result.wordCount,
-          });
-        }
-
-        if (item.source_type === "fmp_sec_filing" && summaryText) {
-          await getDb().run(`UPDATE news_items SET body = ? WHERE id = ?`, [summaryText, item.id]);
-          summaryUpdatedCount++;
-        }
-
-        if (result.extractionStatus === "success") successCount++;
-        else if (result.extractionStatus === "skipped") skippedCount++;
-        else failedCount++;
-      } catch (err: any) {
-        failedCount++;
-        await insertFulltext(item.id, {
-          fullText: "",
-          extractionStatus: "failed",
-          extractionNote: `unexpected: ${err.message?.slice(0, 200)}`,
-        });
-      }
+      if (result.extractionStatus === "success") successCount++;
+      else if (result.extractionStatus === "skipped") skippedCount++;
+      else failedCount++;
 
       processed++;
       updateProgress(jobId, processed);
