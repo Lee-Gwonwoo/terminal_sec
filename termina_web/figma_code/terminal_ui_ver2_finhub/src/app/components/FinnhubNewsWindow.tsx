@@ -4,6 +4,20 @@ import { VariableSizeList as List } from 'react-window';
 import { BookmarkManager } from './BookmarkManager';
 
 const API_BASE = "";
+const ET_TIME_ZONE = 'America/New_York';
+const ET_DATE_FORMATTER = new Intl.DateTimeFormat('en-US', {
+  timeZone: ET_TIME_ZONE,
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+});
+const ET_TIME_FORMATTER = new Intl.DateTimeFormat('en-US', {
+  timeZone: ET_TIME_ZONE,
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+});
+const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
 
 // ─── Heights ───
 const STICKY_DATE_HEADER_HEIGHT = 32;
@@ -28,7 +42,7 @@ interface ColumnDef {
 const DEFAULT_COLUMNS: ColumnDef[] = [
   { id: 'date',         label: 'Date',       defaultWidth: 72,  minWidth: 50 },
   { id: 'ticker',       label: 'Ticker',     defaultWidth: 72,  minWidth: 48 },
-  { id: 'time',         label: 'Time',       defaultWidth: 52,  minWidth: 40 },
+  { id: 'time',         label: 'Time ET',    defaultWidth: 64,  minWidth: 52 },
   { id: 'title',        label: 'Title',      defaultWidth: 300, minWidth: 100, flex: true },
   { id: 'publisher',    label: 'Publisher',  defaultWidth: 96,  minWidth: 60 },
   { id: 'industry',     label: 'Industry',   defaultWidth: 110, minWidth: 60 },
@@ -285,13 +299,67 @@ interface BookmarkFolder {
   parent_id?: string | null;
 }
 
+function hasExplicitTimeZone(value: string): boolean {
+  return /(?:Z|[+-]\d{2}:\d{2})$/i.test(value);
+}
+
+function parseNaiveEtParts(value: string): { date: string; time: string } | null {
+  const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?)?/);
+  if (!match) return null;
+
+  const year = match[1];
+  const monthIndex = Number(match[2]) - 1;
+  const day = Number(match[3]);
+  const hour = match[4] ?? '00';
+  const minute = match[5] ?? '00';
+
+  if (monthIndex < 0 || monthIndex >= MONTH_LABELS.length) return null;
+
+  return {
+    date: `${MONTH_LABELS[monthIndex]} ${day}, ${year}`,
+    time: `${hour}:${minute}`,
+  };
+}
+
+function formatPublishedAtEt(value: string): { date: string; time: string } {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return { date: '-', time: '-' };
+  }
+
+  if (hasExplicitTimeZone(trimmed)) {
+    const parsed = new Date(trimmed);
+    if (!Number.isNaN(parsed.getTime())) {
+      return {
+        date: ET_DATE_FORMATTER.format(parsed),
+        time: ET_TIME_FORMATTER.format(parsed),
+      };
+    }
+  }
+
+  const naiveParts = parseNaiveEtParts(trimmed);
+  if (naiveParts) {
+    return naiveParts;
+  }
+
+  const parsed = new Date(trimmed);
+  if (!Number.isNaN(parsed.getTime())) {
+    return {
+      date: ET_DATE_FORMATTER.format(parsed),
+      time: ET_TIME_FORMATTER.format(parsed),
+    };
+  }
+
+  return { date: trimmed, time: '-' };
+}
+
 function mapBackendItem(item: BackendNewsItem): DisplayItem {
-  const d = new Date(item.published_at);
+  const publishedAtEt = formatPublishedAtEt(item.published_at);
   return {
     id: item.id,
     publishedAt: item.published_at,
-    date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-    time: d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+    date: publishedAtEt.date,
+    time: publishedAtEt.time,
     title: item.title,
     body: item.body,
     ticker: item.tickers?.[0] ?? '',
