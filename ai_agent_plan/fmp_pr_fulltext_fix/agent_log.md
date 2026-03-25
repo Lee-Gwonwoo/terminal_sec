@@ -317,3 +317,104 @@
 | 런타임 통합 | ⏳ | 브라우저에서 filter/scroll 체감 확인 예정 |
 
 - 상태: 구현 완료, 검증 진행 중 (확인 대기)
+
+**작성 시각:** 2026-03-25 15:03 (local)
+
+### FINNHUB publisher별 대표 샘플 fulltext 테스트 + publisher 고정 문제 수정
+- 사용자 요청:
+  - 각 publisher마다 원문 추출 가능 여부를 테스트하고, 되는 것들을 정리
+  - `YAHOO`면 `YAHOO`로 보여야 하는데 왜 `FINNHUB`로 보이는지 원인 수정
+- 테스트 결과 요약:
+  - `scrape-success`: `NASDAQ`, `TMX`
+  - `body-fallback-success`: `YAHOO`, `BENZINGA`, `SEEKINGALPHA`, `CHARTMILL`, `CNBC(company_news)`, `DOWJONES`, `FINNHUB`, `REUTERS`, `BLOOMBERG`, `UNKNOWN`
+  - `unavailable`: `FINTEL`, `MARKETWATCH`, `CNBC(market_news)`, `GOOGLE NEWS`
+- 확인한 원인:
+  - 프론트는 `item.publisher`를 그대로 표시하므로 UI 매핑 문제는 아님.
+  - backend에서 `INSERT OR IGNORE` 때문에 기존 `(source, url)` row의 publisher가 더 정확한 값으로 승격되지 않음.
+  - 기존 backfill은 `NULL/UNKNOWN`만 갱신하고 `origin_url`이 없는 `finnhub.io` wrapper URL은 다시 `FINNHUB`로 남김.
+- 변경 파일:
+  - `terminal/backend/src/services/finnhubNewsProvider.ts`
+  - `terminal/backend/src/services/newsRepository.ts`
+  - `terminal/backend/tests/finnhubNewsProvider.test.ts`
+  - `.github/copilot-skills/finhub_other_api.md`
+  - `terminal/backend_prompt.md`
+  - `ai_agent_plan/fmp_pr_fulltext_fix/plan.md`
+
+- 상태: 구현 진행 중 (검증 대기)
+
+**작성 시각:** 2026-03-25 15:07 (local)
+
+### FINNHUB publisher 테스트 / publisher 보정 검증 완료
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `finnhubNewsProvider.ts`, `newsRepository.ts`, `finnhubNewsProvider.test.ts` diagnostics 0 errors |
+| 빌드 | ✅ | backend `npm.cmd run build -w backend` 성공 |
+| 자동 테스트 | ✅ | backend `vitest run` 13 files / 76 tests pass |
+| 런타임 통합 | ✅ | 임시 DB 복사본에서 `POST /api/news/fulltext/update` 호출 후 샘플 row `publisher: FINNHUB -> YAHOO` 갱신 확인 |
+
+- 추가 확인:
+  - 대표 샘플 테스트 기준 실제 원문 scrape success는 `NASDAQ`, `TMX`였다.
+  - `YAHOO`, `BENZINGA`, `SEEKINGALPHA` 등은 현재 대표 샘플 기준 body-fallback success였다.
+  - live DB 분포상 `company_news` publisher는 `YAHOO`, `FINNHUB`, `BENZINGA`, `SEEKINGALPHA`, `CHARTMILL` 등이 섞여 있으며 전체가 `FINNHUB`만은 아니다.
+  - 다만 기존 `(source, url)` duplicate row가 `INSERT OR IGNORE`로 남아 있던 탓에 `YAHOO`가 실제 publisher여도 과거 row는 `FINNHUB`로 고착될 수 있었고, 이번 수정으로 그 승격 경로를 복구했다.
+
+- 상태: 구현 및 검증 완료, 사용자 확인 대기 (awaiting user confirmation)
+
+**작성 시각:** 2026-03-25 15:16 (local)
+
+### FINNHUB company_news 원문 추출 보강 + reset 준비
+- 사용자 요청:
+  - `company only fulltext`에서 원문 추출 가능한 것들은 제대로 작동하게 수정
+  - 기존 company news fulltext 데이터는 지울 준비를 해둘 것
+- 추가 확인한 사실:
+  - 실DB `source='FINNHUB' AND source_type='company_news'`는 총 `32716`건이며 `origin_url`이 `0`건이었다.
+  - 저장된 `url`은 전부 `https://finnhub.io/api/news?id=...` wrapper였고, 이 wrapper는 실제로 `302 Location`으로 원문 기사 URL(`YAHOO`, `BENZINGA` 등)로 리다이렉트된다.
+  - 따라서 기존 `company_news` fulltext는 원문이 아니라 summary/body fallback semantics로 저장된 비율이 높았다.
+- 변경 파일:
+  - `terminal/backend/src/services/fulltextExtractors.ts`
+  - `terminal/backend/src/services/fulltextUpdateService.ts`
+  - `terminal/backend/src/services/fulltextRepository.ts`
+  - `terminal/backend/src/server.ts`
+  - `terminal/backend/tests/fulltextExtractors.test.ts`
+  - `.github/copilot-skills/finhub_other_api.md`
+  - `terminal/backend_prompt.md`
+  - `ai_agent_plan/fmp_pr_fulltext_fix/plan.md`
+- 구현 내용:
+  - `company_news` fulltext 추출 시 wrapper URL이면 먼저 redirect origin URL을 해석하도록 변경
+  - 추출 중 복구한 `origin_url`과 더 정확한 `publisher`를 `news_items`에 다시 저장하도록 연결
+  - 현재 success로 남기도록 지원한 company_news publisher를 `YAHOO`, `BENZINGA`로 제한
+  - `company_news`에서는 summary/body fallback success를 더 이상 저장하지 않고, 미지원 publisher는 `unavailable`로 처리
+  - 기존 company news fulltext 전량 삭제 준비용 `POST /api/news/fulltext/reset-company-news` endpoint 추가
+  - extractor test에 redirect-based Yahoo success와 unsupported publisher unavailable 케이스 추가
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `fulltextExtractors.ts`, `fulltextUpdateService.ts`, `fulltextRepository.ts`, `server.ts`, test 파일 diagnostics 0 errors |
+| 빌드 | ⏳ | 다음 단계에서 전체 backend build 실행 예정 |
+| 자동 테스트 | ✅ | `vitest run tests/fulltextExtractors.test.ts` 10 tests pass |
+| 런타임 통합 | ⏳ | temp DB에서 `reset-company-news -> update(company_news)` 검증 예정 |
+
+- 상태: 구현 완료, 전체 검증 진행 중 (확인 대기)
+
+**작성 시각:** 2026-03-25 15:41 (local)
+
+### FINNHUB company_news 원문 추출 / reset 준비 최종 검증
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 변경 backend 파일과 test 파일 diagnostics 0 errors |
+| 빌드 | ✅ | backend `npm.cmd run build` 성공 |
+| 자동 테스트 | ✅ | backend `npm.cmd run test` 13 files / 78 tests pass |
+| 런타임 통합 | ✅ | temp DB에서 `POST /api/news/fulltext/reset-company-news` → `deleted=1`, 이어서 `POST /api/news/fulltext/update` with `sourceType=company_news` 실행 후 샘플 row가 `publisher=YAHOO`, `origin_url=...`, `extraction_note=yahoo-finance-browser`로 갱신됨 |
+
+- 런타임 검증 상세:
+  - temp DB에는 Yahoo-origin wrapper company_news 1건만 남기고, legacy fallback fulltext row를 의도적으로 seed했다.
+  - isolated backend(`PORT=8094`)에서 `healthz`는 `{"ok":true}`를 반환했다.
+  - `reset-company-news` 응답은 `{"deleted":1}`였다.
+  - 같은 DB에서 `update(company_news)` 응답은 `{"total":1,"concurrency":1}`였고 job은 `1 success`로 완료됐다.
+  - 완료 후 sample row는 `publisher='YAHOO'`, `origin_url='https://finance.yahoo.com/markets/stocks/articles/1-wall-street-favorite-stock-175422842.html'`, `extraction_note='yahoo-finance-browser'`, `word_count=426`으로 확인됐다.
+
+- 상태: 구현 및 검증 완료, 사용자 확인 대기 (awaiting user confirmation)
+
+*** Delete File: c:\github_coding\terminal_sec\terminal\backend\tmp_test_finnhub_publishers.mjs
+*** Delete File: c:\github_coding\terminal_sec\terminal\backend\tmp_verify_publisher_fix.mjs
+*** Delete File: c:\github_coding\terminal_sec\terminal\backend\tmp_read_publisher_fix.mjs

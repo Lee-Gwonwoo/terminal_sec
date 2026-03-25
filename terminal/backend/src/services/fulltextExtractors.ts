@@ -8,12 +8,14 @@
 
 import * as cheerio from "cheerio";
 import { chromium, type Browser } from "playwright";
+import { derivePublisher } from "./finnhubNewsProvider.js";
 
 const MAX_RETRIES = 10;
 const BASE_DELAY_MS = 500;
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0";
 const MIN_SEC_FULLTEXT_LEN = 200;
 const BROWSER_TIMEOUT_MS = 15000;
+const COMPANY_NEWS_SCRAPE_PUBLISHERS = new Set(["YAHOO", "BENZINGA"]);
 
 // ─── Types ───
 
@@ -22,6 +24,13 @@ export interface ExtractionResult {
   extractionStatus: "success" | "failed" | "skipped" | "unavailable";
   extractionNote?: string;
   wordCount?: number;
+  resolvedUrl?: string;
+  resolvedPublisher?: string;
+}
+
+interface ExtractByDomainOptions {
+  sourceType?: string;
+  originUrl?: string | null;
 }
 
 // ─── Helpers ───
@@ -110,6 +119,50 @@ function clipAtMarkers(text: string, markers: string[]): string {
   return cleanPlainText(clipped);
 }
 
+function unavailableResult(note: string): ExtractionResult {
+  return {
+    fullText: "",
+    extractionStatus: "unavailable",
+    extractionNote: note,
+  };
+}
+
+function fallbackOrUnavailable(body: string | null, note: string, fallbackBody: boolean): ExtractionResult {
+  return fallbackBody ? bodyFallback(body, note) : unavailableResult(note);
+}
+
+function isFinnhubNewsRedirectUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname.toLowerCase() === "finnhub.io"
+      && parsed.pathname === "/api/news"
+      && parsed.searchParams.has("id");
+  } catch {
+    return false;
+  }
+}
+
+async function resolveFinnhubNewsOriginUrl(url: string): Promise<string | null> {
+  if (!isFinnhubNewsRedirectUrl(url)) {
+    return null;
+  }
+
+  try {
+    const res = await fetchWithRetry(url, {
+      redirect: "manual",
+      headers: {
+        "User-Agent": UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+      },
+    });
+    const location = res.headers.get("location");
+    return location ? new URL(location, url).toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 async function extractTextViaHttp(
   url: string,
   body: string | null,
@@ -119,8 +172,10 @@ async function extractTextViaHttp(
     removeSelectors?: string[];
     clipMarkers?: string[];
     minLength?: number;
+    fallbackBody?: boolean;
   },
 ): Promise<ExtractionResult> {
+  const fallbackBody = options.fallbackBody ?? true;
   try {
     const res = await fetchWithRetry(url, {
       headers: {
@@ -131,7 +186,7 @@ async function extractTextViaHttp(
     });
 
     if (!res.ok) {
-      return bodyFallback(body, `${options.notePrefix}-http-${res.status}`);
+      return fallbackOrUnavailable(body, `${options.notePrefix}-http-${res.status}`, fallbackBody);
     }
 
     const html = await res.text();
@@ -147,12 +202,12 @@ async function extractTextViaHttp(
 
     let plainText = extractBestTextFromSelectors($, options.selectors);
     if (!plainText) {
-      return bodyFallback(body, `${options.notePrefix}-no-body`);
+      return fallbackOrUnavailable(body, `${options.notePrefix}-no-body`, fallbackBody);
     }
 
     plainText = clipAtMarkers(plainText, options.clipMarkers ?? []);
     if (plainText.length < (options.minLength ?? 200)) {
-      return bodyFallback(body, `${options.notePrefix}-too-short`);
+      return fallbackOrUnavailable(body, `${options.notePrefix}-too-short`, fallbackBody);
     }
 
     return {
@@ -162,7 +217,7 @@ async function extractTextViaHttp(
       wordCount: countWords(plainText),
     };
   } catch (err: any) {
-    return bodyFallback(body, `${options.notePrefix}-${err.message?.slice(0, 200) ?? "fetch-failed"}`);
+    return fallbackOrUnavailable(body, `${options.notePrefix}-${err.message?.slice(0, 200) ?? "fetch-failed"}`, fallbackBody);
   }
 }
 
@@ -207,6 +262,52 @@ async function loadPageHtmlInBrowser(url: string): Promise<string> {
 
 export function setBrowserHtmlLoaderForTests(loader: ((url: string) => Promise<string>) | null): void {
   browserHtmlLoaderForTests = loader;
+}
+
+async function extractTextViaBrowser(
+  url: string,
+  body: string | null,
+  options: {
+    notePrefix: string;
+    selectors: string[];
+    removeSelectors?: string[];
+    clipMarkers?: string[];
+    minLength?: number;
+    fallbackBody?: boolean;
+  },
+): Promise<ExtractionResult> {
+  const fallbackBody = options.fallbackBody ?? true;
+  try {
+    const html = await loadPageHtmlInBrowser(url);
+    const $ = cheerio.load(html);
+    removeNodes($, [
+      "script",
+      "style",
+      "noscript",
+      "svg",
+      "iframe",
+      ...(options.removeSelectors ?? []),
+    ]);
+
+    let plainText = extractBestTextFromSelectors($, options.selectors);
+    if (!plainText) {
+      return fallbackOrUnavailable(body, `${options.notePrefix}-no-body`, fallbackBody);
+    }
+
+    plainText = clipAtMarkers(plainText, options.clipMarkers ?? []);
+    if (plainText.length < (options.minLength ?? 200)) {
+      return fallbackOrUnavailable(body, `${options.notePrefix}-too-short`, fallbackBody);
+    }
+
+    return {
+      fullText: plainText,
+      extractionStatus: "success",
+      extractionNote: `${options.notePrefix}-browser`,
+      wordCount: countWords(plainText),
+    };
+  } catch (err: any) {
+    return fallbackOrUnavailable(body, `${options.notePrefix}-${err.message?.slice(0, 200) ?? "browser-failed"}`, fallbackBody);
+  }
 }
 
 async function fetchWithRetry(
@@ -552,6 +653,61 @@ export async function extractBusinessWire(url: string, body?: string | null): Pr
   }
 }
 
+export async function extractYahooFinance(url: string, body?: string | null): Promise<ExtractionResult> {
+  return extractTextViaBrowser(url, body ?? null, {
+    notePrefix: "yahoo-finance",
+    selectors: [
+      '[data-testid="articleBody"]',
+      '[data-module="ArticleBody"]',
+      '[class*="caas-body"]',
+      '[class*="article-body"]',
+      "article",
+      "main",
+    ],
+    removeSelectors: [
+      "header",
+      "footer",
+      "nav",
+      "aside",
+      '[data-testid="ad"]',
+      '[class*="advertisement"]',
+      '[class*="ad-"]',
+    ],
+    clipMarkers: [
+      "Recommended Stories",
+      "View comments",
+      "Terms and Privacy Policy",
+    ],
+    minLength: 250,
+    fallbackBody: false,
+  });
+}
+
+export async function extractBenzinga(url: string, body?: string | null): Promise<ExtractionResult> {
+  return extractTextViaHttp(url, body ?? null, {
+    notePrefix: "benzinga",
+    selectors: [
+      '[itemprop="articleBody"]',
+      ".article-content-body-only",
+      ".article-content-body",
+      '[class*="article-content-body"]',
+    ],
+    removeSelectors: [
+      "header",
+      "footer",
+      "aside",
+      '[class*="advertisement"]',
+      '[class*="paywall"]',
+    ],
+    clipMarkers: [
+      "Benzinga simplifies the market",
+      "Trade confidently",
+    ],
+    minLength: 150,
+    fallbackBody: false,
+  });
+}
+
 // ─── Body Fallback Helper ───
 
 function bodyFallback(body: string | null, note: string): ExtractionResult {
@@ -611,12 +767,41 @@ export async function extractByDomain(
   url: string,
   publisher: string | null,
   body?: string | null,
+  options?: ExtractByDomainOptions,
 ): Promise<ExtractionResult> {
   const pub = (publisher ?? "").replace(/\s+/g, " ").trim().toUpperCase();
 
-  switch (pub) {
+  let resolvedUrl = options?.originUrl?.trim() || "";
+  if (!resolvedUrl && options?.sourceType === "company_news") {
+    resolvedUrl = (await resolveFinnhubNewsOriginUrl(url)) ?? "";
+  }
+
+  const effectiveUrl = resolvedUrl || url;
+  const effectivePub = resolvedUrl ? derivePublisher(resolvedUrl) : pub;
+
+  if (options?.sourceType === "company_news") {
+    let companyResult: ExtractionResult;
+
+    if (!resolvedUrl && isFinnhubNewsRedirectUrl(url)) {
+      companyResult = unavailableResult("company-news-no-origin-url");
+    } else if (!COMPANY_NEWS_SCRAPE_PUBLISHERS.has(effectivePub)) {
+      companyResult = unavailableResult(`company-news-no-scraper: ${effectivePub || "(empty)"}`);
+    } else if (effectivePub === "YAHOO") {
+      companyResult = await extractYahooFinance(effectiveUrl, body ?? null);
+    } else {
+      companyResult = await extractBenzinga(effectiveUrl, body ?? null);
+    }
+
+    return {
+      ...companyResult,
+      resolvedUrl: resolvedUrl || undefined,
+      resolvedPublisher: effectivePub && effectivePub !== pub ? effectivePub : undefined,
+    };
+  }
+
+  switch (effectivePub) {
     case "NASDAQ": {
-      const result = await extractNasdaq(url);
+      const result = await extractNasdaq(effectiveUrl);
       // If scraping failed (e.g. Akamai 403), fall back to body text
       if (result.extractionStatus !== "success") {
         return bodyFallback(body ?? null, `nasdaq-scrape-${result.extractionNote ?? "failed"}`);
@@ -625,7 +810,7 @@ export async function extractByDomain(
     }
 
     case "TMX": {
-      const result = await extractTmx(url);
+      const result = await extractTmx(effectiveUrl);
       if (result.extractionStatus !== "success") {
         return bodyFallback(body ?? null, `tmx-${result.extractionNote ?? "failed"}`);
       }
@@ -634,30 +819,30 @@ export async function extractByDomain(
 
     case "GLOBENEWSWIRE":
     case "GLOBE NEWS WIRE":
-      return extractGlobeNewswire(url, body ?? null);
+      return extractGlobeNewswire(effectiveUrl, body ?? null);
 
     case "PRNEWSWIRE":
-      return extractPrNewswire(url, body ?? null);
+      return extractPrNewswire(effectiveUrl, body ?? null);
 
     case "BUSINESS WIRE":
-      return extractBusinessWire(url, body ?? null);
+      return extractBusinessWire(effectiveUrl, body ?? null);
 
     case "NEWSFILE CORP":
-      return extractNewsfile(url, body ?? null);
+      return extractNewsfile(effectiveUrl, body ?? null);
 
     case "ACCESSWIRE":
-      return extractAccesswire(url, body ?? null);
+      return extractAccesswire(effectiveUrl, body ?? null);
 
     case "MCAP MEDIAWIRE":
-      return extractMcapMediaWire(url, body ?? null);
+      return extractMcapMediaWire(effectiveUrl, body ?? null);
 
     case "FINNHUB":
       return bodyFallback(body ?? null, "finnhub-no-external-page");
 
     case "SEC/EDGAR":
-      return extractSecEdgar(url, body ?? null);
+      return extractSecEdgar(effectiveUrl, body ?? null);
 
     default:
-      return bodyFallback(body ?? null, `no-scraper: ${pub || "(empty)"}`);
+      return bodyFallback(body ?? null, `no-scraper: ${effectivePub || "(empty)"}`);
   }
 }

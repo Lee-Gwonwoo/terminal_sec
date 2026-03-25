@@ -83,6 +83,13 @@
   - body row DOM 개수만 줄어 drag, filter, reload 시 프론트 렌더링 부담이 감소한다.
   - 화면상 filter 결과와 컬럼 구성은 유지하되, 필터 적용 반응은 `useDeferredValue` 기준으로 처리된다.
 
+### PLAN CHANGE — 2026-03-25 15:03
+- 변경 내용: FINNHUB source의 `source_type + publisher`별 최신 대표 row를 실제 `extractByDomain()`으로 테스트해 publisher별 fulltext 가능 여부를 분류하고, stale `FINNHUB` publisher가 남는 저장 로직도 함께 수정한다.
+- 변경 이유: 사용자가 “각 publisher마다 원문 추출 가능한지 테스트해서 정리”하고, `YAHOO`가 `FINNHUB`로 보이는 원인도 바로잡으라고 요청했다.
+- 영향:
+  - 문서에는 publisher별 대표 샘플 테스트 결과가 들어간다.
+  - backend는 duplicate row에서도 더 정확한 publisher로 승격될 수 있고, `origin_url`이 있는 `FINNHUB` row는 backfill 대상이 된다.
+
 ### 아키텍처(상위)
 - 입력:
   - 사용자가 Full Text 메뉴에서 `FMP PR Only` 실행
@@ -372,3 +379,40 @@ Step 1 -> Step 2 -> Step 3 -> Step 4 -> Step 5
 - 이번 작업의 목표는 “가장 빠른 값”이 아니라 “실패율과 처리량을 같이 봤을 때 가장 효율적인 값”을 고르는 것이다.
 - FMP PR fulltext는 `Business Wire` 브라우저 fallback이 포함되므로, 일반 HTTP scrape 전용 작업보다 높은 concurrency에서 효율 저하가 더 빨리 올 수 있다.
 - 따라서 기본값은 벤치마크 결과상 처리량 증가가 둔화되기 직전의 값으로 선택한다.
+
+### PLAN CHANGE — 2026-03-25 15:16
+- 변경 내용: 이번 phase 범위를 `FINNHUB company_news` 원문 추출 보강까지 확장한다. `finnhub.io/api/news?id=...` wrapper redirect를 따라 `origin_url`을 복구하고, 현재 원문 추출이 가능한 `YAHOO`, `BENZINGA`만 success로 남기며, 기존 `company_news` fulltext 전량 reset endpoint도 추가한다.
+- 변경 이유: 사용자가 `company only fulltext`에서 원문 추출 가능한 것들은 제대로 동작하게 하고, 기존 company news fulltext 데이터는 지울 준비를 하라고 요청했다.
+- 영향:
+  - `company_news`는 summary/body fallback success를 더 이상 저장하지 않는다.
+  - 새 reset 경로는 `POST /api/news/fulltext/reset-company-news`다.
+  - 검증은 temp DB 기준 `reset-company-news -> update(company_news)` 흐름으로 확인한다.
+
+#### ⏳ Step 6 — FINNHUB company_news 원문 추출 + reset 준비
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 6-1 | wrapper redirect에서 `origin_url`을 복구하고 지원 publisher 원문 추출 연결 | `terminal/backend/src/services/fulltextExtractors.ts`, `terminal/backend/src/services/fulltextUpdateService.ts`, `terminal/backend/src/services/fulltextRepository.ts` | extractor test + temp DB 재추출 | ⏳ |
+| 6-2 | 기존 company news fulltext 삭제 준비용 reset endpoint 추가 | `terminal/backend/src/services/fulltextRepository.ts`, `terminal/backend/src/server.ts` | reset endpoint 응답 `deleted` 확인 | ⏳ |
+| 6-3 | 동작 문서/로그 동기화 | `.github/copilot-skills/finhub_other_api.md`, `terminal/backend_prompt.md`, `ai_agent_plan/fmp_pr_fulltext_fix/agent_log.md` | 문서 diff 확인 | ⏳ |
+| 6-4 | build / test / runtime 통합 검증 | `terminal/backend` | `get_errors`, `npm.cmd run build`, `npm.cmd run test`, temp DB API 검증 | ⏳ |
+
+- `6-1` 목적: summary fallback이 아니라 실제 원문 page를 읽는 경로를 만든다.
+  설명: `company_news`는 `origin_url` 또는 wrapper redirect 결과를 기준으로만 추출한다.
+  완료 조건(눈으로 확인): `yahoo-finance-browser` 또는 `benzinga-scrape` note가 생긴다.
+  사람 검증(비개발자): temp DB에서 company news 한 건의 `origin_url`이 채워지고 fulltext note가 바뀌면 된다.
+  흔한 문제/주의: redirect를 안 따라가면 `publisher='FINNHUB'`와 wrapper URL만 남는다.
+- `6-2` 목적: 과거 company news fallback 데이터를 새 규칙으로 다시 채울 수 있게 한다.
+  설명: company news에 연결된 기존 `news_fulltext` row를 source_type 기준으로 한 번에 삭제할 수 있어야 한다.
+  완료 조건(눈으로 확인): reset endpoint가 `deleted` count를 반환한다.
+  사람 검증(비개발자): API 응답 숫자가 보이면 된다.
+  흔한 문제/주의: 일부 publisher는 재추출 후 `unavailable`로 남을 수 있다.
+- `6-3` 목적: 현재 지원/미지원 publisher 해석이 문서와 코드에서 일치하게 한다.
+  설명: `YAHOO`, `BENZINGA`는 success 후보, 나머지는 unavailable 원칙을 문서화한다.
+  완료 조건(눈으로 확인): skill/backend prompt에 reset-company-news와 company_news 규칙이 적혀 있다.
+  사람 검증(비개발자): 문서만 읽고 어떤 publisher가 현재 되는지 알 수 있다.
+  흔한 문제/주의: 예전 body-fallback-success 설명을 그대로 두면 의미가 충돌한다.
+- `6-4` 목적: 새 규칙이 실제 API 경로에서 동작하는지 닫는다.
+  설명: 단위 테스트뿐 아니라 temp DB에서 reset/update 흐름과 origin_url 갱신을 확인한다.
+  완료 조건(눈으로 확인): build/test 성공과 temp DB row 변화가 확인된다.
+  사람 검증(비개발자): API 응답과 DB 출력에서 `origin_url`, `extraction_note`가 바뀌면 된다.
+  흔한 문제/주의: temp DB를 쓰지 않으면 운영 DB 데이터를 실수로 지울 수 있다.

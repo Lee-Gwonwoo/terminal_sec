@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 
 // Mock config to prevent real API key loading
 vi.mock("../src/config.js", () => ({
@@ -11,24 +11,39 @@ vi.mock("../src/config.js", () => ({
 }));
 
 // Mock db to prevent real DB access
+const mockDb = {
+  get: vi.fn<(...args: any[]) => Promise<any>>(async () => null),
+  all: vi.fn<(...args: any[]) => Promise<any[]>>(async () => []),
+  run: vi.fn<(...args: any[]) => Promise<any>>(async () => ({ changes: 0 })),
+};
+
 vi.mock("../src/db.js", () => ({
-  getDb: () => ({
-    get: async () => null,
-    all: async () => [],
-    run: async () => ({ changes: 0 }),
-  }),
+  getDb: () => mockDb,
   initDb: async () => {},
 }));
 
 let fetchCompanyNewsRaw: typeof import("../src/services/finnhubNewsProvider.js").fetchCompanyNewsRaw;
 let fetchPressReleasesRaw: typeof import("../src/services/finnhubNewsProvider.js").fetchPressReleasesRaw;
 let fetchMarketNewsPageRaw: typeof import("../src/services/finnhubNewsProvider.js").fetchMarketNewsPageRaw;
+let canonicalizePublisherLabel: typeof import("../src/services/finnhubNewsProvider.js").canonicalizePublisherLabel;
+let backfillPublisher: typeof import("../src/services/finnhubNewsProvider.js").backfillPublisher;
 
 beforeAll(async () => {
   const mod = await import("../src/services/finnhubNewsProvider.js");
   fetchCompanyNewsRaw = mod.fetchCompanyNewsRaw;
   fetchPressReleasesRaw = mod.fetchPressReleasesRaw;
   fetchMarketNewsPageRaw = mod.fetchMarketNewsPageRaw;
+  canonicalizePublisherLabel = mod.canonicalizePublisherLabel;
+  backfillPublisher = mod.backfillPublisher;
+});
+
+beforeEach(() => {
+  mockDb.get.mockReset();
+  mockDb.all.mockReset();
+  mockDb.run.mockReset();
+  mockDb.get.mockResolvedValue(null);
+  mockDb.all.mockResolvedValue([]);
+  mockDb.run.mockResolvedValue({ changes: 0 });
 });
 
 // Helper to mock global fetch
@@ -88,6 +103,21 @@ describe("finnhubNewsProvider mapping", () => {
       expect(item.url).toBe("");
       expect(item.providerTickers).toEqual(["AAPL"]);
       expect(item.tags).toEqual([]);
+    });
+
+    it("should canonicalize publisher labels from Finnhub source field", async () => {
+      mockFetchOnce([
+        {
+          datetime: 1709683200,
+          headline: "Yahoo sample",
+          summary: "Summary",
+          url: "https://finnhub.io/api/news?id=test",
+          source: "Yahoo Finance",
+        },
+      ]);
+
+      const items = await fetchCompanyNewsRaw("AAPL", "2024-03-01", "2024-03-07");
+      expect(items[0].publisher).toBe("YAHOO");
     });
 
     it("should never expose API key in mapped output", async () => {
@@ -224,6 +254,33 @@ describe("finnhubNewsProvider mapping", () => {
 
       const items = await fetchCompanyNewsRaw("TEST", "2024-03-01", "2024-03-07");
       expect(items[0].publishedAt).toBe("2024-03-05T19:00:00");
+    });
+  });
+
+  describe("publisher helpers", () => {
+    it("should canonicalize equivalent publisher labels consistently", () => {
+      expect(canonicalizePublisherLabel("Yahoo Finance")).toBe("YAHOO");
+      expect(canonicalizePublisherLabel("SEEKING ALPHA")).toBe("SEEKINGALPHA");
+      expect(canonicalizePublisherLabel("PR Newswire")).toBe("PRNEWSWIRE");
+    });
+
+    it("should use origin_url to backfill FINNHUB publisher rows", async () => {
+      mockDb.all.mockResolvedValueOnce([
+        {
+          id: "row-1",
+          url: "https://finnhub.io/api/news?id=abc",
+          origin_url: "https://finance.yahoo.com/news/example-123.html",
+          publisher: "FINNHUB",
+        },
+      ] as any);
+      mockDb.run.mockResolvedValue({ changes: 1 });
+
+      const updated = await backfillPublisher();
+      expect(updated).toBe(1);
+      expect(mockDb.run).toHaveBeenCalledWith(
+        "UPDATE news_items SET publisher = ? WHERE id = ?",
+        ["YAHOO", "row-1"],
+      );
     });
   });
 });

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getDb } from "../db.js";
 import type { Model1NewsItem, NewsItem, NewsQuery } from "../types.js";
+import { canonicalizePublisherLabel } from "./finnhubNewsProvider.js";
 import { getIndustry } from "./industryLookup.js";
 
 function clampInt(value: number, min: number, max: number): number {
@@ -505,6 +506,21 @@ export async function insertNewsItem(params: {
   );
 
   if (!result.changes) {
+    const existing = await getDb().get<{ publisher: string | null }>(
+      `SELECT publisher FROM news_items WHERE source = ? AND url = ?`,
+      [params.source, params.url],
+    );
+    const nextPublisher = canonicalizePublisherLabel(params.publisher ?? null);
+    const currentPublisher = canonicalizePublisherLabel(existing?.publisher ?? null);
+    const shouldUpgradePublisher = nextPublisher !== "UNKNOWN"
+      && (currentPublisher === "UNKNOWN" || (currentPublisher === "FINNHUB" && nextPublisher !== "FINNHUB"));
+
+    if (shouldUpgradePublisher) {
+      await getDb().run(
+        `UPDATE news_items SET publisher = ? WHERE source = ? AND url = ?`,
+        [nextPublisher, params.source, params.url],
+      );
+    }
     return null;
   }
 
@@ -512,7 +528,7 @@ export async function insertNewsItem(params: {
     id,
     published_at: params.publishedAt,
     source: params.source,
-    publisher: params.publisher ?? null,
+    publisher: params.publisher ? canonicalizePublisherLabel(params.publisher) : null,
     source_type: params.sourceType,
     title: params.title,
     body: params.body,

@@ -191,6 +191,8 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 - `getUnextractedNewsIds()`는 `news_fulltext` row가 없는 뉴스만 대상으로 삼는다. 한 번 `failed` 또는 `skipped` row가 생기면 자동 재시도 대상에서 빠질 수 있다.
 - 프론트는 일반 full text와 FMP PR fulltext에 서로 다른 UI 기본값을 둘 수 있지만, 백엔드 `POST /api/news/fulltext/update`는 최종적으로 요청 body의 `[][][]concurrency[][][]` 숫자 하나만 받아 동일 worker pool 경로로 처리한다.
+- `FINNHUB + company_news`는 별도 규칙이 있다. 저장된 `url`이 `https://finnhub.io/api/news?id=...` wrapper이면 fulltext 단계에서 먼저 `302 Location`을 읽어 `[][][]origin_url[][][]`을 복구하고, 현재는 그 원문이 `YAHOO`, `BENZINGA`일 때만 원문 추출을 시도한다.
+- 위 `company_news` 경로에서는 summary/body fallback을 더 이상 success로 저장하지 않는다. 지원하지 않는 publisher는 `unavailable`로 남고, 재처리가 필요하면 reset 후 다시 돌려야 한다.
 
 ### 뉴스 창 UI 락 규칙 기준표
 
@@ -198,8 +200,8 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 | UI 작업 | backend endpoint 예시 | job category | 중복 차단 범위 | 동시에 가능한 작업 |
 |-----------|------|------|------|------|
-| 일반 Update / FMP PR Pull / FMP Stock Pull / FMP SEC Pull / RTPR Pull / Change Update | `/api/news/pull-finhub`, `/api/news/pull-fmp-press-release`, `/api/news/pull-fmp-stock-news`, `/api/news/pull-fmp-sec-filing`, `/api/news/pull-rtpr`, `/api/news/change/update-*` | `news-update` | 같은 pull 계열 UI만 차단 | `news-fulltext` 계열과 병행 가능 |
-| Full Text / FMP PR Only / FMP Stock Only / FMP SEC Only / RTPR Body Backfill | `/api/news/fulltext/update`, `/api/news/fulltext/backfill-rtpr` | `news-fulltext` | 같은 fulltext UI만 차단 | `news-update` 계열과 병행 가능 |
+| 일반 Update / FMP PR Pull / FMP SEC Pull / RTPR Pull / Change Update | `/api/news/pull-finhub`, `/api/news/pull-fmp-press-release`, `/api/news/pull-fmp-sec-filing`, `/api/news/pull-rtpr`, `/api/news/change/update-*` | `news-update` | 같은 pull 계열 UI만 차단 | `news-fulltext` 계열과 병행 가능 |
+| Full Text / FMP PR Only / FMP SEC Only / RTPR Body Backfill | `/api/news/fulltext/update`, `/api/news/fulltext/backfill-rtpr` | `news-fulltext` | 같은 fulltext UI만 차단 | `news-update` 계열과 병행 가능 |
 
 운영적 정의:
 
@@ -1472,10 +1474,18 @@ query:
 - `company_news`, `press_release`, `market_news`: 해당 `news_items.source_type`만 대상
 - `fmp_press_release`: `news_fulltext` row가 없는 FMP PR 뉴스만 대상이다. 기존 잘못된 fallback success row는 reset endpoint로 먼저 삭제한 뒤 다시 update 해야 한다.
 - `fmp_sec_filing`: 기본 미추출 row + metadata fallback body를 가진 SEC filing row를 포함할 수 있으며, 성공 시 `news_fulltext.full_text`와 `news_items.body` summary를 함께 갱신한다.
+- `company_news`는 wrapper URL이면 먼저 redirect origin을 해석한다. 현재 원문 추출 지원 publisher는 `YAHOO`, `BENZINGA`이며, 이외 publisher는 body fallback 대신 `unavailable`로 저장된다.
 
 사전 동작:
 
 - `backfillPublisher()`를 먼저 실행해 publisher 없는 기존 row를 보정한다.
+
+publisher 동작 주의:
+
+- 현재 FINNHUB 수집 경로는 raw `item.source`가 있으면 그 값을 publisher로 저장하고, 없으면 `url` 도메인으로 추론한다.
+- 하지만 `news_items`는 `UNIQUE (source, url)`에 `INSERT OR IGNORE`를 쓰므로, 같은 row가 다시 들어올 때 publisher가 자동으로 더 정확한 값으로 갱신되지는 않는다.
+- 또한 기본 backfill은 `publisher IS NULL OR 'UNKNOWN'`만 대상으로 하고, `url`이 `finnhub.io/api/news?id=...`이면 다시 `FINNHUB`로 판정될 수 있다.
+- 그래서 실제 기사 출처가 `YAHOO`여도, 과거에 generic `FINNHUB`로 저장된 row가 화면에 남을 수 있다.
 
 응답:
 
@@ -1492,6 +1502,19 @@ query:
   - 그리고 `extraction_note LIKE 'body-fallback (no-scraper:%'` 또는 `full_text == body`
 - `RTPR` 같은 다른 source의 기사 body를 FMP PR fulltext에 재사용하지 않는다.
 - 현재 extractor는 `GlobeNewswire`, `PRNewswire`, `Newsfile Corp`, `Accesswire`, `MCAP MediaWire`를 server-side scrape로 처리하고, `Business Wire`는 브라우저 기반 fallback으로 직접 본문 추출을 시도한다.
+- 응답 컬럼:
+  - `[][][]deleted[][][]`
+
+### `POST /api/news/fulltext/reset-company-news`
+
+- 목적: 기존 `company_news` fulltext가 summary/body fallback semantics로 저장돼 있던 상태를 비우고, 새 redirect-origin 기준으로 다시 채울 준비를 한다.
+- 현재 삭제 대상:
+  - `source='FINNHUB'`
+  - `source_type='company_news'`
+  - 위 조건에 연결된 `news_fulltext` 전 row
+- 주의:
+  - reset 후 `POST /api/news/fulltext/update`를 다시 돌리면 현재 지원 publisher인 `YAHOO`, `BENZINGA`만 success로 남을 가능성이 높다.
+  - `SEEKINGALPHA`, `CHARTMILL`, `MARKETWATCH` 등은 현재 구현상 `unavailable`로 다시 채워질 수 있다.
 - 응답 컬럼:
   - `[][][]deleted[][][]`
 
@@ -1524,6 +1547,32 @@ query:
 - `TMX`: URL의 `newsid`를 추출해 `https://app-money.tmx.com/graphql` 호출
 - `FINNHUB`: 외부 기사 페이지가 아니라서 `skipped`
 - unknown publisher: `unavailable`
+
+### 2026-03-25 대표 샘플 기준 FINNHUB publisher별 테스트 결과
+
+| source_type | publisher | 결과 | 의미 |
+|-----------|------|------|------|
+| `press_release` | `NASDAQ` | `scrape-success` | 전용 extractor로 원문 확보 확인 |
+| `press_release` | `TMX` | `scrape-success` | 전용 extractor로 원문 확보 확인 |
+| `company_news` | `YAHOO` | `scrape-success` | `finnhub.io/api/news?id=...` redirect 후 Yahoo 원문 page를 브라우저 추출 |
+| `company_news` | `BENZINGA` | `scrape-success` | redirect 후 Benzinga 원문 page에서 `itemprop=articleBody` 기반 추출 |
+| `company_news` | `SEEKINGALPHA` | `unavailable` | anti-bot 차단, summary fallback 저장 금지 |
+| `company_news` | `CHARTMILL` | `unavailable` | 현재 원문 scraper 없음 |
+| `company_news` | `CNBC` | `unavailable` | 유효 origin sample 확보 전까지 미지원 |
+| `company_news` | `DOWJONES` | `unavailable` | 현재 원문 scraper 없음 |
+| `company_news` | `FINNHUB` | `unavailable` | redirect/origin을 찾지 못하면 원문 없음으로 처리 |
+| `market_news` | `REUTERS` | `body-fallback-success` | Google News wrapper + body fallback |
+| `market_news` | `BLOOMBERG` | `body-fallback-success` | 전용 scraper 없음 |
+| `company_news` | `FINTEL` | `unavailable` | fallback body도 부족 |
+| `company_news` / `market_news` | `MARKETWATCH` | `unavailable` | 현재 구조상 원문 확보 실패 |
+| `market_news` | `CNBC` | `unavailable` | sample 기준 fallback 실패 |
+| `market_news` | `GOOGLE NEWS` | `unavailable` | wrapper URL만으로는 원문 확보 실패 |
+
+현재 해석:
+
+- 대표 샘플 기준 실제 원문 scrape가 확인된 publisher는 `NASDAQ`, `TMX`, 그리고 redirect-origin 기준 `company_news`의 `YAHOO`, `BENZINGA`다.
+- `company_news`는 이제 summary/body fallback success를 남기지 않고, 지원 publisher만 원문 scrape를 시도한다.
+- 따라서 `fulltext success`와 `원문 scrape success`는 반드시 구분해서 해석해야 한다.
 
 재시도 정책:
 

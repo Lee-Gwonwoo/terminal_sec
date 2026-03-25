@@ -69,6 +69,13 @@ export type FinnhubMappedItem = {
   bodyHtml?: string;
 };
 
+const PUBLISHER_CANONICAL_MAP: Record<string, string> = {
+  "YAHOO FINANCE": "YAHOO",
+  "SEEKING ALPHA": "SEEKINGALPHA",
+  "PR NEWSWIRE": "PRNEWSWIRE",
+  "GLOBE NEWS WIRE": "GLOBENEWSWIRE",
+};
+
 export interface MarketNewsBatchProgress {
   batchNumber: number;
   batchPagesFetched: number;
@@ -241,7 +248,7 @@ export async function fetchCompanyNewsRaw(
           .filter(Boolean)
       : [symbol.toUpperCase()],
     tags: item.category ? [item.category.toLowerCase()] : [],
-    publisher: item.source ? String(item.source).toUpperCase() : derivePublisher(item.url ?? ""),
+    publisher: item.source ? canonicalizePublisherLabel(String(item.source)) : derivePublisher(item.url ?? ""),
   }));
 }
 
@@ -294,7 +301,7 @@ export async function fetchMarketNewsPageRaw(
           .filter(Boolean)
       : [],
     tags: item.category ? [String(item.category).toLowerCase()] : [MARKET_NEWS_CATEGORY],
-    publisher: item.source ? String(item.source).toUpperCase() : derivePublisher(item.url ?? ""),
+    publisher: item.source ? canonicalizePublisherLabel(String(item.source)) : derivePublisher(item.url ?? ""),
   }));
 
   return {
@@ -649,13 +656,27 @@ export function derivePublisher(url: string): string {
   try {
     const hostname = new URL(url).hostname.toLowerCase();
     for (const [test, label] of PUBLISHER_MAP) {
-      if (test(hostname)) return label;
+      if (test(hostname)) return canonicalizePublisherLabel(label);
     }
     // Fallback: strip "www." and return hostname as-is
-    return hostname.replace(/^www\./, "").toUpperCase();
+    return canonicalizePublisherLabel(hostname.replace(/^www\./, "").toUpperCase());
   } catch {
     return "UNKNOWN";
   }
+}
+
+export function canonicalizePublisherLabel(value: string | null | undefined): string {
+  const normalized = String(value ?? "").replace(/\s+/g, " ").trim().toUpperCase();
+  if (!normalized) return "UNKNOWN";
+  return PUBLISHER_CANONICAL_MAP[normalized] ?? normalized;
+}
+
+function deriveBestPublisher(url: string, originUrl?: string | null): string {
+  const originPublisher = originUrl ? derivePublisher(originUrl) : "UNKNOWN";
+  if (originPublisher !== "UNKNOWN" && originPublisher !== "FINNHUB") {
+    return originPublisher;
+  }
+  return derivePublisher(url);
 }
 
 /**
@@ -663,12 +684,20 @@ export function derivePublisher(url: string): string {
  * Returns the number of rows updated.
  */
 export async function backfillPublisher(): Promise<number> {
-  const rows = await getDb().all<{ id: string; url: string }[]>(
-    `SELECT id, url FROM news_items WHERE publisher IS NULL OR publisher = 'UNKNOWN'`,
+  const rows = await getDb().all<{ id: string; url: string; origin_url: string | null; publisher: string | null }[]>(
+    `SELECT id, url, origin_url, publisher
+       FROM news_items
+      WHERE publisher IS NULL
+         OR publisher = 'UNKNOWN'
+         OR (publisher = 'FINNHUB' AND origin_url IS NOT NULL AND TRIM(origin_url) <> '')`,
   );
   let updated = 0;
   for (const row of rows) {
-    const publisher = derivePublisher(row.url);
+    const publisher = deriveBestPublisher(row.url, row.origin_url);
+    const currentPublisher = canonicalizePublisherLabel(row.publisher);
+    if (publisher === currentPublisher) {
+      continue;
+    }
     await getDb().run(`UPDATE news_items SET publisher = ? WHERE id = ?`, [publisher, row.id]);
     updated++;
   }

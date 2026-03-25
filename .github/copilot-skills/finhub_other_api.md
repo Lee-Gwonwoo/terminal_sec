@@ -101,3 +101,50 @@
 - **독립 요청 + batch endpoint 존재**: batch 우선
 - **continuation token 의존**: 내부 순차, 외부 단위만 병렬
 - **이미 DB에 있음**: 네트워크 호출 금지
+
+### FINNHUB publisher별 원문 추출 테스트 결과 기록 규칙
+- FINNHUB source 뉴스는 `publisher`별로 원문 추출 가능 여부가 다르므로, 문서에는 반드시 “전용 scraper success”, “body-fallback success”, “unavailable”를 구분해서 적는다.
+- `news_fulltext.extraction_status='success'`만으로 원문 추출 성공이라고 쓰지 않는다. `extraction_note`가 `body-fallback (...)`면 summary/body 재사용일 수 있다.
+
+### 2026-03-25 실측 결과 — FINNHUB source 대표 publisher 샘플 테스트
+- 테스트 방법:
+  - `source='FINNHUB'`에서 `source_type + publisher`별 최신 row 1개를 뽑아 현재 `extractByDomain(url, publisher, body)`로 실제 실행
+  - 분류 기준:
+    - `scrape-success`: 전용 extractor로 원문 확보
+    - `body-fallback-success`: summary/body 재사용 성공
+    - `unavailable`: 현재 구조상 원문 확보 실패
+- 테스트 결과 요약:
+  - `NASDAQ` (`press_release`): `scrape-success`
+  - `TMX` (`press_release`): `scrape-success`
+  - `YAHOO` (`company_news`): 기존 대표 샘플은 `body-fallback-success`였지만, wrapper redirect를 따라 Yahoo 원문 page를 브라우저로 열면 `scrape-success` 경로로 승격 가능
+  - `BENZINGA` (`company_news`): 기존 대표 샘플은 `body-fallback-success`였지만, wrapper redirect 후 원문 page의 `itemprop=articleBody`를 읽으면 `scrape-success` 경로로 승격 가능
+  - `SEEKINGALPHA` (`company_news`): 현재 `unavailable`로 보는 것이 맞다. 원문 page anti-bot 차단이 있고 summary fallback 저장은 금지해야 한다.
+  - `CHARTMILL` (`company_news`): 현재 `unavailable`
+  - `CNBC` (`company_news`): 현재 `unavailable`
+  - `DOWJONES` (`company_news`): 현재 `unavailable`
+  - `FINNHUB` (`company_news`): redirect/origin 미복구 시 `unavailable`
+  - `REUTERS` (`market_news`): `body-fallback-success`
+  - `BLOOMBERG` (`market_news`): `body-fallback-success`
+  - `FINTEL` (`company_news`): `unavailable`
+  - `MARKETWATCH` (`company_news`, `market_news`): `unavailable`
+  - `CNBC` (`market_news`): `unavailable`
+  - `GOOGLE NEWS` (`market_news`): `unavailable`
+  - `UNKNOWN` (`press_release`): `body-fallback-success`
+- 현재 코드 기준 결론:
+  - FINNHUB `company_news`는 `finnhub.io/api/news?id=...` wrapper를 직접 읽지 말고, 먼저 `302 Location`으로 원문 `origin_url`을 복구해야 한다.
+  - 현재 원문 추출을 성공으로 남기도록 지원한 `company_news` publisher는 `YAHOO`, `BENZINGA`다.
+  - 나머지 `company_news` publisher는 summary/body fallback success로 남기지 말고 `unavailable`로 남겨야 한다.
+
+### company_news 재처리 운영 규칙
+- 기존 실DB 상태에서는 `source='FINNHUB' AND source_type='company_news'`의 `origin_url`이 0건일 수 있다. 이 경우 fulltext 단계에서 wrapper redirect를 읽어 `origin_url`을 채우는 경로가 필요하다.
+- 기존 `company_news` fulltext row는 대부분 summary/body fallback semantics로 저장돼 있으므로, 새 규칙으로 다시 채우려면 먼저 reset endpoint로 비우는 것이 맞다.
+- 권장 순서:
+  1. `POST /api/news/fulltext/reset-company-news`
+  2. `POST /api/news/fulltext/update` with `{ "sourceType": "company_news" }`
+  3. `news_fulltext.extraction_note`에서 `yahoo-finance-browser`, `benzinga-scrape`, `company-news-no-scraper:*` 분포를 확인
+
+### 왜 화면에서 publisher가 `FINNHUB`로 보일 수 있는가
+- 현재 수집 코드는 `item.source`가 있으면 그 값을 publisher로 저장하지만, 기존 row는 `INSERT OR IGNORE` 때문에 중복 수집 시 업데이트되지 않는다.
+- 따라서 처음 insert될 때 `FINNHUB`로 저장된 row는, 나중에 더 정확한 publisher 정보가 와도 그대로 남을 수 있다.
+- 현재 backfill도 `NULL/UNKNOWN` row만 대상으로 하고, `url`만 보면 `finnhub.io/api/news?id=...`라 다시 `FINNHUB`가 나올 수 있다.
+- 즉 `YAHOO`가 실제 publisher인 row도 과거 insert 순서와 중복 무시 때문에 `FINNHUB`로 남아 있을 수 있다.

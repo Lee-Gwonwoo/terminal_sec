@@ -40,7 +40,7 @@ import {
 import type { FinnhubMappedItem } from "./services/finnhubNewsProvider.js";
 import { mergeChangeForNewItems, bulkUpdateRecentChange, bulkUpdateCustomChange, type FmpFallbackOptions } from "./services/newsChangeMerger.js";
 import { createJob, getJob, getActiveJobs, updateProgress, appendLog, completeJob, failJob, cancelJob, isJobCancelled } from "./services/jobManager.js";
-import { getFmpSecFulltextBackfillRows, getFulltext, getUnextractedNewsIds, deleteFailedFulltextRows, deleteFmpPressReleaseFallbackRows, getFulltextStats, upsertProvidedFulltext } from "./services/fulltextRepository.js";
+import { getFmpSecFulltextBackfillRows, getFulltext, getUnextractedNewsIds, deleteFailedFulltextRows, deleteFmpPressReleaseFallbackRows, deleteCompanyNewsFulltextRows, getFulltextStats, upsertProvidedFulltext } from "./services/fulltextRepository.js";
 import { runFulltextUpdate, runFulltextPlainTextBackfill, runRtprBodyBackfill, runOriginUrlBackfill, extractAndPersistFulltext } from "./services/fulltextUpdateService.js";
 import { extractOriginUrl } from "./services/rtprOriginUrlExtractor.js";
 import { htmlToPlainText } from "./services/fulltextExtractors.js";
@@ -2194,6 +2194,15 @@ app.post("/api/news/fulltext/reset-failed", async (_req, res, next) => {
 app.post("/api/news/fulltext/reset-fmp-pr-fallback", async (_req, res, next) => {
   try {
     const deleted = await deleteFmpPressReleaseFallbackRows();
+    res.json({ deleted });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/news/fulltext/reset-company-news", async (_req, res, next) => {
+  try {
+    const deleted = await deleteCompanyNewsFulltextRows();
     res.json({ deleted });
   } catch (error) {
     next(error);

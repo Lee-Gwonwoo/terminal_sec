@@ -17,6 +17,7 @@ export interface FulltextRow {
 export interface UnextractedNewsRow {
   id: string;
   url: string;
+  origin_url?: string | null;
   publisher: string | null;
   body: string | null;
   source_type?: string;
@@ -122,7 +123,7 @@ export async function getUnextractedNewsIds(
     params.push(sourceName);
   }
   return getDb().all<UnextractedNewsRow[]>(
-    `SELECT ni.id, ni.url, ni.publisher, ni.body, ni.source_type, sf.form_type, sf.cik, sf.filed_at, sf.accepted_at,
+    `SELECT ni.id, ni.url, ni.origin_url, ni.publisher, ni.body, ni.source_type, sf.form_type, sf.cik, sf.filed_at, sf.accepted_at,
           nf.full_text AS existing_full_text, nf.extraction_status AS existing_extraction_status,
           nf.extraction_note AS existing_extraction_note
      FROM news_items ni
@@ -250,6 +251,19 @@ export async function deleteFmpPressReleaseFallbackRows(): Promise<number> {
            nf.extraction_note LIKE 'body-fallback (no-scraper:%'
            OR TRIM(COALESCE(nf.full_text, '')) = TRIM(COALESCE(ni.body, ''))
          )
+     )`,
+  );
+  return result.changes ?? 0;
+}
+
+export async function deleteCompanyNewsFulltextRows(): Promise<number> {
+  const result = await getDb().run(
+    `DELETE FROM news_fulltext
+     WHERE news_id IN (
+       SELECT ni.id
+       FROM news_items ni
+       WHERE ni.source = 'FINNHUB'
+         AND ni.source_type = 'company_news'
      )`,
   );
   return result.changes ?? 0;

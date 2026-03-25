@@ -214,6 +214,76 @@ describe("fulltextExtractors", () => {
     expect(result.fullText).not.toContain("Related News");
   });
 
+  it("should resolve Finnhub company_news redirect and extract Yahoo article body", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 302,
+        headers: {
+          get: (name: string) => name.toLowerCase() === "location"
+            ? "https://finance.yahoo.com/markets/stocks/articles/example.html"
+            : null,
+        },
+      }),
+    );
+    setBrowserHtmlLoaderForTests(async () => `
+      <html>
+        <body>
+          <article>
+            <div data-testid="articleBody">
+              <p>Yahoo Finance original body paragraph one with enough length to satisfy the extractor threshold and verify redirect-based company news extraction.</p>
+              <p>Paragraph two continues the article so the result is materially different from the provider summary fallback path previously stored in company_news.</p>
+              <p>Paragraph three adds additional detail about analyst sentiment, revenue growth, and market reaction.</p>
+              <div>Recommended Stories</div>
+            </div>
+          </article>
+        </body>
+      </html>
+    `);
+
+    const result = await extractByDomain(
+      "https://finnhub.io/api/news?id=wrapper-id",
+      "FINNHUB",
+      "summary fallback body that should not be used",
+      { sourceType: "company_news" },
+    );
+
+    expect(result.extractionStatus).toBe("success");
+    expect(result.extractionNote).toBe("yahoo-finance-browser");
+    expect(result.resolvedUrl).toBe("https://finance.yahoo.com/markets/stocks/articles/example.html");
+    expect(result.resolvedPublisher).toBe("YAHOO");
+    expect(result.fullText).toContain("Yahoo Finance original body paragraph one");
+    expect(result.fullText).not.toContain("Recommended Stories");
+  });
+
+  it("should mark unsupported company_news origin as unavailable instead of body fallback", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 302,
+        headers: {
+          get: (name: string) => name.toLowerCase() === "location"
+            ? "https://www.marketwatch.com/story/example"
+            : null,
+        },
+      }),
+    );
+
+    const result = await extractByDomain(
+      "https://finnhub.io/api/news?id=wrapper-id",
+      "FINNHUB",
+      "existing summary fallback body that should not be preserved as success",
+      { sourceType: "company_news" },
+    );
+
+    expect(result.extractionStatus).toBe("unavailable");
+    expect(result.extractionNote).toBe("company-news-no-scraper: MARKETWATCH");
+    expect(result.fullText).toBe("");
+    expect(result.resolvedPublisher).toBe("MARKETWATCH");
+  });
+
   it("should fall back to body when SEC/EDGAR extraction is too short", async () => {
     vi.stubGlobal(
       "fetch",

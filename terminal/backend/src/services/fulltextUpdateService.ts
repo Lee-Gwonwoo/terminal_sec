@@ -25,7 +25,20 @@ export async function extractAndPersistFulltext(
   item: UnextractedNewsRow,
 ): Promise<{ extractionStatus: "success" | "failed" | "skipped" | "unavailable"; summaryUpdated: boolean }> {
   try {
-    const result = await extractByDomain(item.url, item.publisher, item.body);
+    const result = await extractByDomain(item.url, item.publisher, item.body, {
+      sourceType: item.source_type,
+      originUrl: item.origin_url,
+    });
+
+    if (item.source_type === "company_news" && (result.resolvedUrl || result.resolvedPublisher)) {
+      await getDb().run(
+        `UPDATE news_items
+         SET origin_url = COALESCE(?, origin_url),
+             publisher = COALESCE(?, publisher)
+         WHERE id = ?`,
+        [result.resolvedUrl ?? null, result.resolvedPublisher ?? null, item.id],
+      );
+    }
 
     let summaryText: string | null = null;
     if (item.source_type === "fmp_sec_filing") {
