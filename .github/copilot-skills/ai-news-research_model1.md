@@ -11,19 +11,35 @@
 
 `Model_1`은 아래 3단계를 순서대로 수행한다. 각 단계의 역할이 다르므로 단계를 건너뛰거나 합치지 않는다.
 
-**Model_1 후속 확장 기능: `model_1_2_investing` (필수 규칙 추가)**
+**Model_1 간접 영향 전파 기능: `model_1_2_investing` (필수 규칙 추가)**
 
-- `model_1_2_investing`은 `Model_1`의 기본 3단계를 대체하는 별도 모델이 아니라, **DB 기반 Model_1 분석을 끝낸 뒤 마지막에 수행하는 후속 보강 단계**다.
+- `model_1_2_investing`은 `Model_1`의 기본 3단계를 대체하는 별도 모델이 아니라, **DB 기반 Model_1 분석을 끝낸 뒤 마지막에 수행하는 간접 영향 전파 점검 단계**다.
 - 즉 실행 순서는 아래처럼 고정한다.
   1. `Model_1` 기본 3단계로 `app.db` 중심 분석을 먼저 끝낸다.
   2. 그 다음 `model_1_2_investing`으로 **Investing 웹사이트의 시황/정책/섹터 기사**를 추가 조사한다.
-  3. 마지막에 DB 기반 결론과 Investing 보강 결과를 합쳐, `놓친 macro/theme 기사`, `ticker 비직접 기사`, `추가 watch 후보`가 있는지 재점검한다.
-- 이 확장 단계의 목적은 **DB에 직접 적재되지 않았거나 ticker에 직접 매핑되지 않아 놓치기 쉬운 기사**를 보강하는 것이다. 특히 아래 유형을 우선 대상으로 본다.
+  3. 마지막에 DB 기반 결론과 Investing 조사 결과를 합쳐, `외부 이슈`, `ticker 비직접 기사`, `watchlist/readthrough 후보`가 있는지 재점검한다.
+- 이 단계의 목적은 **DB에 직접 적재되지 않았거나 ticker에 직접 매핑되지 않아 놓치기 쉬운 외부 이슈가 어떤 공개 ticker 바스켓에 영향을 전파하는지 닫는 것**이다. 특히 아래 유형을 우선 대상으로 본다.
   - `macro / market structure / regulation / legislation`
   - `sector-wide risk-on / risk-off`
   - `theme 기사인데 개별 ticker가 headline에 직접 안 붙은 경우`
   - `한 ticker 기사로는 안 보이지만 여러 peer에 동시에 영향을 줄 수 있는 경우`
-- `model_1_2_investing`은 기존 `same-ticker / other-ticker` 유사사례 비교를 덮어쓰지 않는다. **기본 Model_1 결론을 보강하거나 누락을 줄이는 보조 확장 단계**로만 사용한다.
+- `model_1_2_investing`은 기존 `same-ticker / other-ticker` 유사사례 비교를 덮어쓰지 않는다. 다만 **단순 보강 메모로 끝내지 않고, 외부 이슈 -> 영향 경로 -> impacted ticker -> 현재 분석 universe 안의 ripple candidate를 명시적으로 닫는 단계**로 사용한다.
+
+**`model_1_2_investing` 운영 메커니즘 (필수)**
+
+- `model_1_2_investing`은 아래 3층 구조를 강제로 남긴다.
+  1. `external issue`: 기사에서 직접 다루는 외부 사건 또는 테마
+  2. `transmission path`: 그 사건이 어떤 경제 경로로 공개 ticker에 영향을 줄 수 있는지
+  3. `ripple candidate`: 현재 분석 universe 안에서 실제로 재점검해야 할 ticker
+- 즉 이 단계는 `외부 기사 한 줄 소개`가 아니라, **외부 사건을 현재 ticker 판단 체계로 변환하는 메커니즘**이어야 한다.
+- `transmission path`는 최소한 아래 중 하나로 설명해야 한다.
+  - `revenue model linkage`
+  - `peer repricing basket`
+  - `supply chain / customer linkage`
+  - `policy / regulation beneficiary or loser`
+  - `valuation narrative transfer`
+- `ripple candidate`를 적을 때는 반드시 `왜 이 ticker가 readthrough 후보인지`를 한 줄 이상 적는다. 단순 나열은 금지한다.
+- 외부 이슈가 중요해 보여도 현재 분석 universe에 연결되는 공개 ticker 후보를 하나도 못 닫으면, `외부 이슈 확인됨 / 현재 universe 연결 약함`으로 적고 종료할 수 있다. 반대로 공개 ticker 연결이 닫히면 `supplement`가 아니라 **필수 재평가 대상**으로 취급한다.
 
 **`model_1_2_investing` 조사 범위 규칙 (필수)**
 
@@ -41,6 +57,7 @@
   - 특정 산업/테마 바스켓 전체에 영향을 줄 수 있는 규제/법안/정책 기사
   - 동일 날짜에 여러 관련주가 함께 움직였는데, DB 기사만으로는 공통 원인이 설명되지 않는 경우
   - FMP `stock/general/press release`나 DB canonical source에는 없지만, 시장 내러티브를 실제로 형성한 것으로 보이는 기사
+- 위 조건을 만족한 기사는 **직접 ticker 언급이 약하더라도 `external issue 후보`로 먼저 채택**하고, 그 다음 공개 ticker/readthrough 후보를 닫는 순서로 처리한다.
 
 **`model_1_2_investing` 시간 / 시각 해석 규칙 (필수)**
 
@@ -64,29 +81,38 @@
   - `AI chip export control -> NVDA, AMD, SMCI, AI infra peers`
 - 이 전파는 어디까지나 **해석 가능한 영향 경로를 설명하기 위한 것**이지, 기사에 없는 ticker를 임의로 추가 source처럼 꾸미는 용도로 사용하면 안 된다.
 - 따라서 전파 결과를 적을 때는 반드시 `왜 이 ticker가 영향권이라고 보는지`를 짧게 남긴다. 예: `stablecoin 수익모델`, `exchange rewards exposure`, `peer repricing basket`.
+- 이 단계에서 중요한 것은 `기사에 ticker가 직접 적혀 있느냐`가 아니라, **외부 사건이 공개 종목 valuation / 기대 / 자금 유입 논리에 전염될 수 있느냐**다.
+- 예를 들어 `SpaceX IPO 기대`처럼 비상장 실체가 중심인 이슈도, 공개시장에서는 `direct exposure narrative`, `peer basket repricing`, `retail speculation transfer`를 통해 `TSLA`, `HOOD`, `우주/위성 관련 ticker`, `관련 인프라 ticker`의 readthrough 후보가 될 수 있다.
+- 따라서 `비상장 entity 중심 이슈`, `정책/법안 이슈`, `거시 테마 이슈`는 **직접 ticker 부재만으로 탈락시키지 말고 먼저 영향 전파 가능성부터 판단**한다.
 
 **`model_1_2_investing` 산출물 규칙 (필수)**
 
 - `model_1_2_investing`을 수행했다면, 최종 note 또는 research page 본문에 최소한 아래 항목을 추가한다.
-  1. `Investing 보강 조사 여부`
+  1. `Investing 간접 영향 점검 여부`
   2. `조사한 핵심 기사 목록` (제목, source, time evidence)
-  3. `직접 ticker 언급이 없지만 영향 가능성이 있다고 본 ticker 바스켓`
-  4. `기존 DB 분석 대비 추가로 발견한 내용`
-  5. `시간 정보의 확실성 수준` (`확정`, `RSS 기준`, `timezone 미확정` 등)
+  3. `external issue -> transmission path -> impacted ticker` 구조 요약
+  4. `직접 ticker 언급이 없지만 영향 가능성이 있다고 본 ticker 바스켓`
+  5. `기존 DB 분석 대비 추가로 발견한 내용`
+  6. `시간 정보의 확실성 수준` (`확정`, `RSS 기준`, `timezone 미확정` 등)
 - 이 섹션은 가능하면 `📰 model_1_2_investing` 같은 별도 소제목으로 분리한다.
 - 최종 결론에는 아래 중 무엇이 바뀌었는지 명시해야 한다.
   - `기존 결론 유지`
   - `watch 후보 추가`
   - `primary/secondary 재검토 필요`
   - `시장 내러티브 설명력 보강`
+- 가능하면 산출물 안에서 아래 3개 소제목을 분리한다.
+  - `External Theme / Issue`
+  - `Readthrough To Public Tickers`
+  - `Universe Ripple Candidate Recheck`
 
 **`model_1_2_investing` 가드레일 (필수)**
 
 - Investing 확장 조사는 **DB canonical source를 대체하지 않는다.** 기본 source of truth는 여전히 `app.db`와 기존 `Model_1` 조사 결과다.
 - Investing 기사만 보고 `same-ticker / other-ticker` 유사사례 조사 없이 강한 등급 상향을 하면 안 된다.
-- Investing 기사에서 강한 내러티브가 보이더라도, 그것이 현재 뉴스 사건의 핵심 경제 성격과 다르면 `reference macro article`, `theme context`, `watch reason`으로만 남긴다.
+- Investing 기사에서 강한 내러티브가 보이더라도, 그것이 현재 뉴스 사건의 핵심 경제 성격과 다르면 무조건 버리는 것이 아니라 먼저 `readthrough candidate` 여부를 닫는다. 다만 연결 고리가 약하면 그때 `reference macro article`, `theme context`, `watch reason`으로만 남긴다.
 - 한 날짜에 Investing 기사 수가 많더라도, **주가 영향 경로가 명확한 기사만 채택**한다. generic market wrap, 얕은 commentary, 정보량이 낮은 recap은 제외한다.
-- `model_1_2_investing`까지 끝나야만 Model_1이 완료된다고 강제하지는 않는다. 다만 사용자가 Investing 보강을 명시적으로 요청했거나, DB 기사만으로 공통 내러티브 설명이 비어 있는 경우에는 **사실상 필수 보강 단계**로 본다.
+- `model_1_2_investing`까지 끝나야만 Model_1이 완료된다고 항상 강제하지는 않는다. 다만 사용자가 Investing 점검을 명시적으로 요청했거나, DB 기사만으로 공통 내러티브 설명이 비어 있거나, 외부 이슈의 간접 파급 가능성이 명백한 경우에는 **사실상 필수 단계**로 본다.
+- 외부 이슈가 확인되었는데 `현재 분석 universe에 미칠 수 있는 공개 ticker 영향`을 점검하지 않고 넘어가면, `model_1_2_investing`을 수행했다고 볼 수 없다.
 
 **Model_1 소스 커버리지 규칙 (필수)**
 
@@ -514,6 +540,6 @@
   - `secondary`: 위 전체 구조를 동일하게 수행하고, 상단 보조 표 + 상세 본문에 모두 포함한다.
   - `watch`: 상세 본문은 선택 사항이지만, `ticker / headline 요약 / watch 이유`는 반드시 사용자에게 보이게 남긴다.
 
-`model_1_2_investing`을 수행한 경우에는 위 최종 출력 뒤에 별도 보강 섹션을 덧붙여, `DB source에는 없지만 Investing에서 확인된 시장 기사`, `영향 가능 ticker 바스켓`, `시간 정보 확실성 수준`을 함께 남긴다. 이 보강 섹션은 `Model_1`의 기본 구조를 대체하지 않고, 누락된 macro/theme 설명을 덧붙이는 형태여야 한다.
+`model_1_2_investing`을 수행한 경우에는 위 최종 출력 뒤에 별도 간접 영향 점검 섹션을 덧붙여, `DB source에는 없지만 Investing에서 확인된 external issue`, `그 이슈의 transmission path`, `영향 가능 ticker 바스켓`, `현재 universe 안의 ripple candidate`, `시간 정보 확실성 수준`을 함께 남긴다. 이 섹션은 `Model_1`의 기본 구조를 대체하지 않지만, 단순 보강 메모가 아니라 **외부 이슈를 현재 ticker 판단으로 변환하는 메커니즘 설명**이어야 한다.
 
 이 모델은 현재 뉴스를 해석할 때 참고하는 **유사사례 비교 모델**이다.

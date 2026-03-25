@@ -16,7 +16,7 @@
 
 기존에 문서에 있던 단일 뉴스 `Score / Score Evidence / Keywords` 생성 방식은 이제 `Model_3`로 분류한다.
 
-추가로 `Model_1`에는 필요시 **후속 보강 확장 단계**인 `model_1_2_investing`을 붙일 수 있다. 이는 별도 4번째 모델이 아니라, `Model_1`의 DB 기반 분석을 끝낸 뒤 Investing 웹사이트의 시황/정책/테마 기사를 추가 조사해 ticker 직접 매핑이 없는 시장 내러티브를 보강하는 규칙이다. 상세 정의는 [ai-news-research_model1.md](ai-news-research_model1.md)에 둔다.
+추가로 `Model_1`에는 필요시 **간접 영향 전파 점검 단계**인 `model_1_2_investing`을 붙일 수 있다. 이는 별도 4번째 모델이 아니라, `Model_1`의 DB 기반 분석을 끝낸 뒤 Investing 웹사이트의 시황/정책/테마 기사를 추가 조사해 **ticker 직접 매핑이 약한 외부 이슈가 어떤 공개 ticker 바스켓과 watchlist 내부 종목에 readthrough를 만들 수 있는지 구조적으로 점검하는 규칙**이다. 상세 정의는 [ai-news-research_model1.md](ai-news-research_model1.md)에 둔다.
 
 `Model_4_watchlists`는 `Model_1`과 같은 분석 프레임을 사용하되, **현재 뉴스 직접 분석 대상을 사용자가 지정한 watchlist ticker 집합으로 제한**하는 모델이다. 상세 정의는 [ai-news-research_model4_watchlists.md](ai-news-research_model4_watchlists.md)에 둔다.
 
@@ -236,6 +236,6 @@ AI news research 작업에서는 모든 저장소를 동일하게 취급하면 �
 각 모델의 상세 규칙은 아래 별도 파일에 정의되어 있다. 공통 규칙(이 파일의 위 섹션들)은 모든 모델에 동일하게 적용된다.
 
 - 🟦 **Model_1** (유사사례 비교 모델): [ai-news-research_model1.md](ai-news-research_model1.md)
-- `Model_1` 확장 보강: `model_1_2_investing` (DB 기반 분석 후 Investing 웹 기사로 macro/theme 누락 보강)
+- `Model_1` 간접 영향 전파 점검: `model_1_2_investing` (DB 기반 분석 후 Investing 웹 기사로 외부 이슈 -> 공개 ticker 바스켓 -> watchlist/readthrough 후보를 점검)
 - 🟧 **Model_2** (기간 전체 case 분류 메타 모델): [ai-news-research_model2.md](ai-news-research_model2.md)
 - 🟥 **Model_3** (단일 뉴스 Score/Evidence/Keywords 생성): [ai-news-research_model3.md](ai-news-research_model3.md)

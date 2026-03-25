@@ -93,16 +93,18 @@
   - `industry readthrough`
   - `Investing theme context`
 - 사용자가 `watchlist 밖으로 퍼질 수 있는 ticker도 같이 적어라`라고 명시한 경우에만 별도 `외부 파급 후보` 섹션을 둔다.
+- 다만 watchlist 바깥에서 시작된 외부 이슈라도, **그 이슈가 watchlist 내부 종목으로 readthrough를 만들 수 있으면 반드시 watchlist 내부 ripple candidate 재점검**을 해야 한다.
 
 ### model_1_2_investing 결합 규칙 (필수)
 
 - `Model_4_watchlists`에서도 필요하면 `model_1_2_investing`을 붙일 수 있다.
 - 이때도 순서는 아래처럼 유지한다.
   1. watchlist 내부 ticker만 대상으로 DB 기반 `Model_1` 분석
-  2. Investing 시황/정책/테마 기사 보강
-  3. watchlist 내부 ticker 중 놓친 macro/theme 영향 후보가 있는지 재점검
-- Investing 확장에서 watchlist 바깥 ticker가 보여도, 기본적으로는 `theme context`나 `reference basket`으로만 적고 **watchlist 내부 교집합이 있는지 먼저 확인**한다.
-- 즉 `stablecoin regulation -> CRCL, COIN, HOOD` 같은 기사를 봤더라도, 현재 선택 watchlist에 `COIN`만 있으면 직접 분석 후속 보강 대상은 우선 `COIN`이다.
+  2. Investing 시황/정책/테마 기사에서 `external issue -> transmission path -> public ticker basket`을 닫는다.
+  3. 그 바스켓 기준으로 watchlist 내부 ticker 중 놓친 macro/theme 영향 후보가 있는지 재점검한다.
+- Investing 확장에서 watchlist 바깥 ticker가 보여도, 거기서 멈추면 안 된다. **그 외부 이슈가 watchlist 내부 종목에 어떤 readthrough를 만들 수 있는지까지 닫아야** 한다.
+- 즉 `stablecoin regulation -> CRCL, COIN, HOOD` 같은 기사를 봤더라도, 현재 선택 watchlist에 `COIN`만 있으면 직접 분석 후속 대상은 우선 `COIN`이고, `COIN`이 왜 readthrough 후보인지 영향 경로까지 같이 적어야 한다.
+- 같은 원리로 `SpaceX IPO 기대 -> direct exposure narrative / peer repricing / retail speculation transfer -> TSLA, HOOD, space-linked public names`처럼 **비상장 중심 외부 이슈도 먼저 공개 ticker 바스켓으로 번역한 뒤, 그중 watchlist 내부 교집합을 재점검**해야 한다.
 
 ### 산출물 규칙 (필수)
 
@@ -118,9 +120,15 @@
   - `watchlist 포함 여부`
   - `분류` (`primary`, `secondary`, `watch`, `noise`)
   - `제외/유지 이유`
-- page/note 본문에는 가능하면 아래 두 층을 분리한다.
+- page/note 본문에는 가능하면 아래 세 층을 분리한다.
   1. `watchlist 기준 current-news 스크리닝 요약`
-  2. `watchlist 내부 직접 분석 ticker 본문`
+  2. `external theme / indirect issue 점검`
+  3. `watchlist 내부 직접 분석 ticker + ripple candidate 본문`
+- `external theme / indirect issue 점검`에는 최소한 아래를 적는다.
+  - `external issue`
+  - `transmission path`
+  - `watchlist 내부 ripple candidate`
+  - `왜 직접 기사 없이도 재점검 대상인지`
 
 ### 미완료 판정 규칙 (필수)
 
@@ -130,6 +138,9 @@
   - watchlist 내부 뉴스만 본 것인지 전체 시장 뉴스를 섞어 본 것인지 불명확
   - 직접 분석 후보가 왜 watchlist 안에서 채택되었는지 설명 없음
   - watchlist 바깥 중요 뉴스가 왜 제외되었는지 최소한의 경계 설명 없음
+- 추가로 아래 상황도 `미완료`로 본다.
+  - 외부 이슈 또는 비상장 중심 테마를 확인했는데, 그것이 watchlist 내부 종목에 미칠 readthrough 가능성을 점검하지 않음
+  - `model_1_2_investing`을 했다고 쓰고도 `external issue -> transmission path -> watchlist ripple candidate` 구조가 본문에 보이지 않음
 - 사용자가 watchlist를 아직 지정하지 않았는데도 agent가 임의로 broad market 분석을 시작하면, 그것은 `Model_4_watchlists` 수행이 아니라 다른 모델 오적용으로 본다.
 
 ### 권장 안내 예시
