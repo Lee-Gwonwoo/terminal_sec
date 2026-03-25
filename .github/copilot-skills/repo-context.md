@@ -45,26 +45,27 @@
 - **앱 런타임 SQLite (terminal 백엔드 기본 DB)**
 	- 경로: `terminal/backend/backend/data/app.db`
 	- 용도: terminal 앱의 기본 영속 데이터
-	- **전체 테이블 목록 (2026-03-12 live inspect 기준)**:
+	- **전체 테이블 목록 (2026-03-25 live inspect 기준)**:
 		| 테이블 | 용도 | 비고 |
 		|--------|------|------|
-		| `news_items` | 뉴스 메타데이터 (226,039 rows) | PK: `id` (UUID). live schema에는 `publisher`, `origin_url`, 일부 legacy inline change 컬럼이 남아 있다 |
-		| `news_change_metrics` | 뉴스별 change% 파생값 (1,437,664 rows) | PK: `(news_id, metric_key)`. **영구 보존** (`CREATE TABLE IF NOT EXISTS`). metric_key: `change_pct`, `change_1d_pct`, `change_from_open_pct`, `change_open_to_high_pct`, `change_3d_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct` |
-		| `news_fulltext` | full text 추출/키워드 (136,116 rows) | PK: `news_id`. keywords_json/keywords_status 포함 |
+		| `news_items` | 뉴스 메타데이터 (254,903 rows) | PK: `id` (UUID). live schema에는 `publisher`, `origin_url`, 일부 legacy inline change 컬럼이 남아 있다 |
+		| `news_change_metrics` | 뉴스별 change% 파생값 (1,445,240 rows) | PK: `(news_id, metric_key)`. **영구 보존** (`CREATE TABLE IF NOT EXISTS`). metric_key: `change_pct`, `change_1d_pct`, `change_from_open_pct`, `change_open_to_high_pct`, `change_3d_pct`, `change_7d_pct`, `change_14d_pct`, `change_30d_pct` |
+		| `news_fulltext` | full text 추출/키워드 (147,219 rows) | PK: `news_id`. keywords_json/keywords_status 포함 |
 		| `news_ai_analysis` | AI 스코어/증거 (0 rows) | PK: `news_id`. score, score_evidence, analysis_status |
 		| `news_sentiment_snapshots` | 종목별 sentiment (683 rows) | UNIQUE: `(ticker, asof_date)`. Finnhub sentiment API 기반 |
 		| `news_saved_views` | 저장된 뉴스 필터 뷰 (0 rows) | |
-		| `bookmark_folders` | 북마크 폴더 트리 (3 rows) | parent_id 자기참조로 트리 구조 |
-		| `bookmark_items` | 북마크된 뉴스 (3 rows) | PK: `(folder_id, news_id)` |
-		| `confirmed_empty_ranges` | 빈 뉴스 구간 확정 (2,343 rows) | PK: `(ticker, source_type)` |
-		| `securities` | ticker 마스터 (1,698 rows) | UNIQUE: `(ticker, exchange)`. 서버 시작 시 CSV에서 upsert |
-		| `company_profiles` | 기업 프로필 (3,432 rows) | UNIQUE: `(security_id, source)`. 현재 source 분포는 `finnhub=1698`, `yahoo=1683`, `fmp=51` |
+		| `bookmark_folders` | 북마크 폴더 트리 (4 rows) | parent_id 자기참조로 트리 구조 |
+		| `bookmark_items` | 북마크된 뉴스 (7 rows) | PK: `(folder_id, news_id)` |
+		| `confirmed_empty_ranges` | 빈 뉴스 구간 확정 (3,439 rows) | PK: `(ticker, source_type)` |
+		| `securities` | ticker 마스터 (1,700 rows) | UNIQUE: `(ticker, exchange)`. 서버 시작 시 CSV에서 upsert |
+		| `company_profiles` | 기업 프로필 (5,070 rows) | UNIQUE: `(security_id, source)`. company data + float/institutional/source 추적 컬럼을 함께 보관 |
 		| `ticker_universes` | ticker 유니버스 정의 (1 row) | |
 		| `ticker_universe_items` | 유니버스 소속 ticker (1,698 rows) | |
 		| `calendar_events` | 캘린더 이벤트 (0 rows) | |
-		| `update_status` | 업데이트 상태 추적 (12 rows) | PK: `source_key`. live columns는 `source_key`, `last_success_at`, `details_json`, `updated_at` |
-		| `research_tabs` | Case Research 탭 (5 rows) | `deleted_at` soft delete 포함. active 3 rows |
-		| `research_pages` | Case Research 페이지 (8 rows) | `deleted_at` soft delete 포함. active 5 rows |
+		| `update_status` | 업데이트 상태 추적 (14 rows) | PK: `source_key`. live columns는 `source_key`, `last_success_at`, `details_json`, `updated_at` |
+		| `research_tabs` | Case Research 탭 (3 rows) | `deleted_at` soft delete 포함 |
+		| `research_pages` | Case Research 페이지 (28 rows) | `deleted_at` soft delete 포함 |
+		| `sec_filings` | SEC filing companion (582 rows) | `news_items`와 1:N로 연결되는 filing 메타데이터 |
 		| `users` | 사용자 (1 row) | |
 		| `watchlists` / `watchlist_items` | 관심종목 (0 rows) | `watchlist_items.security_id` FK 컬럼 포함 |
 		| `alert_rules` | 알림 규칙 (0 rows) | |
@@ -74,11 +75,13 @@
 		- 실제 조회(`GET /api/news`)는 `news_items`에 `news_change_metrics` 8개 metric_key를 각각 LEFT JOIN + `news_fulltext` + `news_ai_analysis` + `news_sentiment_snapshots` + `company_profiles`/`securities`를 join해서 응답한다.
 		- `GET /api/news`는 company data enrich 단계에서 `[][][]marketCap[][][]`, `[][][]peers[][][]`, `[][][]companyDescription[][][]`, `[][][]ipoDate[][][]`를 대표 ticker 기준으로 보강한다.
 		- `GET /api/news`의 `[][][]industry[][][]`는 `company_profiles` 컬럼이 아니라 `securities.industry` 또는 `industryLookup.ts`의 CSV cache fallback에서 온다. raw DB에서 industry를 볼 때 `company_profiles`만 보면 안 된다.
-		- `GET /api/tickers`의 default-universe row도 `[][][]ipoDate[][][]`와 `[][][]marketCap[][][]`를 함께 반환한다.
-		- `company_profiles`의 핵심 company data 컬럼은 `[][][]description[][][]`, `[][][]ipo_date[][][]`, `[][][]market_cap[][][]`, `[][][]peers_json[][][]`다. ticker 심볼은 이 테이블의 컬럼이 아니므로 `securities`와 JOIN해서 해석해야 한다. `POST /api/company-profiles/pull-fmp`, `pull-peers`, `pull-market-cap`, `pull-ipo-date`, `pull-yahoo`가 이 테이블을 갱신한다.
+		- `GET /api/tickers`의 default-universe row는 `[][][]ipoDate[][][]`, `[][][]marketCap[][][]`뿐 아니라 `[][][]floatPct[][][]`, `[][][]institutionalPct[][][]`, `[][][]marketCapSource[][][]`, `[][][]floatSource[][][]`, `[][][]institutionalSource[][][]`도 함께 반환한다.
+		- `company_profiles`의 핵심 컬럼은 이제 `[][][]description[][][]`, `[][][]ipo_date[][][]`, `[][][]market_cap[][][]`, `[][][]peers_json[][][]`에 더해 `[][][]float_shares[][][]`, `[][][]float_pct[][][]`, `[][][]outstanding_shares[][][]`, `[][][]institutional_pct[][][]`, `[][][]market_cap_source[][][]`, `[][][]float_source[][][]`, `[][][]institutional_source[][][]`까지 포함한다. ticker 심볼은 이 테이블의 컬럼이 아니므로 `securities`와 JOIN해서 해석해야 한다. `POST /api/company-profiles/pull-fmp`, `pull-peers`, `pull-market-cap`, `pull-float`, `pull-institutional`, `pull-ipo-date`, `pull-yahoo`가 이 테이블을 갱신한다.
 		- `company_profiles`는 ticker당 단일 row가 아니라 source별 다중 row 구조다. raw SQL로 읽을 때는 `security_id + source` 또는 `fetched_at DESC` 기준 대표 row 선택 규칙을 먼저 정한다.
-		- Finnhub company data 경로(`pull-peers`, `pull-market-cap`, `pull-ipo-date`)는 2026-03-12 기준 **프로세스 전역 throttle**을 공유한다. 기본값은 `[][][]tickerConcurrency[][][]=1`이며, 서로 다른 job이 동시에 돌아도 실제 Finnhub 요청은 직렬화된다. 별도 사용자 조절 interval delay는 제거됐다.
-		- `update_status` live source_key 전체 집합은 `company_profiles`, `company_profiles_ipo_date`, `company_profiles_market_cap`, `company_profiles_yahoo`, `finhub_news`, `ibkr_calendar`, `ibkr_ohlc_1d`, `news_change_7d`, `news_change_custom`, `news_change_recent`, `rtpr_press_release`, `tickers_csv`다.
+		- 현재 구현 기준 `market cap`은 FMP profile, `float`는 FMP shares-float, `institutional`은 Finnhub ownership 기반으로 저장한다.
+		- Finnhub company data 경로(`pull-peers`, `pull-ipo-date`, `pull-institutional`)는 전역 throttle을 공유한다. 기본값은 `[][][]tickerConcurrency[][][]=1`이며, 서로 다른 Finnhub company-data job이 동시에 돌아도 실제 요청은 직렬화된다.
+		- `pull-market-cap`은 더 이상 Finnhub profile2가 아니라 FMP profile batch 경로를 사용한다. 현재 기본 concurrency는 `5`, clamp 범위는 `1..20`이다.
+		- `update_status` live source_key 전체 집합은 `company_profiles`, `company_profiles_ipo_date`, `company_profiles_market_cap`, `company_profiles_yahoo`, `finhub_news`, `fmp_press_release`, `fmp_sec_filing`, `ibkr_calendar`, `ibkr_ohlc_1d`, `news_change_7d`, `news_change_custom`, `news_change_recent`, `rtpr_press_release`, `tickers_csv`다.
 		- `news_items.source_type` live 분포는 `press_release=192,899`, `news=18,321`, `company_news=14,354`, `market_news=440`, `IBKR=25`다.
 		- `/api/news` change 날짜 필드는 분리되어 있다.
 		  - `[][][]ohlc_date[][][]` / `[][][]change_pct_ohlc_date[][][]` = `change_pct.target_date`

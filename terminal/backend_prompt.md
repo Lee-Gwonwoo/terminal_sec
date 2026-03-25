@@ -253,8 +253,15 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `[][][]ipo_date[][][]`
 - `[][][]market_cap[][][]`
 - `[][][]raw_json[][][]`
-- `[][][]peers_json[][][]`
 - `[][][]fetched_at[][][]`
+- `[][][]peers_json[][][]`
+- `[][][]float_shares[][][]`
+- `[][][]float_pct[][][]`
+- `[][][]outstanding_shares[][][]`
+- `[][][]institutional_pct[][][]`
+- `[][][]market_cap_source[][][]`
+- `[][][]float_source[][][]`
+- `[][][]institutional_source[][][]`
 
 주의:
 
@@ -2007,7 +2014,7 @@ Finnhub `/stock/peers` API로 관련 종목 데이터를 수집해 `company_prof
 
 ### `POST /api/company-profiles/pull-market-cap`
 
-Finnhub `/stock/profile2` API에서 시가총액과 기본 회사 메타데이터를 가져와 `company_profiles`와 `securities`를 보강한다.
+FMP `stable/profile` API에서 시가총액과 기본 회사 메타데이터를 가져와 `company_profiles`와 `securities`를 보강한다.
 
 요청 body:
 
@@ -2016,9 +2023,8 @@ Finnhub `/stock/profile2` API에서 시가총액과 기본 회사 메타데이�
 ```
 
 - `tickers` 생략 시 `ticker_universes/default` 전체를 대상으로 한다.
-- `[][][]tickerConcurrency[][][]`는 1~5 범위다. 기본값은 1이다.
-- 별도 `[][][]requestIntervalMs[][][]` body 값은 더 이상 사용하지 않는다.
-- 요청 직렬화는 market-cap / IPO / peers가 공유하는 **전역 company-data throttle**로 제어된다.
+- `[][][]tickerConcurrency[][][]`는 1~20 범위다. 기본값은 5다.
+- 별도 `[][][]requestIntervalMs[][][]` body 값은 현재 사용하지 않는다.
 - **Skip 로직**: 최근 24시간 내 market_cap이 이미 저장된 ticker는 자동 건너뛴다.
 - **취소 지원**: `POST /api/jobs/:jobId/cancel`로 중단 가능.
 
@@ -2038,11 +2044,11 @@ job 완료 result 예시:
 
 1. 대상 ticker 목록을 결정한다.
 2. 24시간 이내에 market_cap이 이미 있는 ticker를 DB에서 조회해 skip 목록을 만든다.
-3. 남은 ticker에 대해 Finnhub `/stock/profile2?symbol=X`를 호출한다. 요청 자체는 peers/IPO와 공유하는 전역 throttle을 통과해야 하므로 다른 Finnhub company-data job과 동시에 실행돼도 burst가 합산되지 않는다.
+3. 남은 ticker에 대해 FMP `stable/profile?symbol=X`를 호출한다.
 4. 매 반복마다 job 취소 여부를 확인하고, 취소 시 즉시 중단한다.
-5. `securities`의 `name`, `exchange`, `industry`를 best-effort로 upsert한다.
-6. `company_profiles`에 `source='finnhub'` row를 upsert하면서 `[][][]market_cap[][][]`에 USD 절대값을 저장한다. 같은 응답에 `ipo`가 있으면 `[][][]ipo_date[][][]`도 함께 보강한다.
-7. `update_status.company_profiles_market_cap`에 최근 실행 정보와 요약을 기록한다.
+5. `securities`의 `name`, `exchange`, `sector`, `industry`를 best-effort로 upsert한다.
+6. `company_profiles`에 `source='fmp'` row를 upsert하면서 `[][][]market_cap[][][]`와 `[][][]market_cap_source[][][]='fmp'`를 저장한다. 같은 응답의 `ipoDate`도 함께 보강할 수 있다.
+7. `update_status.company_profiles_market_cap`에 최근 실행 정보와 요약을 기록하며 `details.source='fmp-profile'`를 남긴다.
 
 ### `POST /api/company-profiles/pull-float`
 
@@ -2084,7 +2090,7 @@ Finnhub `stock/ownership` API에서 institutional ownership 퍼센트를 계산�
 - `tickers` 생략 시 `ticker_universes/default` 전체를 대상으로 한다.
 - `[][][]tickerConcurrency[][][]`는 1~5 범위다. 기본값은 1이다.
 - **Skip 로직**: 최근 24시간 내 `institutional_pct`가 이미 저장된 ticker는 자동 건너뛴다.
-- 계산에는 같은 ticker의 최신 `[][][]outstanding_shares[][][]` 값이 필요하므로, float data가 먼저 있는 편이 정확하다.
+- 계산에는 같은 ticker의 최신 `[][][]outstanding_shares[][][]` 값이 필요하다. 현재 route는 이 값이 비어 있으면 FMP `shares-float`로 먼저 bootstrap 한 뒤 ownership 계산을 시도한다.
 - 저장 필드: `[][][]institutional_pct[][][]`, `[][][]institutional_source[][][]`, `[][][]fetched_at[][][]`
 - 현재 구현 기준 `[][][]institutional_source[][][] = 'finnhub'`다.
 

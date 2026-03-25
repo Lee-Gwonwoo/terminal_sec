@@ -71,6 +71,13 @@
   - lost-job 감지 시 table 자동 reload
   - 동일 규칙을 `Mkt Cap`, `Float`, `Inst` 세 버튼 모두에 적용
 
+### PLAN CHANGE — 2026-03-25 00:12 (repo markdown의 현재 DB 구조 동기화)
+- 사용자 요청에 따라 repo markdown의 DB 구조 설명을 현재 live schema 기준으로 갱신한다.
+- 이번 동기화 범위는 아래와 같다.
+  - `.github/copilot-skills/repo-context.md`의 app DB 테이블 목록/row count/주의사항 갱신
+  - `terminal/backend_prompt.md`의 `company_profiles` 컬럼 목록과 market-cap route/source 설명 갱신
+  - 현재 `company_profiles` 수급 컬럼과 `update_status` source key 집합을 문서에 반영
+
 
 ### PLAN CHANGE — 2026-03-20 20:26
 - 사용자 결정에 따라 legacy `Finnhub SEC filing`은 유지하지 않고 제거한다.

@@ -88,6 +88,44 @@
 | 자동 테스트 | ✅ | UI-only 변경, 기존 backend test 영향 없음 |
 | 런타임 통합 | ✅ | `POST /api/company-profiles/pull-institutional` live 호출로 job 생성/완료 확인, 브라우저 시각 확인은 사용자 위임 |
 
+### repo markdown DB 구조 동기화 (2026-03-25 00:12)
+
+**작성 시각:** 2026-03-25 00:12 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. live `GET /api/db/inspect` 기준으로 app DB의 현재 테이블 row count와 핵심 컬럼 구성을 다시 확인했다.
+2. `.github/copilot-skills/repo-context.md`의 app DB 섹션을 현재 live 상태로 갱신했다.
+   - `company_profiles` row 수와 수급 컬럼 반영
+   - `sec_filings` 테이블 추가 반영
+   - `update_status` live key 집합 갱신
+3. `terminal/backend_prompt.md`의 `company_profiles` 컬럼 목록을 현재 schema에 맞췄다.
+4. `pull-market-cap` 문서 설명도 현재 구현(FMP profile 기반)으로 정정했다.
+
+#### 사용자가 직접 확인할 수 있는 방법
+
+1. repo 문서에서 `company_profiles` 컬럼 목록에 `float_shares`, `float_pct`, `outstanding_shares`, `institutional_pct`, `market_cap_source`, `float_source`, `institutional_source`가 보이는지 확인한다.
+2. repo-context의 app DB 표에서 `company_profiles`, `securities`, `update_status`, `sec_filings` row 수가 현재 live inspect 값으로 갱신됐는지 확인한다.
+3. backend prompt의 `pull-market-cap` 설명이 Finnhub가 아니라 FMP 기준으로 바뀌었는지 확인한다.
+
+#### 리스크 / 완화
+
+1. **리스크:** row count는 live DB 기준이라 시간이 지나면 다시 달라질 수 있다.
+   - 완화 1: 문서에 `2026-03-25 live inspect 기준`이라고 명시했다.
+2. **리스크:** route 구현이 다시 바뀌면 prompt 문서가 다시 드리프트할 수 있다.
+   - 완화 1: 현재 source 정책(`Market Cap = FMP`, `Float = FMP`, `Institutional = Finnhub`)을 함께 명시했다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | markdown 변경만 수행 |
+| 빌드 | ✅ | 코드 변경 없음, 직전 backend/frontend build 성공 상태 유지 |
+| 자동 테스트 | ✅ | 코드 변경 없음 |
+| 런타임 통합 | ✅ | `GET /api/db/inspect`, `GET /api/tickers`, `GET /api/updates/status` live 응답으로 문서 값 재검증 |
+
 ## 2026-03-20
 
 ### FMP 구독 가능 데이터 타입 조사 plan 작성 (2026-03-20 18:04)
