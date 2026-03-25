@@ -411,6 +411,11 @@
 
 - `Model_1`의 **모든 단계**(1단계 스크리닝, 2단계 유사사례 조사, 3단계 재분류)에서 뉴스 headline/본문만 보지 않고, 해당 ticker의 **기업 컨텍스트**를 함께 참조한다.
 - 현재 live app DB 기준으로 참조 경로를 아래처럼 구분한다.
+  - `Model_1`에서 사용하는 **시가총액/수급 데이터의 기본 source of truth는 repo의 live app DB**다. 즉 기본적으로 `terminal/backend/backend/data/app.db`에 적재된 `company_profiles` 계열 값을 먼저 사용하고, 이미 DB에 있는 값을 두고 매번 외부 API를 다시 조회하는 방식은 기본 플로우로 삼지 않는다.
+  - 특히 현재 레포 기준으로 `market_cap`, `float_pct`, `institutional_pct`와 각 source 컬럼(`market_cap_source`, `float_source`, `institutional_source`)은 같은 `company_profiles` family에 저장된다. 따라서 `Model_1` note에서는 가능하면 **DB에 저장된 최신 값 + source 정보**를 함께 읽어 사용한다.
+  - raw DB를 직접 읽을 때는 `company_profiles`가 ticker당 단일 row가 아니라 source별 다중 row 구조라는 점을 전제로, `securities`와 JOIN한 뒤 **필드별 최신 non-null 대표값**을 고르는 규칙 또는 `fetched_at DESC` 대표 row 규칙을 먼저 정하고 읽는다.
+  - 현재 repo 문서 기준 구현 source 정책은 `market cap = FMP profile`, `float = FMP shares-float`, `institutional = Finnhub ownership` 저장 방식이다. 따라서 `Model_1`에서 수치를 인용할 때는 가능하면 `DB stored value (source=...)` 형식으로 출처를 같이 남긴다.
+  - DB에 값이 이미 있으면 그것을 우선 사용하고, DB 값이 비어 있거나 대표값 선택이 불가능할 때만 외부 API/web source를 보강 조회한다. 이 경우에도 최종 note에는 `DB 없음으로 보강 조회`라고 명시해, DB 값과 실시간 보강값을 혼동하지 않는다.
   - `[][][]description[][][]`, `[][][]peers[][][]`, `[][][]ipo_date[][][]`, `[][][]market_cap[][][]`는 기본적으로 `company_profiles`에서 온다.
   - 단, `company_profiles`는 ticker당 단일 row가 아니라 `security_id + source` 기준 다중 row 구조이므로, raw DB를 직접 읽을 때는 대표 row 선택 규칙을 먼저 정해야 한다.
   - `[][][]industry[][][]`는 `company_profiles` 컬럼이 아니라 주로 `securities.industry` 또는 `industryLookup.ts`의 CSV cache fallback에서 온다.
