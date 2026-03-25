@@ -20,6 +20,7 @@
 - `GET /api/news`는 `news_items` 단독 조회가 아니라 `news_change_metrics`, `news_fulltext`, `news_ai_analysis`, sentiment snapshot, peers, company description, IPO date, market cap, industry를 join/병합해서 내려준다.
 - `news_change_metrics`는 `CREATE TABLE IF NOT EXISTS`로 유지되는 영구 테이블이며, change update 작업이 metric 단위로 UPSERT 한다.
 - background job 상태와 로그는 메모리 기반이라 서버 재시작 시 유지되지 않는다.
+- `GET /api/jobs/active`, `GET /api/jobs/:jobId`는 뉴스 창 관련 장시간 작업에 대해 `category`와 `label`을 포함한다. 현재 핵심 category는 `news-update`, `news-fulltext`다.
 - default ticker universe는 서버 시작 시 CSV를 읽어 `securities`, `ticker_universes`, `ticker_universe_items`를 upsert하며, 이후 기본 경로 조회/수정은 DB-primary로 동작하고 CSV는 backup sync 성격이다.
 - case research 노트는 같은 `app.db`의 `research_tabs`, `research_pages` 테이블에 저장된다.
 - `company_profiles`는 ticker당 단일 row가 아니라 `security_id + source` 기준 다중 row 구조다. ticker 심볼 해석은 `securities` JOIN이 필요하다.
@@ -190,6 +191,22 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 - `getUnextractedNewsIds()`는 `news_fulltext` row가 없는 뉴스만 대상으로 삼는다. 한 번 `failed` 또는 `skipped` row가 생기면 자동 재시도 대상에서 빠질 수 있다.
 - 프론트는 일반 full text와 FMP PR fulltext에 서로 다른 UI 기본값을 둘 수 있지만, 백엔드 `POST /api/news/fulltext/update`는 최종적으로 요청 body의 `[][][]concurrency[][][]` 숫자 하나만 받아 동일 worker pool 경로로 처리한다.
+
+### 뉴스 창 UI 락 규칙 기준표
+
+현재 뉴스 창이 의존하는 backend job category 기준은 아래와 같다.
+
+| UI 작업 | backend endpoint 예시 | job category | 중복 차단 범위 | 동시에 가능한 작업 |
+|-----------|------|------|------|------|
+| 일반 Update / FMP PR Pull / FMP SEC Pull / RTPR Pull / Change Update | `/api/news/pull-finhub`, `/api/news/pull-fmp-press-release`, `/api/news/pull-fmp-sec-filing`, `/api/news/pull-rtpr`, `/api/news/change/update-*` | `news-update` | 같은 pull 계열 UI만 차단 | `news-fulltext` 계열과 병행 가능 |
+| Full Text / FMP PR Only / FMP SEC Only / RTPR Body Backfill | `/api/news/fulltext/update`, `/api/news/fulltext/backfill-rtpr` | `news-fulltext` | 같은 fulltext UI만 차단 | `news-update` 계열과 병행 가능 |
+
+운영적 정의:
+
+- `news-update` running 중에는 프론트의 `Update` 계열 버튼만 비활성화된다.
+- `news-fulltext` running 중에는 프론트의 `Full Text` 계열 버튼만 비활성화된다.
+- 두 category는 job id와 polling을 분리해서 추적하므로, 예를 들어 `FMP PR Full Text` 실행 중에도 일반 `Update`는 시작할 수 있다.
+- backend 자체는 fulltext global lock을 두지 않는다. UI는 같은 category의 중복 클릭만 막고, 실제 동일 sourceType pull 중복은 route-level `409 existingJobId` guard로 막는다.
 
 #### `news_sentiment_snapshots`
 

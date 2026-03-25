@@ -60,6 +60,21 @@
   - 일반 full text와 FMP PR fulltext가 서로 다른 localStorage 키를 사용할 수 있다.
   - 이후 벤치마크는 이 전용 설정을 기준으로 수행한다.
 
+### PLAN CHANGE — 2026-03-25 11:02
+- 변경 내용: 뉴스 창 UI 락 규칙을 `news-update` / `news-fulltext` 두 category 기준으로 재정의하고, 두 작업을 동시에 실행 가능하게 구현한다.
+- 변경 이유: 사용자가 현재 락 규칙을 문서/코드 기준표로 정리하고, FMP PR fulltext 실행 중 다른 작업도 가능하게 해 달라고 요청했다.
+- 영향:
+  - backend job status 응답에 category/label이 포함된다.
+  - frontend는 pull/update와 fulltext를 별도 job id 및 polling으로 추적한다.
+  - `Update` 계열과 `Full Text` 계열은 서로를 막지 않고, 같은 category 내 중복만 막는다.
+
+### PLAN CHANGE — 2026-03-25 11:16
+- 변경 내용: 프론트 앱 시작 시 workspace 복원 전에 기본 탭 상태가 localStorage를 덮어쓰는 회귀를 막기 위해 hydration guard를 추가한다.
+- 변경 이유: 사용자가 기존에 저장된 탭들이 갑자기 사라졌다고 보고했고, `App.tsx`의 restore effect와 persist effect 순서상 저장값이 초기 기본 상태로 덮어써질 수 있었다.
+- 영향:
+  - `terminal-workspace-v1`는 초기 복원이 끝난 뒤에만 다시 저장된다.
+  - 이후 새로고침/재접속 시 기존 탭 구성이 초기 기본 탭으로 덮어써질 가능성을 차단한다.
+
 ### 아키텍처(상위)
 - 입력:
   - 사용자가 Full Text 메뉴에서 `FMP PR Only` 실행
@@ -195,12 +210,12 @@
 ```
 사용자 확인 필요: **예**
 
-#### ⬜ Step 4 — 문서 동기화
+#### ⏳ Step 4 — 문서 동기화 + UI 락 규칙 명문화
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 4-1 | backend prompt에 fulltext 기본값과 성능 기준 반영 | `terminal/backend_prompt.md` | 문서 diff 확인 | ⬜ |
-| 4-2 | frontend prompt에 Control Window fulltext 설정 설명 반영 | `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md` | 문서 diff 확인 | ⬜ |
-| 4-3 | plan/agent_log에 측정 결과와 선택 이유 반영 | `ai_agent_plan/fmp_pr_fulltext_fix/plan.md`, `ai_agent_plan/fmp_pr_fulltext_fix/agent_log.md` | 기록 확인 | ⬜ |
+| 4-1 | backend prompt에 job category와 UI 락 기준표 반영 | `terminal/backend_prompt.md` | 문서 diff 확인 | ⏳ |
+| 4-2 | frontend prompt에 `Update`/`Full Text` 분리 락 규칙 반영 | `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md` | 문서 diff 확인 | ⏳ |
+| 4-3 | plan/agent_log에 락 규칙 변경 이유와 영향 반영 | `ai_agent_plan/fmp_pr_fulltext_fix/plan.md`, `ai_agent_plan/fmp_pr_fulltext_fix/agent_log.md` | 기록 확인 | ⏳ |
 
 - `4-1` 목적: backend 기본값과 실제 성능 가정을 문서화한다.
   설명: 현재 기본 concurrency와 조정 이유를 backend spec에 적는다.
@@ -224,13 +239,28 @@
 ```
 사용자 확인 필요: **예**
 
-#### ⬜ Step 5 — 전체 검증
+#### ⏳ Step 5 — 전체 검증
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 5-1 | 정적 분석 확인 | 관련 변경 파일 전부 | `get_errors` | ⬜ |
-| 5-2 | backend build | `terminal/backend` | `npm.cmd run build` | ⬜ |
-| 5-3 | 자동 테스트 | `terminal` 또는 `terminal/backend` | `npm.cmd run test` | ⬜ |
-| 5-4 | 런타임 통합 검증 | backend API + 프론트 설정 UI | fulltext API, job polling, Data Control 확인 | ⬜ |
+| 5-1 | 정적 분석 확인 | 관련 변경 파일 전부 | `get_errors` | ⏳ |
+| 5-2 | backend build | `terminal/backend` | `npm.cmd run build` | ⏳ |
+| 5-3 | 자동 테스트 | `terminal` 또는 `terminal/backend` | `npm.cmd run test` | ⏳ |
+| 5-4 | 런타임 통합 검증 | backend API + 프론트 설정 UI | fulltext API, job polling, Data Control 확인 | ⏳ |
+
+### 현재 UI 락 규칙 기준표
+
+| 구분 | 현재 코드 기준 state | backend job category | 같은 category 중복 허용 | 다른 category와 동시작업 |
+|-----------|------|------|------|------|
+| Update 계열 | `updating` | `news-update` | 아니오 | 예 |
+| Full Text 계열 | `ftUpdating` | `news-fulltext` | 아니오 | 예 |
+| View Log | `selectedJobId` | 둘 다 조회 | 해당 없음 | 예 |
+
+운영적 정의:
+
+- `Pulling...`은 `news-update` job이 running일 때만 표시된다.
+- `Extracting...`은 `news-fulltext` job이 running일 때만 표시된다.
+- 둘은 job id와 polling effect가 분리되므로, 예를 들어 `FMP PR Full Text` 실행 중에도 `Recent Update`를 시작할 수 있다.
+- 다만 같은 category 안의 실제 sourceType 중복은 backend route-level `409 existingJobId` guard가 막는다.
 
 - `5-1` 목적: 성능 튜닝 과정에서 타입/구문 오류가 새로 생기지 않았는지 확인한다.
   설명: 수정한 backend/frontend 파일 diagnostics 0개를 목표로 한다.

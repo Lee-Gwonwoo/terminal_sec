@@ -21,6 +21,13 @@ export interface JobProgress {
   pct: number;
 }
 
+export type JobCategory = "news-update" | "news-fulltext" | "other";
+
+export interface JobMetadata {
+  category?: JobCategory;
+  label?: string;
+}
+
 export interface JobState {
   id: string;
   status: "running" | "done" | "failed" | "cancelled";
@@ -30,6 +37,8 @@ export interface JobState {
   result?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  category: JobCategory;
+  label?: string;
 }
 
 // ─── In-memory store ───
@@ -53,7 +62,7 @@ function cleanup(): void {
 
 // ─── Public API ───
 
-export function createJob(total: number): string {
+export function createJob(total: number, metadata?: JobMetadata): string {
   cleanup();
   const id = randomUUID();
   const now = new Date().toISOString();
@@ -64,6 +73,8 @@ export function createJob(total: number): string {
     logs: [],
     createdAt: now,
     updatedAt: now,
+    category: metadata?.category ?? "other",
+    label: metadata?.label,
   });
   return id;
 }

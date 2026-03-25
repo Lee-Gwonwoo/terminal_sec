@@ -408,6 +408,29 @@ export function FinnhubNewsWindow({
   const [fulltextData, setFulltextData] = useState<{ title: string; text: string; wordCount: number; status: string } | null>(null);
   const [fulltextLoading, setFulltextLoading] = useState(false);
 
+  type JobCategory = 'news-update' | 'news-fulltext';
+  type TrackedJobStatus = {
+    id: string;
+    category?: JobCategory | string;
+    label?: string;
+    status: 'running' | 'done' | 'failed' | 'cancelled';
+    progress: { completed: number; total: number; pct: number };
+    logs: string[];
+    error?: string;
+    result?: Record<string, unknown>;
+    createdAt?: string;
+    updatedAt?: string;
+  };
+  type ActiveTrackedJob = {
+    id: string;
+    category?: JobCategory | string;
+    label?: string;
+    status: string;
+    progress: { completed: number; total: number; pct: number };
+    createdAt: string;
+    updatedAt?: string;
+  };
+
   // Full text extraction job
   const [ftUpdating, setFtUpdating] = useState(false);
 
@@ -546,22 +569,19 @@ export function FinnhubNewsWindow({
   const [pendingUpdateSourceType, setPendingUpdateSourceType] = useState<UpdateSourceType>('all');
 
   // ─── Background job tracking ───
-  const [currentJobId, setCurrentJobId] = useState<string | null>(null);
+  const [pullJobId, setPullJobId] = useState<string | null>(null);
+  const [ftJobId, setFtJobId] = useState<string | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [showLogPanel, setShowLogPanel] = useState(false);
-  const [jobStatus, setJobStatus] = useState<{
-    status: 'running' | 'done' | 'failed' | 'cancelled';
-    progress: { completed: number; total: number; pct: number };
-    logs: string[];
-    error?: string;
-    result?: Record<string, unknown>;
-  } | null>(null);
-  const [activeJobs, setActiveJobs] = useState<{ id: string; status: string; progress: { completed: number; total: number; pct: number }; createdAt: string }[]>([]);
+  const [jobStatuses, setJobStatuses] = useState<Record<string, TrackedJobStatus>>({});
+  const [activeJobs, setActiveJobs] = useState<ActiveTrackedJob[]>([]);
   const logEndRef = useRef<HTMLDivElement>(null);
   const fetchAbortRef = useRef<AbortController | null>(null);
   const tickerQueryRef = useRef(tickerQuery);
   tickerQueryRef.current = tickerQuery;
   const searchQueryRef = useRef(searchQuery);
   searchQueryRef.current = searchQuery;
+  const selectedJobStatus = selectedJobId ? jobStatuses[selectedJobId] ?? null : null;
 
   const listContainerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<List>(null);
@@ -864,7 +884,6 @@ export function FinnhubNewsWindow({
 
     setUpdating(true);
     setError(null);
-    setJobStatus(null);
     try {
       if (sourceType === 'fmp_press_release') {
         const body: Record<string, unknown> = {
@@ -884,7 +903,7 @@ export function FinnhubNewsWindow({
         const data = await res.json();
         if (!res.ok) {
           if (res.status === 409 && data.existingJobId) {
-            setCurrentJobId(data.existingJobId);
+            registerJob(data.existingJobId, 'news-update');
             setShowLogPanel(true);
             setError(data.error || 'FMP press release pull job is already running');
             return;
@@ -893,7 +912,7 @@ export function FinnhubNewsWindow({
           setUpdating(false);
           return;
         }
-        setCurrentJobId(data.jobId);
+        registerJob(data.jobId, 'news-update');
         return;
       }
 
@@ -914,7 +933,7 @@ export function FinnhubNewsWindow({
         const data = await res.json();
         if (!res.ok) {
           if (res.status === 409 && data.existingJobId) {
-            setCurrentJobId(data.existingJobId);
+            registerJob(data.existingJobId, 'news-update');
             setShowLogPanel(true);
             setError(data.error || 'FMP SEC filing pull job is already running');
             return;
@@ -923,7 +942,7 @@ export function FinnhubNewsWindow({
           setUpdating(false);
           return;
         }
-        setCurrentJobId(data.jobId);
+        registerJob(data.jobId, 'news-update');
         return;
       }
 
@@ -943,7 +962,7 @@ export function FinnhubNewsWindow({
       const data = await res.json();
       if (!res.ok) {
         if (res.status === 409 && data.existingJobId) {
-          setCurrentJobId(data.existingJobId);
+          registerJob(data.existingJobId, 'news-update');
           setShowLogPanel(true);
           setError(data.error || 'Finnhub pull job is already running');
           return;
@@ -952,7 +971,7 @@ export function FinnhubNewsWindow({
         setUpdating(false);
         return;
       }
-      setCurrentJobId(data.jobId);
+      registerJob(data.jobId, 'news-update');
     } catch (err: any) {
       setError(err.message || 'Failed to start update');
       setUpdating(false);
@@ -992,7 +1011,6 @@ export function FinnhubNewsWindow({
   const handlePtprUpdate = async (mode: 'recent' | 'custom', from?: string, to?: string) => {
     setUpdating(true);
     setError(null);
-    setJobStatus(null);
     try {
       const body: Record<string, unknown> = {
         mode,
@@ -1008,7 +1026,7 @@ export function FinnhubNewsWindow({
       const data = await res.json();
       if (!res.ok) {
         if (res.status === 409 && data.existingJobId) {
-          setCurrentJobId(data.existingJobId);
+          registerJob(data.existingJobId, 'news-update');
           setShowLogPanel(true);
           setError(data.error || 'RTPR pull job is already running');
           return;
@@ -1017,7 +1035,7 @@ export function FinnhubNewsWindow({
         setUpdating(false);
         return;
       }
-      setCurrentJobId(data.jobId);
+      registerJob(data.jobId, 'news-update');
     } catch (err: any) {
       setError(err.message || 'Failed to start PTPR update');
       setUpdating(false);
@@ -1069,7 +1087,6 @@ export function FinnhubNewsWindow({
   const handleRecentChangeUpdate = async () => {
     setUpdating(true);
     setError(null);
-    setJobStatus(null);
     try {
       const res = await fetch(`${API_BASE}/api/news/change/update-recent`, {
         method: 'POST',
@@ -1081,7 +1098,7 @@ export function FinnhubNewsWindow({
         setUpdating(false);
         return;
       }
-      setCurrentJobId(data.jobId);
+      registerJob(data.jobId, 'news-update');
     } catch (err: any) {
       setError(err.message || 'Failed to start recent change update');
       setUpdating(false);
@@ -1092,7 +1109,6 @@ export function FinnhubNewsWindow({
   const handleCustomChangeUpdate = async (from: string, to: string) => {
     setUpdating(true);
     setError(null);
-    setJobStatus(null);
     try {
       const res = await fetch(`${API_BASE}/api/news/change/update-custom`, {
         method: 'POST',
@@ -1105,7 +1121,7 @@ export function FinnhubNewsWindow({
         setUpdating(false);
         return;
       }
-      setCurrentJobId(data.jobId);
+      registerJob(data.jobId, 'news-update');
     } catch (err: any) {
       setError(err.message || 'Failed to start custom change update');
       setUpdating(false);
@@ -1183,12 +1199,46 @@ export function FinnhubNewsWindow({
   type FtSourceType = 'all' | 'company_news' | 'press_release' | 'market_news' | 'rtpr' | 'fmp_press_release' | 'fmp_sec_filing';
   const [lastFtSourceType, setLastFtSourceType] = useState<FtSourceType>('all');
 
+  const registerJob = useCallback((jobId: string, category: JobCategory) => {
+    if (category === 'news-update') {
+      setPullJobId(jobId);
+      setUpdating(true);
+    } else {
+      setFtJobId(jobId);
+      setFtUpdating(true);
+    }
+    setSelectedJobId(jobId);
+  }, []);
+
+  const syncJobState = useCallback((jobId: string, category: JobCategory, data: TrackedJobStatus) => {
+    setJobStatuses(prev => ({ ...prev, [jobId]: data }));
+
+    if (data.status === 'running') {
+      if (category === 'news-update') setUpdating(true);
+      else setFtUpdating(true);
+      return;
+    }
+
+    if (category === 'news-update') {
+      setUpdating(false);
+      setPullJobId(prev => (prev === jobId ? null : prev));
+    } else {
+      setFtUpdating(false);
+      setFtJobId(prev => (prev === jobId ? null : prev));
+    }
+
+    if (data.status === 'done') {
+      fetchNews(searchQueryRef.current || undefined);
+    } else if (data.status === 'failed') {
+      setError(data.error || 'Job failed');
+    }
+  }, [fetchNews]);
+
   const handleFulltextUpdate = async (sourceType: FtSourceType = 'all') => {
-    if (updating || ftUpdating) return;
+    if (ftUpdating) return;
     setLastFtSourceType(sourceType);
     setFtUpdating(true);
     setError(null);
-    setJobStatus(null);
     try {
       const concurrency = sourceType === 'fmp_press_release'
         ? getFmpPrFulltextConcurrency()
@@ -1214,7 +1264,7 @@ export function FinnhubNewsWindow({
         setFtUpdating(false);
         return;
       }
-      setCurrentJobId(data.jobId);
+      registerJob(data.jobId, 'news-fulltext');
     } catch (err: any) {
       setError(err.message || 'Failed to start fulltext extraction');
       setFtUpdating(false);
@@ -1223,7 +1273,7 @@ export function FinnhubNewsWindow({
 
   /** Reset failed/unavailable fulltext rows and start re-extraction */
   const handleResetAndRetry = async () => {
-    if (updating || ftUpdating) return;
+    if (ftUpdating) return;
     try {
       const resetRes = await fetch(`${API_BASE}/api/news/fulltext/reset-failed`, { method: 'POST' });
       const resetData = await resetRes.json();
@@ -1236,7 +1286,7 @@ export function FinnhubNewsWindow({
   };
 
   const handleResetFmpPrFallbackAndRetry = async () => {
-    if (updating || ftUpdating) return;
+    if (ftUpdating) return;
     try {
       const resetRes = await fetch(`${API_BASE}/api/news/fulltext/reset-fmp-pr-fallback`, { method: 'POST' });
       const resetData = await resetRes.json();
@@ -1271,27 +1321,15 @@ export function FinnhubNewsWindow({
 
   // ─── Poll background job status ───
   useEffect(() => {
-    if (!currentJobId) return;
+    if (!pullJobId) return;
     let cancelled = false;
     const poll = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/jobs/${currentJobId}`);
+        const res = await fetch(`${API_BASE}/api/jobs/${pullJobId}`);
         if (!res.ok) return;
         const data = await res.json();
         if (cancelled) return;
-        setJobStatus(data);
-        if (data.status === 'done') {
-          setUpdating(false);
-          setFtUpdating(false);
-          fetchNews(searchQuery || undefined);
-        } else if (data.status === 'failed') {
-          setUpdating(false);
-          setFtUpdating(false);
-          setError(data.error || 'Job failed');
-        } else if (data.status === 'cancelled') {
-          setUpdating(false);
-          setFtUpdating(false);
-        }
+        syncJobState(pullJobId, 'news-update', data);
       } catch {
         // Ignore transient fetch errors; will retry next interval
       }
@@ -1300,7 +1338,27 @@ export function FinnhubNewsWindow({
     const timer = setInterval(poll, 2500);
     return () => { cancelled = true; clearInterval(timer); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentJobId]);
+  }, [pullJobId, syncJobState]);
+
+  useEffect(() => {
+    if (!ftJobId) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/jobs/${ftJobId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        syncJobState(ftJobId, 'news-fulltext', data);
+      } catch {
+        // Ignore transient fetch errors; will retry next interval
+      }
+    };
+    poll();
+    const timer = setInterval(poll, 2500);
+    return () => { cancelled = true; clearInterval(timer); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ftJobId, syncJobState]);
 
   // Auto-reconnect to running job after page refresh + refresh active jobs list
   useEffect(() => {
@@ -1309,14 +1367,26 @@ export function FinnhubNewsWindow({
       try {
         const res = await fetch(`${API_BASE}/api/jobs/active`);
         if (!res.ok || cancelled) return;
-        const jobs: { id: string; status: string; progress: { completed: number; total: number; pct: number }; createdAt: string }[] = await res.json();
+        const jobs: ActiveTrackedJob[] = await res.json();
         if (cancelled) return;
-        setActiveJobs(jobs);
-        if (!currentJobId && jobs.length > 0) {
-          const latest = jobs.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-          setCurrentJobId(latest.id);
-          setUpdating(true);
-          setShowLogPanel(true);
+        const trackedJobs = jobs.filter((job) => job.category === 'news-update' || job.category === 'news-fulltext');
+        setActiveJobs(trackedJobs);
+
+        const sortedJobs = [...trackedJobs].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        const latestPullJob = sortedJobs.find((job) => job.category === 'news-update') ?? null;
+        const latestFulltextJob = sortedJobs.find((job) => job.category === 'news-fulltext') ?? null;
+
+        setUpdating(Boolean(latestPullJob));
+        setFtUpdating(Boolean(latestFulltextJob));
+        setPullJobId(latestPullJob?.id ?? null);
+        setFtJobId(latestFulltextJob?.id ?? null);
+
+        const hasSelectedActiveJob = selectedJobId ? trackedJobs.some((job) => job.id === selectedJobId) : false;
+        if (sortedJobs.length > 0 && (!selectedJobId || !hasSelectedActiveJob)) {
+          setSelectedJobId(sortedJobs[0].id);
+          if (!selectedJobId) {
+            setShowLogPanel(true);
+          }
         }
       } catch { /* ignore — server may be down */ }
     };
@@ -1324,14 +1394,14 @@ export function FinnhubNewsWindow({
     const timer = setInterval(refreshActiveJobs, 5000);
     return () => { cancelled = true; clearInterval(timer); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentJobId]);
+  }, [selectedJobId]);
 
   // Auto-scroll log panel to bottom
   useEffect(() => {
     if (showLogPanel && logEndRef.current) {
       logEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [jobStatus?.logs?.length, showLogPanel]);
+  }, [selectedJobStatus?.logs?.length, showLogPanel]);
 
   // ESC key closes log panel
   useEffect(() => {
@@ -2253,29 +2323,38 @@ export function FinnhubNewsWindow({
               })()}
 
               <button
-                onClick={() => (currentJobId || activeJobs.length > 0) && setShowLogPanel(!showLogPanel)}
-                disabled={!currentJobId && activeJobs.length === 0}
+                onClick={() => {
+                  const hasSelectedActiveJob = selectedJobId ? activeJobs.some((job) => job.id === selectedJobId) : false;
+                  if ((!selectedJobId || !hasSelectedActiveJob) && activeJobs.length > 0) {
+                    const latest = [...activeJobs].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+                    setSelectedJobId(latest.id);
+                  }
+                  if (selectedJobId || activeJobs.length > 0) {
+                    setShowLogPanel(!showLogPanel);
+                  }
+                }}
+                disabled={!selectedJobId && activeJobs.length === 0}
                 className={`px-3 py-1.5 border rounded-lg transition-colors flex items-center gap-1.5 text-xs ${
-                  !currentJobId && activeJobs.length === 0
+                  !selectedJobId && activeJobs.length === 0
                     ? 'border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-600 cursor-not-allowed opacity-50'
                     : showLogPanel
                       ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
                       : 'border-gray-300 dark:border-gray-600 hover:bg-white dark:hover:bg-gray-800 bg-white dark:bg-gray-900'
                 }`}
-                title={currentJobId ? 'View update job logs and progress' : activeJobs.length > 0 ? 'View active jobs' : 'No active job — click Update first'}
+                title={selectedJobId ? 'View selected job logs and progress' : activeJobs.length > 0 ? 'View active jobs' : 'No active job — click Update or Full Text first'}
               >
                 <Eye className="w-3.5 h-3.5" />
                 <span>View Log</span>
                 {activeJobs.length > 1 && (
                   <span className="ml-1 px-1.5 py-0.5 rounded-full bg-blue-500 text-white text-[9px] font-bold leading-none">{activeJobs.length}</span>
                 )}
-                {jobStatus?.status === 'running' && (
-                  <span className="ml-1 text-[10px] text-blue-500 tabular-nums">{jobStatus.progress.pct}%</span>
+                {selectedJobStatus?.status === 'running' && (
+                  <span className="ml-1 text-[10px] text-blue-500 tabular-nums">{selectedJobStatus.progress.pct}%</span>
                 )}
-                {jobStatus?.status === 'done' && (
+                {selectedJobStatus?.status === 'done' && (
                   <span className="ml-1 w-2 h-2 rounded-full bg-green-500 inline-block" />
                 )}
-                {jobStatus?.status === 'failed' && (
+                {selectedJobStatus?.status === 'failed' && (
                   <span className="ml-1 w-2 h-2 rounded-full bg-red-500 inline-block" />
                 )}
               </button>
@@ -2308,7 +2387,7 @@ export function FinnhubNewsWindow({
                 {/* Main button — repeats last used sourceType */}
                 <button
                   onClick={() => handleFulltextUpdate(lastFtSourceType)}
-                  disabled={updating || ftUpdating}
+                  disabled={ftUpdating}
                   className="px-3 py-1.5 border border-r-0 border-gray-300 dark:border-gray-600 rounded-l-lg hover:bg-white dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 text-xs disabled:opacity-50 bg-white dark:bg-gray-900"
                   title={lastFtSourceType === 'rtpr' ? 'Backfill RTPR full text from stored body' : `Extract full text (${getSourceTypeLabel(lastFtSourceType)})`}
                 >
@@ -2318,7 +2397,7 @@ export function FinnhubNewsWindow({
                 {/* Dropdown arrow */}
                 <button
                   onClick={() => setShowFtMenu(!showFtMenu)}
-                  disabled={updating || ftUpdating}
+                  disabled={ftUpdating}
                   className="px-1.5 py-1.5 border border-gray-300 dark:border-gray-600 rounded-r-lg hover:bg-white dark:hover:bg-gray-800 transition-colors disabled:opacity-50 bg-white dark:bg-gray-900"
                   title="Choose source type for full text extraction"
                 >
@@ -2328,40 +2407,40 @@ export function FinnhubNewsWindow({
                 {showFtMenu && (
                   <div className="absolute top-full left-0 mt-1 w-56 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-lg z-50">
                     <div className="p-1.5">
-                      <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('all'); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                      <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('all'); }} disabled={ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <FileText className="w-3.5 h-3.5 shrink-0 text-orange-500" />
                         <div><div className="font-medium">Full Text (All)</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Company + Press + Market News</div></div>
                       </button>
-                      <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('company_news'); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                      <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('company_news'); }} disabled={ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <FileText className="w-3.5 h-3.5 shrink-0 text-blue-500" />
                         <div><div className="font-medium">Company News Only</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Extract for company_news items</div></div>
                       </button>
-                      <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('press_release'); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                      <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('press_release'); }} disabled={ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <FileText className="w-3.5 h-3.5 shrink-0 text-green-500" />
                         <div><div className="font-medium">Press Release Only</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Extract for press_release items</div></div>
                       </button>
-                      <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('fmp_press_release'); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                      <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('fmp_press_release'); }} disabled={ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <FileText className="w-3.5 h-3.5 shrink-0 text-emerald-500" />
                         <div><div className="font-medium">FMP PR Only</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Extract only missing full text rows for FMP press releases</div></div>
                       </button>
-                      <button onClick={async () => { setShowFtMenu(false); await handleResetFmpPrFallbackAndRetry(); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50 text-emerald-700 dark:text-emerald-300">
+                      <button onClick={async () => { setShowFtMenu(false); await handleResetFmpPrFallbackAndRetry(); }} disabled={ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50 text-emerald-700 dark:text-emerald-300">
                         <RotateCw className="w-3.5 h-3.5 shrink-0" />
                         <div><div className="font-medium">Reset FMP PR Fallback</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">기존 잘못된 fallback full text 삭제 후 missing-only update 재실행</div></div>
                       </button>
-                      <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('fmp_sec_filing'); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                      <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('fmp_sec_filing'); }} disabled={ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <FileText className="w-3.5 h-3.5 shrink-0 text-violet-500" />
                         <div><div className="font-medium">FMP SEC Filing Only</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Extract full text and refresh summary/body for SEC filing items</div></div>
                       </button>
-                      <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('market_news'); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                      <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('market_news'); }} disabled={ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <FileText className="w-3.5 h-3.5 shrink-0 text-amber-500" />
                         <div><div className="font-medium">Market News Only</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Attempt extraction for market_news items</div></div>
                       </button>
-                      <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('rtpr'); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                      <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('rtpr'); }} disabled={ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <FileText className="w-3.5 h-3.5 shrink-0 text-cyan-500" />
                         <div><div className="font-medium">RTPR Body Backfill</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">저장된 RTPR body로 누락 full text 채우기</div></div>
                       </button>
                       <hr className="my-1 border-gray-200 dark:border-gray-700" />
-                      <button onClick={async () => { setShowFtMenu(false); await handleResetAndRetry(); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50 text-red-600 dark:text-red-400">
+                      <button onClick={async () => { setShowFtMenu(false); await handleResetAndRetry(); }} disabled={ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50 text-red-600 dark:text-red-400">
                         <RotateCw className="w-3.5 h-3.5 shrink-0" />
                         <div><div className="font-medium">Reset Failed & Retry</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">이전 실패 행 삭제 후 body fallback으로 재시도</div></div>
                       </button>
@@ -2575,44 +2654,44 @@ export function FinnhubNewsWindow({
       </div>
 
       {/* ─── Job Log Panel (bottom overlay) ─── */}
-      {showLogPanel && jobStatus && (
+      {showLogPanel && selectedJobStatus && (
         <div className="absolute bottom-0 left-0 right-0 h-[45%] bg-white dark:bg-gray-900 border-t border-gray-300 dark:border-gray-700 z-40 flex flex-col shadow-lg">
           {/* Panel header */}
           <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 shrink-0">
             <div className="flex items-center gap-3">
               {activeJobs.length > 1 ? (
                 <select
-                  value={currentJobId || ''}
-                  onChange={(e) => { setCurrentJobId(e.target.value); setJobStatus(null); }}
+                  value={selectedJobId || ''}
+                  onChange={(e) => { setSelectedJobId(e.target.value); }}
                   className="text-xs font-semibold bg-transparent border border-gray-300 dark:border-gray-600 rounded px-1.5 py-0.5 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500 max-w-[180px]"
                 >
                   {activeJobs.map((j, i) => (
                     <option key={j.id} value={j.id}>
-                      Job {i + 1} — {j.progress.completed}/{j.progress.total} ({j.progress.pct}%)
+                      {j.label ?? `Job ${i + 1}`} — {j.progress.completed}/{j.progress.total} ({j.progress.pct}%)
                     </option>
                   ))}
                 </select>
               ) : (
-                <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">Update Log</span>
+                <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">{selectedJobStatus.label ?? 'Job Log'}</span>
               )}
               <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
-                jobStatus.status === 'running' ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300' :
-                jobStatus.status === 'done' ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300' :
-                jobStatus.status === 'cancelled' ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300' :
+                selectedJobStatus.status === 'running' ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300' :
+                selectedJobStatus.status === 'done' ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300' :
+                selectedJobStatus.status === 'cancelled' ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300' :
                 'bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300'
               }`}>
-                {jobStatus.status === 'running' ? 'Running' : jobStatus.status === 'done' ? 'Done' : jobStatus.status === 'cancelled' ? 'Cancelled' : 'Failed'}
+                {selectedJobStatus.status === 'running' ? 'Running' : selectedJobStatus.status === 'done' ? 'Done' : selectedJobStatus.status === 'cancelled' ? 'Cancelled' : 'Failed'}
               </span>
               <span className="text-[10px] text-gray-400 tabular-nums">
-                {jobStatus.progress.completed}/{jobStatus.progress.total} ({jobStatus.progress.pct}%)
+                {selectedJobStatus.progress.completed}/{selectedJobStatus.progress.total} ({selectedJobStatus.progress.pct}%)
               </span>
             </div>
             <div className="flex items-center gap-1">
-              {jobStatus.status === 'running' && currentJobId && (
+              {selectedJobStatus.status === 'running' && selectedJobId && (
                 <button
                   onClick={async () => {
                     try {
-                      await fetch(`${API_BASE}/api/jobs/${currentJobId}/cancel`, { method: 'POST' });
+                      await fetch(`${API_BASE}/api/jobs/${selectedJobId}/cancel`, { method: 'POST' });
                     } catch { /* ignore */ }
                   }}
                   className="p-1 hover:bg-red-100 dark:hover:bg-red-900/40 rounded transition-colors"
@@ -2630,31 +2709,31 @@ export function FinnhubNewsWindow({
           <div className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 shrink-0">
             <div
               className={`h-full transition-all duration-300 ${
-                jobStatus.status === 'failed' ? 'bg-red-500' : jobStatus.status === 'done' ? 'bg-green-500' : jobStatus.status === 'cancelled' ? 'bg-amber-500' : 'bg-blue-500'
+                selectedJobStatus.status === 'failed' ? 'bg-red-500' : selectedJobStatus.status === 'done' ? 'bg-green-500' : selectedJobStatus.status === 'cancelled' ? 'bg-amber-500' : 'bg-blue-500'
               }`}
-              style={{ width: `${jobStatus.progress.pct}%` }}
+              style={{ width: `${selectedJobStatus.progress.pct}%` }}
             />
           </div>
           {/* Log lines */}
           <div className="flex-1 overflow-y-auto px-3 py-2 font-mono text-[11px] leading-relaxed text-gray-600 dark:text-gray-300 bg-gray-50/50 dark:bg-gray-900">
-            {jobStatus.logs.map((line, i) => (
+            {selectedJobStatus.logs.map((line, i) => (
               <div key={i} className={`whitespace-pre-wrap py-0.5 ${line.includes('⚠') ? 'text-amber-600 dark:text-amber-400' : ''}`}>
                 {line}
               </div>
             ))}
-            {jobStatus.error && (
+            {selectedJobStatus.error && (
               <div className="mt-2 px-2 py-1.5 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded text-red-600 dark:text-red-400 text-xs">
-                Error: {jobStatus.error}
+                Error: {selectedJobStatus.error}
               </div>
             )}
             <div ref={logEndRef} />
           </div>
           {/* Result summary when done */}
-          {jobStatus.status === 'done' && jobStatus.result && (
+          {selectedJobStatus.status === 'done' && selectedJobStatus.result && (
             <div className="px-3 py-2 border-t border-gray-200 dark:border-gray-700 bg-green-50 dark:bg-green-900/20 text-xs text-green-700 dark:text-green-300 shrink-0">
-              {(jobStatus.result as Record<string, unknown>).success !== undefined
-                ? `✓ Full Text — ${(jobStatus.result as Record<string, unknown>).success ?? 0} extracted, ${(jobStatus.result as Record<string, unknown>).skipped ?? 0} skipped, ${(jobStatus.result as Record<string, unknown>).failed ?? 0} failed`
-                : `✓ Completed — ${(jobStatus.result as Record<string, unknown>).inserted ?? 0} inserted, ${(jobStatus.result as Record<string, unknown>).skipped ?? 0} skipped, ${(jobStatus.result as Record<string, unknown>).changeMerged ?? 0} change% merged`
+              {(selectedJobStatus.result as Record<string, unknown>).success !== undefined
+                ? `✓ Full Text — ${(selectedJobStatus.result as Record<string, unknown>).success ?? 0} extracted, ${(selectedJobStatus.result as Record<string, unknown>).skipped ?? 0} skipped, ${(selectedJobStatus.result as Record<string, unknown>).failed ?? 0} failed`
+                : `✓ Completed — ${(selectedJobStatus.result as Record<string, unknown>).inserted ?? 0} inserted, ${(selectedJobStatus.result as Record<string, unknown>).skipped ?? 0} skipped, ${(selectedJobStatus.result as Record<string, unknown>).changeMerged ?? 0} change% merged`
               }
             </div>
           )}

@@ -32,6 +32,7 @@ export default function App() {
   const [newsSummaryFontSize, setNewsSummaryFontSize] = useState(11);
   const [dragTabId, setDragTabId] = useState<string | null>(null);
   const [dragOverTabId, setDragOverTabId] = useState<string | null>(null);
+  const [workspaceHydrated, setWorkspaceHydrated] = useState(false);
 
   // ─── Restore workspace from localStorage ───
   useEffect(() => {
@@ -47,6 +48,9 @@ export default function App() {
       setNewsTitleFontSize(clampNumber(p.newsTitleFontSize, 12, 10, 20));
       setNewsSummaryFontSize(clampNumber(p.newsSummaryFontSize, 11, 9, 18));
     } catch { /* corrupted — use defaults */ }
+    finally {
+      setWorkspaceHydrated(true);
+    }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Apply font scale ───
@@ -56,6 +60,7 @@ export default function App() {
 
   // ─── Persist workspace on change ───
   useEffect(() => {
+    if (!workspaceHydrated) return;
     try {
       localStorage.setItem('terminal-workspace-v1', JSON.stringify({
         version: 1,
@@ -68,7 +73,7 @@ export default function App() {
         tabs: tabs.map(t => ({ id: t.id, name: t.name, windows: t.windows })),
       }));
     } catch { /* quota */ }
-  }, [tabs, activeTabId, isDarkMode, fontScale, newsTitleFontSize, newsSummaryFontSize, linkedTicker]);
+  }, [workspaceHydrated, tabs, activeTabId, isDarkMode, fontScale, newsTitleFontSize, newsSummaryFontSize, linkedTicker]);
 
   useEffect(() => {
     // Apply dark mode class to document

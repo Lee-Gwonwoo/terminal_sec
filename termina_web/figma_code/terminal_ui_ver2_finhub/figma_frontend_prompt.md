@@ -16,6 +16,7 @@
 - `FinnhubNewsWindow`의 `Control` modal과 `DataControlWindow` Settings 탭은 `fmp-concurrency`, `fmp-request-interval-ms`를 공유한다. 즉 FMP press release / FMP SEC filing pull 속도 설정은 두 화면에서 같은 값을 편집한다.
 - 일반 full text 추출은 `ft-concurrency`를 사용한다.
 - `FMP PR Only`와 `Reset FMP PR Fallback` 뒤 재실행은 전용 키 `fmp-pr-fulltext-concurrency`를 우선 사용하고, 값이 없으면 `ft-concurrency`를 fallback으로 사용한다.
+- `FinnhubNewsWindow`는 pull/update 계열 job과 fulltext 계열 job을 서로 다른 state/job id로 추적한다. 즉 `Update`는 `updating`만, `Full Text`는 `ftUpdating`만 차단한다.
 - API 호출 base는 빈 문자열 `""` 이고, dev 환경에서는 Vite proxy가 `/api`, `/healthz`를 `http://localhost:8080`으로 보낸다.
 
 ## 실행
@@ -165,6 +166,22 @@ GET /api/news?source_names=FINNHUB,RTPR,FMP&limit=500
   - source type filter 버튼 묶음
   - `Full View` / `Model_1 Safe`, `Bookmark view`, `Display mode`
   - `Update`, `View Log`, `Full Text`, `Refresh`, `Control`, `Save`, `Load`
+
+### 뉴스 창 UI 락 규칙 기준표
+
+| UI 버튼 그룹 | 차단 state | backend job category | 비고 |
+|-----------|------|------|------|
+| `Update` 계열 | `updating` | `news-update` | pull/update/change 계열 진행 중에만 차단 |
+| `Full Text` 계열 | `ftUpdating` | `news-fulltext` | fulltext/reset/retry 계열 진행 중에만 차단 |
+| `View Log` | 선택된 job 유무 | `news-update` + `news-fulltext` | 두 category의 running job을 같은 패널에서 선택 조회 |
+
+운영적 정의:
+
+- `Pulling...`은 `updating=true`일 때만 표시된다.
+- `Extracting...`은 `ftUpdating=true`일 때만 표시된다.
+- 따라서 `FMP PR Full Text` 실행 중에는 Full Text 메뉴만 잠기고, 일반 `Update` 버튼은 계속 눌릴 수 있다.
+- 반대로 일반 `Update`가 running 중이어도 Full Text 메뉴는 별도 category라서 계속 사용할 수 있다.
+- 로그 패널은 선택된 job id를 기준으로 표시하고, active job이 여러 개면 dropdown으로 전환할 수 있다.
 - 하단 유틸리티 줄
   - item count / loading 상태
   - 에러 메시지 / `Model_1 safe payload active`

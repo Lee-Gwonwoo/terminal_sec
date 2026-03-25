@@ -237,3 +237,56 @@
 | 런타임 통합 | ✅ | 코드 리뷰로 `fmp-pr-fulltext-concurrency` 저장/조회/실행 payload 연결 확인, 브라우저 시각 확인은 사용자 위임 |
 
 - 상태: 구현 및 기본 검증 완료, 사용자 확인 대기 (awaiting user confirmation)
+
+**작성 시각:** 2026-03-25 11:02 (local)
+
+### UI 락 규칙 정리 + 동시작업 허용 구현
+- 사용자 요청:
+  - 현재 UI 락 규칙을 문서/코드 기준표로 정리
+  - frontend 또는 backend md에 명시
+  - active plan에도 반영
+  - FMP PR fulltext 실행 중 다른 작업도 가능하게 구현
+- 변경 파일:
+  - `terminal/backend/src/services/jobManager.ts`
+  - `terminal/backend/src/server.ts`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+  - `terminal/backend_prompt.md`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+  - `ai_agent_plan/fmp_pr_fulltext_fix/plan.md`
+- 구현 내용:
+  - backend job에 `category`, `label` metadata 추가
+  - 뉴스 창 관련 job을 `news-update`, `news-fulltext`로 구분해 active/status endpoint에 함께 노출
+  - frontend에서 pull/update와 fulltext를 별도 job id 및 polling effect로 분리
+  - `Update`는 `updating`만, `Full Text`는 `ftUpdating`만 막도록 변경
+  - log panel은 선택 job 기준으로 유지하되, active job이 여러 개면 dropdown으로 전환
+- 의도:
+  - 기존 단일 `currentJobId` / `jobStatus` 공유 때문에 생기던 과도한 UI lock 제거
+  - FMP PR fulltext 실행 중에도 일반 update/change 계열 작업이 가능하도록 변경
+  - 현재 락 규칙을 문서 기준표로 남겨 이후 해석 혼선을 줄임
+- 상태: 구현 완료, 검증 진행 중 (확인 대기)
+
+**작성 시각:** 2026-03-25 11:16 (local)
+
+### 저장된 탭 소실 회귀 수정
+- 사용자 보고:
+  - 기존에 기억되어 있던 workspace 탭들이 갑자기 사라짐
+- 원인 분석:
+  - `termina_web/.../src/app/App.tsx`에서 localStorage restore effect와 persist effect가 모두 mount 직후 실행된다.
+  - 이 구조에서는 저장값을 읽기 전에 기본 state(`Tab 1`, 빈 windows)가 `terminal-workspace-v1`를 먼저 덮어쓸 수 있다.
+- 변경 파일:
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/App.tsx`
+- 구현 내용:
+  - `workspaceHydrated` state 추가
+  - restore effect 종료 후에만 persist effect가 저장하도록 guard 추가
+- 의미:
+  - 이후에는 새로고침/재접속 시 기존 저장 탭이 기본 탭으로 덮어써지는 문제를 막는다.
+  - 이미 덮어써진 localStorage 내용은 코드만으로 자동 복구할 수 없다.
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `App.tsx` diagnostics 0 errors |
+| 빌드 | ✅ | frontend `npm.cmd run build` 성공 |
+| 자동 테스트 | ✅ | 기존 backend test pass 상태 유지 |
+| 런타임 통합 | ✅ | 코드 경로 검토로 restore 완료 전 persist 차단 확인, 브라우저 시각 확인은 사용자 위임 |
+
+- 상태: 회귀 수정 완료, 사용자 확인 대기 (awaiting user confirmation)

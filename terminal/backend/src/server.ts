@@ -750,7 +750,10 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
     }
 
     // ── Create background job and return immediately ──
-    const jobId = createJob(Math.max(tickerList.length + (pullMarket ? 1 : 0), 1));
+    const jobId = createJob(Math.max(tickerList.length + (pullMarket ? 1 : 0), 1), {
+      category: "news-update",
+      label: `Finnhub Pull (${input.sourceType})`,
+    });
     activePullJobs.set(input.sourceType, jobId);
     appendLog(jobId, `Starting ${input.mode}/${input.sourceType} pull for ${tickerList.length} tickers`);
     appendLog(jobId, `[batch] requested tickerConcurrency=${input.tickerConcurrency}, requestIntervalMs=${input.requestIntervalMs}, levels=${batchLevels.join(" → ")}`);
@@ -1047,7 +1050,10 @@ app.post("/api/news/pull-rtpr", async (req, res, next) => {
     // Both modes use per-ticker fetch from universe
     const tickerList = await getDefaultUniverseTickers();
 
-    const jobId = createJob(tickerList.length);
+    const jobId = createJob(tickerList.length, {
+      category: "news-update",
+      label: "RTPR Pull",
+    });
     activePullJobs.set(rtprJobKey, jobId);
     appendLog(jobId, `Starting RTPR ${input.mode} pull — ${tickerList.length} tickers`);
     appendLog(jobId, `[batch] requested tickerConcurrency=${input.tickerConcurrency}`);
@@ -1292,7 +1298,10 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
     const todayEt = getEtDateString(new Date());
     const fallback7d = getEtDateString(new Date(Date.now() - 7 * 86_400_000));
     const effectiveTo = input.to ?? todayEt;
-    const jobId = createJob(tickerList.length);
+    const jobId = createJob(tickerList.length, {
+      category: "news-update",
+      label: "FMP PR Pull",
+    });
     activePullJobs.set(jobKey, jobId);
     appendLog(jobId, `Starting FMP press release ${input.mode} pull — ${tickerList.length} tickers`);
     appendLog(jobId, `[batch] tickerConcurrency=${input.tickerConcurrency}, requestIntervalMs=${input.requestIntervalMs}, pageLimit=${input.pageLimit}, maxPages=${input.maxPages}`);
@@ -1593,7 +1602,10 @@ app.post("/api/news/pull-fmp-sec-filing", async (req, res, next) => {
       effectiveFrom = anchor?.max_acc?.slice(0, 10) ?? getEtDateString(new Date(Date.now() - 7 * 86_400_000));
     }
 
-    const jobId = createJob(tickerList.length);
+    const jobId = createJob(tickerList.length, {
+      category: "news-update",
+      label: "FMP SEC Pull",
+    });
     activePullJobs.set(jobKey, jobId);
     appendLog(jobId, `Starting FMP SEC filing ${input.mode} pull — from=${effectiveFrom} to=${effectiveTo}`);
     appendLog(jobId, `Universe: ${tickerList.length} tickers, endpoint=sec-filings-search/symbol, tickerConcurrency=${input.tickerConcurrency}, maxPages=${input.maxPages}, requestIntervalMs=${input.requestIntervalMs}`);
@@ -1738,8 +1750,10 @@ app.post("/api/news/pull-fmp-sec-filing", async (req, res, next) => {
 
 // ── Active jobs (for auto-reconnect after page refresh) ──
 app.get("/api/jobs/active", (_req, res) => {
-  const active = getActiveJobs().map((j) => ({
+    const active = getActiveJobs().map((j) => ({
     id: j.id,
+      category: j.category,
+      label: j.label,
     status: j.status,
     progress: j.progress,
     createdAt: j.createdAt,
@@ -1757,6 +1771,8 @@ app.get("/api/jobs/:jobId", (req, res) => {
   }
   res.json({
     id: job.id,
+    category: job.category,
+    label: job.label,
     status: job.status,
     progress: job.progress,
     logs: job.logs,
@@ -1792,7 +1808,10 @@ app.post("/api/news/fulltext/update", async (req, res, next) => {
       ? await getFmpSecFulltextBackfillRows(sourceName)
       : await getUnextractedNewsIds(sourceType, sourceName);
     const total = unextracted.length;
-    const jobId = createJob(total);
+    const jobId = createJob(total, {
+      category: "news-fulltext",
+      label: sourceType ? `Full Text (${sourceType})` : "Full Text (all)",
+    });
 
     // Fire-and-forget background job
     runFulltextUpdate(jobId, sourceType, sourceName, concurrency).catch((err) => {
@@ -1808,7 +1827,10 @@ app.post("/api/news/fulltext/update", async (req, res, next) => {
 // Backfill: convert existing HTML-based fulltext to plain text
 app.post("/api/news/fulltext/backfill-plaintext", async (_req, res, next) => {
   try {
-    const jobId = createJob(0);
+    const jobId = createJob(0, {
+      category: "news-fulltext",
+      label: "Full Text Plaintext Backfill",
+    });
     runFulltextPlainTextBackfill(jobId).catch((err) => {
       console.error("[fulltext-backfill] unhandled:", err);
     });
@@ -1821,7 +1843,10 @@ app.post("/api/news/fulltext/backfill-plaintext", async (_req, res, next) => {
 app.post("/api/news/fulltext/backfill-rtpr", async (req, res, next) => {
   try {
     const concurrency: number = Math.max(1, Math.min(Number(req.body?.concurrency) || 10, 200));
-    const jobId = createJob(0);
+    const jobId = createJob(0, {
+      category: "news-fulltext",
+      label: "RTPR Full Text Backfill",
+    });
     runRtprBodyBackfill(jobId, concurrency).catch((err) => {
       console.error("[fulltext-backfill-rtpr] unhandled:", err);
     });
@@ -1909,7 +1934,10 @@ app.post("/api/news/change/update-recent", async (req, res, next) => {
       concurrency: clampFmpConcurrency(Number.isFinite(concurrencyRaw) ? concurrencyRaw : 5),
       requestIntervalMs: clampFmpIntervalMs(Number.isFinite(intervalRaw) ? intervalRaw : 250),
     };
-    const jobId = createJob(0); // total unknown upfront
+    const jobId = createJob(0, {
+      category: "news-update",
+      label: "News Change Update (Recent)",
+    }); // total unknown upfront
     (async () => {
       try {
         await bulkUpdateRecentChange((done, total) => {
@@ -1944,7 +1972,10 @@ app.post("/api/news/change/update-custom", async (req, res, next) => {
       concurrency: clampFmpConcurrency(fmpConcurrency ?? ibkrConcurrency ?? 5),
       requestIntervalMs: clampFmpIntervalMs(fmpRequestIntervalMs),
     };
-    const jobId = createJob(0);
+    const jobId = createJob(0, {
+      category: "news-update",
+      label: "News Change Update (Custom)",
+    });
     (async () => {
       try {
         await bulkUpdateCustomChange(from, to, (done, total) => {
