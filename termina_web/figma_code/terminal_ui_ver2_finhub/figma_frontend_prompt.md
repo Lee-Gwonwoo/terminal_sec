@@ -357,10 +357,15 @@ API:
 
 현재 코드 상태:
 
-- Full Text 메뉴 버튼도 `updating || ftUpdating` 조건으로 비활성화된다.
-- 따라서 뉴스 update가 running이면 Full Text Update도 같이 잠기고, 반대로 Full Text job이 running이면 일반 update 버튼도 잠긴다.
+- 일반 Update 메뉴(Finnhub/FMP/FMP SEC/Market/Calendar/PTPR/Change)는 현재 `disabled={updating}`만 사용한다.
+- 즉 `updating=true`인 일반 update 계열 job이 running이면 같은 메뉴의 다른 update 버튼들이 잠긴다.
+- Full Text 메뉴 버튼은 `disabled={updating || ftUpdating}` 조건으로 비활성화된다.
+- 따라서 일반 update가 running이면 Full Text Update도 잠기지만, 반대로 Full Text job만 running인 상태가 일반 Update 버튼을 직접 비활성화하지는 않는다.
+- `handleFulltextUpdate()`와 reset 계열 fulltext action은 내부에서도 `if (updating || ftUpdating) return;` 가드가 있다.
+- 반면 `handleUpdate()` 자체에는 `ftUpdating` 가드가 없다. 현재 코드만 보면 fulltext job running 중에도 일반 update 시작 시도는 가능하다.
 - backend 자체는 fulltext endpoint에 Finnhub/RTPR pull과 같은 `409 + existingJobId` duplicate guard가 없다.
-- 즉 현재 UX는 "병렬 실행 방지"가 backend 정책이 아니라 프론트 전역 disable에 크게 의존한다.
+- 즉 현재 UX는 "모든 작업 전역 단일 lock"이 아니라, `updating` 상태를 공유하는 일반 update 묶음 + `updating || ftUpdating`를 보는 fulltext 묶음으로 나뉘어 있다.
+- `View Log`는 backend의 여러 running job을 동시에 보여줄 수 있으므로, 다른 경로(다른 탭/직접 API 호출)에서 병렬 job이 있으면 UI에서 함께 관찰할 수 있다.
 - `FMP PR Only`는 missing-only 동작이다. 이미 `news_fulltext` row가 있는 FMP PR id는 건드리지 않는다.
 - 기존에 잘못 저장된 FMP PR fallback success row를 다시 처리하려면 `Reset FMP PR Fallback`을 먼저 실행해 해당 row를 삭제한 뒤, 이어서 `FMP PR Only`를 실행한다.
 - FMP PR fulltext는 `RTPR` 같은 다른 source body를 재사용하지 않고, FMP로 새로 적재된 기사 URL에서 직접 원문 추출한다.
@@ -728,13 +733,14 @@ API:
 
 현재 상태:
 
-- mock data only
-- local state 위주
-- API 연동 없음
+- backend `watchlists` API와 연결되어 있다.
+- 초기 로드 시 `GET /api/watchlists`로 목록을 가져온다.
+- 새 watch list 생성 시 `POST /api/watchlists`를 호출한다.
+- 이름 변경 및 ticker 추가/삭제는 `PUT /api/watchlists/:id`로 현재 리스트 전체 구성을 저장한다.
+- watch list 자체 삭제는 dropdown의 trash 버튼으로 `DELETE /api/watchlists/:id`를 호출한다.
 - 상단 툴바의 copy 버튼으로 현재 선택된 watch list 이름을 clipboard에 복사할 수 있다.
 - Watch Lists dropdown의 각 row에도 copy 아이콘이 있어 해당 리스트 이름을 직접 복사할 수 있다.
-
-컬럼 UI는 있지만 source of truth가 backend가 아니다.
+- 현재 source of truth는 backend `app.db`의 `watchlists`, `watchlist_items` 테이블이다.
 
 ## Calendar Window
 

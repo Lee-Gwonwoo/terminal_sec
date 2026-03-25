@@ -68,6 +68,60 @@ export async function createWatchlist(userId: string, name: string, tickers: str
   };
 }
 
+export async function updateWatchlist(
+  userId: string,
+  watchlistId: string,
+  name: string,
+  tickers: string[],
+  enableAlerts: boolean,
+) {
+  const db = getDb();
+  await db.run("BEGIN");
+  try {
+    const existing = await db.get<{ id: string; created_at: string }>(
+      `SELECT id, created_at FROM watchlists WHERE user_id = ? AND id = ?`,
+      [userId, watchlistId],
+    );
+
+    if (!existing) {
+      await db.run("ROLLBACK");
+      return null;
+    }
+
+    await db.run(
+      `UPDATE watchlists
+       SET name = ?, enable_alerts = ?
+       WHERE user_id = ? AND id = ?`,
+      [name, enableAlerts ? 1 : 0, userId, watchlistId],
+    );
+
+    await db.run(`DELETE FROM watchlist_items WHERE watchlist_id = ?`, [watchlistId]);
+
+    for (const ticker of tickers) {
+      const normalizedTicker = ticker.toUpperCase();
+      const securityId = await upsertSecurity(normalizedTicker, null, null, null, null);
+      await db.run(
+        `INSERT INTO watchlist_items (watchlist_id, ticker, security_id) VALUES (?, ?, ?)`,
+        [watchlistId, normalizedTicker, securityId],
+      );
+    }
+
+    await db.run("COMMIT");
+
+    return {
+      id: watchlistId,
+      user_id: userId,
+      name,
+      enable_alerts: enableAlerts,
+      created_at: existing.created_at,
+      tickers: tickers.map((ticker) => ticker.toUpperCase()),
+    };
+  } catch (error) {
+    await db.run("ROLLBACK");
+    throw error;
+  }
+}
+
 export async function deleteWatchlist(userId: string, watchlistId: string) {
   const result = await getDb().run(
     `DELETE FROM watchlists WHERE user_id = ? AND id = ?`,

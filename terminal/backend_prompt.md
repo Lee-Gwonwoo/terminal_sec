@@ -1482,7 +1482,9 @@ query:
 - fulltext update는 background job으로 실행되고 `jobId`를 반환한다.
 - 하지만 현재 backend에는 `pull-finhub`/`pull-rtpr`처럼 endpoint 전용 duplicate guard가 없다.
 - 따라서 API만 보면 같은 fulltext 계열 job을 연속 호출해 여러 job을 만들 수 있다.
-- 다만 현재 프론트 `FinnhubNewsWindow`는 `updating || ftUpdating` 전역 lock으로 fulltext 버튼도 함께 비활성화하기 때문에, 일반 UI 경로에서는 중복 시작이 잘 일어나지 않는다.
+- 다만 현재 프론트 `FinnhubNewsWindow`는 fulltext 메뉴에만 `updating || ftUpdating` lock을 적용한다.
+- 일반 update 메뉴는 `updating`만 보므로, backend contract 기준으로는 fulltext job과 일반 pull/change job이 동시에 존재할 수 있다.
+- 즉 fulltext와 다른 update 간 병렬 가능 여부는 backend보다 프론트 버튼 disable/handler guard 조합의 영향을 더 크게 받는다.
 - 이 제약은 frontend UX 제약이지 backend contract 보장은 아니다.
 
 ### `GET /api/news/fulltext/:newsId`
@@ -1864,6 +1866,7 @@ job 완료 result 예시:
 
 - `GET /api/watchlists`
 - `POST /api/watchlists`
+- `PUT /api/watchlists/:id`
 - `DELETE /api/watchlists/:id`
 
 ### Alerts

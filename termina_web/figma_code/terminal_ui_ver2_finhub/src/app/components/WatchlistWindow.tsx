@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { TrendingUp, TrendingDown, Plus, ChevronDown, Pencil, Check, Copy, X } from 'lucide-react';
-import { mockWatchlistData } from '../mockData';
+import { TrendingUp, TrendingDown, Plus, ChevronDown, Pencil, Trash2, RefreshCw, Check, Copy, X } from 'lucide-react';
 import { WatchlistItem } from '../types';
+
+const API_BASE = '';
 
 // ─── Ticker lookup for newly added tickers ───
 const TICKER_DB: Record<string, Partial<WatchlistItem>> = {
@@ -35,31 +36,31 @@ const COLUMNS: ColumnDef[] = [
 ];
 
 // ─── Watch list presets ───
-interface WatchListPreset {
+interface WatchListRecord {
   id: string;
   name: string;
   tickers: string[];
+  enable_alerts?: boolean;
 }
-
-const DEFAULT_WATCHLISTS: WatchListPreset[] = [
-  { id: 'default', name: 'Default', tickers: ['TSLA', 'AAPL', 'GOOGL', 'MSFT', 'NVDA', 'AMZN', 'META'] },
-  { id: 'tech', name: 'Tech Stocks', tickers: ['AAPL', 'MSFT', 'GOOGL', 'META', 'NVDA'] },
-  { id: 'portfolio', name: 'My Portfolio', tickers: ['TSLA', 'NVDA', 'AMZN'] },
-];
 
 interface WatchlistWindowProps {
   onTickerClick?: (ticker: string) => void;
 }
 
 export function WatchlistWindow({ onTickerClick }: WatchlistWindowProps) {
-  const [watchlist, setWatchlist] = useState<WatchlistItem[]>(mockWatchlistData);
+  const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
   const [tickerInput, setTickerInput] = useState('');
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [selectedTickers, setSelectedTickers] = useState<Set<string>>(new Set());
   const [showWatchlistMenu, setShowWatchlistMenu] = useState(false);
-  const [activeWatchlist, setActiveWatchlist] = useState('default');
-  const [watchlists, setWatchlists] = useState<WatchListPreset[]>(DEFAULT_WATCHLISTS);
+  const [activeWatchlist, setActiveWatchlist] = useState<string | null>(null);
+  const [watchlists, setWatchlists] = useState<WatchListRecord[]>([]);
   const [copiedListId, setCopiedListId] = useState<string | null>(null);
+  const [loadingLists, setLoadingLists] = useState(false);
+  const [savingList, setSavingList] = useState(false);
+  const [deletingListId, setDeletingListId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   // ─── New watchlist creation ───
   const [isCreatingList, setIsCreatingList] = useState(false);
@@ -81,6 +82,62 @@ export function WatchlistWindow({ onTickerClick }: WatchlistWindowProps) {
   const watchlistMenuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const activeWatchlistName = watchlists.find((list) => list.id === activeWatchlist)?.name ?? 'Watch Lists';
+
+  const hydrateWatchlistItems = useCallback((tickers: string[]) => {
+    return tickers.map((ticker) => {
+      const dbEntry = TICKER_DB[ticker];
+      return {
+        ticker,
+        name: dbEntry?.name || ticker,
+        price: dbEntry?.price || 0,
+        change: dbEntry?.change || 0,
+        changePercent: dbEntry?.changePercent || 0,
+        marketCap: dbEntry?.marketCap || '-',
+        industry: dbEntry?.industry || '-',
+      } satisfies WatchlistItem;
+    });
+  }, []);
+
+  const applyActiveWatchlist = useCallback((listId: string | null, nextWatchlists: WatchListRecord[]) => {
+    if (!listId) {
+      setActiveWatchlist(null);
+      setWatchlist([]);
+      return;
+    }
+    const nextActive = nextWatchlists.find((list) => list.id === listId) ?? nextWatchlists[0] ?? null;
+    if (!nextActive) {
+      setActiveWatchlist(null);
+      setWatchlist([]);
+      return;
+    }
+    setActiveWatchlist(nextActive.id);
+    setWatchlist(hydrateWatchlistItems(nextActive.tickers));
+  }, [hydrateWatchlistItems]);
+
+  const loadWatchlists = useCallback(async (preferredListId?: string | null) => {
+    setLoadingLists(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/watchlists`);
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || `HTTP ${res.status}`);
+        return;
+      }
+      const rows = Array.isArray(data) ? data.map((row) => ({
+        id: String(row.id),
+        name: String(row.name ?? 'Untitled'),
+        tickers: Array.isArray(row.tickers) ? row.tickers.map((ticker: unknown) => String(ticker).toUpperCase()) : [],
+        enable_alerts: Boolean(row.enable_alerts ?? row.enableAlerts),
+      })) : [];
+      setWatchlists(rows);
+      applyActiveWatchlist(preferredListId ?? activeWatchlist, rows);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load watchlists');
+    } finally {
+      setLoadingLists(false);
+    }
+  }, [activeWatchlist, applyActiveWatchlist]);
 
   // ─── Resize handlers ───
   const onResizeMouseDown = useCallback((colIdx: number) => (e: React.MouseEvent) => {
@@ -148,6 +205,10 @@ export function WatchlistWindow({ onTickerClick }: WatchlistWindowProps) {
     };
   }, []);
 
+  useEffect(() => {
+    void loadWatchlists();
+  }, [loadWatchlists]);
+
   const copyToClipboard = useCallback(async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -180,27 +241,43 @@ export function WatchlistWindow({ onTickerClick }: WatchlistWindowProps) {
   }, [copyToClipboard]);
 
   // ─── Add tickers ───
-  const handleAddTickers = () => {
-    if (!tickerInput.trim()) return;
+  const handleAddTickers = async () => {
+    if (!tickerInput.trim() || !activeWatchlist) return;
     const raw = tickerInput.toUpperCase().replace(/,/g, ' ');
     const tickers = raw.split(/\s+/).filter(t => t.length > 0);
-    const existingTickers = new Set(watchlist.map(w => w.ticker));
-    const newItems: WatchlistItem[] = [];
+    const activeList = watchlists.find((list) => list.id === activeWatchlist);
+    if (!activeList) return;
+    const existingTickers = new Set(activeList.tickers);
+    const mergedTickers = [...activeList.tickers];
     tickers.forEach(ticker => {
       if (existingTickers.has(ticker)) return;
       existingTickers.add(ticker);
-      const dbEntry = TICKER_DB[ticker];
-      newItems.push({
-        ticker,
-        name: dbEntry?.name || ticker,
-        price: dbEntry?.price || 0,
-        change: dbEntry?.change || 0,
-        changePercent: dbEntry?.changePercent || 0,
-        marketCap: dbEntry?.marketCap || '-',
-        industry: dbEntry?.industry || '-',
-      });
+      mergedTickers.push(ticker);
     });
-    if (newItems.length > 0) setWatchlist(prev => [...prev, ...newItems]);
+    if (mergedTickers.length === activeList.tickers.length) {
+      setTickerInput('');
+      return;
+    }
+    setSavingList(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/watchlists/${activeList.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: activeList.name, tickers: mergedTickers, enableAlerts: Boolean(activeList.enable_alerts) }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || `HTTP ${res.status}`);
+        return;
+      }
+      setNotice(`Saved ${mergedTickers.length} tickers to ${activeList.name}`);
+      await loadWatchlists(activeList.id);
+    } catch (err: any) {
+      setError(err.message || 'Failed to update watchlist');
+    } finally {
+      setSavingList(false);
+    }
     setTickerInput('');
     inputRef.current?.focus();
   };
@@ -220,11 +297,33 @@ export function WatchlistWindow({ onTickerClick }: WatchlistWindowProps) {
     });
   };
 
-  const handleDelete = () => {
-    if (selectedTickers.size === 0) return;
-    setWatchlist(prev => prev.filter(item => !selectedTickers.has(item.ticker)));
-    setSelectedTickers(new Set());
-    setIsSelectMode(false);
+  const handleDelete = async () => {
+    if (selectedTickers.size === 0 || !activeWatchlist) return;
+    const activeList = watchlists.find((list) => list.id === activeWatchlist);
+    if (!activeList) return;
+    const nextTickers = activeList.tickers.filter((ticker) => !selectedTickers.has(ticker));
+    setSavingList(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/watchlists/${activeList.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: activeList.name, tickers: nextTickers, enableAlerts: Boolean(activeList.enable_alerts) }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || `HTTP ${res.status}`);
+        return;
+      }
+      setNotice(`Removed ${selectedTickers.size} ticker${selectedTickers.size > 1 ? 's' : ''}`);
+      setSelectedTickers(new Set());
+      setIsSelectMode(false);
+      await loadWatchlists(activeList.id);
+    } catch (err: any) {
+      setError(err.message || 'Failed to remove tickers');
+    } finally {
+      setSavingList(false);
+    }
   };
 
   const handleSelectToggle = () => {
@@ -232,42 +331,44 @@ export function WatchlistWindow({ onTickerClick }: WatchlistWindowProps) {
   };
 
   const handleSwitchWatchlist = (listId: string) => {
-    setActiveWatchlist(listId);
-    const list = watchlists.find(w => w.id === listId);
-    if (list) {
-      const items: WatchlistItem[] = list.tickers.map(ticker => {
-        const existing = mockWatchlistData.find(m => m.ticker === ticker);
-        if (existing) return existing;
-        const dbEntry = TICKER_DB[ticker];
-        return {
-          ticker, name: dbEntry?.name || ticker, price: dbEntry?.price || 0,
-          change: dbEntry?.change || 0, changePercent: dbEntry?.changePercent || 0,
-          marketCap: dbEntry?.marketCap, industry: dbEntry?.industry,
-        };
-      });
-      setWatchlist(items);
-    }
+    applyActiveWatchlist(listId, watchlists);
     setShowWatchlistMenu(false);
     setSelectedTickers(new Set());
     setIsSelectMode(false);
     setIsCreatingList(false);
     setEditingListId(null);
+    setError(null);
+    setNotice(null);
   };
 
   // ─── Create new watchlist ───
-  const handleCreateList = () => {
+  const handleCreateList = async () => {
     if (!newListName.trim()) return;
-    const newId = `list-${Date.now()}`;
-    const newList: WatchListPreset = { id: newId, name: newListName.trim(), tickers: [] };
-    setWatchlists(prev => [...prev, newList]);
-    setNewListName('');
-    setIsCreatingList(false);
-    // Switch to the new list
-    setActiveWatchlist(newId);
-    setWatchlist([]);
-    setShowWatchlistMenu(false);
-    setSelectedTickers(new Set());
-    setIsSelectMode(false);
+    setSavingList(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/watchlists`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newListName.trim(), tickers: [], enableAlerts: false }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || `HTTP ${res.status}`);
+        return;
+      }
+      setNotice(`Created watch list ${data.name}`);
+      setNewListName('');
+      setIsCreatingList(false);
+      setShowWatchlistMenu(false);
+      setSelectedTickers(new Set());
+      setIsSelectMode(false);
+      await loadWatchlists(String(data.id));
+    } catch (err: any) {
+      setError(err.message || 'Failed to create watchlist');
+    } finally {
+      setSavingList(false);
+    }
   };
 
   // ─── Rename watchlist ───
@@ -277,12 +378,33 @@ export function WatchlistWindow({ onTickerClick }: WatchlistWindowProps) {
     setEditingListName(currentName);
   };
 
-  const handleConfirmRename = (e?: React.MouseEvent) => {
+  const handleConfirmRename = async (e?: React.MouseEvent) => {
     e?.stopPropagation();
     if (!editingListId || !editingListName.trim()) return;
-    setWatchlists(prev => prev.map(w => w.id === editingListId ? { ...w, name: editingListName.trim() } : w));
-    setEditingListId(null);
-    setEditingListName('');
+    const activeList = watchlists.find((list) => list.id === editingListId);
+    if (!activeList) return;
+    setSavingList(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/watchlists/${editingListId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: editingListName.trim(), tickers: activeList.tickers, enableAlerts: Boolean(activeList.enable_alerts) }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || `HTTP ${res.status}`);
+        return;
+      }
+      setEditingListId(null);
+      setEditingListName('');
+      setNotice(`Renamed watch list to ${data.name}`);
+      await loadWatchlists(editingListId);
+    } catch (err: any) {
+      setError(err.message || 'Failed to rename watchlist');
+    } finally {
+      setSavingList(false);
+    }
   };
 
   const handleCancelRename = (e?: React.MouseEvent) => {
@@ -290,6 +412,31 @@ export function WatchlistWindow({ onTickerClick }: WatchlistWindowProps) {
     setEditingListId(null);
     setEditingListName('');
   };
+
+  const handleDeleteWatchlist = useCallback(async (listId: string, listName: string, event?: React.MouseEvent) => {
+    event?.stopPropagation();
+    if (!window.confirm(`Delete watch list "${listName}"?`)) {
+      return;
+    }
+    setDeletingListId(listId);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/watchlists/${listId}`, { method: 'DELETE' });
+      if (!res.ok && res.status !== 204) {
+        const data = await res.json();
+        setError(data.error || `HTTP ${res.status}`);
+        return;
+      }
+      const remaining = watchlists.filter((list) => list.id !== listId);
+      const nextActiveId = activeWatchlist === listId ? (remaining[0]?.id ?? null) : activeWatchlist;
+      setNotice(`Deleted watch list ${listName}`);
+      await loadWatchlists(nextActiveId);
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete watchlist');
+    } finally {
+      setDeletingListId(null);
+    }
+  }, [activeWatchlist, loadWatchlists, watchlists]);
 
   // ─── Render cell content by column id ───
   const renderCell = (colId: string, item: WatchlistItem) => {
@@ -328,29 +475,41 @@ export function WatchlistWindow({ onTickerClick }: WatchlistWindowProps) {
     <div className="flex flex-col h-full bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
       {/* ─── Top Controls ─── */}
       <div className="px-3 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+        {(error || notice) && (
+          <div className={`mb-2 rounded px-2 py-1 text-[11px] ${error ? 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-300' : 'bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-300'}`}>
+            {error ?? notice}
+          </div>
+        )}
         <div className="flex items-center gap-1.5">
           <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0">Watchlist</span>
           <div className="flex-1 min-w-0">
             <input ref={inputRef} type="text" value={tickerInput}
               onChange={(e) => setTickerInput(e.target.value)} onKeyDown={handleInputKeyDown} onPaste={handlePaste}
+              disabled={!activeWatchlist || savingList || loadingLists}
               placeholder="Ticker (e.g. tsla ionq)"
               className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500" />
           </div>
-          <button onClick={handleAddTickers} className="p-1 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" title="Add tickers">
+          <button onClick={() => void handleAddTickers()} disabled={!activeWatchlist || savingList || loadingLists} className="p-1 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:text-gray-400 disabled:hover:bg-transparent" title="Add tickers">
             <Plus className="w-3.5 h-3.5" />
           </button>
-          <button onClick={handleSelectToggle}
-            className={`px-2.5 py-1 text-xs border rounded transition-colors ${isSelectMode ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700'}`}>
+          <button onClick={handleSelectToggle} disabled={!activeWatchlist || savingList || loadingLists}
+            className={`px-2.5 py-1 text-xs border rounded transition-colors disabled:text-gray-400 disabled:hover:bg-transparent ${isSelectMode ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700'}`}>
             Select
           </button>
-          <button onClick={handleDelete} disabled={selectedTickers.size === 0}
+          <button onClick={() => void handleDelete()} disabled={selectedTickers.size === 0 || savingList || loadingLists}
             className={`px-2.5 py-1 text-xs border rounded transition-colors ${selectedTickers.size > 0 ? 'border-red-400 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50' : 'border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-600 cursor-not-allowed'}`}>
             Delete{selectedTickers.size > 0 ? ` (${selectedTickers.size})` : ''}
+          </button>
+          <button onClick={() => void loadWatchlists()} disabled={loadingLists || savingList}
+            className="p-1 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:text-gray-400 disabled:hover:bg-transparent"
+            title="Refresh watchlists">
+            <RefreshCw className={`w-3.5 h-3.5 ${loadingLists ? 'animate-spin' : ''}`} />
           </button>
           <div className="relative" ref={watchlistMenuRef}>
             <div className="flex items-center gap-1">
             <button
-              onClick={() => handleCopyListName(activeWatchlist, activeWatchlistName)}
+              onClick={() => activeWatchlist ? void handleCopyListName(activeWatchlist, activeWatchlistName) : undefined}
+              disabled={!activeWatchlist}
               className={`p-1 border rounded transition-colors ${copiedListId === activeWatchlist ? 'border-green-500 bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400' : 'border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
               title={copiedListId === activeWatchlist ? 'Copied active watch list name' : 'Copy active watch list name'}
             >
@@ -364,6 +523,9 @@ export function WatchlistWindow({ onTickerClick }: WatchlistWindowProps) {
             {showWatchlistMenu && (
               <div className="absolute top-full mt-1 right-0 w-52 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-lg z-30">
                 <div className="p-1.5 space-y-0.5">
+                  {watchlists.length === 0 && !loadingLists && (
+                    <div className="px-3 py-2 text-xs text-gray-400">No watch lists yet.</div>
+                  )}
                   {watchlists.map(list => (
                     <div key={list.id} className={`flex items-center rounded hover:bg-gray-100 dark:hover:bg-gray-700 ${activeWatchlist === list.id ? 'bg-blue-50 dark:bg-blue-900/40' : ''}`}>
                       {editingListId === list.id ? (
@@ -393,7 +555,7 @@ export function WatchlistWindow({ onTickerClick }: WatchlistWindowProps) {
                             <div className="text-[10px] text-gray-400 mt-0.5">{list.tickers.length} tickers</div>
                           </button>
                           <button
-                            onClick={(e) => handleCopyListName(list.id, list.name, e)}
+                            onClick={(e) => void handleCopyListName(list.id, list.name, e)}
                             className={`p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 shrink-0 ${copiedListId === list.id ? 'text-green-600 dark:text-green-400' : ''}`}
                             title={copiedListId === list.id ? 'Copied list name' : 'Copy list name'}
                           >
@@ -405,6 +567,14 @@ export function WatchlistWindow({ onTickerClick }: WatchlistWindowProps) {
                             title="Rename"
                           >
                             <Pencil className="w-3 h-3" />
+                          </button>
+                          <button
+                            onClick={(e) => void handleDeleteWatchlist(list.id, list.name, e)}
+                            disabled={deletingListId === list.id}
+                            className="p-1.5 mr-1 text-gray-400 hover:text-red-600 dark:hover:text-red-400 shrink-0 disabled:text-gray-400"
+                            title="Delete watch list"
+                          >
+                            <Trash2 className="w-3 h-3" />
                           </button>
                         </>
                       )}
@@ -424,7 +594,7 @@ export function WatchlistWindow({ onTickerClick }: WatchlistWindowProps) {
                           placeholder="List name..."
                           className="flex-1 min-w-0 px-1.5 py-0.5 text-xs border border-blue-400 rounded bg-white dark:bg-gray-900 focus:outline-none focus:ring-1 focus:ring-blue-500"
                         />
-                        <button onClick={(e) => { e.stopPropagation(); handleCreateList(); }} className="p-0.5 text-green-600 hover:text-green-700" title="Create">
+                        <button onClick={(e) => { e.stopPropagation(); void handleCreateList(); }} className="p-0.5 text-green-600 hover:text-green-700" title="Create">
                           <Check className="w-3 h-3" />
                         </button>
                         <button onClick={(e) => { e.stopPropagation(); setIsCreatingList(false); setNewListName(''); }} className="p-0.5 text-red-500 hover:text-red-600" title="Cancel">
@@ -488,7 +658,7 @@ export function WatchlistWindow({ onTickerClick }: WatchlistWindowProps) {
           {/* ── Rows ── */}
           {watchlist.length === 0 ? (
             <div className="flex items-center justify-center py-12 text-xs text-gray-400">
-              No tickers. Add tickers above.
+              {activeWatchlist ? 'No tickers. Add tickers above.' : 'Create a watch list to begin.'}
             </div>
           ) : (
             watchlist.map(item => {

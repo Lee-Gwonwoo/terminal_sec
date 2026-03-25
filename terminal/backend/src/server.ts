@@ -6,7 +6,7 @@ import { config } from "./config.js";
 import { initDb } from "./db.js";
 import { getModel1News, getModel1NewsById, getNews, getNewsById, getNewsIdBySourceUrl } from "./services/newsRepository.js";
 import { createSavedView, deleteSavedView, listSavedViews } from "./services/savedViewRepository.js";
-import { createWatchlist, deleteWatchlist, listWatchlists, backfillWatchlistSecurityIds } from "./services/watchlistRepository.js";
+import { createWatchlist, deleteWatchlist, listWatchlists, updateWatchlist, backfillWatchlistSecurityIds } from "./services/watchlistRepository.js";
 import {
   exportCalendarEventsCsv,
   getCalendarEventById,
@@ -2144,6 +2144,20 @@ app.post("/api/watchlists", async (req, res, next) => {
     const input = watchlistSchema.parse(req.body);
     const row = await createWatchlist(DEMO_USER_ID, input.name, input.tickers, input.enableAlerts);
     res.status(201).json(row);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put("/api/watchlists/:id", async (req, res, next) => {
+  try {
+    const input = watchlistSchema.parse(req.body);
+    const row = await updateWatchlist(DEMO_USER_ID, req.params.id, input.name, input.tickers, input.enableAlerts);
+    if (!row) {
+      res.status(404).json({ error: "Watchlist not found" });
+      return;
+    }
+    res.json(row);
   } catch (error) {
     next(error);
   }

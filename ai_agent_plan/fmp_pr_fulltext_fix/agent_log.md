@@ -152,3 +152,31 @@
 | 런타임 통합 | ✅ | live `Newsfile` / live `Business Wire` URL에 대해 직접 extractor 실행 결과 확인 |
 
 - 상태: 구현 완료, 사용자 확인 대기 (awaiting user confirmation)
+
+**작성 시각:** 2026-03-24 21:52 (local)
+
+### 실DB 확장 reset + refill 실행
+- 사용자 선택: `1.` → 실제 운영 DB에 대해 확장된 `reset-fmp-pr-fallback` 실행 후 `FMP PR Only` refill 시작.
+- 실행 전 stale fallback 분포:
+  - `BUSINESS WIRE`: 1685
+  - `NEWSFILE CORP`: 702
+  - `ACCESSWIRE`: 108
+  - `MCAP MEDIAWIRE`: 10
+  - 합계: `2505`
+- 실행 결과:
+  - `POST /api/news/fulltext/reset-fmp-pr-fallback` → `deleted=2505`
+  - `POST /api/news/fulltext/update` with `{ sourceType: 'fmp_press_release', sourceName: 'FMP', concurrency: 3 }`
+  - 응답: `jobId=fb297cb7-9235-4ced-81c5-460de39ef5e7`, `total=6361`
+- 실행 후 확인:
+  - 동일 stale fallback 조건 재조회 결과: `0`
+  - refill job은 `running` 상태로 시작 확인
+  - `6361`은 이번에 비운 `2505` + 기존부터 missing 상태였던 FMP PR row가 합쳐진 값
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 이번 실행은 DB/API 호출만 수행 |
+| 빌드 | ⚠️ | 기존 `server.ts` unrelated build 오류 상태 유지 |
+| 자동 테스트 | ✅ | 직전 extractor 전용 test 및 전체 backend test pass 상태 유지 |
+| 런타임 통합 | ✅ | real `reset-fmp-pr-fallback` + real `fulltext/update(fmp_press_release)` 실행, stale row 0 확인 |
+
+- 상태: refill job 진행 중, 사용자 확인 대기 (awaiting user confirmation)
