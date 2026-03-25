@@ -63,6 +63,14 @@
   - `company_profiles.market_cap_source`와 job success metadata의 source 값을 `fmp` 계열로 기록
   - `DefaultTickerWindow` 버튼 tooltip 및 prompt 문서를 현재 source 정책과 동기화
 
+### PLAN CHANGE — 2026-03-25 00:06 (job lost 메시지 UX 완화)
+- 사용자 보고 기준으로 `Institutional update job lost (server may have restarted)` 빨간 에러가 혼란을 주고 있었다.
+- 원인은 backend job manager가 메모리 기반이라 dev server restart 시 기존 job id polling이 404가 되는 구조다.
+- 이번 리비전에서는 계산 route 자체를 바꾸지 않고, `DefaultTickerWindow`의 404 polling 처리 UX만 조정한다.
+  - red error 대신 notice로 전환
+  - lost-job 감지 시 table 자동 reload
+  - 동일 규칙을 `Mkt Cap`, `Float`, `Inst` 세 버튼 모두에 적용
+
 
 ### PLAN CHANGE — 2026-03-20 20:26
 - 사용자 결정에 따라 legacy `Finnhub SEC filing`은 유지하지 않고 제거한다.

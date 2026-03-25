@@ -49,6 +49,45 @@
 | 자동 테스트 | ✅ | backend vitest `64 passed` 유지 |
 | 런타임 통합 | ✅ | `LFMD` 샘플 호출 후 `source=fmp`, `market_cap_source=fmp`, `market_cap=186767226` 확인 |
 
+### DefaultTickerWindow job lost 메시지 UX 완화 (2026-03-25 00:06)
+
+**작성 시각:** 2026-03-25 00:06 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. 사용자 스크린샷 기준 `Institutional update job lost (server may have restarted)` 빨간 에러 배너 원인을 재확인했다.
+2. live backend에서 institutional route를 직접 호출해 job 생성/완료 자체는 정상임을 확인했다.
+3. 원인은 backend `jobManager`가 메모리 기반이라 dev server restart 시 기존 job id가 404가 되는 구조라는 점으로 정리했다.
+4. frontend `DefaultTickerWindow`의 lost-job 처리 로직을 수정했다.
+   - red error 제거
+   - notice로 안내 문구 전환
+   - lost-job 감지 시 ticker table 자동 reload
+   - `Mkt Cap`, `Float`, `Inst` 모두 동일 처리
+
+#### 사용자가 직접 확인할 수 있는 방법
+
+1. `DefaultTickerWindow`에서 `Inst` 실행 중 backend가 restart되는 상황을 만들면, 이제 빨간 에러 대신 notice로 바뀌어야 한다.
+2. notice 문구 뒤에 table이 자동 reload되어 partial update가 있으면 값이 반영된다.
+3. 일반적인 경우 `Inst` 버튼 실행 자체는 계속 동작해야 한다.
+
+#### 리스크 / 완화
+
+1. **리스크:** backend restart로 사라진 job은 실제로 복구할 수 없다.
+   - 완화 1: 문구에 `partially completed` 가능성을 명시하고 table을 자동 reload한다.
+2. **리스크:** notice가 남아 있어도 사용자는 계산 실패로 오해할 수 있다.
+   - 완화 1: red error 대신 notice로 낮춰 실제 실패와 구분했다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `DefaultTickerWindow.tsx` error 없음 |
+| 빌드 | ✅ | frontend `npm.cmd run build` 성공 |
+| 자동 테스트 | ✅ | UI-only 변경, 기존 backend test 영향 없음 |
+| 런타임 통합 | ✅ | `POST /api/company-profiles/pull-institutional` live 호출로 job 생성/완료 확인, 브라우저 시각 확인은 사용자 위임 |
+
 ## 2026-03-20
 
 ### FMP 구독 가능 데이터 타입 조사 plan 작성 (2026-03-20 18:04)

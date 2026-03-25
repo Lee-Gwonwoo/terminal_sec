@@ -300,6 +300,16 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
     }
   };
 
+  const handleLostJob = useCallback(async (
+    kind: "Market cap" | "Float" | "Institutional",
+    reset: () => void,
+  ) => {
+    reset();
+    setError(null);
+    setNotice(`${kind} update job tracking was lost after a backend restart. The update may have partially completed; table reloaded.`);
+    await loadTickers();
+  }, [loadTickers]);
+
   useEffect(() => {
     if (!marketCapJobId) return;
     let cancelled = false;
@@ -307,11 +317,11 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
       try {
         const res = await fetch(`${API_BASE}/api/jobs/${marketCapJobId}`);
         if (res.status === 404) {
-          // Job lost (server restarted or cleaned up)
-          setMarketCapUpdating(false);
-          setMarketCapJob(null);
-          setError("Market cap update job lost (server may have restarted). Please retry.");
-          setMarketCapJobId(null);
+          await handleLostJob("Market cap", () => {
+            setMarketCapUpdating(false);
+            setMarketCapJob(null);
+            setMarketCapJobId(null);
+          });
           return;
         }
         if (!res.ok) return;
@@ -347,10 +357,11 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
       try {
         const res = await fetch(`${API_BASE}/api/jobs/${floatJobId}`);
         if (res.status === 404) {
-          setFloatUpdating(false);
-          setFloatJob(null);
-          setError("Float update job lost (server may have restarted). Please retry.");
-          setFloatJobId(null);
+          await handleLostJob("Float", () => {
+            setFloatUpdating(false);
+            setFloatJob(null);
+            setFloatJobId(null);
+          });
           return;
         }
         if (!res.ok) return;
@@ -386,10 +397,11 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
       try {
         const res = await fetch(`${API_BASE}/api/jobs/${instJobId}`);
         if (res.status === 404) {
-          setInstUpdating(false);
-          setInstJob(null);
-          setError("Institutional update job lost (server may have restarted). Please retry.");
-          setInstJobId(null);
+          await handleLostJob("Institutional", () => {
+            setInstUpdating(false);
+            setInstJob(null);
+            setInstJobId(null);
+          });
           return;
         }
         if (!res.ok) return;
@@ -416,7 +428,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [instJobId, loadTickers]);
+  }, [handleLostJob, instJobId, loadTickers]);
 
   const filteredRows = useMemo(() => {
     const needle = filterText.trim().toUpperCase();
