@@ -1452,7 +1452,7 @@ query:
 
 - 생략 또는 `all`: 전체 미추출 뉴스
 - `company_news`, `press_release`, `market_news`: 해당 `news_items.source_type`만 대상
-- `fmp_press_release`: 기본 미추출 row뿐 아니라 기존 `failed/unavailable`, 빈 full text, `body-fallback (no-scraper: ...)`, `full_text == body` 형태의 기존 fallback success row까지 재추출 대상에 포함한다.
+- `fmp_press_release`: `news_fulltext` row가 없는 FMP PR 뉴스만 대상이다. 기존 잘못된 fallback success row는 reset endpoint로 먼저 삭제한 뒤 다시 update 해야 한다.
 - `fmp_sec_filing`: 기본 미추출 row + metadata fallback body를 가진 SEC filing row를 포함할 수 있으며, 성공 시 `news_fulltext.full_text`와 `news_items.body` summary를 함께 갱신한다.
 
 사전 동작:
@@ -1464,6 +1464,18 @@ query:
 ```json
 { "jobId": "...", "total": 123 }
 ```
+
+### `POST /api/news/fulltext/reset-fmp-pr-fallback`
+
+- 목적: 예전에 잘못 저장된 FMP PR fallback success row를 삭제해서 regular missing-only update로 다시 채울 수 있게 만든다.
+- 현재 삭제 대상:
+  - `source_type='fmp_press_release'`
+  - publisher가 `GlobeNewswire`, `Globe News Wire`, `PRNewsWire`, `Business Wire`, `Newsfile Corp`, `Accesswire`, `MCAP MediaWire`
+  - 그리고 `extraction_note LIKE 'body-fallback (no-scraper:%'` 또는 `full_text == body`
+- `RTPR` 같은 다른 source의 기사 body를 FMP PR fulltext에 재사용하지 않는다.
+- 현재 extractor는 `GlobeNewswire`, `PRNewswire`, `Newsfile Corp`, `Accesswire`, `MCAP MediaWire`를 server-side scrape로 처리하고, `Business Wire`는 브라우저 기반 fallback으로 직접 본문 추출을 시도한다.
+- 응답 컬럼:
+  - `[][][]deleted[][][]`
 
 현재 job/중복 규칙:
 
@@ -2177,7 +2189,8 @@ Finnhub `/stock/profile2` API에서 IPO date와 기본 회사 메타데이터를
 ## 현재 한계와 주의점
 
 - `news_change_metrics`는 startup 시 매번 초기화된다.
-- full text는 기본적으로 row가 이미 생성된 뉴스에 대해 자동 재시도하지 않는다. 예외적으로 `fmp_press_release`는 기존 body fallback success row도 `POST /api/news/fulltext/update`에서 재추출 대상으로 포함한다.
+- full text는 기본적으로 row가 이미 생성된 뉴스에 대해 자동 재시도하지 않는다.
+- FMP PR에서 과거 잘못 저장된 fallback success row를 다시 처리하려면 `POST /api/news/fulltext/reset-fmp-pr-fallback`으로 먼저 삭제한 뒤, 일반 missing-only `POST /api/news/fulltext/update`를 실행한다.
 - `POST /api/ibkr/calendar/update`는 background job이 아니라 즉시 처리형이다.
 - `GET /api/updates/status`의 기본 key 목록에는 `news_change_recent`, `news_change_custom`가 하드코딩되어 있지 않다. 다만 DB row가 생기면 extra key로 응답에 포함된다.
 - industry는 DB source of truth가 아니라 최신 `watch lists2*.csv` 파일 기반 lazy cache다.

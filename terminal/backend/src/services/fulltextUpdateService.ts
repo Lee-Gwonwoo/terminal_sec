@@ -5,7 +5,7 @@
  * extractors, and persists results to news_fulltext table.
  */
 
-import { getFmpPressReleaseBackfillRows, getFmpSecFulltextBackfillRows, getRtprBodyBackfillRows, getUnextractedNewsIds, insertFulltext, upsertProvidedFulltext, type UnextractedNewsRow } from "./fulltextRepository.js";
+import { getFmpSecFulltextBackfillRows, getRtprBodyBackfillRows, getUnextractedNewsIds, insertFulltext, upsertProvidedFulltext, type UnextractedNewsRow } from "./fulltextRepository.js";
 import { extractByDomain, htmlToPlainText } from "./fulltextExtractors.js";
 import { updateProgress, appendLog, completeJob, failJob, isJobCancelled } from "./jobManager.js";
 import { getDb } from "../db.js";
@@ -99,9 +99,7 @@ export async function runFulltextUpdate(
   try {
     const unextracted = sourceType === "fmp_sec_filing"
       ? await getFmpSecFulltextBackfillRows(sourceName)
-      : sourceType === "fmp_press_release"
-        ? await getFmpPressReleaseBackfillRows(sourceName)
-        : await getUnextractedNewsIds(sourceType, sourceName);
+      : await getUnextractedNewsIds(sourceType, sourceName);
     const total = unextracted.length;
 
     appendLog(

@@ -7,11 +7,13 @@
  */
 
 import * as cheerio from "cheerio";
+import { chromium, type Browser } from "playwright";
 
 const MAX_RETRIES = 10;
 const BASE_DELAY_MS = 500;
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0";
 const MIN_SEC_FULLTEXT_LEN = 200;
+const BROWSER_TIMEOUT_MS = 15000;
 
 // ─── Types ───
 
@@ -26,6 +28,9 @@ export interface ExtractionResult {
 
 /** Minimum body length (chars) to accept Finnhub body as fallback full text */
 const MIN_BODY_FALLBACK_LEN = 80;
+
+let sharedBrowserPromise: Promise<Browser> | null = null;
+let browserHtmlLoaderForTests: ((url: string) => Promise<string>) | null = null;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -90,6 +95,118 @@ function extractBestTextFromSelectors($: cheerio.CheerioAPI, selectors: string[]
     }
   }
   return "";
+}
+
+function removeNodes($: cheerio.CheerioAPI, selectors: string[]): void {
+  if (selectors.length === 0) return;
+  $(selectors.join(", ")).remove();
+}
+
+function clipAtMarkers(text: string, markers: string[]): string {
+  let clipped = text;
+  for (const marker of markers) {
+    clipped = clipAtMarker(clipped, marker);
+  }
+  return cleanPlainText(clipped);
+}
+
+async function extractTextViaHttp(
+  url: string,
+  body: string | null,
+  options: {
+    notePrefix: string;
+    selectors: string[];
+    removeSelectors?: string[];
+    clipMarkers?: string[];
+    minLength?: number;
+  },
+): Promise<ExtractionResult> {
+  try {
+    const res = await fetchWithRetry(url, {
+      headers: {
+        "User-Agent": UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+      },
+    });
+
+    if (!res.ok) {
+      return bodyFallback(body, `${options.notePrefix}-http-${res.status}`);
+    }
+
+    const html = await res.text();
+    const $ = cheerio.load(html);
+    removeNodes($, [
+      "script",
+      "style",
+      "noscript",
+      "svg",
+      "iframe",
+      ...(options.removeSelectors ?? []),
+    ]);
+
+    let plainText = extractBestTextFromSelectors($, options.selectors);
+    if (!plainText) {
+      return bodyFallback(body, `${options.notePrefix}-no-body`);
+    }
+
+    plainText = clipAtMarkers(plainText, options.clipMarkers ?? []);
+    if (plainText.length < (options.minLength ?? 200)) {
+      return bodyFallback(body, `${options.notePrefix}-too-short`);
+    }
+
+    return {
+      fullText: plainText,
+      extractionStatus: "success",
+      extractionNote: `${options.notePrefix}-scrape`,
+      wordCount: countWords(plainText),
+    };
+  } catch (err: any) {
+    return bodyFallback(body, `${options.notePrefix}-${err.message?.slice(0, 200) ?? "fetch-failed"}`);
+  }
+}
+
+async function getBrowser(): Promise<Browser> {
+  if (!sharedBrowserPromise) {
+    sharedBrowserPromise = (async () => {
+      try {
+        return await chromium.launch({
+          channel: "msedge",
+          headless: true,
+        });
+      } catch {
+        return chromium.launch({ headless: true });
+      }
+    })();
+  }
+  return sharedBrowserPromise;
+}
+
+async function loadPageHtmlInBrowser(url: string): Promise<string> {
+  if (browserHtmlLoaderForTests) {
+    return browserHtmlLoaderForTests(url);
+  }
+
+  const browser = await getBrowser();
+  const page = await browser.newPage({
+    userAgent: `${UA} Safari/537.36`,
+    locale: "en-US",
+  });
+
+  try {
+    await page.goto(url, {
+      waitUntil: "domcontentloaded",
+      timeout: BROWSER_TIMEOUT_MS,
+    });
+    await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => undefined);
+    return await page.content();
+  } finally {
+    await page.close().catch(() => undefined);
+  }
+}
+
+export function setBrowserHtmlLoaderForTests(loader: ((url: string) => Promise<string>) | null): void {
+  browserHtmlLoaderForTests = loader;
 }
 
 async function fetchWithRetry(
@@ -281,102 +398,157 @@ export async function extractTmx(url: string): Promise<ExtractionResult> {
 }
 
 export async function extractGlobeNewswire(url: string, body?: string | null): Promise<ExtractionResult> {
-  try {
-    const res = await fetchWithRetry(url, {
-      headers: {
-        "User-Agent": UA,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-      },
-    });
-
-    if (!res.ok) {
-      return bodyFallback(body ?? null, `globenewswire-http-${res.status}`);
-    }
-
-    const html = await res.text();
-    const $ = cheerio.load(html);
-    $("script, style, noscript, svg, iframe, .recommended-reading, .explore, .additional-links, .cookie-banner").remove();
-
-    let plainText = extractBestTextFromSelectors($, [
+  return extractTextViaHttp(url, body ?? null, {
+    notePrefix: "globenewswire",
+    selectors: [
       "#main-body-container",
       ".main-body-container.article-body",
       ".main-scroll-container",
       "article",
       "main",
-    ]);
-
-    if (!plainText) {
-      return bodyFallback(body ?? null, "globenewswire-no-body");
-    }
-
-    plainText = clipAtMarker(plainText, "Company Profile");
-    plainText = clipAtMarker(plainText, "Press Release Actions");
-    plainText = clipAtMarker(plainText, "Recommended Reading");
-    plainText = clipAtMarker(plainText, "Explore");
-    plainText = cleanPlainText(plainText);
-
-    if (plainText.length < 200) {
-      return bodyFallback(body ?? null, "globenewswire-too-short");
-    }
-
-    return {
-      fullText: plainText,
-      extractionStatus: "success",
-      extractionNote: "globenewswire-scrape",
-      wordCount: countWords(plainText),
-    };
-  } catch (err: any) {
-    return bodyFallback(body ?? null, `globenewswire-${err.message?.slice(0, 200) ?? "fetch-failed"}`);
-  }
+    ],
+    removeSelectors: [
+      ".recommended-reading",
+      ".explore",
+      ".additional-links",
+      ".cookie-banner",
+    ],
+    clipMarkers: ["Company Profile", "Press Release Actions", "Recommended Reading", "Explore"],
+  });
 }
 
 export async function extractPrNewswire(url: string, body?: string | null): Promise<ExtractionResult> {
-  try {
-    const res = await fetchWithRetry(url, {
-      headers: {
-        "User-Agent": UA,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-      },
-    });
-
-    if (!res.ok) {
-      return bodyFallback(body ?? null, `prnewswire-http-${res.status}`);
-    }
-
-    const html = await res.text();
-    const $ = cheerio.load(html);
-    $("script, style, noscript, svg, iframe, .main-footer, .navigation-menu, .related-links, .contact-prn-container").remove();
-
-    let plainText = extractBestTextFromSelectors($, [
+  return extractTextViaHttp(url, body ?? null, {
+    notePrefix: "prnewswire",
+    selectors: [
       "section.release-body",
       "article.news-release",
       "#main article.news-release",
       "#main",
+    ],
+    removeSelectors: [
+      ".main-footer",
+      ".navigation-menu",
+      ".related-links",
+      ".contact-prn-container",
+    ],
+    clipMarkers: ["SOURCE ", "Modal title", "Contact PR Newswire"],
+  });
+}
+
+export async function extractNewsfile(url: string, body?: string | null): Promise<ExtractionResult> {
+  return extractTextViaHttp(url, body ?? null, {
+    notePrefix: "newsfile",
+    selectors: [
+      "main",
+      "article",
+      ".content",
+      ".news-release-content",
+    ],
+    removeSelectors: [
+      ".cookie-banner",
+      ".additional-links",
+      ".share-icons",
+      ".signup-box",
+      "footer",
+    ],
+    clipMarkers: ["Ready to Announce with Confidence?", "Additional Links", "Cookie Settings"],
+  });
+}
+
+export async function extractAccesswire(url: string, body?: string | null): Promise<ExtractionResult> {
+  return extractTextViaHttp(url, body ?? null, {
+    notePrefix: "accesswire",
+    selectors: [
+      "main",
+      "article",
+      ".newsroom-article",
+      ".article-content",
+    ],
+    removeSelectors: [
+      ".cookie-banner",
+      "footer",
+      ".newsroom-sidebar",
+      ".social-share",
+      ".faq-section",
+    ],
+    clipMarkers: ["Solutions", "Public Relations Products", "Investor Relations Products", "Resources", "FAQs", "About Us", "Our Brands", "Contact Us", "Cookie Notice"],
+  });
+}
+
+export async function extractMcapMediaWire(url: string, body?: string | null): Promise<ExtractionResult> {
+  return extractTextViaHttp(url, body ?? null, {
+    notePrefix: "mcap-mediawire",
+    selectors: [
+      "article",
+      "main",
+      ".elementor-widget-theme-post-content",
+      ".entry-content",
+    ],
+    removeSelectors: [
+      ".elementor-location-header",
+      ".elementor-location-footer",
+      ".comments-area",
+      ".post-navigation",
+      ".share-buttons",
+    ],
+    clipMarkers: ["Search", "Categories", "Subscribe to notifications", "PRISM MediaWire - Press Release Service - Press Release Distribution"],
+  });
+}
+
+export async function extractBusinessWire(url: string, body?: string | null): Promise<ExtractionResult> {
+  try {
+    const html = await loadPageHtmlInBrowser(url);
+    const $ = cheerio.load(html);
+    removeNodes($, [
+      "script",
+      "style",
+      "noscript",
+      "svg",
+      "iframe",
+      "header",
+      "footer",
+      ".cookie-banner",
+      ".related-news",
+      ".bw-release-toolbar",
+      ".bw-release-contacts",
     ]);
 
-    if (!plainText) {
-      return bodyFallback(body ?? null, "prnewswire-no-body");
+    const accessDeniedText = cleanPlainText($.text()).slice(0, 1000);
+    if (/access denied|powered and protected by|errors\.edgesuite\.net/i.test(accessDeniedText)) {
+      return bodyFallback(body ?? null, "businesswire-browser-blocked");
     }
 
-    plainText = clipAtMarker(plainText, "SOURCE ");
-    plainText = clipAtMarker(plainText, "Modal title");
-    plainText = clipAtMarker(plainText, "Contact PR Newswire");
-    plainText = cleanPlainText(plainText);
+    let plainText = extractBestTextFromSelectors($, [
+      "main",
+      "article",
+      ".bw-release-story",
+      ".bw-release-body",
+      "[data-testid='bw-release-story']",
+    ]);
+    if (!plainText) {
+      return bodyFallback(body ?? null, "businesswire-no-body");
+    }
+
+    plainText = clipAtMarkers(plainText, [
+      "View source version on businesswire.com",
+      "Contacts",
+      "SOURCE:",
+      "Related News",
+    ]);
 
     if (plainText.length < 200) {
-      return bodyFallback(body ?? null, "prnewswire-too-short");
+      return bodyFallback(body ?? null, "businesswire-too-short");
     }
 
     return {
       fullText: plainText,
       extractionStatus: "success",
-      extractionNote: "prnewswire-scrape",
+      extractionNote: "businesswire-browser",
       wordCount: countWords(plainText),
     };
   } catch (err: any) {
-    return bodyFallback(body ?? null, `prnewswire-${err.message?.slice(0, 200) ?? "fetch-failed"}`);
+    return bodyFallback(body ?? null, `businesswire-${err.message?.slice(0, 200) ?? "browser-failed"}`);
   }
 }
 
@@ -466,6 +638,18 @@ export async function extractByDomain(
 
     case "PRNEWSWIRE":
       return extractPrNewswire(url, body ?? null);
+
+    case "BUSINESS WIRE":
+      return extractBusinessWire(url, body ?? null);
+
+    case "NEWSFILE CORP":
+      return extractNewsfile(url, body ?? null);
+
+    case "ACCESSWIRE":
+      return extractAccesswire(url, body ?? null);
+
+    case "MCAP MEDIAWIRE":
+      return extractMcapMediaWire(url, body ?? null);
 
     case "FINNHUB":
       return bodyFallback(body ?? null, "finnhub-no-external-page");

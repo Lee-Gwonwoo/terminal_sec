@@ -1216,6 +1216,23 @@ export function FinnhubNewsWindow({
     await handleFulltextUpdate('all');
   };
 
+  const handleResetFmpPrFallbackAndRetry = async () => {
+    if (updating || ftUpdating) return;
+    try {
+      const resetRes = await fetch(`${API_BASE}/api/news/fulltext/reset-fmp-pr-fallback`, { method: 'POST' });
+      const resetData = await resetRes.json();
+      if (!resetRes.ok) {
+        setError(resetData.error || `HTTP ${resetRes.status}`);
+        return;
+      }
+      console.log(`[fulltext] reset-fmp-pr-fallback: deleted ${resetData.deleted} rows`);
+    } catch (err: any) {
+      setError(err.message || 'Failed to reset stale FMP PR fulltext rows');
+      return;
+    }
+    await handleFulltextUpdate('fmp_press_release');
+  };
+
   // ─── Main button label (reflects last used config) ───
   const mainBtnLabel = (() => {
     const m = lastUpdateConfig.mode;
@@ -2306,7 +2323,11 @@ export function FinnhubNewsWindow({
                       </button>
                       <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('fmp_press_release'); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <FileText className="w-3.5 h-3.5 shrink-0 text-emerald-500" />
-                        <div><div className="font-medium">FMP PR Only</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Extract for FMP press release items only</div></div>
+                        <div><div className="font-medium">FMP PR Only</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Extract only missing full text rows for FMP press releases</div></div>
+                      </button>
+                      <button onClick={async () => { setShowFtMenu(false); await handleResetFmpPrFallbackAndRetry(); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50 text-emerald-700 dark:text-emerald-300">
+                        <RotateCw className="w-3.5 h-3.5 shrink-0" />
+                        <div><div className="font-medium">Reset FMP PR Fallback</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">기존 잘못된 fallback full text 삭제 후 missing-only update 재실행</div></div>
                       </button>
                       <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('fmp_sec_filing'); }} disabled={updating || ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <FileText className="w-3.5 h-3.5 shrink-0 text-violet-500" />

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { TrendingUp, TrendingDown, Plus, ChevronDown, Pencil, Check, X } from 'lucide-react';
+import { TrendingUp, TrendingDown, Plus, ChevronDown, Pencil, Check, Copy, X } from 'lucide-react';
 import { mockWatchlistData } from '../mockData';
 import { WatchlistItem } from '../types';
 
@@ -59,6 +59,7 @@ export function WatchlistWindow({ onTickerClick }: WatchlistWindowProps) {
   const [showWatchlistMenu, setShowWatchlistMenu] = useState(false);
   const [activeWatchlist, setActiveWatchlist] = useState('default');
   const [watchlists, setWatchlists] = useState<WatchListPreset[]>(DEFAULT_WATCHLISTS);
+  const [copiedListId, setCopiedListId] = useState<string | null>(null);
 
   // ─── New watchlist creation ───
   const [isCreatingList, setIsCreatingList] = useState(false);
@@ -75,9 +76,11 @@ export function WatchlistWindow({ onTickerClick }: WatchlistWindowProps) {
 
   // ─── Resize state ───
   const resizingRef = useRef<{ colIdx: number; startX: number; startWidth: number } | null>(null);
+  const copyResetTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
 
   const watchlistMenuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const activeWatchlistName = watchlists.find((list) => list.id === activeWatchlist)?.name ?? 'Watch Lists';
 
   // ─── Resize handlers ───
   const onResizeMouseDown = useCallback((colIdx: number) => (e: React.MouseEvent) => {
@@ -136,6 +139,45 @@ export function WatchlistWindow({ onTickerClick }: WatchlistWindowProps) {
       editListInputRef.current.focus();
     }
   }, [editingListId]);
+
+  useEffect(() => {
+    return () => {
+      if (copyResetTimeoutRef.current) {
+        window.clearTimeout(copyResetTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const copyToClipboard = useCallback(async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      textarea.style.top = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+    }
+  }, []);
+
+  const handleCopyListName = useCallback(async (listId: string, listName: string, event?: React.MouseEvent) => {
+    event?.stopPropagation();
+    await copyToClipboard(listName);
+    setCopiedListId(listId);
+    if (copyResetTimeoutRef.current) {
+      window.clearTimeout(copyResetTimeoutRef.current);
+    }
+    copyResetTimeoutRef.current = window.setTimeout(() => {
+      setCopiedListId((current) => (current === listId ? null : current));
+      copyResetTimeoutRef.current = null;
+    }, 1500);
+  }, [copyToClipboard]);
 
   // ─── Add tickers ───
   const handleAddTickers = () => {
@@ -306,10 +348,19 @@ export function WatchlistWindow({ onTickerClick }: WatchlistWindowProps) {
             Delete{selectedTickers.size > 0 ? ` (${selectedTickers.size})` : ''}
           </button>
           <div className="relative" ref={watchlistMenuRef}>
+            <div className="flex items-center gap-1">
+            <button
+              onClick={() => handleCopyListName(activeWatchlist, activeWatchlistName)}
+              className={`p-1 border rounded transition-colors ${copiedListId === activeWatchlist ? 'border-green-500 bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400' : 'border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+              title={copiedListId === activeWatchlist ? 'Copied active watch list name' : 'Copy active watch list name'}
+            >
+              {copiedListId === activeWatchlist ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+            </button>
             <button onClick={() => setShowWatchlistMenu(!showWatchlistMenu)}
               className="px-2.5 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-1 whitespace-nowrap">
               <span>Watch Lists</span><ChevronDown className="w-3 h-3" />
             </button>
+            </div>
             {showWatchlistMenu && (
               <div className="absolute top-full mt-1 right-0 w-52 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-lg z-30">
                 <div className="p-1.5 space-y-0.5">
@@ -340,6 +391,13 @@ export function WatchlistWindow({ onTickerClick }: WatchlistWindowProps) {
                             className={`flex-1 min-w-0 text-left px-3 py-1.5 text-xs ${activeWatchlist === list.id ? 'text-blue-600 dark:text-blue-400' : ''}`}>
                             <div className="truncate">{list.name}</div>
                             <div className="text-[10px] text-gray-400 mt-0.5">{list.tickers.length} tickers</div>
+                          </button>
+                          <button
+                            onClick={(e) => handleCopyListName(list.id, list.name, e)}
+                            className={`p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 shrink-0 ${copiedListId === list.id ? 'text-green-600 dark:text-green-400' : ''}`}
+                            title={copiedListId === list.id ? 'Copied list name' : 'Copy list name'}
+                          >
+                            {copiedListId === list.id ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
                           </button>
                           <button
                             onClick={(e) => handleStartRename(list.id, list.name, e)}

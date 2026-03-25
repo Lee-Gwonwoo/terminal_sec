@@ -347,6 +347,7 @@ Change update 후 News Feed가 다시 `GET /api/news`를 읽으면, 날짜 관�
 - Company News
 - Press Release
 - FMP PR Only
+- Reset FMP PR Fallback
 - FMP SEC Filing Only
 - Market News
 
@@ -360,8 +361,10 @@ API:
 - 따라서 뉴스 update가 running이면 Full Text Update도 같이 잠기고, 반대로 Full Text job이 running이면 일반 update 버튼도 잠긴다.
 - backend 자체는 fulltext endpoint에 Finnhub/RTPR pull과 같은 `409 + existingJobId` duplicate guard가 없다.
 - 즉 현재 UX는 "병렬 실행 방지"가 backend 정책이 아니라 프론트 전역 disable에 크게 의존한다.
-- `FMP PR Only`는 신규 FMP press release row만이 아니라, 기존에 `body-fallback (no-scraper: ...)`로 저장된 FMP PR full text success row까지 재추출 대상으로 포함할 수 있다.
-- 현재 extractor는 `GlobeNewswire`, `PRNewswire` 기사 페이지 본문 scrape를 우선 시도하고, `Business Wire`처럼 anti-bot/차단이 걸린 publisher는 fallback이 남을 수 있다.
+- `FMP PR Only`는 missing-only 동작이다. 이미 `news_fulltext` row가 있는 FMP PR id는 건드리지 않는다.
+- 기존에 잘못 저장된 FMP PR fallback success row를 다시 처리하려면 `Reset FMP PR Fallback`을 먼저 실행해 해당 row를 삭제한 뒤, 이어서 `FMP PR Only`를 실행한다.
+- FMP PR fulltext는 `RTPR` 같은 다른 source body를 재사용하지 않고, FMP로 새로 적재된 기사 URL에서 직접 원문 추출한다.
+- 현재 extractor는 `GlobeNewswire`, `PRNewswire`, `Newsfile Corp`, `Accesswire`, `MCAP MediaWire` 기사 페이지 본문 scrape를 시도하고, `Business Wire`는 브라우저 fallback으로 직접 추출한다.
 
 ### Log 패널
 
@@ -728,6 +731,8 @@ API:
 - mock data only
 - local state 위주
 - API 연동 없음
+- 상단 툴바의 copy 버튼으로 현재 선택된 watch list 이름을 clipboard에 복사할 수 있다.
+- Watch Lists dropdown의 각 row에도 copy 아이콘이 있어 해당 리스트 이름을 직접 복사할 수 있다.
 
 컬럼 UI는 있지만 source of truth가 backend가 아니다.
 

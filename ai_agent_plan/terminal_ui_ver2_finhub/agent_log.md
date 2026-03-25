@@ -743,6 +743,51 @@
 3. source를 `press_release only`로 제한하면 설명력은 좋아지지만 coverage는 줄어든다. 다른 source는 별도 부록으로 관리하는 편이 안전하다.
 | `wshe_fq` | 19 | `earnings_date`, `confidence_indicator`, `wshe_earnings_date_status`(INFERRED — 2028년까지 예측) |
 
+## 2026-03-24
+
+### Watchlist 이름 복사 UX + DB 저장 여부 확인 (2026-03-24 21:37)
+
+**Status: done (awaiting user confirmation)**
+
+#### 수정 내용
+
+1. `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/WatchlistWindow.tsx`
+   - 현재 선택된 watch list 이름을 복사하는 상단 copy 버튼 추가
+   - `Watch Lists` dropdown 각 row에 copy 아이콘 추가
+   - clipboard API 실패 시 textarea fallback으로 복사되도록 처리
+   - 복사 직후 1.5초 동안 check 아이콘으로 성공 상태 표시
+
+2. `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+   - watchlist 이름 복사 UX를 현재 프론트 동작 문서에 반영
+
+3. `ai_agent_plan/terminal_ui_ver2_finhub/plan.md`
+   - `PLAN CHANGE (2026-03-24 #watchlist-copy-name)` 추가
+   - watchlist DB 저장 구조(`watchlists`, `watchlist_items`)와 프론트 mock 상태 차이를 명시
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `WatchlistWindow.tsx`, `figma_frontend_prompt.md`, `plan.md`, `agent_log.md` diagnostics 0 errors |
+| 빌드 | ✅ | frontend `npm.cmd run build` 성공 |
+| 자동 테스트 | ✅ | 프론트 package.json에 `test` script 없음. 추가 자동 테스트 대상 없음 |
+| 런타임 통합 | ✅ | `http://localhost:8080/healthz` = 200, `http://localhost:5173` = 200, 앱 DB에서 `watchlists`, `watchlist_items` 테이블 존재 확인 |
+
+#### DB 확인 결과
+
+- 파일: `terminal/backend/backend/data/app.db`
+- 테이블: `watchlists`, `watchlist_items`
+- row 수: `watchlists = 0`, `watchlist_items = 0`
+- 해석: watchlist는 **DB에 저장되는 구조가 맞지만**, 현재 이 환경에서는 저장된 row가 아직 없다.
+- 추가 주의: 현재 프론트 `WatchlistWindow`는 여전히 mock/local state라서, 이 창에서 만든/바꾼 리스트가 자동으로 DB에 반영되지는 않는다.
+
+#### 리스크 / 완화
+
+1. 현재 copy UX는 프론트 로컬 state 이름만 복사한다.
+   - 완화: watchlist API 연동을 붙이면 DB 저장 이름과 완전히 동일한 값을 복사하도록 확장 가능
+2. Clipboard API가 막힌 환경에서는 fallback이 `document.execCommand('copy')`에 의존한다.
+   - 완화: 현재 주요 브라우저 호환 fallback으로는 충분하지만, 장기적으로는 공통 clipboard util로 통합 가능
+
 **기존 판정 수정:**
 - 기존 (v2): "WSH는 이벤트 날짜/타입만 제공, 재무 수치(EPS/Revenue)는 없음" → **잘못됨**
 - 수정 (v3): "WSH는 **EPS actual + estimate + surprise 제공**. 단, **Revenue(매출)는 어떤 이벤트 타입에도 없음**"

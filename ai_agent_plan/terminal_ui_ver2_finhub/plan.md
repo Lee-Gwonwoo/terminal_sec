@@ -45,6 +45,9 @@
   - `/calendar` 툴바에 `Last Week`, `This Week`, `Next Week`, `This Month`, `Next Month` 버튼을 추가한다.
   - 각 버튼은 새 pull/update를 발생시키는 것이 아니라, **이미 저장된 calendar data를 해당 기간으로 조회**하는 필터 역할을 한다.
   - 기간 계산 기준은 `America/New_York` 로컬 날짜이며, 버튼별 범위 정의는 plan 본문에 명시한다.
+10) **Watchlist 이름 복사 UX**
+  - `WatchlistWindow`에서 현재 선택된 watch list 이름을 바로 clipboard로 복사할 수 있어야 한다.
+  - `Watch Lists` dropdown 각 리스트 row에서도 해당 이름을 직접 복사할 수 있어야 한다.
 
 ### 현재 레포 상태(중요, 확인됨)
 - 프론트에는 이미 `brave-news` 윈도우 타입이 존재하며 구현 파일은 아래와 같다.
@@ -71,6 +74,10 @@
   - `terminal/backend/src/services/calendarIngestion.ts`가 `source = "mock_provider"` 이벤트를 주기적으로 insert.
   - `terminal/backend/src/server.ts`에서 `startCalendarIngestionWorkers()`를 startup에 호출.
   - “/calendar = IBKR only”를 만족하려면 mock 생성기를 중지하고, 기존 mock row도 정리해야 한다.
+- watchlist 데이터 저장 구조는 이미 backend runtime DB에 존재한다.
+  - DB: `terminal/backend/backend/data/app.db`
+  - 테이블: `watchlists`, `watchlist_items`
+  - 현재 프론트 `WatchlistWindow`는 이 테이블을 직접 쓰지 않고 mock/local state만 사용한다.
 
 ### 제약 / 비범위
 - 요구된 UX 외에 추가 페이지/모달/필터/애니메이션 등은 만들지 않는다.
@@ -170,6 +177,16 @@ PLAN CHANGE (2026-03-06)
   - 8단계: 각 섹션에 View Log 버튼 추가, 8-6/8-7 서브스텝 추가
   - 의존성 그래프에 신규 서브스텝 반영
 - 영향: 5단계·8단계 구현 범위 확대(백엔드 잡 큐 + 프론트 로그 패널). 기존 완료 서브스텝에는 영향 없음.
+```
+
+```
+PLAN CHANGE (2026-03-24 #watchlist-copy-name)
+- 왜: 사용자가 watch list 이름 자체를 복사할 수 있어야 하고, watchlist 데이터가 실제 DB에 저장되는지도 함께 확인하고 싶다고 요청함.
+- 무엇이 바뀌었나:
+  - 목표 #10 추가 — `WatchlistWindow` 이름 복사 UX
+  - 현재 레포 상태에 `watchlists` / `watchlist_items` DB 저장 구조와 프론트 mock 상태를 명시
+  - 프론트 구현은 상단 active-list copy 버튼 + dropdown row copy 버튼으로 최소 변경 적용
+- 영향: 이번 변경은 프론트 UX 개선이며 backend schema 변경은 없다. 다만 현재 `WatchlistWindow` source of truth는 여전히 local state이고 runtime DB와는 분리되어 있다.
 ```
 
 ```

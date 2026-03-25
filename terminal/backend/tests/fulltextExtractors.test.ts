@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { extractByDomain } from "../src/services/fulltextExtractors.js";
+import { extractByDomain, setBrowserHtmlLoaderForTests } from "../src/services/fulltextExtractors.js";
 
 afterEach(() => {
+  setBrowserHtmlLoaderForTests(null);
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -95,6 +96,122 @@ describe("fulltextExtractors", () => {
     expect(result.extractionStatus).toBe("success");
     expect(result.fullText).toContain("Rocket Lab announced a major contract award");
     expect(result.wordCount).toBeGreaterThan(10);
+  });
+
+  it("should extract Newsfile article body instead of body fallback", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => `
+          <html>
+            <body>
+              <main>
+                <h1>Newsfile headline</h1>
+                <p>Philadelphia, Pennsylvania--(Newsfile Corp. - March 24, 2026) - National plaintiffs' law firm Berger Montague announces a class action lawsuit.</p>
+                <p>The complaint alleges that defendants misled investors about the design and progress of the pivotal study.</p>
+                <p>Shares plummeted nearly 50% after the company revealed the FDA did not accept the data as sufficient.</p>
+                <p>For more information, please contact Berger Montague today.</p>
+                <div>Ready to Announce with Confidence?</div>
+              </main>
+            </body>
+          </html>
+        `,
+      }),
+    );
+
+    const result = await extractByDomain("https://www.newsfilecorp.com/release/example", "Newsfile Corp", "short fallback body");
+    expect(result.extractionStatus).toBe("success");
+    expect(result.extractionNote).toBe("newsfile-scrape");
+    expect(result.fullText).toContain("defendants misled investors about the design and progress");
+    expect(result.fullText).not.toContain("Ready to Announce with Confidence");
+  });
+
+  it("should extract Accesswire article body instead of body fallback", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => `
+          <html>
+            <body>
+              <main>
+                <article>
+                  <h1>Innodata Announces Date of Annual Shareholder Meeting</h1>
+                  <p>NEW YORK, NY / ACCESS Newswire / March 24, 2026 / INNODATA INC. today announced that its 2026 annual meeting of shareholders is scheduled for June 4, 2026.</p>
+                  <p>Shareholders of record as of April 8, 2026 will be eligible to vote at the annual meeting.</p>
+                  <p>Innodata is a global data engineering company focused on trusted AI systems at scale.</p>
+                  <p>Visit www.innodata.com to learn more.</p>
+                  <div>Investor Relations Products</div>
+                </article>
+              </main>
+            </body>
+          </html>
+        `,
+      }),
+    );
+
+    const result = await extractByDomain("https://www.accessnewswire.com/newsroom/en/example", "Accesswire", "short fallback body");
+    expect(result.extractionStatus).toBe("success");
+    expect(result.extractionNote).toBe("accesswire-scrape");
+    expect(result.fullText).toContain("annual meeting of shareholders is scheduled");
+    expect(result.fullText).not.toContain("Investor Relations Products");
+  });
+
+  it("should extract MCAP MediaWire article body instead of body fallback", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => `
+          <html>
+            <body>
+              <article>
+                <h1>SS Innovations’ SSi Mantra Surgical Robotic System Approved</h1>
+                <p>Fort Lauderdale, FL, March 18, 2026 – PRISM MediaWire – SS Innovations International today announced that the company’s SSi Mantra system has been approved for telesurgeries.</p>
+                <p>The company also announced that more than 150 cumulative telesurgeries have been successfully performed utilizing the system.</p>
+                <p>The approval expands the company’s remote surgery capabilities into Indonesia and the Philippines.</p>
+                <p>Additional product details and forward-looking statements follow in the remainder of the release.</p>
+                <div>Subscribe to notifications</div>
+              </article>
+            </body>
+          </html>
+        `,
+      }),
+    );
+
+    const result = await extractByDomain("https://prismmediawire.com/example", "MCAP MediaWire", "short fallback body");
+    expect(result.extractionStatus).toBe("success");
+    expect(result.extractionNote).toBe("mcap-mediawire-scrape");
+    expect(result.fullText).toContain("more than 150 cumulative telesurgeries");
+    expect(result.fullText).not.toContain("Subscribe to notifications");
+  });
+
+  it("should extract Business Wire article body via browser fallback", async () => {
+    setBrowserHtmlLoaderForTests(async () => `
+      <html>
+        <body>
+          <main>
+            <article class="bw-release-story">
+              <p>CHICAGO--(BUSINESS WIRE)--Ameresco today announced the delivery of energy and infrastructure upgrades for Pittsylvania County.</p>
+              <p>The project includes microgrid modernization, resilient generation assets, and long-term operational improvements.</p>
+              <p>County leaders said the program lowers operating costs while improving energy resiliency across public facilities.</p>
+              <p>Additional release details continue in several paragraphs to exceed the minimum extraction threshold for testing purposes.</p>
+              <div>Related News</div>
+            </article>
+          </main>
+        </body>
+      </html>
+    `);
+
+    const result = await extractByDomain("https://www.businesswire.com/news/home/example/en/", "Business Wire", "short fallback body");
+    expect(result.extractionStatus).toBe("success");
+    expect(result.extractionNote).toBe("businesswire-browser");
+    expect(result.fullText).toContain("delivery of energy and infrastructure upgrades");
+    expect(result.fullText).not.toContain("Related News");
   });
 
   it("should fall back to body when SEC/EDGAR extraction is too short", async () => {
