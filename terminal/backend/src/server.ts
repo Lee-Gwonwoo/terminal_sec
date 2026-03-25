@@ -40,7 +40,7 @@ import {
 import type { FinnhubMappedItem } from "./services/finnhubNewsProvider.js";
 import { mergeChangeForNewItems, bulkUpdateRecentChange, bulkUpdateCustomChange, type FmpFallbackOptions } from "./services/newsChangeMerger.js";
 import { createJob, getJob, getActiveJobs, updateProgress, appendLog, completeJob, failJob, cancelJob, isJobCancelled } from "./services/jobManager.js";
-import { getFulltext, getUnextractedNewsIds, deleteFailedFulltextRows, getFulltextStats, upsertProvidedFulltext } from "./services/fulltextRepository.js";
+import { getFmpPressReleaseBackfillRows, getFmpSecFulltextBackfillRows, getFulltext, getUnextractedNewsIds, deleteFailedFulltextRows, getFulltextStats, upsertProvidedFulltext } from "./services/fulltextRepository.js";
 import { runFulltextUpdate, runFulltextPlainTextBackfill, runRtprBodyBackfill, runOriginUrlBackfill, extractAndPersistFulltext } from "./services/fulltextUpdateService.js";
 import { extractOriginUrl } from "./services/rtprOriginUrlExtractor.js";
 import { htmlToPlainText } from "./services/fulltextExtractors.js";
@@ -1788,7 +1788,11 @@ app.post("/api/news/fulltext/update", async (req, res, next) => {
     // backfill publisher for any rows missing it
     await backfillPublisher();
 
-    const unextracted = await getUnextractedNewsIds(sourceType, sourceName);
+    const unextracted = sourceType === "fmp_sec_filing"
+      ? await getFmpSecFulltextBackfillRows(sourceName)
+      : sourceType === "fmp_press_release"
+        ? await getFmpPressReleaseBackfillRows(sourceName)
+        : await getUnextractedNewsIds(sourceType, sourceName);
     const total = unextracted.length;
     const jobId = createJob(total);
 

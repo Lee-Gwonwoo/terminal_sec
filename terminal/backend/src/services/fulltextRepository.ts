@@ -26,6 +26,7 @@ export interface UnextractedNewsRow {
   accepted_at?: string | null;
   existing_full_text?: string | null;
   existing_extraction_status?: string | null;
+  existing_extraction_note?: string | null;
 }
 
 export interface RtprBodyBackfillRow {
@@ -122,7 +123,8 @@ export async function getUnextractedNewsIds(
   }
   return getDb().all<UnextractedNewsRow[]>(
     `SELECT ni.id, ni.url, ni.publisher, ni.body, ni.source_type, sf.form_type, sf.cik, sf.filed_at, sf.accepted_at,
-            nf.full_text AS existing_full_text, nf.extraction_status AS existing_extraction_status
+          nf.full_text AS existing_full_text, nf.extraction_status AS existing_extraction_status,
+          nf.extraction_note AS existing_extraction_note
      FROM news_items ni
      LEFT JOIN sec_filings sf ON sf.news_id = ni.id
      LEFT JOIN news_fulltext nf ON nf.news_id = ni.id
@@ -144,7 +146,8 @@ export async function getFmpSecFulltextBackfillRows(
 
   return getDb().all<UnextractedNewsRow[]>(
     `SELECT ni.id, ni.url, ni.publisher, ni.body, ni.source_type, sf.form_type, sf.cik, sf.filed_at, sf.accepted_at,
-            nf.full_text AS existing_full_text, nf.extraction_status AS existing_extraction_status
+          nf.full_text AS existing_full_text, nf.extraction_status AS existing_extraction_status,
+          nf.extraction_note AS existing_extraction_note
      FROM news_items ni
      JOIN sec_filings sf ON sf.news_id = ni.id
      LEFT JOIN news_fulltext nf ON nf.news_id = ni.id
@@ -160,6 +163,37 @@ export async function getFmpSecFulltextBackfillRows(
          OR ni.body LIKE '%telephone number, including area code%'
          OR ni.body LIKE '%Indicate by check mark%'
          OR ni.body LIKE '%well-known seasoned issuer%'
+       )
+     ORDER BY ni.published_at DESC`,
+    params,
+  );
+}
+
+export async function getFmpPressReleaseBackfillRows(
+  sourceName?: string,
+): Promise<UnextractedNewsRow[]> {
+  const params: string[] = [];
+  let sourceClause = "";
+  if (sourceName && sourceName !== "all") {
+    sourceClause = " AND ni.source = ?";
+    params.push(sourceName);
+  }
+
+  return getDb().all<UnextractedNewsRow[]>(
+    `SELECT ni.id, ni.url, ni.publisher, ni.body, ni.source_type, sf.form_type, sf.cik, sf.filed_at, sf.accepted_at,
+            nf.full_text AS existing_full_text, nf.extraction_status AS existing_extraction_status,
+            nf.extraction_note AS existing_extraction_note
+     FROM news_items ni
+     LEFT JOIN sec_filings sf ON sf.news_id = ni.id
+     LEFT JOIN news_fulltext nf ON nf.news_id = ni.id
+     WHERE ni.source_type = 'fmp_press_release'${sourceClause}
+       AND (
+         nf.news_id IS NULL
+         OR nf.extraction_status IN ('failed', 'unavailable')
+         OR TRIM(COALESCE(nf.full_text, '')) = ''
+         OR COALESCE(nf.word_count, 0) = 0
+         OR nf.extraction_note LIKE 'body-fallback (no-scraper:%'
+         OR TRIM(COALESCE(nf.full_text, '')) = TRIM(COALESCE(ni.body, ''))
        )
      ORDER BY ni.published_at DESC`,
     params,

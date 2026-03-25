@@ -8,6 +8,71 @@ afterEach(() => {
 });
 
 describe("fulltextExtractors", () => {
+  it("should extract GlobeNewswire article body instead of body fallback", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => `
+          <html>
+            <body>
+              <div id="main-body-container" class="main-body-container article-body">
+                <p>Geneva, Switzerland, March 24, 2026 (GLOBE NEWSWIRE) -- Strategic Acquisition via the SEALSQ Quantum Fund Strengthens its Quantum Vertical Stack</p>
+                <p>SEALSQ Corp (NASDAQ: LAES) announced that it has signed a Letter of Intent to acquire Miraex, a developer of photonics-based quantum interconnect solutions.</p>
+                <p>The transaction is expected to be finalized by the end of June 2026, subject to customary closing conditions and regulatory approvals.</p>
+                <p>About Miraex Miraex is a deep-tech photonics company based at the EPFL Innovation Park in Ecublens, Switzerland.</p>
+                <div>Company Profile</div>
+                <div>Press Release Actions</div>
+              </div>
+            </body>
+          </html>
+        `,
+      }),
+    );
+
+    const result = await extractByDomain("https://www.globenewswire.com/news-release/example", "GlobeNewsWire", "short fallback body");
+    expect(result.extractionStatus).toBe("success");
+    expect(result.extractionNote).toBe("globenewswire-scrape");
+    expect(result.fullText).toContain("signed a Letter of Intent to acquire Miraex");
+    expect(result.fullText).not.toContain("Press Release Actions");
+    expect(result.wordCount).toBeGreaterThan(20);
+  });
+
+  it("should extract PRNewswire release body instead of body fallback", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => `
+          <html>
+            <body>
+              <main id="main">
+                <article class="news-release inline-gallery-template">
+                  <section class="release-body container ">
+                    <p>Combination of high quality, variable-rich, curated EHR data with genomics enhances understanding of the patient journey and aids in therapy development.</p>
+                    <p>SAN FRANCISCO, March 24, 2026 /PRNewswire/ -- Verana Health and Guardant Health today announced a partnership to advance precision medicine with real-world data.</p>
+                    <p>The companies said the collaboration will help accelerate therapy development and improve longitudinal patient insights across oncology workflows.</p>
+                    <p>Additional release details continue in several paragraphs so the extractor has enough body content to pass the minimum article threshold.</p>
+                  </section>
+                  <div>Contact PR Newswire</div>
+                </article>
+              </main>
+            </body>
+          </html>
+        `,
+      }),
+    );
+
+    const result = await extractByDomain("https://www.prnewswire.com/news-releases/example.html", "PRNewsWire", "short fallback body");
+    expect(result.extractionStatus).toBe("success");
+    expect(result.extractionNote).toBe("prnewswire-scrape");
+    expect(result.fullText).toContain("advance precision medicine with real-world data");
+    expect(result.fullText).not.toContain("Contact PR Newswire");
+    expect(result.wordCount).toBeGreaterThan(25);
+  });
+
   it("should extract SEC/EDGAR HTML into plain full text", async () => {
     vi.stubGlobal(
       "fetch",

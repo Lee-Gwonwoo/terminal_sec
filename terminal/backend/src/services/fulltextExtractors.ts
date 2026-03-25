@@ -66,6 +66,32 @@ function countWords(text: string): number {
   return text.split(/\s+/).filter(Boolean).length;
 }
 
+function cleanPlainText(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+/g, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function clipAtMarker(text: string, marker: string): string {
+  const index = text.indexOf(marker);
+  return index >= 0 ? text.slice(0, index).trim() : text;
+}
+
+function extractBestTextFromSelectors($: cheerio.CheerioAPI, selectors: string[]): string {
+  for (const selector of selectors) {
+    const node = $(selector).first();
+    if (!node.length) continue;
+    const plainText = cleanPlainText(node.text());
+    if (plainText.length >= 200) {
+      return plainText;
+    }
+  }
+  return "";
+}
+
 async function fetchWithRetry(
   url: string,
   init?: RequestInit,
@@ -254,6 +280,106 @@ export async function extractTmx(url: string): Promise<ExtractionResult> {
   }
 }
 
+export async function extractGlobeNewswire(url: string, body?: string | null): Promise<ExtractionResult> {
+  try {
+    const res = await fetchWithRetry(url, {
+      headers: {
+        "User-Agent": UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+      },
+    });
+
+    if (!res.ok) {
+      return bodyFallback(body ?? null, `globenewswire-http-${res.status}`);
+    }
+
+    const html = await res.text();
+    const $ = cheerio.load(html);
+    $("script, style, noscript, svg, iframe, .recommended-reading, .explore, .additional-links, .cookie-banner").remove();
+
+    let plainText = extractBestTextFromSelectors($, [
+      "#main-body-container",
+      ".main-body-container.article-body",
+      ".main-scroll-container",
+      "article",
+      "main",
+    ]);
+
+    if (!plainText) {
+      return bodyFallback(body ?? null, "globenewswire-no-body");
+    }
+
+    plainText = clipAtMarker(plainText, "Company Profile");
+    plainText = clipAtMarker(plainText, "Press Release Actions");
+    plainText = clipAtMarker(plainText, "Recommended Reading");
+    plainText = clipAtMarker(plainText, "Explore");
+    plainText = cleanPlainText(plainText);
+
+    if (plainText.length < 200) {
+      return bodyFallback(body ?? null, "globenewswire-too-short");
+    }
+
+    return {
+      fullText: plainText,
+      extractionStatus: "success",
+      extractionNote: "globenewswire-scrape",
+      wordCount: countWords(plainText),
+    };
+  } catch (err: any) {
+    return bodyFallback(body ?? null, `globenewswire-${err.message?.slice(0, 200) ?? "fetch-failed"}`);
+  }
+}
+
+export async function extractPrNewswire(url: string, body?: string | null): Promise<ExtractionResult> {
+  try {
+    const res = await fetchWithRetry(url, {
+      headers: {
+        "User-Agent": UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+      },
+    });
+
+    if (!res.ok) {
+      return bodyFallback(body ?? null, `prnewswire-http-${res.status}`);
+    }
+
+    const html = await res.text();
+    const $ = cheerio.load(html);
+    $("script, style, noscript, svg, iframe, .main-footer, .navigation-menu, .related-links, .contact-prn-container").remove();
+
+    let plainText = extractBestTextFromSelectors($, [
+      "section.release-body",
+      "article.news-release",
+      "#main article.news-release",
+      "#main",
+    ]);
+
+    if (!plainText) {
+      return bodyFallback(body ?? null, "prnewswire-no-body");
+    }
+
+    plainText = clipAtMarker(plainText, "SOURCE ");
+    plainText = clipAtMarker(plainText, "Modal title");
+    plainText = clipAtMarker(plainText, "Contact PR Newswire");
+    plainText = cleanPlainText(plainText);
+
+    if (plainText.length < 200) {
+      return bodyFallback(body ?? null, "prnewswire-too-short");
+    }
+
+    return {
+      fullText: plainText,
+      extractionStatus: "success",
+      extractionNote: "prnewswire-scrape",
+      wordCount: countWords(plainText),
+    };
+  } catch (err: any) {
+    return bodyFallback(body ?? null, `prnewswire-${err.message?.slice(0, 200) ?? "fetch-failed"}`);
+  }
+}
+
 // ─── Body Fallback Helper ───
 
 function bodyFallback(body: string | null, note: string): ExtractionResult {
@@ -314,7 +440,7 @@ export async function extractByDomain(
   publisher: string | null,
   body?: string | null,
 ): Promise<ExtractionResult> {
-  const pub = (publisher ?? "").toUpperCase();
+  const pub = (publisher ?? "").replace(/\s+/g, " ").trim().toUpperCase();
 
   switch (pub) {
     case "NASDAQ": {
@@ -333,6 +459,13 @@ export async function extractByDomain(
       }
       return result;
     }
+
+    case "GLOBENEWSWIRE":
+    case "GLOBE NEWS WIRE":
+      return extractGlobeNewswire(url, body ?? null);
+
+    case "PRNEWSWIRE":
+      return extractPrNewswire(url, body ?? null);
 
     case "FINNHUB":
       return bodyFallback(body ?? null, "finnhub-no-external-page");

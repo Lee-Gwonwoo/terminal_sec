@@ -346,6 +346,8 @@ Change update 후 News Feed가 다시 `GET /api/news`를 읽으면, 날짜 관�
 - All
 - Company News
 - Press Release
+- FMP PR Only
+- FMP SEC Filing Only
 - Market News
 
 API:
@@ -358,6 +360,8 @@ API:
 - 따라서 뉴스 update가 running이면 Full Text Update도 같이 잠기고, 반대로 Full Text job이 running이면 일반 update 버튼도 잠긴다.
 - backend 자체는 fulltext endpoint에 Finnhub/RTPR pull과 같은 `409 + existingJobId` duplicate guard가 없다.
 - 즉 현재 UX는 "병렬 실행 방지"가 backend 정책이 아니라 프론트 전역 disable에 크게 의존한다.
+- `FMP PR Only`는 신규 FMP press release row만이 아니라, 기존에 `body-fallback (no-scraper: ...)`로 저장된 FMP PR full text success row까지 재추출 대상으로 포함할 수 있다.
+- 현재 extractor는 `GlobeNewswire`, `PRNewswire` 기사 페이지 본문 scrape를 우선 시도하고, `Business Wire`처럼 anti-bot/차단이 걸린 publisher는 fallback이 남을 수 있다.
 
 ### Log 패널
 

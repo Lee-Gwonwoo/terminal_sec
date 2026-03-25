@@ -143,6 +143,7 @@
   - [Model_1](copilot-skills/ai-news-research_model1.md)
   - [Model_2](copilot-skills/ai-news-research_model2.md)
   - [Model_3](copilot-skills/ai-news-research_model3.md)
+  - [Model_4_watchlists](copilot-skills/ai-news-research_model4_watchlists.md)
 - [Wrapper + base 패턴 (momentum)](copilot-skills/momentum-wrapper-base.md)
 - [Indicator calculators](copilot-skills/indicator-calculators.md)
 - [딥러닝 트레이너](copilot-skills/deep-learning-trainers.md)
