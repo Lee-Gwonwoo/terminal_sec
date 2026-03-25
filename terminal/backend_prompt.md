@@ -193,6 +193,7 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - 프론트는 일반 full text와 FMP PR fulltext에 서로 다른 UI 기본값을 둘 수 있지만, 백엔드 `POST /api/news/fulltext/update`는 최종적으로 요청 body의 `[][][]concurrency[][][]` 숫자 하나만 받아 동일 worker pool 경로로 처리한다.
 - `FINNHUB + company_news`는 별도 규칙이 있다. 저장된 `url`이 `https://finnhub.io/api/news?id=...` wrapper이면 fulltext 단계에서 먼저 `302 Location`을 읽어 `[][][]origin_url[][][]`을 복구하고, 현재는 그 원문이 `YAHOO`, `BENZINGA`일 때만 원문 추출을 시도한다.
 - 위 `company_news` 경로에서는 summary/body fallback을 더 이상 success로 저장하지 않는다. 지원하지 않는 publisher는 `unavailable`로 남고, 재처리가 필요하면 reset 후 다시 돌려야 한다.
+- `POST /api/news/pull-finhub`는 `sourceType='company_news'`이면서 `mode='recent' | 'custom'`이고 실제 새 row가 insert되면, pull job 마지막에 그 새 company news id만 대상으로 `news-fulltext` background job을 자동 생성한다. 즉 수동 `Full Text > Company News Only`를 누르지 않아도 방금 들어온 데이터는 자동 후속 추출을 탄다.
 
 ### 뉴스 창 UI 락 규칙 기준표
 
@@ -1475,6 +1476,7 @@ query:
 - `fmp_press_release`: `news_fulltext` row가 없는 FMP PR 뉴스만 대상이다. 기존 잘못된 fallback success row는 reset endpoint로 먼저 삭제한 뒤 다시 update 해야 한다.
 - `fmp_sec_filing`: 기본 미추출 row + metadata fallback body를 가진 SEC filing row를 포함할 수 있으며, 성공 시 `news_fulltext.full_text`와 `news_items.body` summary를 함께 갱신한다.
 - `company_news`는 wrapper URL이면 먼저 redirect origin을 해석한다. 현재 원문 추출 지원 publisher는 `YAHOO`, `BENZINGA`이며, 이외 publisher는 body fallback 대신 `unavailable`로 저장된다.
+- `POST /api/news/pull-finhub`의 `Recent Update (company_news)` / `Custom Update (company_news)`는 pull 완료 후 새로 insert된 company news id만 대상으로 별도 `news-fulltext` job을 자동 시작한다. 과거 전체 backlog를 자동으로 다시 돌리지는 않는다.
 
 사전 동작:
 

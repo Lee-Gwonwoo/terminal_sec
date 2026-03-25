@@ -388,6 +388,22 @@ Step 1 -> Step 2 -> Step 3 -> Step 4 -> Step 5
   - 새 reset 경로는 `POST /api/news/fulltext/reset-company-news`다.
   - 검증은 temp DB 기준 `reset-company-news -> update(company_news)` 흐름으로 확인한다.
 
+### PLAN CHANGE — 2026-03-25 16:11
+- 변경 내용: `Company News` pull 속도를 Control Window에서 별도로 조정할 수 있게 한다. 기존 공용 Finnhub pull 설정은 유지하고, `sourceType='company_news'` 요청일 때만 전용 concurrency / request interval override를 사용한다.
+- 변경 이유: 사용자가 company news 다운로드를 더 빠르게 하기 위해 설정값을 control window에서 조정할 수 있게 해 달라고 요청했다.
+- 영향:
+  - `company_news` pull은 `finnhub-company-news-ticker-concurrency`, `finnhub-company-news-request-interval-sec`를 우선 사용한다.
+  - `press_release`, `market_news`, `peers`, `IPO date`는 기존 Finnhub 공용 설정을 계속 사용한다.
+  - 설정 UI는 `Data Control` Settings 탭과 `Finnhub News` 창의 `Control` modal 둘 다 같은 localStorage 키를 편집한다.
+
+### PLAN CHANGE — 2026-03-25 16:19
+- 변경 내용: `Recent Update (Company News)`와 `Custom Update (Company News)`가 끝나면, 이번 pull에서 새로 insert된 company news row만 대상으로 fulltext job을 backend에서 자동 시작한다.
+- 변경 이유: 사용자가 recent/custom company news update 시 받은 데이터까지 fulltext를 자동으로 받도록 요청했다.
+- 영향:
+  - 수동 `Full Text > Company News Only` 없이도 방금 들어온 company news row는 자동 후속 추출 대상이 된다.
+  - 자동 후속 범위는 새 insert row로 제한해, 과거 backlog 전체를 매번 다시 훑지 않는다.
+  - 로그/결과에는 자동 생성된 `news-fulltext` job id가 남는다.
+
 #### ⏳ Step 6 — FINNHUB company_news 원문 추출 + reset 준비
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
@@ -416,3 +432,43 @@ Step 1 -> Step 2 -> Step 3 -> Step 4 -> Step 5
   완료 조건(눈으로 확인): build/test 성공과 temp DB row 변화가 확인된다.
   사람 검증(비개발자): API 응답과 DB 출력에서 `origin_url`, `extraction_note`가 바뀌면 된다.
   흔한 문제/주의: temp DB를 쓰지 않으면 운영 DB 데이터를 실수로 지울 수 있다.
+
+#### ⏳ Step 7 — Company News Pull 속도 Control Window 분리
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 7-1 | Control Window와 News Pull Control modal에 company news 전용 speed setting 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx`, `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | UI 설정 섹션 / modal 입력 확인 | ⏳ |
+| 7-2 | `sourceType='company_news'` 요청에서만 전용 concurrency / interval override 사용 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | `/api/news/pull-finhub` payload 경로 확인 | ⏳ |
+| 7-3 | prompt / plan / agent log 문서 동기화 후 빌드 검증 | `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`, `ai_agent_plan/fmp_pr_fulltext_fix/plan.md`, `ai_agent_plan/fmp_pr_fulltext_fix/agent_log.md` | frontend build / diagnostics 확인 | ⏳ |
+
+- `7-1` 목적: 사용자가 company news pull만 더 빠르게 조정할 수 있게 한다.
+  설명: 공용 Finnhub pull setting은 유지하고, company news 전용 override를 별도 UI로 노출한다.
+  완료 조건(눈으로 확인): Settings 탭과 News Pull Control modal에 company news 전용 concurrency / request interval 입력이 보인다.
+  사람 검증(비개발자): 화면에서 `Finnhub Company News Pull` 또는 `Company News Override` 항목이 보이면 된다.
+  흔한 문제/주의: 공용 Finnhub 값을 덮어쓰면 press release / peers 속도까지 같이 바뀌므로 전용 키로 분리해야 한다.
+- `7-2` 목적: company news만 전용 값을 쓰고 나머지 Finnhub 경로는 그대로 유지한다.
+  설명: `sourceType='company_news'`인 경우에만 전용 localStorage 키를 읽어 payload를 만든다.
+  완료 조건(눈으로 확인): 코드에 company news 분기와 fallback 규칙이 함께 있다.
+  사람 검증(비개발자): company news 버튼과 press release 버튼이 서로 다른 설정을 쓸 수 있으면 된다.
+  흔한 문제/주의: payload 필드 이름은 기존 API와 같아야 하므로 backend 계약은 바꾸지 않는다.
+- `7-3` 목적: 새 설정 경로가 문서와 실제 구현에서 일치하게 한다.
+  설명: localStorage 키, 적용 범위, fallback 규칙을 frontend prompt와 log에 남긴다.
+  완료 조건(눈으로 확인): 문서에 새 키와 `company_news` 전용 적용 규칙이 적혀 있다.
+  사람 검증(비개발자): 문서만 읽고 company news만 따로 빠르게 돌릴 수 있다는 점을 알 수 있다.
+  흔한 문제/주의: Control Window와 News Pull Control modal 설명이 서로 다르면 사용자가 어느 쪽이 우선인지 혼동한다.
+
+#### ⏳ Step 8 — Company News pull 후 fulltext 자동 연쇄
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 8-1 | recent/custom company_news pull 뒤 새 insert row id만 추려 자동 fulltext job 생성 | `terminal/backend/src/server.ts`, `terminal/backend/src/services/fulltextUpdateService.ts`, `terminal/backend/src/services/fulltextRepository.ts` | backend build / temp runtime 검증 | ⏳ |
+| 8-2 | 자동 후속 범위와 로그 노출 규칙을 문서/로그에 반영 | `.github/copilot-skills/finhub_other_api.md`, `terminal/backend_prompt.md`, `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`, `ai_agent_plan/fmp_pr_fulltext_fix/agent_log.md` | 문서 diff 확인 | ⏳ |
+
+- `8-1` 목적: company news recent/custom pull 직후 방금 받은 row가 자동으로 원문 추출까지 이어지게 한다.
+  설명: backend가 pull job 마지막에 새 insert된 company news id만 대상으로 별도 `news-fulltext` job을 생성한다.
+  완료 조건(눈으로 확인): pull job log/result에 자동 fulltext job id가 남고, 그 id의 fulltext job이 생성된다.
+  사람 검증(비개발자): Company News Recent/Custom 실행 후 View Log에서 곧바로 fulltext job이 하나 더 보이면 된다.
+  흔한 문제/주의: sourceType 전체 backlog를 자동 실행하면 매번 너무 큰 작업이 다시 시작될 수 있으므로 새 insert row로 범위를 제한해야 한다.
+- `8-2` 목적: 자동 연쇄 규칙이 코드와 문서에서 같은 의미로 보이게 한다.
+  설명: 어떤 update가 자동 후속 fulltext를 만드는지, 범위가 무엇인지 문서에 적는다.
+  완료 조건(눈으로 확인): skill/backend/frontend 문서에 `recent/custom company_news -> auto fulltext` 규칙이 적혀 있다.
+  사람 검증(비개발자): 문서만 읽고 수동 Full Text 클릭이 필요한지 아닌지 바로 알 수 있다.
+  흔한 문제/주의: `7d`나 `all`까지 자동인 것처럼 문서가 과장되면 실제 동작과 어긋난다.

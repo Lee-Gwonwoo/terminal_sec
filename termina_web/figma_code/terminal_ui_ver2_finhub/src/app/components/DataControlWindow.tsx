@@ -141,6 +141,34 @@ export function DataControlWindow({
     try { localStorage.setItem('finnhub-ticker-concurrency', String(v)); } catch { /* SSR */ }
   };
 
+  // ─── Finnhub Company News Pull Overrides ───
+  const [companyNewsTickerConcurrency, setCompanyNewsTickerConcurrency] = useState(() => {
+    try {
+      const raw = localStorage.getItem('finnhub-company-news-ticker-concurrency') ?? localStorage.getItem('finnhub-ticker-concurrency') ?? '';
+      const v = parseInt(raw, 10);
+      return v >= 1 && v <= 20 ? v : 5;
+    } catch { return 5; }
+  });
+  const saveCompanyNewsTickerConcurrency = (n: number) => {
+    const v = Math.max(1, Math.min(20, n));
+    setCompanyNewsTickerConcurrency(v);
+    try { localStorage.setItem('finnhub-company-news-ticker-concurrency', String(v)); } catch { /* SSR */ }
+  };
+
+  const [companyNewsRequestIntervalSec, setCompanyNewsRequestIntervalSec] = useState(() => {
+    try {
+      const raw = localStorage.getItem('finnhub-company-news-request-interval-sec') ?? localStorage.getItem('finnhub-request-interval-sec') ?? '';
+      const v = parseFloat(raw);
+      return Number.isFinite(v) && v >= 0 && v <= 10 ? v : 1;
+    } catch { return 1; }
+  });
+  const saveCompanyNewsRequestIntervalSec = (n: number) => {
+    const safe = Number.isFinite(n) ? n : 1;
+    const v = Math.max(0, Math.min(10, Math.round(safe * 10) / 10));
+    setCompanyNewsRequestIntervalSec(v);
+    try { localStorage.setItem('finnhub-company-news-request-interval-sec', String(v)); } catch { /* SSR */ }
+  };
+
   const DEFAULT_FMP_CONCURRENCY = 10;
   const DEFAULT_FMP_REQUEST_INTERVAL_MS = 25;
   const DEFAULT_FMP_PR_PAGE_LIMIT = 100;
@@ -686,6 +714,78 @@ export function DataControlWindow({
               />
               <span className="text-[11px] text-gray-500 w-5 text-right">A</span>
               <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300 w-10 text-right">{(fontScale * 100).toFixed(0)}%</span>
+            </div>
+          </div>
+          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">
+            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">Finnhub Company News Pull</h3>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3">
+              Finnhub News 창에서 `Company News`만 pull할 때 쓰는 전용 override입니다. 값을 따로 건드리지 않으면 기존 Finnhub 공용 설정을 이어받고, 여기서 올리면 press release / peers / IPO 설정은 건드리지 않고 company news만 더 공격적으로 당길 수 있습니다.
+            </p>
+            <div className="space-y-4">
+              <div>
+                <div className="text-[11px] font-medium text-gray-600 dark:text-gray-300 mb-2">Ticker Concurrency</div>
+                <div className="flex gap-2 mb-3 flex-wrap">
+                  {[3, 5, 10, 15, 20].map(preset => (
+                    <button
+                      key={`company-news-finnhub-c-${preset}`}
+                      onClick={() => saveCompanyNewsTickerConcurrency(preset)}
+                      className={`px-3 py-1 rounded border text-xs font-medium transition-colors ${
+                        companyNewsTickerConcurrency === preset
+                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+                          : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200'
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-[11px] text-gray-500 w-6">1</span>
+                  <input
+                    type="range"
+                    min={1}
+                    max={20}
+                    step={1}
+                    value={companyNewsTickerConcurrency}
+                    onChange={e => saveCompanyNewsTickerConcurrency(parseInt(e.target.value, 10))}
+                    className="flex-1 accent-blue-500"
+                  />
+                  <span className="text-[11px] text-gray-500 w-8 text-right">20</span>
+                  <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300 w-10 text-right">{companyNewsTickerConcurrency}</span>
+                </div>
+              </div>
+              <div>
+                <div className="text-[11px] font-medium text-gray-600 dark:text-gray-300 mb-2">Request Interval (sec)</div>
+                <div className="flex gap-2 mb-3 flex-wrap">
+                  {[0, 0.2, 0.5, 1].map(preset => (
+                    <button
+                      key={`company-news-finnhub-interval-${preset}`}
+                      onClick={() => saveCompanyNewsRequestIntervalSec(preset)}
+                      className={`px-3 py-1 rounded border text-xs font-medium transition-colors ${
+                        companyNewsRequestIntervalSec === preset
+                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+                          : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200'
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-[11px] text-gray-500 w-6">0</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={10}
+                    step={0.1}
+                    value={companyNewsRequestIntervalSec}
+                    onChange={e => saveCompanyNewsRequestIntervalSec(parseFloat(e.target.value))}
+                    className="flex-1 accent-blue-500"
+                  />
+                  <span className="text-[11px] text-gray-500 w-8 text-right">10</span>
+                  <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300 w-12 text-right">{companyNewsRequestIntervalSec.toFixed(1)}</span>
+                </div>
+              </div>
             </div>
           </div>
 

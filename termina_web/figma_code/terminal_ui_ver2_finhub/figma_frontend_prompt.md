@@ -12,8 +12,9 @@
 - `Watchlist`, `Calendar` 창은 현재 mock data 기반이다.
 - `BraveNewsWindow.tsx` 파일은 남아 있지만 현재 `WindowType`에 연결되어 있지 않아 UI에서 열 수 없다.
 - 탭/창 레이아웃, 다크 모드, 전역 글자 크기, 뉴스 제목/요약 글자 크기, linked ticker는 `terminal-workspace-v1`로 localStorage에 저장된다.
-- 추가 UI 상태로 `finhub-news-ui-state`, `finnhub-last-update-config`, `data-control-active-tab`, `ft-concurrency`, `fmp-pr-fulltext-concurrency`, `ibkr-concurrency`, `finnhub-ticker-concurrency`, `finnhub-request-interval-sec`, `rtpr-ticker-concurrency`, `fmp-concurrency`, `fmp-request-interval-ms`, `fmp-skip-existing`, `peers-skip-existing`, `ipo-skip-existing`, `yahoo-concurrency`, `yahoo-request-interval-ms`, `yahoo-skip-existing`를 사용한다.
+- 추가 UI 상태로 `finhub-news-ui-state`, `finnhub-last-update-config`, `data-control-active-tab`, `ft-concurrency`, `fmp-pr-fulltext-concurrency`, `ibkr-concurrency`, `finnhub-ticker-concurrency`, `finnhub-request-interval-sec`, `finnhub-company-news-ticker-concurrency`, `finnhub-company-news-request-interval-sec`, `rtpr-ticker-concurrency`, `fmp-concurrency`, `fmp-request-interval-ms`, `fmp-skip-existing`, `peers-skip-existing`, `ipo-skip-existing`, `yahoo-concurrency`, `yahoo-request-interval-ms`, `yahoo-skip-existing`를 사용한다.
 - `FinnhubNewsWindow`의 `Control` modal과 `DataControlWindow` Settings 탭은 `fmp-concurrency`, `fmp-request-interval-ms`를 공유한다. 즉 FMP press release / FMP stock news / FMP SEC filing pull 속도 설정은 두 화면에서 같은 값을 편집한다.
+- `FinnhubNewsWindow`의 `Control` modal과 `DataControlWindow` Settings 탭은 `finnhub-company-news-ticker-concurrency`, `finnhub-company-news-request-interval-sec`도 공유한다. 즉 `Company News` pull 전용 속도 설정은 두 화면에서 같은 값을 편집한다.
 - 일반 full text 추출은 `ft-concurrency`를 사용한다.
 - `FMP PR Only`와 `Reset FMP PR Fallback` 뒤 재실행은 전용 키 `fmp-pr-fulltext-concurrency`를 우선 사용하고, 값이 없으면 `ft-concurrency`를 fallback으로 사용한다.
 - `FinnhubNewsWindow`는 pull/update 계열 job과 fulltext 계열 job을 서로 다른 state/job id로 추적한다. 즉 `Update`는 `updating`만, `Full Text`는 `ftUpdating`만 차단한다.
@@ -307,6 +308,12 @@ Finnhub 뉴스 적재는 직접 API response를 표에 그리지 않고, backend
 - `GET /api/jobs/active`
 - `GET /api/jobs/:jobId`
 
+Finnhub pull payload 규칙:
+
+- 기본적으로 `tickerConcurrency`, `requestIntervalMs`는 공용 `finnhub-ticker-concurrency`, `finnhub-request-interval-sec`를 사용한다.
+- 단 `sourceType='company_news'`일 때는 `finnhub-company-news-ticker-concurrency`, `finnhub-company-news-request-interval-sec` 값을 우선 사용한다.
+- 따라서 company news만 더 빠르게 당기고 싶으면 전용 override만 올리고, press release / peers / IPO 설정은 그대로 둘 수 있다.
+
 `recent`를 시작하면 preflight modal이 먼저 열리고, 기존 데이터가 없는 fallback ticker 수를 보여준다.
 
 Recent Update 섹션 바로 아래에 automatic recent retry 정책 설명이 작은 보조 문구로 항상 표시된다.
@@ -320,6 +327,9 @@ Recent Update 섹션 바로 아래에 automatic recent retry 정책 설명이 �
 - 강제 재조회가 필요하면 `Custom Update` 사용
 
 custom update는 별도 날짜 선택 modal에서 `from/to`를 입력한 뒤 시작한다.
+
+- `Recent Update (Company News)`와 `Custom Update (Company News)`는 backend에서 pull 완료 후, 이번에 새로 insert된 company news row만 대상으로 `news-fulltext` job을 자동으로 이어서 시작한다.
+- 따라서 사용자가 같은 시점에 `Full Text > Company News Only`를 다시 눌러야만 방금 받은 row가 추출되는 구조는 아니다. 자동 후속 fulltext job은 `GET /api/jobs/active` / `GET /api/jobs/:jobId`에 별도 `news-fulltext` job으로 나타난다.
 
 현재 코드 상태(중요):
 
@@ -388,6 +398,7 @@ API:
 - backend 자체는 fulltext endpoint에 Finnhub/RTPR pull과 같은 `409 + existingJobId` duplicate guard가 없다.
 - 즉 현재 UX는 "모든 작업 전역 단일 lock"이 아니라, `updating` 상태를 공유하는 일반 update 묶음 + `updating || ftUpdating`를 보는 fulltext 묶음으로 나뉘어 있다.
 - `View Log`는 backend의 여러 running job을 동시에 보여줄 수 있으므로, 다른 경로(다른 탭/직접 API 호출)에서 병렬 job이 있으면 UI에서 함께 관찰할 수 있다.
+- `Recent Update (Company News)` 또는 `Custom Update (Company News)` 직후에는 backend가 자동으로 후속 `news-fulltext` job을 생성할 수 있으므로, 로그 패널 dropdown에서 `news-update`와 `news-fulltext` 두 job이 연속으로 보일 수 있다.
 - `FMP PR Only`는 missing-only 동작이다. 이미 `news_fulltext` row가 있는 FMP PR id는 건드리지 않는다.
 - 기존에 잘못 저장된 FMP PR fallback success row를 다시 처리하려면 `Reset FMP PR Fallback`을 먼저 실행해 해당 row를 삭제한 뒤, 이어서 `FMP PR Only`를 실행한다.
 - FMP PR fulltext는 `RTPR` 같은 다른 source body를 재사용하지 않고, FMP로 새로 적재된 기사 URL에서 직접 원문 추출한다.
@@ -486,6 +497,8 @@ localStorage 사용:
 - `ibkr-concurrency`: Change Update용 IBKR 동시성 설정
 - `finnhub-ticker-concurrency`: Finnhub pull 대상 ticker 동시성 설정
 - `finnhub-request-interval-sec`: Finnhub pull 요청 간격(초)
+- `finnhub-company-news-ticker-concurrency`: Finnhub `Company News` pull 전용 ticker 동시성 설정. 값이 없으면 공용 Finnhub 동시성을 fallback으로 사용
+- `finnhub-company-news-request-interval-sec`: Finnhub `Company News` pull 전용 요청 간격(초). 값이 없으면 공용 Finnhub 간격을 fallback으로 사용
 - `rtpr-ticker-concurrency`: RTPR press release pull ticker 동시성 설정
 - `fmp-concurrency`, `fmp-request-interval-ms`, `fmp-skip-existing`: FMP description pull 설정
 - `peers-skip-existing`, `ipo-skip-existing`: Finnhub peers / IPO date pull의 skip-existing 설정
@@ -648,6 +661,7 @@ company data job contract:
   - `Full Text Concurrency`
   - `IBKR Fetch Concurrency`
   - `Finnhub Pull Ticker Concurrency`
+  - `Finnhub Company News Pull` (company news 전용 concurrency + request interval override)
   - `RTPR Pull Ticker Concurrency`
   - `FMP Concurrency` (기본=5, 범위 1~20)
   - `FMP Request Interval` (기본=250ms, 범위 0~5000ms)
@@ -658,6 +672,7 @@ company data job contract:
   - `Yahoo Request Interval` (기본=200ms, 범위 0~5000ms)
   - `Yahoo Skip Existing` (기본=Skip Existing, 토글로 Overwrite All 전환 가능)
 - Finnhub concurrency 설정은 `Peers Data Update`, `IPO Date Update`에도 적용된다.
+- `Finnhub Company News Pull` 설정은 News Feed 창에서 `Company News`만 pull할 때만 적용되고, press release / peers / IPO date 경로는 건드리지 않는다.
 - 위 두 값은 Control Window에서만 조정한다. News Feed 창 toolbar에는 별도 font size control이 없다.
 - 설정은 `terminal-workspace-v1` 하나에 합쳐 저장되지 않고, 각 설정별 localStorage key에 분산 저장된다.
 

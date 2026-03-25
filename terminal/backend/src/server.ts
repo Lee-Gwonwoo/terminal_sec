@@ -41,7 +41,7 @@ import type { FinnhubMappedItem } from "./services/finnhubNewsProvider.js";
 import { mergeChangeForNewItems, bulkUpdateRecentChange, bulkUpdateCustomChange, type FmpFallbackOptions } from "./services/newsChangeMerger.js";
 import { createJob, getJob, getActiveJobs, updateProgress, appendLog, completeJob, failJob, cancelJob, isJobCancelled } from "./services/jobManager.js";
 import { getFmpSecFulltextBackfillRows, getFulltext, getUnextractedNewsIds, deleteFailedFulltextRows, deleteFmpPressReleaseFallbackRows, deleteCompanyNewsFulltextRows, getFulltextStats, upsertProvidedFulltext } from "./services/fulltextRepository.js";
-import { runFulltextUpdate, runFulltextPlainTextBackfill, runRtprBodyBackfill, runOriginUrlBackfill, extractAndPersistFulltext } from "./services/fulltextUpdateService.js";
+import { runFulltextUpdate, runFulltextUpdateForNewsIds, runFulltextPlainTextBackfill, runRtprBodyBackfill, runOriginUrlBackfill, extractAndPersistFulltext } from "./services/fulltextUpdateService.js";
 import { extractOriginUrl } from "./services/rtprOriginUrlExtractor.js";
 import { htmlToPlainText } from "./services/fulltextExtractors.js";
 import { backfillPublisher } from "./services/finnhubNewsProvider.js";
@@ -777,6 +777,7 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
     (async () => {
       const counters = { totalInserted: 0, totalSkipped: 0 };
       const newItems: Array<{ id: string; tickers: string[]; publishedAt: string }> = [];
+      const companyNewsNewItems: Array<{ id: string; tickers: string[]; publishedAt: string }> = [];
       const detailsPerType: Record<string, { fetched: number; inserted: number }> = {
         company_news: { fetched: 0, inserted: 0 },
         press_release: { fetched: 0, inserted: 0 },
@@ -817,7 +818,11 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
                   items = await fetchCompanyNewsRaw(ticker, tickerFrom, effectiveTo);
                 }
               }
+              const companyNewsStart = newItems.length;
               await insertFetchedItems(items, detailsPerType.company_news, newItems, counters);
+              if (newItems.length > companyNewsStart) {
+                companyNewsNewItems.push(...newItems.slice(companyNewsStart));
+              }
               if (items.length > 0) {
                 appendLog(jobId, `  company_news ${ticker}: ${items.length} fetched`);
               }
@@ -948,6 +953,7 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
 
         // Merge change% for newly inserted items (from existing OHLC DB)
         let changeMergeResult = { merged: 0, skipped: 0 };
+        let autoFulltextJobId: string | null = null;
         if (newItems.length > 0 && !isJobCancelled(jobId)) {
           appendLog(jobId, `Merging change% for ${newItems.length} new items...`);
           try {
@@ -959,6 +965,27 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
           }
         }
 
+        const shouldAutoRunCompanyNewsFulltext = !isJobCancelled(jobId)
+          && input.sourceType === "company_news"
+          && (isRecent || isCustom)
+          && companyNewsNewItems.length > 0;
+
+        if (shouldAutoRunCompanyNewsFulltext) {
+          autoFulltextJobId = createJob(companyNewsNewItems.length, {
+            category: "news-fulltext",
+            label: "Full Text (company_news:auto)",
+          });
+          appendLog(jobId, `Auto-starting company_news fulltext for ${companyNewsNewItems.length} newly inserted rows (jobId=${autoFulltextJobId})`);
+          runFulltextUpdateForNewsIds(
+            autoFulltextJobId,
+            companyNewsNewItems.map((item) => item.id),
+            "company_news",
+            "FINNHUB",
+          ).catch((err) => {
+            console.error(`[pull-finhub] auto company_news fulltext ${autoFulltextJobId}: ${err.message}`);
+          });
+        }
+
         // Update status
         await setLastSuccess("finhub_news", new Date().toISOString(), {
           mode: input.mode,
@@ -967,6 +994,7 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
           inserted: counters.totalInserted,
           skipped: counters.totalSkipped,
           changeMerged: changeMergeResult.merged,
+          autoFulltextJobId,
         });
 
         completeJob(jobId, {
@@ -977,6 +1005,8 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
           inserted: counters.totalInserted,
           skipped: counters.totalSkipped,
           changeMerged: changeMergeResult.merged,
+          autoFulltextJobId,
+          autoFulltextInserted: companyNewsNewItems.length,
           details: detailsPerType,
         });
         activePullJobs.delete(input.sourceType);

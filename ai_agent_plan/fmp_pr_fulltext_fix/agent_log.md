@@ -360,6 +360,56 @@
 
 - 상태: 구현 및 검증 완료, 사용자 확인 대기 (awaiting user confirmation)
 
+**작성 시각:** 2026-03-25 16:08 (local)
+
+### 실DB company_news 기존 fulltext 삭제 실행
+- 사용자 요청:
+  - 기존 company news 데이터의 fulltext 부분을 확실하고 안전하게 삭제할 것
+- 실행 내용:
+  - 현재 dev backend(`http://localhost:8080`)에 `POST /api/news/fulltext/reset-company-news`를 실제 호출
+  - 이 endpoint는 `source='FINNHUB' AND source_type='company_news'`에 연결된 `news_fulltext` row만 삭제한다.
+- 실행 전 확인:
+  - real DB `company_news` fulltext row: `14151`
+  - 그중 `body-fallback%`: `11076`
+- 실행 결과:
+  - API 응답: `{"deleted":14151}`
+  - 실행 후 재조회 결과: `company_fulltext_rows = 0`
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 코드 변경 없음 |
+| 빌드 | ✅ | 직전 backend build 성공 상태 유지 |
+| 자동 테스트 | ✅ | 직전 backend test 13 files / 78 tests pass 상태 유지 |
+| 런타임 통합 | ✅ | real backend `reset-company-news` 호출 후 DB count `14151 -> 0` 확인 |
+
+- 상태: 실DB 삭제 완료, 사용자 확인 대기 (awaiting user confirmation)
+
+**작성 시각:** 2026-03-25 16:11 (local)
+
+### Company News pull 속도 설정 Control Window 분리
+- 사용자 요청:
+  - company news 다운로드도 더 빠르게 돌릴 수 있게 control window에서 설정값을 조정할 수 있도록 할 것
+- 변경 파일:
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+  - `ai_agent_plan/fmp_pr_fulltext_fix/plan.md`
+- 구현 내용:
+  - `finnhub-company-news-ticker-concurrency`, `finnhub-company-news-request-interval-sec` localStorage 키 추가
+  - `Data Control` Settings 탭에 `Finnhub Company News Pull` 전용 concurrency / request interval 설정 추가
+  - `Finnhub News` 창의 `News Pull Control` modal에도 동일한 company news override 입력 추가
+  - `/api/news/pull-finhub` 요청 body는 기존 계약을 유지하되, `sourceType='company_news'`일 때만 전용 override 값을 `tickerConcurrency`, `requestIntervalMs`에 넣도록 분기
+  - `press_release`, `market_news`, `peers`, `IPO date` 경로는 기존 Finnhub 공용 설정을 계속 사용
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `DataControlWindow.tsx`, `FinnhubNewsWindow.tsx` diagnostics 0 errors |
+| 빌드 | ✅ | web UI `npm.cmd run build` 성공 |
+| 자동 테스트 | ⚠️ | 별도 프론트 자동 테스트 없음 |
+| 런타임 통합 | ✅ | 코드 경로 검토로 `company_news` 요청만 전용 override를 사용하고 나머지 sourceType은 공용 Finnhub 설정 유지 확인 |
+
+- 상태: 구현 및 기본 검증 완료, 사용자 확인 대기 (awaiting user confirmation)
+
 **작성 시각:** 2026-03-25 15:16 (local)
 
 ### FINNHUB company_news 원문 추출 보강 + reset 준비
@@ -397,6 +447,35 @@
 - 상태: 구현 완료, 전체 검증 진행 중 (확인 대기)
 
 **작성 시각:** 2026-03-25 15:41 (local)
+
+**작성 시각:** 2026-03-25 16:19 (local)
+
+### company_news recent/custom pull 후 fulltext 자동 연쇄
+- 사용자 요청:
+  - recent/custom company news update 시 받은 데이터까지 fulltext를 자동으로 받도록 할 것
+- 변경 파일:
+  - `terminal/backend/src/services/fulltextRepository.ts`
+  - `terminal/backend/src/services/fulltextUpdateService.ts`
+  - `terminal/backend/src/server.ts`
+  - `.github/copilot-skills/finhub_other_api.md`
+  - `terminal/backend_prompt.md`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+  - `ai_agent_plan/fmp_pr_fulltext_fix/plan.md`
+- 구현 내용:
+  - 선택된 news id 집합만 대상으로 미추출 fulltext row를 읽는 helper 추가
+  - fulltext service에 `runFulltextUpdateForNewsIds()` 경로 추가
+  - `POST /api/news/pull-finhub`에서 `sourceType='company_news'` + `mode='recent' | 'custom'` + 새 row insert가 있을 때, 그 새 company news id만 대상으로 `news-fulltext` job을 자동 생성하도록 연결
+  - pull job log/result에 자동 생성된 fulltext job id를 남기도록 반영
+  - backend/frontend/skill 문서에 자동 연쇄 범위와 예외(`7d`, `all` 제외) 반영
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `fulltextRepository.ts`, `fulltextUpdateService.ts`, `server.ts` diagnostics 0 errors |
+| 빌드 | ✅ | backend `npm.cmd run build` 성공 |
+| 자동 테스트 | ✅ | backend `vitest run` 13 files / 78 tests pass |
+| 런타임 통합 | ✅ | temp SQLite에서 `runFulltextUpdateForNewsIds()` 실행 후 job `done`, `news_fulltext.extraction_status='unavailable'`, `extraction_note='company-news-no-scraper: FINNHUB'` 확인 |
+
+- 상태: 구현 및 기본 검증 완료, 사용자 확인 대기 (awaiting user confirmation)
 
 ### FINNHUB company_news 원문 추출 / reset 준비 최종 검증
 | 검증 계층 | 결과 | 비고 |

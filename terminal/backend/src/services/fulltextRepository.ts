@@ -135,6 +135,26 @@ export async function getUnextractedNewsIds(
   );
 }
 
+export async function getUnextractedNewsRowsByIds(newsIds: string[]): Promise<UnextractedNewsRow[]> {
+  if (newsIds.length === 0) return [];
+
+  const placeholders = newsIds.map(() => "?").join(",");
+  const rows = await getDb().all<UnextractedNewsRow[]>(
+    `SELECT ni.id, ni.url, ni.origin_url, ni.publisher, ni.body, ni.source_type, sf.form_type, sf.cik, sf.filed_at, sf.accepted_at,
+          nf.full_text AS existing_full_text, nf.extraction_status AS existing_extraction_status,
+          nf.extraction_note AS existing_extraction_note
+     FROM news_items ni
+     LEFT JOIN sec_filings sf ON sf.news_id = ni.id
+     LEFT JOIN news_fulltext nf ON nf.news_id = ni.id
+     WHERE ni.id IN (${placeholders})
+       AND nf.news_id IS NULL`,
+    newsIds,
+  );
+
+  const order = new Map(newsIds.map((id, index) => [id, index]));
+  return rows.sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0));
+}
+
 export async function getFmpSecFulltextBackfillRows(
   sourceName?: string,
 ): Promise<UnextractedNewsRow[]> {

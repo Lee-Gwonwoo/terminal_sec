@@ -134,6 +134,27 @@ function getFinnhubRequestIntervalMs(): number {
   }
 }
 
+function getCompanyNewsTickerConcurrency(): number {
+  try {
+    const raw = localStorage.getItem('finnhub-company-news-ticker-concurrency') ?? localStorage.getItem('finnhub-ticker-concurrency') ?? '';
+    const value = parseInt(raw, 10);
+    return Number.isFinite(value) && value >= 1 && value <= 20 ? value : 5;
+  } catch {
+    return 5;
+  }
+}
+
+function getCompanyNewsRequestIntervalMs(): number {
+  try {
+    const raw = localStorage.getItem('finnhub-company-news-request-interval-sec') ?? localStorage.getItem('finnhub-request-interval-sec') ?? '';
+    const value = parseFloat(raw);
+    const safeValue = Number.isFinite(value) && value >= 0 && value <= 10 ? value : 1;
+    return Math.round(safeValue * 1000);
+  } catch {
+    return 1000;
+  }
+}
+
 const DEFAULT_FT_CONCURRENCY = 10;
 const DEFAULT_FMP_PR_FULLTEXT_CONCURRENCY = 10;
 
@@ -631,6 +652,8 @@ export function FinnhubNewsWindow({
   const [showControlWindow, setShowControlWindow] = useState(false);
   const [finnhubTickerConcurrencyInput, setFinnhubTickerConcurrencyInput] = useState(() => String(getFinnhubTickerConcurrency()));
   const [finnhubRequestIntervalSecInput, setFinnhubRequestIntervalSecInput] = useState(() => String(getFinnhubRequestIntervalMs() / 1000));
+  const [companyNewsTickerConcurrencyInput, setCompanyNewsTickerConcurrencyInput] = useState(() => String(getCompanyNewsTickerConcurrency()));
+  const [companyNewsRequestIntervalSecInput, setCompanyNewsRequestIntervalSecInput] = useState(() => String(getCompanyNewsRequestIntervalMs() / 1000));
   const [fmpTickerConcurrencyInput, setFmpTickerConcurrencyInput] = useState(() => String(getFmpTickerConcurrency()));
   const [fmpRequestIntervalMsInput, setFmpRequestIntervalMsInput] = useState(() => String(getFmpRequestIntervalMs()));
   const [fmpPrPageLimitInput, setFmpPrPageLimitInput] = useState(() => String(getFmpPrPageLimit()));
@@ -1057,8 +1080,8 @@ export function FinnhubNewsWindow({
       const body: Record<string, unknown> = {
         mode,
         sourceType,
-        tickerConcurrency: getFinnhubTickerConcurrency(),
-        requestIntervalMs: getFinnhubRequestIntervalMs(),
+        tickerConcurrency: sourceType === 'company_news' ? getCompanyNewsTickerConcurrency() : getFinnhubTickerConcurrency(),
+        requestIntervalMs: sourceType === 'company_news' ? getCompanyNewsRequestIntervalMs() : getFinnhubRequestIntervalMs(),
       };
       if (from) body.from = from;
       if (to) body.to = to;
@@ -1160,6 +1183,8 @@ export function FinnhubNewsWindow({
   const handleSaveControlWindow = () => {
     const finnhubTickerConcurrency = Math.max(1, Math.min(20, parseInt(finnhubTickerConcurrencyInput, 10) || 5));
     const finnhubRequestIntervalSec = Math.max(0, Math.min(10, parseFloat(finnhubRequestIntervalSecInput) || 1));
+    const companyNewsTickerConcurrency = Math.max(1, Math.min(20, parseInt(companyNewsTickerConcurrencyInput, 10) || finnhubTickerConcurrency));
+    const companyNewsRequestIntervalSec = Math.max(0, Math.min(10, parseFloat(companyNewsRequestIntervalSecInput) || finnhubRequestIntervalSec));
     const fmpTickerConcurrency = Math.max(1, Math.min(20, parseInt(fmpTickerConcurrencyInput, 10) || DEFAULT_FMP_TICKER_CONCURRENCY));
     const fmpRequestIntervalMs = Math.max(0, Math.min(5000, parseInt(fmpRequestIntervalMsInput, 10) || DEFAULT_FMP_REQUEST_INTERVAL_MS));
     const fmpPrPageLimit = Math.max(1, Math.min(100, parseInt(fmpPrPageLimitInput, 10) || DEFAULT_FMP_PR_PAGE_LIMIT));
@@ -1170,6 +1195,8 @@ export function FinnhubNewsWindow({
     try {
       localStorage.setItem('finnhub-ticker-concurrency', String(finnhubTickerConcurrency));
       localStorage.setItem('finnhub-request-interval-sec', String(finnhubRequestIntervalSec));
+      localStorage.setItem('finnhub-company-news-ticker-concurrency', String(companyNewsTickerConcurrency));
+      localStorage.setItem('finnhub-company-news-request-interval-sec', String(companyNewsRequestIntervalSec));
       localStorage.setItem('fmp-concurrency', String(fmpTickerConcurrency));
       localStorage.setItem('fmp-request-interval-ms', String(fmpRequestIntervalMs));
       localStorage.setItem('fmp-pr-page-limit', String(fmpPrPageLimit));
@@ -1182,6 +1209,8 @@ export function FinnhubNewsWindow({
 
     setFinnhubTickerConcurrencyInput(String(finnhubTickerConcurrency));
     setFinnhubRequestIntervalSecInput(String(finnhubRequestIntervalSec));
+  setCompanyNewsTickerConcurrencyInput(String(companyNewsTickerConcurrency));
+  setCompanyNewsRequestIntervalSecInput(String(companyNewsRequestIntervalSec));
     setFmpTickerConcurrencyInput(String(fmpTickerConcurrency));
     setFmpRequestIntervalMsInput(String(fmpRequestIntervalMs));
     setFmpPrPageLimitInput(String(fmpPrPageLimit));
@@ -3014,6 +3043,33 @@ export function FinnhubNewsWindow({
                     onChange={(e) => setFinnhubRequestIntervalSecInput(e.target.value)}
                     className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
+                </div>
+                <div className="border-t border-gray-200 dark:border-gray-700 pt-3 space-y-3">
+                  <div className="text-[11px] font-medium text-gray-600 dark:text-gray-300">Company News Override</div>
+                  <p className="text-[10px] text-gray-400">`Company News` pull에서만 쓰는 전용 설정입니다. Press Release, Peers, IPO Date는 기존 Finnhub 공용 설정을 그대로 사용합니다.</p>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Company News Ticker Concurrency</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={companyNewsTickerConcurrencyInput}
+                      onChange={(e) => setCompanyNewsTickerConcurrencyInput(e.target.value)}
+                      className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Company News Request Interval (sec)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={10}
+                      step="0.1"
+                      value={companyNewsRequestIntervalSecInput}
+                      onChange={(e) => setCompanyNewsRequestIntervalSecInput(e.target.value)}
+                      className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
                 </div>
               </div>
               <div className="rounded border border-gray-200 dark:border-gray-700 p-3 space-y-3">
