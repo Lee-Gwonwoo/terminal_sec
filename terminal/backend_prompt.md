@@ -198,8 +198,8 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 | UI 작업 | backend endpoint 예시 | job category | 중복 차단 범위 | 동시에 가능한 작업 |
 |-----------|------|------|------|------|
-| 일반 Update / FMP PR Pull / FMP SEC Pull / RTPR Pull / Change Update | `/api/news/pull-finhub`, `/api/news/pull-fmp-press-release`, `/api/news/pull-fmp-sec-filing`, `/api/news/pull-rtpr`, `/api/news/change/update-*` | `news-update` | 같은 pull 계열 UI만 차단 | `news-fulltext` 계열과 병행 가능 |
-| Full Text / FMP PR Only / FMP SEC Only / RTPR Body Backfill | `/api/news/fulltext/update`, `/api/news/fulltext/backfill-rtpr` | `news-fulltext` | 같은 fulltext UI만 차단 | `news-update` 계열과 병행 가능 |
+| 일반 Update / FMP PR Pull / FMP Stock Pull / FMP SEC Pull / RTPR Pull / Change Update | `/api/news/pull-finhub`, `/api/news/pull-fmp-press-release`, `/api/news/pull-fmp-stock-news`, `/api/news/pull-fmp-sec-filing`, `/api/news/pull-rtpr`, `/api/news/change/update-*` | `news-update` | 같은 pull 계열 UI만 차단 | `news-fulltext` 계열과 병행 가능 |
+| Full Text / FMP PR Only / FMP Stock Only / FMP SEC Only / RTPR Body Backfill | `/api/news/fulltext/update`, `/api/news/fulltext/backfill-rtpr` | `news-fulltext` | 같은 fulltext UI만 차단 | `news-update` 계열과 병행 가능 |
 
 운영적 정의:
 

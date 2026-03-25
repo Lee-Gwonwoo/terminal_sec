@@ -53,12 +53,13 @@ type SortDir = 'asc' | 'desc' | null;
 interface SortState { column: ColumnId | null; dir: SortDir; }
 
 // ─── Source type filter ───
-type SourceTypeFilter = 'all' | 'company_news' | 'press_release' | 'fmp_press_release' | 'fmp_sec_filing' | 'market_news';
+type SourceTypeFilter = 'all' | 'company_news' | 'press_release' | 'fmp_press_release' | 'fmp_stock_news' | 'fmp_sec_filing' | 'market_news';
 
 function getSourceTypeLabel(sourceType: SourceTypeFilter | string): string {
   if (sourceType === 'company_news') return 'Company News';
   if (sourceType === 'press_release') return 'Press Release';
   if (sourceType === 'fmp_press_release') return 'FMP PR';
+  if (sourceType === 'fmp_stock_news') return 'FMP Stock';
   if (sourceType === 'fmp_sec_filing') return 'FMP SEC';
   if (sourceType === 'market_news') return 'Market News';
   return 'All';
@@ -68,6 +69,7 @@ function getSourceTypeShortLabel(sourceType: SourceTypeFilter | string): string 
   if (sourceType === 'company_news') return 'Co.';
   if (sourceType === 'press_release') return 'PR';
   if (sourceType === 'fmp_press_release') return 'FMP PR';
+  if (sourceType === 'fmp_stock_news') return 'FMP Stk';
   if (sourceType === 'fmp_sec_filing') return 'SEC';
   if (sourceType === 'market_news') return 'Mkt.';
   return 'All';
@@ -86,6 +88,9 @@ function getSourceTypeBadgeClass(sourceType: string): string {
   }
   if (sourceType === 'fmp_press_release') {
     return 'bg-emerald-50 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300';
+  }
+  if (sourceType === 'fmp_stock_news') {
+    return 'bg-cyan-50 dark:bg-cyan-900/40 text-cyan-700 dark:text-cyan-300';
   }
   if (sourceType === 'fmp_sec_filing') {
     return 'bg-violet-50 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300';
@@ -517,7 +522,7 @@ export function FinnhubNewsWindow({
       const saved = localStorage.getItem('finhub-news-ui-state');
       if (saved) {
         const p = JSON.parse(saved);
-        if (['all', 'company_news', 'press_release', 'fmp_press_release', 'fmp_sec_filing', 'market_news'].includes(p.sourceTypeFilter)) {
+        if (['all', 'company_news', 'press_release', 'fmp_press_release', 'fmp_stock_news', 'fmp_sec_filing', 'market_news'].includes(p.sourceTypeFilter)) {
           return p.sourceTypeFilter as SourceTypeFilter;
         }
       }
@@ -535,7 +540,7 @@ export function FinnhubNewsWindow({
 
   // ─── Update config (last used mode/sourceType) ───
   type UpdateMode = '7d' | 'recent' | 'custom';
-  type UpdateSourceType = 'all' | 'company_news' | 'press_release' | 'market_news' | 'fmp_press_release' | 'fmp_sec_filing';
+  type UpdateSourceType = 'all' | 'company_news' | 'press_release' | 'market_news' | 'fmp_press_release' | 'fmp_stock_news' | 'fmp_sec_filing';
   const [lastUpdateConfig, setLastUpdateConfig] = useState<{ mode: UpdateMode; sourceType: UpdateSourceType }>(() => {
     try {
       const saved = localStorage.getItem('finnhub-last-update-config');
@@ -759,12 +764,14 @@ export function FinnhubNewsWindow({
     setNextCursor(null);
     try {
       const params = new URLSearchParams();
-      params.set('source_names', (sourceTypeFilter === 'fmp_press_release' || sourceTypeFilter === 'fmp_sec_filing') ? 'FMP' : 'FINNHUB,RTPR,FMP');
+      params.set('source_names', (sourceTypeFilter === 'fmp_press_release' || sourceTypeFilter === 'fmp_stock_news' || sourceTypeFilter === 'fmp_sec_filing') ? 'FMP' : 'FINNHUB,RTPR,FMP');
       if (selectedBookmarkFolderId) {
         params.set('bookmarkFolderId', selectedBookmarkFolderId);
       }
       if (sourceTypeFilter === 'fmp_press_release') {
         params.set('source_type', 'fmp_press_release');
+      } else if (sourceTypeFilter === 'fmp_stock_news') {
+        params.set('source_type', 'fmp_stock_news');
       } else if (sourceTypeFilter === 'fmp_sec_filing') {
         params.set('source_type', 'fmp_sec_filing');
       } else if (sourceTypeFilter !== 'all') {
@@ -808,12 +815,14 @@ export function FinnhubNewsWindow({
     setLoadingMore(true);
     try {
       const params = new URLSearchParams();
-      params.set('source_names', (sourceTypeFilter === 'fmp_press_release' || sourceTypeFilter === 'fmp_sec_filing') ? 'FMP' : 'FINNHUB,RTPR,FMP');
+      params.set('source_names', (sourceTypeFilter === 'fmp_press_release' || sourceTypeFilter === 'fmp_stock_news' || sourceTypeFilter === 'fmp_sec_filing') ? 'FMP' : 'FINNHUB,RTPR,FMP');
       if (selectedBookmarkFolderId) {
         params.set('bookmarkFolderId', selectedBookmarkFolderId);
       }
       if (sourceTypeFilter === 'fmp_press_release') {
         params.set('source_type', 'fmp_press_release');
+      } else if (sourceTypeFilter === 'fmp_stock_news') {
+        params.set('source_type', 'fmp_stock_news');
       } else if (sourceTypeFilter === 'fmp_sec_filing') {
         params.set('source_type', 'fmp_sec_filing');
       } else if (sourceTypeFilter !== 'all') {
@@ -916,6 +925,37 @@ export function FinnhubNewsWindow({
         return;
       }
 
+      if (sourceType === 'fmp_stock_news') {
+        const body: Record<string, unknown> = {
+          mode,
+          tickerConcurrency: getFmpTickerConcurrency(),
+          requestIntervalMs: getFmpRequestIntervalMs(),
+          pageLimit: getFmpPrPageLimit(),
+          maxPages: getFmpPrMaxPages(),
+        };
+        if (from) body.from = from;
+        if (to) body.to = to;
+        const res = await fetch(`${API_BASE}/api/news/pull-fmp-stock-news`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          if (res.status === 409 && data.existingJobId) {
+            registerJob(data.existingJobId, 'news-update');
+            setShowLogPanel(true);
+            setError(data.error || 'FMP stock news pull job is already running');
+            return;
+          }
+          setError(data.error || `HTTP ${res.status}`);
+          setUpdating(false);
+          return;
+        }
+        registerJob(data.jobId, 'news-update');
+        return;
+      }
+
       if (sourceType === 'fmp_sec_filing') {
         const body: Record<string, unknown> = {
           mode,
@@ -980,7 +1020,7 @@ export function FinnhubNewsWindow({
 
   // ─── Recent Update with preflight check ───
   const handleRecentWithPreflight = async (sourceType: UpdateSourceType) => {
-    if (sourceType === 'market_news' || sourceType === 'fmp_press_release' || sourceType === 'fmp_sec_filing') {
+    if (sourceType === 'market_news' || sourceType === 'fmp_press_release' || sourceType === 'fmp_stock_news' || sourceType === 'fmp_sec_filing') {
       handleUpdate('recent', sourceType);
       return;
     }
@@ -1196,7 +1236,7 @@ export function FinnhubNewsWindow({
   }, []);
 
   // ─── Full text extraction (background job) ───
-  type FtSourceType = 'all' | 'company_news' | 'press_release' | 'market_news' | 'rtpr' | 'fmp_press_release' | 'fmp_sec_filing';
+  type FtSourceType = 'all' | 'company_news' | 'press_release' | 'market_news' | 'rtpr' | 'fmp_press_release' | 'fmp_stock_news' | 'fmp_sec_filing';
   const [lastFtSourceType, setLastFtSourceType] = useState<FtSourceType>('all');
 
   const registerJob = useCallback((jobId: string, category: JobCategory) => {
@@ -1250,6 +1290,8 @@ export function FinnhubNewsWindow({
         ? { concurrency }
         : sourceType === 'fmp_press_release'
           ? { sourceType: 'fmp_press_release', sourceName: 'FMP', concurrency }
+        : sourceType === 'fmp_stock_news'
+          ? { sourceType: 'fmp_stock_news', sourceName: 'FMP', concurrency }
         : sourceType === 'fmp_sec_filing'
           ? { sourceType: 'fmp_sec_filing', sourceName: 'FMP', concurrency }
         : { sourceType, concurrency };
@@ -1953,7 +1995,7 @@ export function FinnhubNewsWindow({
             <div className="space-y-2">
               <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400 dark:text-gray-500">Source Filter</div>
               <div className="flex flex-wrap gap-1.5">
-                {(['all', 'company_news', 'press_release', 'fmp_press_release', 'fmp_sec_filing', 'market_news'] as SourceTypeFilter[]).map(st => (
+                {(['all', 'company_news', 'press_release', 'fmp_press_release', 'fmp_stock_news', 'fmp_sec_filing', 'market_news'] as SourceTypeFilter[]).map(st => (
                   <button
                     key={st}
                     onClick={() => setSourceTypeFilter(st)}
@@ -2240,6 +2282,10 @@ export function FinnhubNewsWindow({
                         <RotateCw className="w-3.5 h-3.5 shrink-0 text-emerald-500" />
                         <div><div className="font-medium">Recent FMP PR</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Per-ticker incremental · full text included for new rows</div></div>
                       </button>
+                      <button onClick={() => { setShowUpdateMenu(false); handleRecentWithPreflight('fmp_stock_news'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <RotateCw className="w-3.5 h-3.5 shrink-0 text-cyan-500" />
+                        <div><div className="font-medium">Recent FMP Stock</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Per-ticker incremental stock news · full text included for new rows</div></div>
+                      </button>
                       <button onClick={() => { setShowUpdateMenu(false); handleRecentWithPreflight('fmp_sec_filing'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <RotateCw className="w-3.5 h-3.5 shrink-0 text-violet-500" />
                         <div><div className="font-medium">Recent FMP SEC Filing</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Per-ticker SEC fetch · filing summary included</div></div>
@@ -2267,6 +2313,10 @@ export function FinnhubNewsWindow({
                       <button onClick={() => { setShowUpdateMenu(false); handleCustomStart('fmp_press_release'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <Calendar className="w-3.5 h-3.5 shrink-0 text-emerald-500" />
                         <div><div className="font-medium">Custom FMP PR</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick date range · full text included for new rows</div></div>
+                      </button>
+                      <button onClick={() => { setShowUpdateMenu(false); handleCustomStart('fmp_stock_news'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <Calendar className="w-3.5 h-3.5 shrink-0 text-cyan-500" />
+                        <div><div className="font-medium">Custom FMP Stock</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick date range · per-ticker stock news backfill</div></div>
                       </button>
                       <button onClick={() => { setShowUpdateMenu(false); handleCustomStart('fmp_sec_filing'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <Calendar className="w-3.5 h-3.5 shrink-0 text-violet-500" />
@@ -2376,6 +2426,7 @@ export function FinnhubNewsWindow({
                   ? 'Extracting...'
                   : lastFtSourceType === 'rtpr' ? 'FT RTPR'
                   : lastFtSourceType === 'fmp_press_release' ? 'FT FMP PR'
+                  : lastFtSourceType === 'fmp_stock_news' ? 'FT FMP Stk'
                   : lastFtSourceType === 'fmp_sec_filing' ? 'FT SEC'
                   : lastFtSourceType === 'company_news' ? 'FT Co.'
                   : lastFtSourceType === 'press_release' ? 'FT PR'
@@ -2422,6 +2473,10 @@ export function FinnhubNewsWindow({
                       <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('fmp_press_release'); }} disabled={ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <FileText className="w-3.5 h-3.5 shrink-0 text-emerald-500" />
                         <div><div className="font-medium">FMP PR Only</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Extract only missing full text rows for FMP press releases</div></div>
+                      </button>
+                      <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('fmp_stock_news'); }} disabled={ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <FileText className="w-3.5 h-3.5 shrink-0 text-cyan-500" />
+                        <div><div className="font-medium">FMP Stock Only</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Extract only missing full text rows for FMP stock news</div></div>
                       </button>
                       <button onClick={async () => { setShowFtMenu(false); await handleResetFmpPrFallbackAndRetry(); }} disabled={ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50 text-emerald-700 dark:text-emerald-300">
                         <RotateCw className="w-3.5 h-3.5 shrink-0" />
@@ -2971,7 +3026,7 @@ export function FinnhubNewsWindow({
                     className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
                 </div>
-                <p className="text-[10px] text-gray-400">Applies to FMP company profile, FMP PR, and FMP SEC pulls. Aggressive defaults: concurrency 10, interval 25ms, PR 100 x 12 pages, SEC 40 pages.</p>
+                <p className="text-[10px] text-gray-400">Applies to FMP company profile, FMP PR, FMP Stock, and FMP SEC pulls. Aggressive defaults: concurrency 10, interval 25ms, PR/Stock 100 x 12 pages, SEC 40 pages.</p>
               </div>
             </div>
             <div className="flex justify-end gap-2 mt-4">

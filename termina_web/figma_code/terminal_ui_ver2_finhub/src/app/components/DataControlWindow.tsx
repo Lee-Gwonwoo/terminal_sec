@@ -910,7 +910,7 @@ export function DataControlWindow({
           <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">
             <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">FMP Request Concurrency</h3>
             <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3">
-              FMP Company Description, FMP Press Release, FMP SEC Filing pull이 공통으로 참조하는 병렬 요청 수입니다. 높을수록 빠르지만 API rate limit 위험이 커집니다.
+              FMP Company Description, FMP Press Release, FMP Stock News, FMP SEC Filing pull이 공통으로 참조하는 병렬 요청 수입니다. 높을수록 빠르지만 API rate limit 위험이 커집니다.
             </p>
             <div className="flex gap-2 mb-3 flex-wrap">
               {[3, 5, 10, 15].map(preset => (
@@ -945,7 +945,7 @@ export function DataControlWindow({
           <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">
             <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">FMP Request Interval</h3>
             <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3">
-              FMP 요청 사이 최소 간격(ms). 기본 25ms. Company Description, FMP Press Release, FMP SEC Filing pull이 공통으로 사용합니다.
+              FMP 요청 사이 최소 간격(ms). 기본 25ms. Company Description, FMP Press Release, FMP Stock News, FMP SEC Filing pull이 공통으로 사용합니다.
             </p>
             <div className="flex gap-2 mb-3 flex-wrap">
               {[0, 25, 50, 100, 250].map(preset => (
@@ -978,9 +978,9 @@ export function DataControlWindow({
             </div>
           </div>
           <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">
-            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">FMP PR Paging</h3>
+            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">FMP PR / Stock Paging</h3>
             <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3">
-              FMP press release pull에서 ticker당 얼마나 깊게 page를 탐색할지 정합니다. 기본값은 더 공격적인 100 rows x 12 pages입니다.
+              FMP press release와 FMP stock news pull에서 ticker당 얼마나 깊게 page를 탐색할지 정합니다. 기본값은 100 rows x 12 pages입니다.
             </p>
             <div className="grid grid-cols-2 gap-4">
               <label className="text-xs text-gray-600 dark:text-gray-300">

@@ -13,7 +13,7 @@
 - `BraveNewsWindow.tsx` 파일은 남아 있지만 현재 `WindowType`에 연결되어 있지 않아 UI에서 열 수 없다.
 - 탭/창 레이아웃, 다크 모드, 전역 글자 크기, 뉴스 제목/요약 글자 크기, linked ticker는 `terminal-workspace-v1`로 localStorage에 저장된다.
 - 추가 UI 상태로 `finhub-news-ui-state`, `finnhub-last-update-config`, `data-control-active-tab`, `ft-concurrency`, `fmp-pr-fulltext-concurrency`, `ibkr-concurrency`, `finnhub-ticker-concurrency`, `finnhub-request-interval-sec`, `rtpr-ticker-concurrency`, `fmp-concurrency`, `fmp-request-interval-ms`, `fmp-skip-existing`, `peers-skip-existing`, `ipo-skip-existing`, `yahoo-concurrency`, `yahoo-request-interval-ms`, `yahoo-skip-existing`를 사용한다.
-- `FinnhubNewsWindow`의 `Control` modal과 `DataControlWindow` Settings 탭은 `fmp-concurrency`, `fmp-request-interval-ms`를 공유한다. 즉 FMP press release / FMP SEC filing pull 속도 설정은 두 화면에서 같은 값을 편집한다.
+- `FinnhubNewsWindow`의 `Control` modal과 `DataControlWindow` Settings 탭은 `fmp-concurrency`, `fmp-request-interval-ms`를 공유한다. 즉 FMP press release / FMP stock news / FMP SEC filing pull 속도 설정은 두 화면에서 같은 값을 편집한다.
 - 일반 full text 추출은 `ft-concurrency`를 사용한다.
 - `FMP PR Only`와 `Reset FMP PR Fallback` 뒤 재실행은 전용 키 `fmp-pr-fulltext-concurrency`를 우선 사용하고, 값이 없으면 `ft-concurrency`를 fallback으로 사용한다.
 - `FinnhubNewsWindow`는 pull/update 계열 job과 fulltext 계열 job을 서로 다른 state/job id로 추적한다. 즉 `Update`는 `updating`만, `Full Text`는 `ftUpdating`만 차단한다.
@@ -140,7 +140,7 @@ GET /api/news?source_names=FINNHUB,RTPR,FMP&limit=500
 추가 query:
 
 - `keyword`
-- `source_type` (`company_news | press_release | fmp_press_release | fmp_sec_filing | market_news`)
+- `source_type` (`company_news | press_release | fmp_press_release | fmp_stock_news | fmp_sec_filing | market_news`)
 - `tickers` (ticker 전용 검색, 예: `AAPL,TSLA`)
 - `from`, `to` (YYYY-MM-DD 날짜 범위 필터)
 - `bookmarkFolderId` (북마크 폴더 필터)
@@ -258,6 +258,9 @@ score/scoreEvidence/sentiment 컬럼 규칙:
 - `All`
 - `Company News`
 - `Press Release`
+- `FMP PR`
+- `FMP Stock`
+- `FMP SEC`
 - `Market News`
 
 상태값:

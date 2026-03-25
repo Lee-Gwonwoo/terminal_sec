@@ -105,7 +105,7 @@ export async function upsertProvidedFulltext(
 
 /**
  * Returns news_items that do NOT have a corresponding news_fulltext row.
- * @param sourceType  Optional filter: 'company_news' | 'press_release' | 'fmp_press_release'. Omit or 'all' for no filter.
+ * @param sourceType  Optional filter: 'company_news' | 'press_release' | 'fmp_press_release' | 'fmp_stock_news'. Omit or 'all' for no filter.
  */
 export async function getUnextractedNewsIds(
   sourceType?: string,

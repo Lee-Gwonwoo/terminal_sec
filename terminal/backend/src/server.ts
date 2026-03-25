@@ -88,6 +88,7 @@ import {
 } from "./services/researchRepository.js";
 import { fetchRtprArticles, fetchRtprArticlesByTicker } from "./services/ptprNewsProvider.js";
 import { fetchFmpPressReleasesByTicker } from "./services/fmpPressReleaseProvider.js";
+import { fetchFmpStockNewsByTicker } from "./services/fmpStockNewsProvider.js";
 import { fetchFmpSecFilings } from "./services/fmpSecFilingProvider.js";
 import { generateSecFilingSummary } from "./services/secFilingSummary.js";
 import { getEtDateString } from "./services/timeUtils.js";
@@ -1008,6 +1009,16 @@ const pullFmpPressReleaseSchema = z.object({
   maxPages: z.number().int().min(1).max(50).optional().default(12),
 });
 
+const pullFmpStockNewsSchema = z.object({
+  mode: z.enum(["recent", "custom"]).optional().default("recent"),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  tickerConcurrency: z.number().int().min(1).max(20).optional().default(10),
+  requestIntervalMs: z.number().int().min(0).max(5_000).optional().default(25),
+  pageLimit: z.number().int().min(1).max(100).optional().default(100),
+  maxPages: z.number().int().min(1).max(50).optional().default(12),
+});
+
 const pullFmpSecFilingSchema = z.object({
   mode: z.enum(["recent", "custom"]).optional().default("recent"),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
@@ -1557,6 +1568,297 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
   }
 });
 
+app.post("/api/news/pull-fmp-stock-news", async (req, res, next) => {
+  try {
+    if (!config.fmpApiKey) {
+      res.status(400).json({ error: "FMP API key is not configured" });
+      return;
+    }
+
+    const input = pullFmpStockNewsSchema.parse(req.body ?? {});
+    const isCustom = input.mode === "custom";
+    if (isCustom && !input.from) {
+      res.status(400).json({ error: "Custom mode requires 'from' date" });
+      return;
+    }
+
+    const jobKey = "fmp_stock_news";
+    const existingJobId = activePullJobs.get(jobKey);
+    if (existingJobId) {
+      const existingJob = getJob(existingJobId);
+      if (existingJob && existingJob.status === "running") {
+        res.status(409).json({
+          error: `An FMP stock news pull job is already running (jobId=${existingJobId}). Wait for it to finish or cancel it first.`,
+          existingJobId,
+        });
+        return;
+      }
+      activePullJobs.delete(jobKey);
+    }
+
+    const tickerList = await getDefaultUniverseTickers();
+    const todayEt = getEtDateString(new Date());
+    const fallback7d = getEtDateString(new Date(Date.now() - 7 * 86_400_000));
+    const effectiveTo = input.to ?? todayEt;
+    const jobId = createJob(tickerList.length, {
+      category: "news-update",
+      label: "FMP Stock Pull",
+    });
+    activePullJobs.set(jobKey, jobId);
+    appendLog(jobId, `Starting FMP stock news ${input.mode} pull — ${tickerList.length} tickers`);
+    appendLog(jobId, `[batch] tickerConcurrency=${input.tickerConcurrency}, requestIntervalMs=${input.requestIntervalMs}, pageLimit=${input.pageLimit}, maxPages=${input.maxPages}`);
+
+    let anchorMap: Map<string, string> | undefined;
+    if (!isCustom) {
+      anchorMap = await getTickerAnchorMap("fmp_stock_news", "FMP");
+    }
+
+    res.json({ jobId });
+
+    (async () => {
+      const counters = { totalInserted: 0, totalSkipped: 0 };
+      const newItems: Array<{ id: string; tickers: string[]; publishedAt: string }> = [];
+      const newFulltextTargets: Array<{ id: string; url: string; publisher: string | null; body: string | null; source_type: string }> = [];
+      const confirmedEmptyKey = "fmp_stock_news";
+      const yesterday = getEtDateString(new Date(Date.now() - 86_400_000));
+      let completedTickers = 0;
+
+      const finishOneTicker = () => {
+        completedTickers += 1;
+        updateProgress(jobId, completedTickers);
+      };
+
+      const runTickerPool = async (processTicker: (ticker: string) => Promise<void>) => {
+        const workerCount = Math.max(1, Math.min(input.tickerConcurrency, tickerList.length || 1));
+        let nextIndex = 0;
+        const worker = async () => {
+          while (!isJobCancelled(jobId)) {
+            const currentIndex = nextIndex;
+            nextIndex += 1;
+            if (currentIndex >= tickerList.length) {
+              return;
+            }
+            const ticker = tickerList[currentIndex];
+            await processTicker(ticker);
+            finishOneTicker();
+          }
+        };
+
+        appendLog(jobId, `[batch] concurrency=${workerCount}`);
+        await Promise.all(Array.from({ length: workerCount }, () => worker()));
+      };
+
+      try {
+        if (!isCustom) {
+          const fallbackCount = tickerList.filter((ticker) => !anchorMap!.has(ticker.toUpperCase())).length;
+          if (fallbackCount > 0) {
+            appendLog(jobId, `${fallbackCount} tickers have no prior FMP stock news data → 7d fallback`);
+          }
+
+          await runTickerPool(async (ticker) => {
+            const anchor = anchorMap!.get(ticker.toUpperCase());
+            const tickerFrom = anchor ? anchor.slice(0, 10) : fallback7d;
+            const emptyRange = await getConfirmedEmptyRange(ticker, confirmedEmptyKey);
+            if (emptyRange && tickerFrom >= emptyRange.rangeFrom && yesterday <= emptyRange.rangeTo) {
+              return;
+            }
+
+            try {
+              const items = await fetchFmpStockNewsByTicker(ticker, {
+                fromDate: tickerFrom,
+                toDate: effectiveTo,
+                pageLimit: input.pageLimit,
+                maxPages: input.maxPages,
+                requestIntervalMs: input.requestIntervalMs,
+              });
+
+              if (items.length === 0 && tickerFrom <= yesterday) {
+                await recordConfirmedEmpty(ticker, confirmedEmptyKey, tickerFrom, yesterday);
+                return;
+              }
+
+              for (const rawItem of items) {
+                const inserted = await insertNewsItem({
+                  publishedAt: rawItem.publishedAt,
+                  source: rawItem.source,
+                  sourceType: rawItem.sourceType,
+                  title: rawItem.title,
+                  body: rawItem.body,
+                  url: rawItem.url,
+                  tickers: rawItem.providerTickers,
+                  tags: rawItem.tags,
+                  publisher: rawItem.publisher,
+                });
+                if (inserted) {
+                  counters.totalInserted++;
+                  newItems.push({
+                    id: inserted.id,
+                    tickers: inserted.tickers,
+                    publishedAt: inserted.published_at,
+                  });
+                  newFulltextTargets.push({
+                    id: inserted.id,
+                    url: rawItem.url,
+                    publisher: rawItem.publisher ?? null,
+                    body: rawItem.body,
+                    source_type: rawItem.sourceType,
+                  });
+                  streamHub.publishNews(inserted);
+                } else {
+                  counters.totalSkipped++;
+                }
+              }
+
+              if (items.length > 0) {
+                appendLog(jobId, `  FMP Stock ${ticker}: ${items.length} new`);
+              }
+            } catch (err: any) {
+              console.error(`[pull-fmp-stock-news] ${ticker}: ${err.message}`);
+              appendLog(jobId, `  ⚠ FMP Stock ${ticker}: ${err.message}`);
+            }
+          });
+        } else {
+          const effectiveFrom = input.from!;
+          appendLog(jobId, `Custom mode: ${effectiveFrom} ~ ${effectiveTo}, ${tickerList.length} tickers`);
+
+          await runTickerPool(async (ticker) => {
+            try {
+              const items = await fetchFmpStockNewsByTicker(ticker, {
+                fromDate: effectiveFrom,
+                toDate: effectiveTo,
+                pageLimit: input.pageLimit,
+                maxPages: input.maxPages,
+                requestIntervalMs: input.requestIntervalMs,
+              });
+
+              for (const rawItem of items) {
+                const inserted = await insertNewsItem({
+                  publishedAt: rawItem.publishedAt,
+                  source: rawItem.source,
+                  sourceType: rawItem.sourceType,
+                  title: rawItem.title,
+                  body: rawItem.body,
+                  url: rawItem.url,
+                  tickers: rawItem.providerTickers,
+                  tags: rawItem.tags,
+                  publisher: rawItem.publisher,
+                });
+                if (inserted) {
+                  counters.totalInserted++;
+                  newItems.push({
+                    id: inserted.id,
+                    tickers: inserted.tickers,
+                    publishedAt: inserted.published_at,
+                  });
+                  newFulltextTargets.push({
+                    id: inserted.id,
+                    url: rawItem.url,
+                    publisher: rawItem.publisher ?? null,
+                    body: rawItem.body,
+                    source_type: rawItem.sourceType,
+                  });
+                  streamHub.publishNews(inserted);
+                } else {
+                  counters.totalSkipped++;
+                }
+              }
+
+              if (items.length > 0) {
+                appendLog(jobId, `  FMP Stock ${ticker}: ${items.length} in range`);
+              }
+            } catch (err: any) {
+              console.error(`[pull-fmp-stock-news] ${ticker}: ${err.message}`);
+              appendLog(jobId, `  ⚠ FMP Stock ${ticker}: ${err.message}`);
+            }
+          });
+        }
+
+        appendLog(jobId, `Total: inserted=${counters.totalInserted}, skipped=${counters.totalSkipped}`);
+
+        let changeMergeResult = { merged: 0, skipped: 0 };
+        if (newItems.length > 0 && !isJobCancelled(jobId)) {
+          appendLog(jobId, `Merging change% for ${newItems.length} new FMP stock items...`);
+          try {
+            changeMergeResult = await mergeChangeForNewItems(newItems, undefined, () => isJobCancelled(jobId));
+            appendLog(jobId, `Change merge: ${changeMergeResult.merged} merged, ${changeMergeResult.skipped} skipped`);
+          } catch (err: any) {
+            console.error(`[pull-fmp-stock-news] change merger error: ${err.message}`);
+            appendLog(jobId, `⚠ Change merge error: ${err.message}`);
+          }
+        }
+
+        let fulltextResult = { success: 0, skipped: 0, failed: 0 };
+        if (newFulltextTargets.length > 0 && !isJobCancelled(jobId)) {
+          appendLog(jobId, `Extracting full text for ${newFulltextTargets.length} new FMP stock items...`);
+          const workerCount = Math.max(1, Math.min(input.tickerConcurrency, newFulltextTargets.length));
+          let fulltextCursor = 0;
+          let lastFulltextLogAt = 0;
+
+          const processFulltextTarget = async (target: typeof newFulltextTargets[number]) => {
+            const result = await extractAndPersistFulltext(target);
+            if (result.extractionStatus === "success") fulltextResult.success++;
+            else if (result.extractionStatus === "skipped") fulltextResult.skipped++;
+            else fulltextResult.failed++;
+
+            const completed = fulltextResult.success + fulltextResult.skipped + fulltextResult.failed;
+            if (completed - lastFulltextLogAt >= 20 || completed === newFulltextTargets.length) {
+              lastFulltextLogAt = completed;
+              appendLog(jobId, `[fulltext ${completed}/${newFulltextTargets.length}] ${fulltextResult.success} ok, ${fulltextResult.skipped} skip, ${fulltextResult.failed} fail`);
+            }
+          };
+
+          const fulltextWorker = async () => {
+            while (!isJobCancelled(jobId)) {
+              const currentIndex = fulltextCursor;
+              fulltextCursor += 1;
+              if (currentIndex >= newFulltextTargets.length) return;
+              await processFulltextTarget(newFulltextTargets[currentIndex]);
+            }
+          };
+
+          await Promise.all(Array.from({ length: workerCount }, () => fulltextWorker()));
+          appendLog(jobId, `Full text during pull: ${fulltextResult.success} success, ${fulltextResult.skipped} skipped, ${fulltextResult.failed} failed`);
+        }
+
+        await setLastSuccess("fmp_stock_news", new Date().toISOString(), {
+          mode: input.mode,
+          tickerCount: tickerList.length,
+          tickerConcurrency: input.tickerConcurrency,
+          requestIntervalMs: input.requestIntervalMs,
+          pageLimit: input.pageLimit,
+          maxPages: input.maxPages,
+          inserted: counters.totalInserted,
+          skipped: counters.totalSkipped,
+          changeMerged: changeMergeResult.merged,
+          fulltextSuccess: fulltextResult.success,
+          fulltextSkipped: fulltextResult.skipped,
+          fulltextFailed: fulltextResult.failed,
+        });
+
+        completeJob(jobId, {
+          source: "FMP",
+          mode: input.mode,
+          sourceType: "fmp_stock_news",
+          tickerCount: tickerList.length,
+          inserted: counters.totalInserted,
+          skipped: counters.totalSkipped,
+          changeMerged: changeMergeResult.merged,
+          fulltextSuccess: fulltextResult.success,
+          fulltextSkipped: fulltextResult.skipped,
+          fulltextFailed: fulltextResult.failed,
+        });
+        activePullJobs.delete(jobKey);
+      } catch (err: any) {
+        console.error(`[pull-fmp-stock-news] job ${jobId} fatal error: ${err.message}`);
+        failJob(jobId, err.message || "Unknown error");
+        activePullJobs.delete(jobKey);
+      }
+    })();
+  } catch (error) {
+    next(error);
+  }
+});
+
 // ── FMP SEC Filing pull ──
 app.post("/api/news/pull-fmp-sec-filing", async (req, res, next) => {
   try {
@@ -1797,7 +2099,7 @@ app.post("/api/jobs/:jobId/cancel", (req, res) => {
 
 app.post("/api/news/fulltext/update", async (req, res, next) => {
   try {
-    const sourceType: string | undefined = req.body?.sourceType; // 'all' | 'company_news' | 'press_release' | 'fmp_press_release'
+    const sourceType: string | undefined = req.body?.sourceType; // 'all' | 'company_news' | 'press_release' | 'fmp_press_release' | 'fmp_stock_news'
     const sourceName: string | undefined = req.body?.sourceName;
     const concurrency: number = Math.max(1, Math.min(Number(req.body?.concurrency) || 10, 200));
 
