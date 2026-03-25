@@ -14,7 +14,7 @@ import { extractOriginUrl } from "./rtprOriginUrlExtractor.js";
 import { buildSecFilingMetadataSummary, summarizeSecDocumentText } from "./secFilingSummary.js";
 
 /** Default concurrency for full text extraction */
-const DEFAULT_CONCURRENCY = 10;
+const DEFAULT_CONCURRENCY = 200;
 const MAX_CONCURRENCY = 200;
 
 function countWords(text: string): number {

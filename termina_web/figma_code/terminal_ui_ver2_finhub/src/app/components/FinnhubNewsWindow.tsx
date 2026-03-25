@@ -155,7 +155,7 @@ function getCompanyNewsRequestIntervalMs(): number {
   }
 }
 
-const DEFAULT_FT_CONCURRENCY = 10;
+const DEFAULT_FT_CONCURRENCY = 200;
 const DEFAULT_FMP_PR_FULLTEXT_CONCURRENCY = 10;
 
 function getFulltextConcurrency(): number {
@@ -1082,6 +1082,7 @@ export function FinnhubNewsWindow({
         sourceType,
         tickerConcurrency: sourceType === 'company_news' ? getCompanyNewsTickerConcurrency() : getFinnhubTickerConcurrency(),
         requestIntervalMs: sourceType === 'company_news' ? getCompanyNewsRequestIntervalMs() : getFinnhubRequestIntervalMs(),
+        fulltextConcurrency: getFulltextConcurrency(),
       };
       if (from) body.from = from;
       if (to) body.to = to;

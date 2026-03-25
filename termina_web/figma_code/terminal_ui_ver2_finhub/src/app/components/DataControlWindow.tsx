@@ -88,8 +88,8 @@ export function DataControlWindow({
   const [ftConcurrency, setFtConcurrency] = useState(() => {
     try {
       const v = parseInt(localStorage.getItem('ft-concurrency') ?? '', 10);
-      return v >= 1 && v <= 200 ? v : 10;
-    } catch { return 10; }
+      return v >= 1 && v <= 200 ? v : 200;
+    } catch { return 200; }
   });
   const saveFtConcurrency = (n: number) => {
     const v = Math.max(1, Math.min(200, n));

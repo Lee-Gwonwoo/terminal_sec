@@ -562,6 +562,8 @@ const pullFinnhubSchema = z.object({
   tickerConcurrency: z.number().int().min(1).max(20).optional().default(DEFAULT_FINNHUB_TICKER_CONCURRENCY),
   /** Pause between concurrent ticker chunks in milliseconds. */
   requestIntervalMs: z.number().int().min(0).max(10_000).optional().default(DEFAULT_FINNHUB_REQUEST_INTERVAL_MS),
+  /** Optional fulltext concurrency for automatic company_news chaining. */
+  fulltextConcurrency: z.number().int().min(1).max(200).optional().default(200),
   mode: z.enum(["7d", "recent", "custom"]).optional().default("7d"),
   /** Which data types to pull. "market_news" = Finnhub /news general market headlines */
   sourceType: z.enum(["all", "company_news", "press_release", "market_news"]).optional().default("all"),
@@ -725,7 +727,7 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
     if (!pullCompany && !pullPress) {
       tickerList = [];
     }
-    console.log(`[pull-finhub] mode=${input.mode} sourceType=${input.sourceType} maxTickers=${input.maxTickers} tickerConcurrency=${input.tickerConcurrency} requestIntervalMs=${input.requestIntervalMs} batchLevels=${batchLevels.join(",")} → tickerList.length=${tickerList.length}`);
+    console.log(`[pull-finhub] mode=${input.mode} sourceType=${input.sourceType} maxTickers=${input.maxTickers} tickerConcurrency=${input.tickerConcurrency} requestIntervalMs=${input.requestIntervalMs} fulltextConcurrency=${input.fulltextConcurrency} batchLevels=${batchLevels.join(",")} → tickerList.length=${tickerList.length}`);
 
     // For recent mode, load per-ticker anchor maps
     let companyAnchorMap: Map<string, string> | undefined;
@@ -757,7 +759,7 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
     });
     activePullJobs.set(input.sourceType, jobId);
     appendLog(jobId, `Starting ${input.mode}/${input.sourceType} pull for ${tickerList.length} tickers`);
-    appendLog(jobId, `[batch] requested tickerConcurrency=${input.tickerConcurrency}, requestIntervalMs=${input.requestIntervalMs}, levels=${batchLevels.join(" → ")}`);
+    appendLog(jobId, `[batch] requested tickerConcurrency=${input.tickerConcurrency}, requestIntervalMs=${input.requestIntervalMs}, fulltextConcurrency=${input.fulltextConcurrency}, levels=${batchLevels.join(" → ")}`);
 
     if (isRecent) {
       const fallbackCount = tickerList.filter((t) => {
@@ -981,6 +983,7 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
             companyNewsNewItems.map((item) => item.id),
             "company_news",
             "FINNHUB",
+            input.fulltextConcurrency,
           ).catch((err) => {
             console.error(`[pull-finhub] auto company_news fulltext ${autoFulltextJobId}: ${err.message}`);
           });
@@ -995,6 +998,7 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
           skipped: counters.totalSkipped,
           changeMerged: changeMergeResult.merged,
           autoFulltextJobId,
+          autoFulltextConcurrency: autoFulltextJobId ? input.fulltextConcurrency : null,
         });
 
         completeJob(jobId, {
@@ -1006,6 +1010,7 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
           skipped: counters.totalSkipped,
           changeMerged: changeMergeResult.merged,
           autoFulltextJobId,
+          autoFulltextConcurrency: autoFulltextJobId ? input.fulltextConcurrency : null,
           autoFulltextInserted: companyNewsNewItems.length,
           details: detailsPerType,
         });
@@ -2131,7 +2136,7 @@ app.post("/api/news/fulltext/update", async (req, res, next) => {
   try {
     const sourceType: string | undefined = req.body?.sourceType; // 'all' | 'company_news' | 'press_release' | 'fmp_press_release' | 'fmp_stock_news'
     const sourceName: string | undefined = req.body?.sourceName;
-    const concurrency: number = Math.max(1, Math.min(Number(req.body?.concurrency) || 10, 200));
+    const concurrency: number = Math.max(1, Math.min(Number(req.body?.concurrency) || 200, 200));
 
     // backfill publisher for any rows missing it
     await backfillPublisher();

@@ -404,6 +404,22 @@ Step 1 -> Step 2 -> Step 3 -> Step 4 -> Step 5
   - 자동 후속 범위는 새 insert row로 제한해, 과거 backlog 전체를 매번 다시 훑지 않는다.
   - 로그/결과에는 자동 생성된 `news-fulltext` job id가 남는다.
 
+### PLAN CHANGE — 2026-03-25 16:31
+- 변경 내용: 자동 company_news fulltext도 수동 company_news fulltext와 같은 `ft-concurrency` 설정을 사용하도록 동기화한다.
+- 변경 이유: 사용자가 자동 company fulltext도 같은 설정값을 사용해야 한다고 지적했다.
+- 영향:
+  - 프론트는 `POST /api/news/pull-finhub` body에 `fulltextConcurrency`를 함께 보낸다.
+  - backend 자동 후속 company_news fulltext job은 그 값을 그대로 사용한다.
+  - 수동/자동 company fulltext의 concurrency 기준이 분리되지 않는다.
+
+### PLAN CHANGE — 2026-03-25 16:32
+- 변경 내용: 공용 fulltext 기본 concurrency를 `200`으로 올린다.
+- 변경 이유: 사용자가 기본값을 200으로 설정하라고 요청했다.
+- 영향:
+  - `ft-concurrency` localStorage가 비어 있으면 UI 초기값이 `200`으로 보인다.
+  - 수동 fulltext fallback, 자동 company fulltext fallback, backend `POST /api/news/fulltext/update` 기본값이 모두 `200`으로 통일된다.
+  - `fmp-pr-fulltext-concurrency` 기본값은 기존 보수적 값 `10`을 유지한다.
+
 #### ⏳ Step 6 — FINNHUB company_news 원문 추출 + reset 준비
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
@@ -472,3 +488,13 @@ Step 1 -> Step 2 -> Step 3 -> Step 4 -> Step 5
   완료 조건(눈으로 확인): skill/backend/frontend 문서에 `recent/custom company_news -> auto fulltext` 규칙이 적혀 있다.
   사람 검증(비개발자): 문서만 읽고 수동 Full Text 클릭이 필요한지 아닌지 바로 알 수 있다.
   흔한 문제/주의: `7d`나 `all`까지 자동인 것처럼 문서가 과장되면 실제 동작과 어긋난다.
+- `8-3` 목적: 자동 company fulltext도 수동 company fulltext와 같은 설정값을 사용하게 맞춘다.
+  설명: pull payload에 `fulltextConcurrency`를 싣고, backend가 auto fulltext job에 그 값을 그대로 전달한다.
+  완료 조건(눈으로 확인): `POST /api/news/pull-finhub` body 생성 코드와 backend schema/log에 `fulltextConcurrency`가 보인다.
+  사람 검증(비개발자): Full Text concurrency 값을 바꾸면 자동 company fulltext도 같은 값으로 동작한다고 설명할 수 있으면 된다.
+  흔한 문제/주의: auto job만 backend 기본값 10을 계속 쓰면 수동 실행과 체감 속도가 달라진다.
+- `8-4` 목적: 공용 fulltext 기본 시작값을 200으로 맞춘다.
+  설명: UI local fallback과 backend endpoint fallback을 함께 올려 새 사용자 기준 기본값을 통일한다.
+  완료 조건(눈으로 확인): `ft-concurrency` fallback 상수와 backend fulltext default가 모두 200이다.
+  사람 검증(비개발자): localStorage를 비우고 다시 열었을 때 Full Text 값이 200으로 보이면 된다.
+  흔한 문제/주의: FMP PR 전용 fulltext 기본값까지 같이 200으로 올리면 Business Wire fallback 때문에 과도할 수 있으므로 분리 기본값 10은 유지한다.

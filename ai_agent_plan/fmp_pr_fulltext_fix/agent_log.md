@@ -477,6 +477,56 @@
 
 - 상태: 구현 및 기본 검증 완료, 사용자 확인 대기 (awaiting user confirmation)
 
+**작성 시각:** 2026-03-25 16:31 (local)
+
+### 자동 company fulltext와 수동 company fulltext 설정값 동기화
+- 사용자 요청:
+  - 자동 company fulltext도 같은 설정값을 사용하도록 할 것
+- 변경 파일:
+  - `terminal/backend/src/server.ts`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+  - `.github/copilot-skills/finhub_other_api.md`
+  - `terminal/backend_prompt.md`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+  - `ai_agent_plan/fmp_pr_fulltext_fix/plan.md`
+- 구현 내용:
+  - 프론트 `POST /api/news/pull-finhub` body에 `fulltextConcurrency` 추가
+  - 값은 현재 수동 fulltext가 사용하는 `ft-concurrency`에서 읽도록 연결
+  - backend `pullFinnhubSchema`에 `fulltextConcurrency` 추가
+  - 자동 후속 company_news fulltext job이 backend 기본값 대신 요청으로 받은 `fulltextConcurrency`를 사용하도록 변경
+
+- 상태: 구현 완료, 검증 진행 중 (확인 대기)
+
+**작성 시각:** 2026-03-25 16:32 (local)
+
+### 공용 fulltext 기본값 200 상향
+- 사용자 요청:
+  - 기본 200으로 설정
+- 변경 파일:
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+  - `terminal/backend/src/services/fulltextUpdateService.ts`
+  - `terminal/backend/src/server.ts`
+  - `.github/copilot-skills/finhub_other_api.md`
+  - `terminal/backend_prompt.md`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+  - `ai_agent_plan/fmp_pr_fulltext_fix/plan.md`
+- 구현 내용:
+  - `ft-concurrency` UI fallback 기본값을 `200`으로 변경
+  - 수동 fulltext 공용 fallback 상수를 `200`으로 변경
+  - backend fulltext worker 기본 concurrency와 `POST /api/news/fulltext/update` fallback을 `200`으로 변경
+  - 자동 company fulltext도 같은 공용 fulltext 기본값을 따르도록 유지
+  - FMP PR 전용 fulltext 기본값은 기존 `10` 유지
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `DataControlWindow.tsx`, `FinnhubNewsWindow.tsx`, `fulltextUpdateService.ts`, `server.ts` diagnostics 0 errors |
+| 빌드 | ✅ | backend `npm.cmd run build`, web UI `npm.cmd run build` 성공 |
+| 자동 테스트 | ✅ | backend `vitest run` 13 files / 78 tests pass |
+| 런타임 통합 | ✅ | temp SQLite에서 `runFulltextUpdateForNewsIds()`를 concurrency 인자 없이 실행했을 때 시작 로그 `concurrency=200` 확인 |
+
+- 상태: 구현 및 기본 검증 완료, 사용자 확인 대기 (awaiting user confirmation)
+
 ### FINNHUB company_news 원문 추출 / reset 준비 최종 검증
 | 검증 계층 | 결과 | 비고 |
 |-----------|------|------|

@@ -16,6 +16,7 @@
 - `FinnhubNewsWindow`의 `Control` modal과 `DataControlWindow` Settings 탭은 `fmp-concurrency`, `fmp-request-interval-ms`를 공유한다. 즉 FMP press release / FMP stock news / FMP SEC filing pull 속도 설정은 두 화면에서 같은 값을 편집한다.
 - `FinnhubNewsWindow`의 `Control` modal과 `DataControlWindow` Settings 탭은 `finnhub-company-news-ticker-concurrency`, `finnhub-company-news-request-interval-sec`도 공유한다. 즉 `Company News` pull 전용 속도 설정은 두 화면에서 같은 값을 편집한다.
 - 일반 full text 추출은 `ft-concurrency`를 사용한다.
+- 일반 full text 추출은 `ft-concurrency`를 사용하고, 현재 기본값은 `200`이다.
 - `FMP PR Only`와 `Reset FMP PR Fallback` 뒤 재실행은 전용 키 `fmp-pr-fulltext-concurrency`를 우선 사용하고, 값이 없으면 `ft-concurrency`를 fallback으로 사용한다.
 - `FinnhubNewsWindow`는 pull/update 계열 job과 fulltext 계열 job을 서로 다른 state/job id로 추적한다. 즉 `Update`는 `updating`만, `Full Text`는 `ftUpdating`만 차단한다.
 - API 호출 base는 빈 문자열 `""` 이고, dev 환경에서는 Vite proxy가 `/api`, `/healthz`를 `http://localhost:8080`으로 보낸다.
@@ -330,6 +331,7 @@ custom update는 별도 날짜 선택 modal에서 `from/to`를 입력한 뒤 시
 
 - `Recent Update (Company News)`와 `Custom Update (Company News)`는 backend에서 pull 완료 후, 이번에 새로 insert된 company news row만 대상으로 `news-fulltext` job을 자동으로 이어서 시작한다.
 - 따라서 사용자가 같은 시점에 `Full Text > Company News Only`를 다시 눌러야만 방금 받은 row가 추출되는 구조는 아니다. 자동 후속 fulltext job은 `GET /api/jobs/active` / `GET /api/jobs/:jobId`에 별도 `news-fulltext` job으로 나타난다.
+- 이 자동 후속 job은 pull 요청 body의 `fulltextConcurrency`를 사용하고, 현재 프론트는 그 값을 `ft-concurrency`에서 읽어 보낸다. 따라서 수동 `Company News Only` fulltext와 자동 후속 company fulltext가 같은 concurrency 설정을 공유한다.
 
 현재 코드 상태(중요):
 

@@ -139,6 +139,8 @@
 - 기존 실DB 상태에서는 `source='FINNHUB' AND source_type='company_news'`의 `origin_url`이 0건일 수 있다. 이 경우 fulltext 단계에서 wrapper redirect를 읽어 `origin_url`을 채우는 경로가 필요하다.
 - 기존 `company_news` fulltext row는 대부분 summary/body fallback semantics로 저장돼 있으므로, 새 규칙으로 다시 채우려면 먼저 reset endpoint로 비우는 것이 맞다.
 - 현재 backend는 `POST /api/news/pull-finhub`에서 `sourceType='company_news'`이면서 `mode='recent' | 'custom'`이고 새 row가 실제 insert되면, pull job 완료 직전에 그 새 row들만 대상으로 `news-fulltext` background job을 자동으로 이어서 시작한다.
+- 이 자동 후속 fulltext는 수동 `Full Text > Company News Only`와 같은 `ft-concurrency` 값을 사용한다. 프론트가 `fulltextConcurrency`를 pull payload에 같이 보내고, backend가 그 값을 자동 후속 job에 전달한다.
+- 현재 공용 fulltext 기본값은 `200`이다. 즉 localStorage가 비어 있으면 수동 fulltext와 자동 company fulltext 둘 다 기본 concurrency `200`으로 시작한다.
 - 따라서 News Feed 창에서 `Recent Update (Company News)` 또는 `Custom Update (Company News)`를 실행하면, 별도 클릭 없이 방금 들어온 company news 데이터까지 fulltext 대상에 포함된다.
 - 자동 후속 fulltext는 `news_items`에 새로 insert된 company news id만 대상으로 한다. 예전 backlog 전체를 매번 다시 훑지 않는다.
 - 권장 순서:
