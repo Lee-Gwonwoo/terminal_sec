@@ -115,7 +115,7 @@ async function fetchFmpProfileWithRetry(ticker: string, intervalMs: number): Pro
         industry: String(item.industry ?? ""),
         website: String(item.website ?? ""),
         ipoDate: String(item.ipoDate ?? ""),
-        mktCap: Number(item.mktCap ?? 0),
+        mktCap: Number(item.mktCap ?? item.marketCap ?? 0),
         fullTimeEmployees: String(item.fullTimeEmployees ?? ""),
         exchangeShortName: String(item.exchangeShortName ?? ""),
         raw: item,

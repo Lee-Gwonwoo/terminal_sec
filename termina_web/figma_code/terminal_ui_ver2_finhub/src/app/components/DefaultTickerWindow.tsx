@@ -456,7 +456,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
               onClick={handleMarketCapUpdate}
               disabled={marketCapUpdating || loading}
               className="px-2 py-1 text-xs bg-violet-600 text-white rounded hover:bg-violet-700 disabled:opacity-50 flex items-center gap-1"
-              title="Pull market cap from Finnhub profile2 into company_profiles and refresh the default universe table"
+              title="Pull market cap from FMP profile into company_profiles and refresh the default universe table"
             >
               <RefreshCw className={`w-3 h-3 ${marketCapUpdating ? "animate-spin" : ""}`} />
               {marketCapUpdating ? "Mkt Cap..." : "Mkt Cap"}

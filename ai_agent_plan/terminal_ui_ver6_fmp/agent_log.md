@@ -8,6 +8,46 @@
 | 2026-03-23 09:03 | FMP SEC summary 추가 작업 시작 | `pull-fmp-sec-filing`에 filing 기반 summary 생성을 붙이는 plan/code/doc 범위를 확정 |
 | 2026-03-24 08:55 | FMP SEC full text + summary backfill 작업 시작 | full text 실행 시 `news_fulltext`와 `news_items.body`를 함께 갱신하는 방향으로 확장 |
 | 2026-03-24 09:13 | FMP 요청 속도 기본값 상향 + Control Window 노출 완료 | FMP PR/SEC 기본 요청 간격을 `100ms`로 낮추고, SEC ticker concurrency 및 Control Window 공유 설정을 연결 |
+| 2026-03-24 20:06 | DefaultTickerWindow market cap source를 FMP로 전환 | `pull-market-cap` route가 FMP profile의 `mktCap`를 저장하고, source badge/doc 기준도 `Market Cap = FMP`로 동기화 |
+
+### DefaultTickerWindow market cap source를 FMP로 전환 (2026-03-24 20:06)
+
+**작성 시각:** 2026-03-24 20:06 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. backend `POST /api/company-profiles/pull-market-cap`를 Finnhub `profile2`가 아니라 FMP profile batch fetch로 전환했다.
+2. `company_profiles` upsert source를 `fmp`로 바꿔서 새로 갱신되는 market cap row가 source badge에 그대로 반영되게 했다.
+3. security metadata update도 FMP payload 기준으로 맞췄다.
+   - `exchangeShortName`
+   - `companyName`
+   - `sector`
+   - `industry`
+4. frontend button tooltip과 backend/frontend prompt 문서에서 `Market Cap = FMP`가 현재 구현 기준이라고 명시했다.
+
+#### 사용자가 직접 확인할 수 있는 방법
+
+1. `DefaultTickerWindow`에서 `Mkt Cap` 버튼을 눌러 새 market cap job을 실행한다.
+2. 완료 후 `GET /api/tickers` 응답 row 또는 표 셀 badge에서 `marketCapSource = fmp`가 보이는지 확인한다.
+3. 이미 24시간 내에 저장된 row는 skip될 수 있으므로, 새 source 반영이 필요한 ticker는 이번 job으로 다시 갱신된 row를 확인한다.
+
+#### 리스크 / 완화
+
+1. **리스크:** 기존에 저장된 `marketCapSource = finnhub` row는 재갱신 전까지 그대로 보일 수 있다.
+   - 완화 1: `Mkt Cap` job을 다시 돌리면 같은 `security_id + source` 기준으로 FMP row가 갱신된다.
+2. **리스크:** FMP profile에 market cap이 비어 있는 ticker는 source 전환 후에도 값이 비어 있을 수 있다.
+   - 완화 1: job log에 `missing`으로 남기고, 필요하면 해당 ticker만 샘플 재검증한다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `server.ts`, `fmpCompanyProfileProvider.ts` 기준 error 없음 |
+| 빌드 | ✅ | backend `npm.cmd run build -w backend`, frontend `npm.cmd run build` 성공 |
+| 자동 테스트 | ✅ | backend vitest `64 passed` 유지 |
+| 런타임 통합 | ✅ | `LFMD` 샘플 호출 후 `source=fmp`, `market_cap_source=fmp`, `market_cap=186767226` 확인 |
 
 ## 2026-03-20
 
@@ -372,6 +412,63 @@
 | 빌드 | ✅ | 직전 검증 상태 유지: backend/frontend build 성공 |
 | 자동 테스트 | ✅ | 직전 검증 상태 유지: backend vitest pass |
 | 런타임 통합 | ✅ | 직전 검증 상태 유지: `GET /api/tickers`, `pull-market-cap`, `pull-float`, `pull-institutional` 실제 확인 후 문서 동기화 |
+
+### institutional update 자동 bootstrap 수정 (2026-03-24 19:31)
+
+**작성 시각:** 2026-03-24 19:31 (local)
+
+**Status: awaiting user confirmation**
+
+#### 작업 요약
+
+1. 사용자 보고 기준으로 `Institutional` update가 반영되지 않는 케이스를 재현했다.
+2. 원인을 `pull-institutional` route의 선행조건 처리 부족으로 확인했다.
+   - institutional % 계산에는 `outstanding_shares`가 필요하다.
+   - 기존 구현은 DB에 그 값이 없으면 `institutionalPct = null`이 될 수 있었다.
+3. `terminal/backend/src/server.ts`를 수정해 institutional job 시작 시 누락 ticker의 `outstanding_shares`를 FMP `shares-float`로 자동 bootstrap 하게 만들었다.
+4. 같은 수정에서 `institutionalPct`가 실제 계산되지 않은 ticker는 `updated` 카운트에 포함하지 않도록 보정했다.
+
+#### 변경 파일
+
+1. `terminal/backend/src/server.ts`
+2. `ai_agent_plan/terminal_ui_ver6_fmp/plan.md`
+3. `ai_agent_plan/terminal_ui_ver6_fmp/agent_log.md`
+
+#### 런타임 검증 상세
+
+1. backend build 재실행
+   - `npm run build` 성공
+2. 샘플 ticker `SNAP`, `OPEN`으로 `POST /api/company-profiles/pull-institutional` 실행
+   - job 완료
+   - `SNAP: institutional 61.51%`
+   - `OPEN: institutional 72.17%`
+3. `GET /api/tickers` 재조회로 아래 필드를 확인
+   - `SNAP`
+     - `floatPct = 65.15%`
+     - `institutionalPct = 61.51%`
+     - `floatSource = fmp`
+     - `institutionalSource = finnhub`
+   - `OPEN`
+     - `floatPct = 86.21%`
+     - `institutionalPct = 72.17%`
+     - `floatSource = fmp`
+     - `institutionalSource = finnhub`
+
+#### 리스크 / 완화
+
+1. **리스크:** institutional job이 이제 일부 ticker에서 FMP float 호출까지 수행하므로 실행 시간이 조금 늘 수 있다.
+   - 완화 1: outstanding shares가 이미 있는 ticker는 bootstrap을 건너뛴다.
+2. **리스크:** FMP bootstrap까지 실패하면 institutional 값은 여전히 비어 있을 수 있다.
+   - 완화 1: 해당 ticker는 job log에 원인을 남기고 `updated` 카운트에서 제외한다.
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `server.ts` `get_errors` 0개 |
+| 빌드 | ✅ | backend `npm run build` 성공 |
+| 자동 테스트 | ✅ | 직전 backend vitest pass 상태 유지 |
+| 런타임 통합 | ✅ | `pull-institutional` 샘플 실행 + `GET /api/tickers`에서 `SNAP`, `OPEN` 값 반영 확인 |
 
 1. `POST /api/news/pull-fmp-press-release`
    - 응답: `jobId` 정상 반환

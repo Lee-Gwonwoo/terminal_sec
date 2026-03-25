@@ -86,7 +86,6 @@ import {
   searchResearch,
   purgeExpiredResearchTrash,
 } from "./services/researchRepository.js";
-import { fetchFinnhubProfilesBatch } from "./services/finnhubProfile2Provider.js";
 import { fetchRtprArticles, fetchRtprArticlesByTicker } from "./services/ptprNewsProvider.js";
 import { fetchFmpPressReleasesByTicker } from "./services/fmpPressReleaseProvider.js";
 import { fetchFmpSecFilings } from "./services/fmpSecFilingProvider.js";
@@ -2768,6 +2767,7 @@ app.get("/api/universes/:id/items", async (req, res) => {
 // ── Step 5-3: company profile API ──
 
 import { fetchFmpProfile, fetchFmpProfilesBatch, clampFmpConcurrency, clampFmpIntervalMs } from "./services/fmpCompanyProfileProvider.js";
+import { fetchFinnhubProfilesBatch } from "./services/finnhubProfile2Provider.js";
 import { fetchYahooProfilesBatch, clampYahooConcurrency, clampYahooIntervalMs } from "./services/yahooCompanyProfileProvider.js";
 import { upsertCompanyProfile, getCompanyProfileByTicker, countCompanyProfiles, upsertPeers, getPeersByTicker, getTickersWithFmpProfile, getTickersWithYahooProfile, getTickersWithExistingPeers, getTickersWithExistingIpoDate } from "./services/companyProfileRepository.js";
 import { fetchFinnhubPeersBatch } from "./services/finnhubPeersProvider.js";
@@ -3175,7 +3175,7 @@ app.post("/api/company-profiles/pull-market-cap", async (req, res) => {
     }
     const max = body.maxTickers ?? tickers.length;
     const target = tickers.slice(0, max);
-    const tickerConcurrency = clampFinnhubCompanyDataConcurrency(body.tickerConcurrency);
+    const tickerConcurrency = clampFmpConcurrency(body.tickerConcurrency);
 
     // Skip tickers that already have recent market_cap (within 24h)
     const { getTickersWithRecentMarketCap } = await import("./services/companyProfileRepository.js");
@@ -3184,12 +3184,12 @@ app.post("/api/company-profiles/pull-market-cap", async (req, res) => {
     const skippedCount = target.length - filtered.length;
 
     const jobId = createJob(filtered.length);
-  appendLog(jobId, `Starting Finnhub market cap update: ${filtered.length} tickers to fetch (${skippedCount} skipped — already have recent data, concurrency=${tickerConcurrency})`);
+  appendLog(jobId, `Starting FMP market cap update: ${filtered.length} tickers to fetch (${skippedCount} skipped — already have recent data, concurrency=${tickerConcurrency})`);
     res.json({ jobId });
 
     void (async () => {
       try {
-        const { results, errors, cancelled } = await fetchFinnhubProfilesBatch(
+        const { results, errors, cancelled } = await fetchFmpProfilesBatch(
           filtered,
           {
             concurrency: tickerConcurrency,
@@ -3205,9 +3205,6 @@ app.post("/api/company-profiles/pull-market-cap", async (req, res) => {
 
         let updated = 0;
         for (const [ticker, profile] of results) {
-          // Look up existing security by ticker only (ignore exchange) to avoid
-          // creating duplicates when Finnhub returns a real exchange name but
-          // the CSV-imported row has exchange=null.
           const existingSec = await getDb().get<{ id: number }>(
             "SELECT id FROM securities WHERE ticker = ? ORDER BY id ASC LIMIT 1",
             [ticker.toUpperCase()],
@@ -3215,12 +3212,12 @@ app.post("/api/company-profiles/pull-market-cap", async (req, res) => {
           let secId: number;
           if (existingSec) {
             secId = existingSec.id;
-            // Update metadata from Finnhub on the existing row
             const sets: string[] = [];
             const params: unknown[] = [];
-            if (profile.exchange) { sets.push("exchange = ?"); params.push(profile.exchange); }
-            if (profile.name) { sets.push("name = ?"); params.push(profile.name); }
-            if (profile.finnhubIndustry) { sets.push("industry = ?"); params.push(profile.finnhubIndustry); }
+            if (profile.exchangeShortName) { sets.push("exchange = ?"); params.push(profile.exchangeShortName); }
+            if (profile.companyName) { sets.push("name = ?"); params.push(profile.companyName); }
+            if (profile.sector) { sets.push("sector = ?"); params.push(profile.sector); }
+            if (profile.industry) { sets.push("industry = ?"); params.push(profile.industry); }
             if (sets.length > 0) {
               params.push(secId);
               await getDb().run(`UPDATE securities SET ${sets.join(", ")} WHERE id = ?`, params);
@@ -3228,25 +3225,25 @@ app.post("/api/company-profiles/pull-market-cap", async (req, res) => {
           } else {
             secId = await upsertSecurity(
               ticker,
-              profile.exchange,
-              profile.name,
-              null,
-              profile.finnhubIndustry,
+              profile.exchangeShortName,
+              profile.companyName,
+              profile.sector,
+              profile.industry,
             );
           }
           await upsertCompanyProfile(
             secId,
-            "finnhub",
+            "fmp",
             null,
             null,
             null,
             null,
             profile.ipoDate,
-            profile.marketCapitalization,
+            profile.mktCap,
             JSON.stringify(profile.raw),
           );
           updated++;
-          appendLog(jobId, `${ticker}: market cap ${profile.marketCapitalization != null ? "updated" : "missing"}`);
+          appendLog(jobId, `${ticker}: market cap ${profile.mktCap != null ? "updated" : "missing"}`);
         }
 
         for (const [ticker, message] of errors) {
@@ -3259,7 +3256,7 @@ app.post("/api/company-profiles/pull-market-cap", async (req, res) => {
           skippedRecent: skippedCount,
           updated,
           errors: errors.size,
-          source: "finnhub-profile2",
+          source: "fmp-profile",
         });
 
         completeJob(jobId, {
@@ -3370,6 +3367,33 @@ app.post("/api/company-profiles/pull-institutional", async (req, res) => {
           if (row?.outstanding_shares) outstandingMap.set(ticker.toUpperCase(), row.outstanding_shares);
         }
 
+        const missingOutstanding = filtered.filter((ticker) => !outstandingMap.has(ticker.toUpperCase()));
+        if (missingOutstanding.length > 0) {
+          appendLog(jobId, `Bootstrapping outstanding shares from FMP for ${missingOutstanding.length} tickers before institutional calc`);
+          const { fetchFmpSharesFloatBatch } = await import("./services/fmpSharesFloatProvider.js");
+          const { upsertFloat } = await import("./services/companyProfileRepository.js");
+          const floatBootstrap = await fetchFmpSharesFloatBatch(missingOutstanding, {
+            shouldCancel: () => isJobCancelled(jobId),
+          });
+
+          for (const [ticker, data] of floatBootstrap.results) {
+            if (data.outstandingShares != null && data.outstandingShares > 0) {
+              outstandingMap.set(ticker.toUpperCase(), data.outstandingShares);
+            }
+            const existingSec = await getDb().get<{ id: number }>(
+              "SELECT id FROM securities WHERE ticker = ? ORDER BY id ASC LIMIT 1",
+              [ticker.toUpperCase()],
+            );
+            if (existingSec) {
+              await upsertFloat(existingSec.id, "fmp", data.floatShares, data.freeFloat, data.outstandingShares, "fmp");
+            }
+          }
+
+          for (const [ticker, message] of floatBootstrap.errors) {
+            appendLog(jobId, `${ticker}: outstanding bootstrap error - ${message}`);
+          }
+        }
+
         const { fetchFinnhubOwnershipBatch } = await import("./services/finnhubOwnershipProvider.js");
         const { results, errors, cancelled } = await fetchFinnhubOwnershipBatch(filtered, outstandingMap, {
           concurrency: tickerConcurrency,
@@ -3386,10 +3410,14 @@ app.post("/api/company-profiles/pull-institutional", async (req, res) => {
             [ticker.toUpperCase()],
           );
           if (!existingSec) continue;
+          if (data.institutionalPct == null) {
+            appendLog(jobId, `${ticker}: institutional N/A (missing outstanding shares denominator)`);
+            continue;
+          }
           const { upsertInstitutional } = await import("./services/companyProfileRepository.js");
           await upsertInstitutional(existingSec.id, "finnhub", data.institutionalPct, "finnhub");
           updated++;
-          appendLog(jobId, `${ticker}: institutional ${data.institutionalPct != null ? data.institutionalPct.toFixed(2) + "%" : "N/A"} (${data.holderCount} holders)`);
+          appendLog(jobId, `${ticker}: institutional ${data.institutionalPct.toFixed(2)}% (${data.holderCount} holders)`);
         }
 
         for (const [ticker, message] of errors) {

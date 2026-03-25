@@ -640,7 +640,7 @@ company data job contract:
 - Reload
 - custom CSV를 default universe에 merge import (`Merge into Default`)
 - default universe 기준 수급/시총 갱신 버튼 3개
-  - `Mkt Cap`: Finnhub 시가총액 갱신
+  - `Mkt Cap`: FMP 시가총액 갱신
   - `Float`: FMP float % 갱신
   - `Inst`: Finnhub institutional % 갱신
   - 세 버튼 모두 진행 상황 표시(completed/total, percent) + job polling을 사용한다.
@@ -651,7 +651,7 @@ company data job contract:
 - filter 입력
 - table 표시: `Ticker | Name | Exchange | Industry | IPO Date | Market Cap | Float % | Inst % | Del`
 - `Market Cap`, `Float %`, `Inst %` 셀에는 값 옆에 source badge가 붙는다.
-  - 현재 구현 기준 `Market Cap = Finnhub`, `Float % = Fmp`, `Inst % = Finnhub`
+  - 현재 구현 기준 `Market Cap = FMP`, `Float % = Fmp`, `Inst % = Finnhub`
 - ticker 클릭 시 상위 `onTickerClick` 전달
 - 삭제 버튼으로 default universe에서 ticker 제거
 

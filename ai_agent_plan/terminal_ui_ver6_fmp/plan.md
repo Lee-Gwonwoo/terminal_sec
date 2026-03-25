@@ -43,6 +43,26 @@
   - `DefaultTickerWindow`의 새 버튼(`Mkt Cap`, `Float`, `Inst`)과 source badge 설명 반영
   - 24시간 skip + 같은 `security_id + source` row update 규칙을 문서화
 
+### PLAN CHANGE — 2026-03-24 19:31 (institutional update 선행조건 자동 보정)
+- 사용자 보고 기준으로 `Institutional` update가 값이 안 들어오는 케이스를 재검토했다.
+- 원인은 `institutional_pct` 계산이 `outstanding_shares`를 분모로 필요로 하는데, 기존 route가 그 값을 DB에 없으면 자동 보정하지 않는 구조였다는 점이다.
+- 수정 방향은 아래처럼 확정한다.
+  - `pull-institutional` 실행 전에 `outstanding_shares`가 없는 ticker를 찾는다.
+  - 누락 ticker에 대해 FMP `shares-float`를 먼저 호출해 `outstanding_shares`, `float_pct`를 bootstrap 한다.
+  - 그 다음 Finnhub ownership 계산을 수행한다.
+  - `institutional_pct`가 실제로 계산되지 않은 ticker는 `updated` 카운트에 넣지 않고, job log에 원인을 남긴다.
+
+### PLAN CHANGE — 2026-03-24 20:06 (market cap source를 FMP로 전환)
+- 사용자 요청에 따라 `DefaultTickerWindow`의 `Market Cap` source를 `Finnhub`에서 `FMP`로 전환한다.
+- 이번 리비전의 source 정책은 아래처럼 다시 고정한다.
+  - `Market Cap`: `FMP`
+  - `Float %`: `FMP`
+  - `Institutional %`: `Finnhub`
+- 구현 범위는 아래와 같다.
+  - backend `POST /api/company-profiles/pull-market-cap`가 `fetchFmpProfilesBatch(...)`를 사용하도록 전환
+  - `company_profiles.market_cap_source`와 job success metadata의 source 값을 `fmp` 계열로 기록
+  - `DefaultTickerWindow` 버튼 tooltip 및 prompt 문서를 현재 source 정책과 동기화
+
 
 ### PLAN CHANGE — 2026-03-20 20:26
 - 사용자 결정에 따라 legacy `Finnhub SEC filing`은 유지하지 않고 제거한다.

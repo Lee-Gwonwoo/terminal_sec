@@ -1608,7 +1608,7 @@ query:
       "marketCap": 3560000000000,
       "floatPct": 99.77,
       "institutionalPct": 50.78,
-      "marketCapSource": "finnhub",
+      "marketCapSource": "fmp",
       "floatSource": "fmp",
       "institutionalSource": "finnhub"
     }
@@ -1621,7 +1621,7 @@ query:
 1. 기본 CSV path일 때는 `ticker_universes/default` + `ticker_universe_items` + `securities` + 최신 `company_profiles`를 조회해 canonical default universe를 반환한다.
 2. `rows`의 각 원소는 `[][][]ticker[][][]`, `[][][]exchange[][][]`, `[][][]name[][][]`, `[][][]sector[][][]`, `[][][]industry[][][]`, `[][][]ipoDate[][][]`, `[][][]marketCap[][][]`, `[][][]floatPct[][][]`, `[][][]institutionalPct[][][]`, `[][][]marketCapSource[][][]`, `[][][]floatSource[][][]`, `[][][]institutionalSource[][][]`를 포함한다.
 3. source 필드는 값의 출처를 나타낸다.
-  - `[][][]marketCapSource[][][]`: 현재 구현 기준 `finnhub`
+  - `[][][]marketCapSource[][][]`: 현재 구현 기준 `fmp`
   - `[][][]floatSource[][][]`: 현재 구현 기준 `fmp`
   - `[][][]institutionalSource[][][]`: 현재 구현 기준 `finnhub`
 4. 다른 CSV path일 때는 CSV를 직접 읽어 `rows`를 만든다. 이 경우 `marketCap`, `ipoDate`, `floatPct`, `institutionalPct`, 각 `*Source`는 CSV 자체에는 없으므로 보통 `null`이다.
