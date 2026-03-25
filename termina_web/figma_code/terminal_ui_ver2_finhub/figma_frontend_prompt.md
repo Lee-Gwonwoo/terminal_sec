@@ -728,6 +728,13 @@ API:
 - `Mkt Cap`, `Float`, `Inst` 버튼은 기본 default path일 때만 보인다. custom CSV view에서는 merge/import가 우선이다.
 - custom CSV view에서는 수급/시총 컬럼과 source badge가 대부분 `null`이라 `-`로 보일 수 있다.
 
+성능 메모(2026-03-25 반영):
+
+- 기능 변화 없이 렉을 줄이기 위해 row 렌더링은 가상 리스트(`react-window`)를 사용한다.
+- filter input 값은 즉시 저장되지만, 실제 row filtering은 `useDeferredValue` 기준으로 한 박자 늦춰 heavy re-render를 줄인다.
+- 헤더는 고정하고, body row만 virtualization 대상으로 유지한다.
+- 데이터/API/job polling semantics는 그대로고, 화면에 동시에 그리는 row 수만 줄인다.
+
 ## News Window
 
 파일: `src/app/components/NewsWindow.tsx`

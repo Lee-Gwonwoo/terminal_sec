@@ -75,6 +75,14 @@
   - `terminal-workspace-v1`는 초기 복원이 끝난 뒤에만 다시 저장된다.
   - 이후 새로고침/재접속 시 기존 탭 구성이 초기 기본 탭으로 덮어써질 가능성을 차단한다.
 
+### PLAN CHANGE — 2026-03-25 11:24
+- 변경 내용: `Default Ticker Window` 렉 완화를 위해 기능 변경 없이 가상 리스트 + deferred filter 기반 렌더링 최적화를 추가한다.
+- 변경 이유: 사용자가 `Default Ticker Window`가 자주 버벅인다고 보고했고, 전체 row를 매번 다시 필터링/렌더링하는 구조가 주요 병목으로 확인됐다.
+- 영향:
+  - ticker 데이터/API/job polling 동작은 유지된다.
+  - body row DOM 개수만 줄어 drag, filter, reload 시 프론트 렌더링 부담이 감소한다.
+  - 화면상 filter 결과와 컬럼 구성은 유지하되, 필터 적용 반응은 `useDeferredValue` 기준으로 처리된다.
+
 ### 아키텍처(상위)
 - 입력:
   - 사용자가 Full Text 메뉴에서 `FMP PR Only` 실행

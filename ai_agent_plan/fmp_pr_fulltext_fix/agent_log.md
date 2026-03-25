@@ -290,3 +290,30 @@
 | 런타임 통합 | ✅ | 코드 경로 검토로 restore 완료 전 persist 차단 확인, 브라우저 시각 확인은 사용자 위임 |
 
 - 상태: 회귀 수정 완료, 사용자 확인 대기 (awaiting user confirmation)
+
+**작성 시각:** 2026-03-25 11:24 (local)
+
+### Default Ticker Window 렌더링 최적화
+- 사용자 요청:
+  - 기능은 바꾸지 말고 `Default Ticker Window` 렉만 줄일 것
+- 변경 파일:
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DefaultTickerWindow.tsx`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+  - `ai_agent_plan/fmp_pr_fulltext_fix/plan.md`
+- 구현 내용:
+  - table body 전체 렌더링을 `react-window` 기반 가상 리스트로 전환
+  - filter 계산은 `useDeferredValue(filterText)` 기준으로 수행해 입력 중 전체 리스트 재계산 압박 완화
+  - 컨테이너 크기를 `ResizeObserver`로 측정해 창 높이에 맞는 visible row 수만 렌더링
+  - API 호출, add/remove, source badge, job polling, 컬럼 구성은 그대로 유지
+- 의도:
+  - row 수가 많을 때 filter 입력, drag, reload에서 발생하던 대규모 DOM re-render를 줄인다.
+  - 사용자 체감 기능은 유지하면서 프론트 렌더링 병목만 낮춘다.
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `DefaultTickerWindow.tsx` diagnostics 0 errors |
+| 빌드 | ✅ | web UI `npm.cmd run build` 성공 |
+| 자동 테스트 | ⚠️ | 별도 프론트 자동 테스트 없음, 기존 backend test pass 상태 유지 |
+| 런타임 통합 | ⏳ | 브라우저에서 filter/scroll 체감 확인 예정 |
+
+- 상태: 구현 완료, 검증 진행 중 (확인 대기)

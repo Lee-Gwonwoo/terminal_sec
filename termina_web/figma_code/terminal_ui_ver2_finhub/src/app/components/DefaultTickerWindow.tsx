@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, ChevronDown, ChevronUp, Plus, RefreshCw, Search, X } from "lucide-react";
+import { FixedSizeList as List, type ListChildComponentProps } from "react-window";
 
 const API_BASE = "";
 const DEFAULT_CSV_PATH = "tradigview_screener/original_data/watch lists2_2026-02-22.csv";
@@ -29,6 +30,18 @@ interface JobStatus {
   logs: string[];
   error?: string;
   result?: Record<string, unknown>;
+}
+
+const ROW_HEIGHT = 37;
+const HEADER_HEIGHT = 37;
+const MIN_LIST_HEIGHT = 200;
+const GRID_TEMPLATE_COLUMNS = "minmax(96px,0.9fr) minmax(180px,1.7fr) minmax(96px,0.8fr) minmax(128px,1.2fr) minmax(96px,0.8fr) minmax(128px,1fr) minmax(96px,0.8fr) minmax(96px,0.8fr) 48px";
+
+interface TickerListRowData {
+  rows: TickerRow[];
+  removing: string | null;
+  onTickerClick?: (ticker: string) => void;
+  onRemove: (ticker: string) => void;
 }
 
 function fallbackRowsFromTickers(tickers: string[] | undefined): TickerRow[] {
@@ -97,6 +110,55 @@ function SourceBadge({ source }: { source: string | null }) {
   );
 }
 
+const TickerListRow = memo(function TickerListRow({ data, index, style }: ListChildComponentProps<TickerListRowData>) {
+  const row = data.rows[index];
+  return (
+    <div
+      style={style}
+      className="border-b border-gray-100 dark:border-gray-800 hover:bg-blue-50/60 dark:hover:bg-blue-900/20 transition-colors"
+    >
+      <div className="grid h-full items-center" style={{ gridTemplateColumns: GRID_TEMPLATE_COLUMNS }}>
+        <div className="px-3 py-2 min-w-0">
+          <button
+            onClick={() => data.onTickerClick?.(row.ticker)}
+            className={`font-mono text-left text-blue-600 dark:text-blue-400 hover:underline ${data.removing === row.ticker ? "opacity-40" : ""}`}
+            title={row.ticker}
+            disabled={data.removing === row.ticker}
+          >
+            {row.ticker}
+          </button>
+        </div>
+        <div className="px-3 py-2 truncate text-gray-700 dark:text-gray-200" title={row.name ?? undefined}>{row.name ?? "-"}</div>
+        <div className="px-3 py-2 truncate text-gray-500 dark:text-gray-400" title={row.exchange ?? undefined}>{row.exchange ?? "-"}</div>
+        <div className="px-3 py-2 truncate text-gray-500 dark:text-gray-400" title={row.industry ?? undefined}>{row.industry ?? "-"}</div>
+        <div className="px-3 py-2 truncate text-gray-500 dark:text-gray-400" title={row.ipoDate ?? undefined}>{row.ipoDate ?? "-"}</div>
+        <div className="px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-200 whitespace-nowrap overflow-hidden">
+          {formatMarketCap(row.marketCap)}<SourceBadge source={row.marketCapSource} />
+        </div>
+        <div className="px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-200 whitespace-nowrap overflow-hidden">
+          {formatPct(row.floatPct)}<SourceBadge source={row.floatSource} />
+        </div>
+        <div className="px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-200 whitespace-nowrap overflow-hidden">
+          {formatPct(row.institutionalPct)}<SourceBadge source={row.institutionalSource} />
+        </div>
+        <div className="px-3 py-2 text-center">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              data.onRemove(row.ticker);
+            }}
+            disabled={data.removing !== null}
+            className="inline-flex w-5 h-5 items-center justify-center rounded hover:bg-red-100 dark:hover:bg-red-900/40 hover:text-red-500 text-gray-400"
+            title={`Remove ${row.ticker} from default universe`}
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+});
+
 export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps) {
   const [csvPath, setCsvPath] = useState(DEFAULT_CSV_PATH);
   const [rows, setRows] = useState<TickerRow[]>([]);
@@ -121,8 +183,11 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
   const [showInstLog, setShowInstLog] = useState(false);
   const [filterText, setFilterText] = useState("");
   const [dataSource, setDataSource] = useState<"db" | "csv" | null>(null);
+  const [listHeight, setListHeight] = useState(MIN_LIST_HEIGHT);
+  const listContainerRef = useRef<HTMLDivElement>(null);
   const trimmedCsvPath = csvPath.trim();
   const isDefaultPath = trimmedCsvPath === DEFAULT_CSV_PATH;
+  const deferredFilterText = useDeferredValue(filterText);
 
   const loadTickers = useCallback(async () => {
     setLoading(true);
@@ -177,7 +242,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
     }
   };
 
-  const handleRemove = async (ticker: string) => {
+  const handleRemove = useCallback(async (ticker: string) => {
     setRemoving(ticker);
     setError(null);
     setNotice(null);
@@ -199,7 +264,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
     } finally {
       setRemoving(null);
     }
-  };
+  }, [isDefaultPath, trimmedCsvPath]);
 
   const handleImportToDefault = async () => {
     if (!trimmedCsvPath || isDefaultPath) return;
@@ -430,8 +495,26 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
     };
   }, [handleLostJob, instJobId, loadTickers]);
 
+  useEffect(() => {
+    const container = listContainerRef.current;
+    if (!container) return;
+
+    const updateHeight = () => {
+      setListHeight(Math.max(container.clientHeight - HEADER_HEIGHT, MIN_LIST_HEIGHT));
+    };
+
+    updateHeight();
+
+    const observer = new ResizeObserver(() => {
+      updateHeight();
+    });
+    observer.observe(container);
+
+    return () => observer.disconnect();
+  }, []);
+
   const filteredRows = useMemo(() => {
-    const needle = filterText.trim().toUpperCase();
+    const needle = deferredFilterText.trim().toUpperCase();
     if (!needle) return rows;
     return rows.filter((row) =>
       row.ticker.includes(needle)
@@ -440,7 +523,16 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
       || (row.ipoDate ?? "").toUpperCase().includes(needle)
       || (row.exchange ?? "").toUpperCase().includes(needle),
     );
-  }, [rows, filterText]);
+  }, [rows, deferredFilterText]);
+
+  const listData = useMemo<TickerListRowData>(() => ({
+    rows: filteredRows,
+    removing,
+    onTickerClick,
+    onRemove: (ticker: string) => {
+      void handleRemove(ticker);
+    },
+  }), [filteredRows, removing, onTickerClick, handleRemove]);
 
   return (
     <div className="h-full flex flex-col p-3 text-sm">
@@ -633,7 +725,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
         </span>
       </div>
 
-      <div className="flex-1 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded">
+      <div ref={listContainerRef} className="flex-1 overflow-hidden border border-gray-200 dark:border-gray-700 rounded">
         {loading && rows.length === 0 ? (
           <div className="flex items-center justify-center h-full text-gray-400 text-xs">
             Loading...
@@ -643,60 +735,32 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
             {rows.length === 0 ? "No tickers loaded" : "No matches"}
           </div>
         ) : (
-          <table className="w-full text-xs table-fixed border-collapse">
-            <thead className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-              <tr>
-                <th className="text-left font-semibold px-3 py-2 w-24">Ticker</th>
-                <th className="text-left font-semibold px-3 py-2">Name</th>
-                <th className="text-left font-semibold px-3 py-2 w-24">Exchange</th>
-                <th className="text-left font-semibold px-3 py-2 w-32">Industry</th>
-                <th className="text-left font-semibold px-3 py-2 w-24">IPO Date</th>
-                <th className="text-right font-semibold px-3 py-2 w-32">Market Cap</th>
-                <th className="text-right font-semibold px-3 py-2 w-24">Float %</th>
-                <th className="text-right font-semibold px-3 py-2 w-24">Inst %</th>
-                <th className="text-center font-semibold px-3 py-2 w-12">Del</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredRows.map((row) => (
-                <tr key={row.ticker} className="border-b border-gray-100 dark:border-gray-800 hover:bg-blue-50/60 dark:hover:bg-blue-900/20 transition-colors">
-                  <td className="px-3 py-2">
-                    <button
-                      onClick={() => onTickerClick?.(row.ticker)}
-                      className={`font-mono text-left text-blue-600 dark:text-blue-400 hover:underline ${removing === row.ticker ? "opacity-40" : ""}`}
-                      title={row.ticker}
-                      disabled={removing === row.ticker}
-                    >
-                      {row.ticker}
-                    </button>
-                  </td>
-                  <td className="px-3 py-2 truncate text-gray-700 dark:text-gray-200" title={row.name ?? undefined}>{row.name ?? "-"}</td>
-                  <td className="px-3 py-2 truncate text-gray-500 dark:text-gray-400" title={row.exchange ?? undefined}>{row.exchange ?? "-"}</td>
-                  <td className="px-3 py-2 truncate text-gray-500 dark:text-gray-400" title={row.industry ?? undefined}>{row.industry ?? "-"}</td>
-                  <td className="px-3 py-2 truncate text-gray-500 dark:text-gray-400" title={row.ipoDate ?? undefined}>{row.ipoDate ?? "-"}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-200">
-                    {formatMarketCap(row.marketCap)}<SourceBadge source={row.marketCapSource} />
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-200">
-                    {formatPct(row.floatPct)}<SourceBadge source={row.floatSource} />
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-200">
-                    {formatPct(row.institutionalPct)}<SourceBadge source={row.institutionalSource} />
-                  </td>
-                  <td className="px-3 py-2 text-center">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleRemove(row.ticker); }}
-                      disabled={removing !== null}
-                      className="inline-flex w-5 h-5 items-center justify-center rounded hover:bg-red-100 dark:hover:bg-red-900/40 hover:text-red-500 text-gray-400"
-                      title={`Remove ${row.ticker} from default universe`}
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="h-full flex flex-col text-xs">
+            <div
+              className="grid sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700"
+              style={{ gridTemplateColumns: GRID_TEMPLATE_COLUMNS, height: HEADER_HEIGHT }}
+            >
+              <div className="text-left font-semibold px-3 py-2">Ticker</div>
+              <div className="text-left font-semibold px-3 py-2">Name</div>
+              <div className="text-left font-semibold px-3 py-2">Exchange</div>
+              <div className="text-left font-semibold px-3 py-2">Industry</div>
+              <div className="text-left font-semibold px-3 py-2">IPO Date</div>
+              <div className="text-right font-semibold px-3 py-2">Market Cap</div>
+              <div className="text-right font-semibold px-3 py-2">Float %</div>
+              <div className="text-right font-semibold px-3 py-2">Inst %</div>
+              <div className="text-center font-semibold px-3 py-2">Del</div>
+            </div>
+            <List
+              height={listHeight}
+              width="100%"
+              itemCount={filteredRows.length}
+              itemSize={ROW_HEIGHT}
+              itemData={listData}
+              overscanCount={12}
+            >
+              {TickerListRow}
+            </List>
+          </div>
         )}
       </div>
     </div>
