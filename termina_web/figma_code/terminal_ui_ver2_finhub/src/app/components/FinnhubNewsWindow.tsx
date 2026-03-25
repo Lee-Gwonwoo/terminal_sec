@@ -115,6 +115,28 @@ function getFinnhubRequestIntervalMs(): number {
   }
 }
 
+const DEFAULT_FT_CONCURRENCY = 10;
+const DEFAULT_FMP_PR_FULLTEXT_CONCURRENCY = 10;
+
+function getFulltextConcurrency(): number {
+  try {
+    const value = parseInt(localStorage.getItem('ft-concurrency') ?? '', 10);
+    return Number.isFinite(value) && value >= 1 && value <= 200 ? value : DEFAULT_FT_CONCURRENCY;
+  } catch {
+    return DEFAULT_FT_CONCURRENCY;
+  }
+}
+
+function getFmpPrFulltextConcurrency(): number {
+  try {
+    const raw = localStorage.getItem('fmp-pr-fulltext-concurrency') ?? localStorage.getItem('ft-concurrency') ?? '';
+    const value = parseInt(raw, 10);
+    return Number.isFinite(value) && value >= 1 && value <= 50 ? value : DEFAULT_FMP_PR_FULLTEXT_CONCURRENCY;
+  } catch {
+    return DEFAULT_FMP_PR_FULLTEXT_CONCURRENCY;
+  }
+}
+
 const DEFAULT_FMP_TICKER_CONCURRENCY = 10;
 const DEFAULT_FMP_REQUEST_INTERVAL_MS = 25;
 const DEFAULT_FMP_PR_PAGE_LIMIT = 100;
@@ -1168,12 +1190,9 @@ export function FinnhubNewsWindow({
     setError(null);
     setJobStatus(null);
     try {
-      // Read concurrency from Settings (localStorage)
-      let concurrency = 10;
-      try {
-        const v = parseInt(localStorage.getItem('ft-concurrency') ?? '', 10);
-        if (v >= 1 && v <= 200) concurrency = v;
-      } catch { /* ignore */ }
+      const concurrency = sourceType === 'fmp_press_release'
+        ? getFmpPrFulltextConcurrency()
+        : getFulltextConcurrency();
       const endpoint = sourceType === 'rtpr'
         ? `${API_BASE}/api/news/fulltext/backfill-rtpr`
         : `${API_BASE}/api/news/fulltext/update`;

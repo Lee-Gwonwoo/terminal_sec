@@ -189,6 +189,7 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 주의:
 
 - `getUnextractedNewsIds()`는 `news_fulltext` row가 없는 뉴스만 대상으로 삼는다. 한 번 `failed` 또는 `skipped` row가 생기면 자동 재시도 대상에서 빠질 수 있다.
+- 프론트는 일반 full text와 FMP PR fulltext에 서로 다른 UI 기본값을 둘 수 있지만, 백엔드 `POST /api/news/fulltext/update`는 최종적으로 요청 body의 `[][][]concurrency[][][]` 숫자 하나만 받아 동일 worker pool 경로로 처리한다.
 
 #### `news_sentiment_snapshots`
 

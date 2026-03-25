@@ -97,6 +97,20 @@ export function DataControlWindow({
     try { localStorage.setItem('ft-concurrency', String(v)); } catch { /* SSR */ }
   };
 
+  // ─── FMP PR Full Text Concurrency ───
+  const [fmpPrFtConcurrency, setFmpPrFtConcurrency] = useState(() => {
+    try {
+      const raw = localStorage.getItem('fmp-pr-fulltext-concurrency') ?? localStorage.getItem('ft-concurrency') ?? '';
+      const v = parseInt(raw, 10);
+      return v >= 1 && v <= 50 ? v : 10;
+    } catch { return 10; }
+  });
+  const saveFmpPrFtConcurrency = (n: number) => {
+    const v = Math.max(1, Math.min(50, n));
+    setFmpPrFtConcurrency(v);
+    try { localStorage.setItem('fmp-pr-fulltext-concurrency', String(v)); } catch { /* SSR */ }
+  };
+
   // ─── Change Update FMP Concurrency ───
   const [changeFmpConcurrency, setChangeFmpConcurrency] = useState(() => {
     try {
@@ -786,6 +800,41 @@ export function DataControlWindow({
               />
               <span className="text-[11px] text-gray-500 w-8 text-right">200</span>
               <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300 w-10 text-right">{ftConcurrency}</span>
+            </div>
+          </div>
+          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">
+            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">FMP PR Full Text Concurrency</h3>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3">
+              FMP PR Only와 Reset FMP PR Fallback 뒤 재실행에만 적용되는 전용 동시성입니다. Business Wire 브라우저 fallback이 섞이므로 일반 Full Text보다 보수적으로 조정합니다.
+            </p>
+            <div className="flex gap-2 mb-3 flex-wrap">
+              {[3, 5, 10, 15, 20].map(preset => (
+                <button
+                  key={`fmp-pr-ft-c-${preset}`}
+                  onClick={() => saveFmpPrFtConcurrency(preset)}
+                  className={`px-3 py-1 rounded border text-xs font-medium transition-colors ${
+                    fmpPrFtConcurrency === preset
+                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+                      : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200'
+                  }`}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-[11px] text-gray-500 w-6">1</span>
+              <input
+                type="range"
+                min={1}
+                max={50}
+                step={1}
+                value={fmpPrFtConcurrency}
+                onChange={e => saveFmpPrFtConcurrency(parseInt(e.target.value, 10))}
+                className="flex-1 accent-blue-500"
+              />
+              <span className="text-[11px] text-gray-500 w-8 text-right">50</span>
+              <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300 w-10 text-right">{fmpPrFtConcurrency}</span>
             </div>
           </div>
           <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">

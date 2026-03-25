@@ -180,3 +180,60 @@
 | 런타임 통합 | ✅ | real `reset-fmp-pr-fallback` + real `fulltext/update(fmp_press_release)` 실행, stale row 0 확인 |
 
 - 상태: refill job 진행 중, 사용자 확인 대기 (awaiting user confirmation)
+
+**작성 시각:** 2026-03-25 08:59 (local)
+
+### PLAN CHANGE — FMP PR fulltext 성능 벤치마크 및 기본값 튜닝 phase 시작
+- 사용자 요청:
+  - FMP PR fulltext 기능에서 concurrency 값별 속도를 실제로 테스트
+  - 가장 효율적인 설정값을 기본값으로 반영
+  - Control Window에서 계속 조정 가능하도록 유지
+  - 단, plan을 먼저 작성
+- 현재 확인한 사실:
+  - backend 기본 fulltext concurrency fallback은 `10`
+  - `/api/news/fulltext/update`는 `concurrency`를 받아 `1..200`으로 clamp
+  - Control Window는 이미 `ft-concurrency`를 localStorage에 저장하고 있음
+  - `FinnhubNewsWindow` 실행부도 같은 `ft-concurrency`를 읽어 fulltext update payload로 전달함
+- 이번 phase의 작업 방향:
+  1. concurrency 후보군과 측정 절차를 plan에 먼저 고정
+  2. 같은 조건에서 concurrency별 속도/성공률 비교 실험 수행
+  3. 최적 기본값을 backend/frontend fallback에 동시에 반영
+  4. Data Control 설명과 prompt 문서 동기화
+- 상태: 계획 갱신 완료, 벤치마크 구현/실행 전 (확인 대기)
+
+**작성 시각:** 2026-03-25 09:26 (local)
+
+### PLAN CHANGE — FMP PR fulltext 전용 Control Window 설정 우선 추가
+- 사용자 요청:
+  - 벤치마크 전에 먼저 Control Window에서 FMP PR fulltext 설정을 조정할 수 있게 할 것
+- 변경 파일:
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+  - `terminal/backend_prompt.md`
+  - `ai_agent_plan/fmp_pr_fulltext_fix/plan.md`
+- 구현 내용:
+  - `fmp-pr-fulltext-concurrency` localStorage 키 추가
+  - Settings 탭에 `FMP PR Full Text Concurrency` 전용 slider/preset 추가
+  - `FMP PR Only`와 `Reset FMP PR Fallback` 뒤 재실행이 전용 값을 우선 사용하도록 연결
+- 의도:
+  - 일반 full text 추출과 FMP PR fulltext 추출 설정을 분리해 이후 벤치마크와 기본값 튜닝을 명확히 수행
+- 상태: 구현 완료, 검증 전 (확인 대기)
+
+**작성 시각:** 2026-03-25 09:26 (local)
+
+### FMP PR fulltext 전용 Control Window 설정 검증
+- 추가 확인 내용:
+  - `DataControlWindow.tsx`에 `FMP PR Full Text Concurrency` 전용 섹션 렌더링 추가
+  - `FinnhubNewsWindow.tsx`에서 `FMP PR Only` 실행 시 `fmp-pr-fulltext-concurrency`를 우선 사용하도록 연결
+  - 값이 없으면 기존 `ft-concurrency`를 fallback으로 사용하도록 유지
+  - frontend/backend prompt 및 active plan 문서 동기화 완료
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `DataControlWindow.tsx`, `FinnhubNewsWindow.tsx` diagnostics 0 errors |
+| 빌드 | ✅ | frontend `npm.cmd run build` 성공 |
+| 자동 테스트 | ✅ | 기존 workspace `terminal: test` 최근 성공 상태 유지, 이번 변경은 프론트 설정 UI 중심 |
+| 런타임 통합 | ✅ | 코드 리뷰로 `fmp-pr-fulltext-concurrency` 저장/조회/실행 payload 연결 확인, 브라우저 시각 확인은 사용자 위임 |
+
+- 상태: 구현 및 기본 검증 완료, 사용자 확인 대기 (awaiting user confirmation)
