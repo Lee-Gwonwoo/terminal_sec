@@ -40,7 +40,16 @@ interface WatchListRecord {
   id: string;
   name: string;
   tickers: string[];
+  items: WatchListApiItem[];
   enable_alerts?: boolean;
+}
+
+interface WatchListApiItem {
+  ticker: string;
+  security_id?: number | null;
+  name?: string | null;
+  industry?: string | null;
+  marketCap?: number | null;
 }
 
 interface WatchlistWindowProps {
@@ -83,20 +92,38 @@ export function WatchlistWindow({ onTickerClick }: WatchlistWindowProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const activeWatchlistName = watchlists.find((list) => list.id === activeWatchlist)?.name ?? 'Watch Lists';
 
-  const hydrateWatchlistItems = useCallback((tickers: string[]) => {
-    return tickers.map((ticker) => {
+  const formatMarketCap = useCallback((marketCap?: number | null) => {
+    if (marketCap == null || !Number.isFinite(marketCap) || marketCap <= 0) {
+      return '-';
+    }
+    const absValue = Math.abs(marketCap);
+    if (absValue >= 1_000_000_000_000) {
+      return `$${(marketCap / 1_000_000_000_000).toFixed(1)}T`;
+    }
+    if (absValue >= 1_000_000_000) {
+      return `$${(marketCap / 1_000_000_000).toFixed(1)}B`;
+    }
+    if (absValue >= 1_000_000) {
+      return `$${(marketCap / 1_000_000).toFixed(1)}M`;
+    }
+    return `$${marketCap.toLocaleString()}`;
+  }, []);
+
+  const hydrateWatchlistItems = useCallback((items: WatchListApiItem[]) => {
+    return items.map((item) => {
+      const ticker = item.ticker.toUpperCase();
       const dbEntry = TICKER_DB[ticker];
       return {
         ticker,
-        name: dbEntry?.name || ticker,
+        name: item.name || dbEntry?.name || ticker,
         price: dbEntry?.price || 0,
         change: dbEntry?.change || 0,
         changePercent: dbEntry?.changePercent || 0,
-        marketCap: dbEntry?.marketCap || '-',
-        industry: dbEntry?.industry || '-',
+        marketCap: formatMarketCap(item.marketCap) !== '-' ? formatMarketCap(item.marketCap) : dbEntry?.marketCap || '-',
+        industry: item.industry || dbEntry?.industry || '-',
       } satisfies WatchlistItem;
     });
-  }, []);
+  }, [formatMarketCap]);
 
   const applyActiveWatchlist = useCallback((listId: string | null, nextWatchlists: WatchListRecord[]) => {
     if (!listId) {
@@ -111,7 +138,7 @@ export function WatchlistWindow({ onTickerClick }: WatchlistWindowProps) {
       return;
     }
     setActiveWatchlist(nextActive.id);
-    setWatchlist(hydrateWatchlistItems(nextActive.tickers));
+    setWatchlist(hydrateWatchlistItems(nextActive.items));
   }, [hydrateWatchlistItems]);
 
   const loadWatchlists = useCallback(async (preferredListId?: string | null) => {
@@ -128,6 +155,15 @@ export function WatchlistWindow({ onTickerClick }: WatchlistWindowProps) {
         id: String(row.id),
         name: String(row.name ?? 'Untitled'),
         tickers: Array.isArray(row.tickers) ? row.tickers.map((ticker: unknown) => String(ticker).toUpperCase()) : [],
+        items: Array.isArray(row.items)
+          ? row.items.map((item: any) => ({
+              ticker: String(item?.ticker ?? '').toUpperCase(),
+              security_id: typeof item?.security_id === 'number' ? item.security_id : null,
+              name: typeof item?.name === 'string' && item.name.trim() ? item.name : null,
+              industry: typeof item?.industry === 'string' && item.industry.trim() ? item.industry : null,
+              marketCap: typeof item?.marketCap === 'number' && Number.isFinite(item.marketCap) ? item.marketCap : null,
+            })).filter((item: WatchListApiItem) => item.ticker)
+          : (Array.isArray(row.tickers) ? row.tickers.map((ticker: unknown) => ({ ticker: String(ticker).toUpperCase() })) : []),
         enable_alerts: Boolean(row.enable_alerts ?? row.enableAlerts),
       })) : [];
       setWatchlists(rows);

@@ -1,6 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { getDb } from "../db.js";
+import { getIndustry } from "./industryLookup.js";
 import { upsertSecurity } from "./tickerUniverseRepository.js";
+
+type WatchlistItemWithMeta = {
+  ticker: string;
+  security_id: number | null;
+  name: string | null;
+  industry: string | null;
+  marketCap: number | null;
+};
 
 export async function listWatchlists(userId: string) {
   const db = getDb();
@@ -14,18 +23,46 @@ export async function listWatchlists(userId: string) {
 
   const result = [];
   for (const h of headers) {
-    const items = await db.all<{ ticker: string; security_id: number | null }[]>(
-      `SELECT ticker, security_id FROM watchlist_items WHERE watchlist_id = ?`,
+    const items = await db.all<{
+      ticker: string;
+      security_id: number | null;
+      security_name: string | null;
+      security_industry: string | null;
+      market_cap: number | null;
+    }[]>(
+      `SELECT wi.ticker,
+              wi.security_id,
+              s.name AS security_name,
+              s.industry AS security_industry,
+              (
+                SELECT cp.market_cap
+                FROM company_profiles cp
+                WHERE cp.security_id = wi.security_id AND cp.market_cap IS NOT NULL
+                ORDER BY cp.fetched_at DESC, cp.id DESC
+                LIMIT 1
+              ) AS market_cap
+         FROM watchlist_items wi
+         LEFT JOIN securities s ON s.id = wi.security_id
+         WHERE wi.watchlist_id = ?
+         ORDER BY wi.rowid ASC`,
       [h.id]
     );
+    const enrichedItems: WatchlistItemWithMeta[] = items.map((item) => ({
+      ticker: item.ticker,
+      security_id: item.security_id,
+      name: item.security_name ?? item.ticker,
+      industry: item.security_industry ?? getIndustry(item.ticker),
+      marketCap: item.market_cap ?? null,
+    }));
     result.push({
       id: h.id,
       user_id: h.user_id,
       name: h.name,
       enable_alerts: Boolean(h.enable_alerts),
       created_at: h.created_at,
-      tickers: items.map((i) => i.ticker).filter(Boolean),
-      security_ids: items.map((i) => i.security_id).filter((id): id is number => id != null),
+      tickers: enrichedItems.map((item) => item.ticker).filter(Boolean),
+      security_ids: enrichedItems.map((item) => item.security_id).filter((id): id is number => id != null),
+      items: enrichedItems,
     });
   }
 

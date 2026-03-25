@@ -1868,6 +1868,15 @@ job 완료 result 예시:
 - `POST /api/watchlists`
 - `PUT /api/watchlists/:id`
 - `DELETE /api/watchlists/:id`
+- `GET /api/watchlists`는 각 watchlist에 `[][][]items[][][]` 배열을 추가로 포함할 수 있다.
+  - `[][][]items[][][]` row 필드:
+    - `[][][]ticker[][][]`
+    - `[][][]security_id[][][]`
+    - `[][][]name[][][]`
+    - `[][][]industry[][][]`
+    - `[][][]marketCap[][][]`
+- `[][][]industry[][][]`는 `securities.industry`를 우선 사용하고, 비어 있으면 backend의 CSV 기반 `industryLookup` fallback으로 보강한다.
+- `[][][]marketCap[][][]`는 해당 `security_id`의 최신 `company_profiles.market_cap` 값을 사용한다.
 
 ### Alerts
 

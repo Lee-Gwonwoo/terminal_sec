@@ -741,6 +741,9 @@ API:
 - 상단 툴바의 copy 버튼으로 현재 선택된 watch list 이름을 clipboard에 복사할 수 있다.
 - Watch Lists dropdown의 각 row에도 copy 아이콘이 있어 해당 리스트 이름을 직접 복사할 수 있다.
 - 현재 source of truth는 backend `app.db`의 `watchlists`, `watchlist_items` 테이블이다.
+- watchlist table row의 `[][][]name[][][]`, `[][][]industry[][][]`, `[][][]marketCap[][][]`는 `GET /api/watchlists`의 `[][][]items[][][]` payload를 우선 사용한다.
+- `[][][]marketCap[][][]`는 backend가 내려주는 숫자 값을 프론트에서 `$1.2B`, `$850.0M` 같은 문자열로 포맷해 표시한다.
+- `[][][]industry[][][]`가 DB `securities.industry`에 없을 때는 backend의 CSV fallback 결과가 그대로 내려올 수 있다.
 
 ## Calendar Window
 

@@ -75,3 +75,41 @@
 - 따라서 “리스트 저장”과 “실시간 시세 데이터 source of truth”는 아직 분리된 상태다.
 - 런타임 검증에서는 임시 watchlist를 생성했다가 삭제하여 DB를 원상복구했다.
 - backend build 실패는 이번 watchlist 수정이 아니라 기존 `fetchFinnhubProfilesBatch` 관련 타입 오류 때문에 남아 있는 별도 이슈다.
+
+### Watchlist metadata DB 반영 수정 (2026-03-25 08:53)
+
+**Status: done (awaiting user confirmation)**
+
+#### 수정 내용
+
+1. `terminal/backend/src/services/watchlistRepository.ts`
+   - `GET /api/watchlists`용 `listWatchlists()`에 `items[]` enrichment 추가
+   - 각 item에 `ticker`, `security_id`, `name`, `industry`, `marketCap`를 포함하도록 변경
+   - `industry`는 `securities.industry` 우선, 없으면 `industryLookup` CSV fallback 사용
+
+2. `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/WatchlistWindow.tsx`
+   - watchlist row hydrate 소스를 `tickers[]` + `TICKER_DB` 중심에서 `items[]` + DB metadata 우선 방식으로 변경
+   - `marketCap` 숫자를 UI용 문자열(`$1.2B` 등)로 포맷해서 표시
+   - `name`, `industry`도 API 응답 값을 우선 사용
+
+3. `terminal/backend/tests/watchlistRepository.test.ts`
+   - watchlist list 응답이 item metadata를 포함하는지 regression test 추가
+
+4. 문서 동기화
+   - `ai_agent_plan/watchlist_copy_db/plan.md`
+   - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+   - `terminal/backend_prompt.md`
+
+#### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `watchlistRepository.ts`, `watchlistRepository.test.ts`, `WatchlistWindow.tsx` diagnostics 0 errors |
+| 빌드 | ✅ | backend `npm.cmd run build` exit code 0, frontend `npm.cmd run build` 성공 |
+| 자동 테스트 | ✅ | backend `npm.cmd run test` 통과: 13 files, 73 tests pass |
+| 런타임 통합 | ✅ | backend dev 서버에서 `GET /api/watchlists` 응답 확인: `market leader 1`의 `items[].name/industry/marketCap` populated. frontend dev 서버도 기동했고 브라우저는 열었지만 시각 확인은 사용자 위임 |
+
+#### 메모
+
+- 이번 수정의 핵심은 “watchlist CRUD 저장”이 아니라 “watchlist row 표시 데이터도 backend DB를 source of truth로 삼게 만든 것”이다.
+- 가격/등락(`price`, `change`, `changePercent`)은 아직 별도 실시간/시세 source가 없어서 기존 fallback 동작을 유지한다.

@@ -32,11 +32,36 @@ describe("watchlistRepository", () => {
     expect(created.name).toBe("Growth");
     expect(created.tickers).toEqual(["AAPL", "MSFT"]);
 
+    const db = getDb();
+    const aapl = await db.get<{ id: number }>("SELECT id FROM securities WHERE ticker = ?", ["AAPL"]);
+    expect(aapl?.id).toBeTypeOf("number");
+    await db.run(
+      "UPDATE securities SET name = ?, industry = ? WHERE id = ?",
+      ["Apple Inc.", "Consumer Electronics", aapl!.id],
+    );
+    await db.run(
+      `INSERT INTO company_profiles (security_id, source, market_cap, fetched_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(security_id, source) DO UPDATE SET market_cap = excluded.market_cap, fetched_at = excluded.fetched_at`,
+      [aapl!.id, "fmp", 3_000_000_000_000, "2026-03-25T08:53:00.000Z"],
+    );
+
     const rows = await listWatchlists(USER_ID);
     expect(rows).toHaveLength(1);
     expect(rows[0].name).toBe("Growth");
     expect(rows[0].tickers).toEqual(["AAPL", "MSFT"]);
     expect(rows[0].security_ids).toHaveLength(2);
+    expect(rows[0].items).toEqual([
+      expect.objectContaining({
+        ticker: "AAPL",
+        name: "Apple Inc.",
+        industry: "Consumer Electronics",
+        marketCap: 3_000_000_000_000,
+      }),
+      expect.objectContaining({
+        ticker: "MSFT",
+      }),
+    ]);
   });
 
   it("updates name and ticker composition", async () => {

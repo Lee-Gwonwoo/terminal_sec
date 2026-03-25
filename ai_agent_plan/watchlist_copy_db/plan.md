@@ -1,10 +1,11 @@
 # Plan — watchlist_copy_db
 
 ## 목표
-이번 독립 plan의 범위는 아래 3가지다.
+이번 독립 plan의 범위는 아래 4가지다.
 1) `WatchlistWindow`에서 **watch list 이름을 복사**할 수 있게 한다.
 2) 현재 watchlist가 **어디에 저장되는지(DB 구조)**를 분리해서 명확히 기록한다.
 3) 프론트 `WatchlistWindow`를 backend DB와 실제 연결하고, watch list 자체 삭제 버튼을 추가한다.
+4) watchlist row의 `name`, `industry`, `market cap` 표시를 backend DB 메타데이터 기준으로 반영한다.
 
 ## 현재 레포 상태(중요, 확인됨)
 - 프론트 대상 파일: `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/WatchlistWindow.tsx`
@@ -22,6 +23,7 @@
 
 ## 제약 / 비범위
 - 이번 plan에서는 watchlist create/load/update/delete를 실제 backend DB와 동기화한다.
+- 이번 plan에서는 watchlist row 메타데이터(`name`, `industry`, `market cap`)도 backend DB 응답 기준으로 렌더링하도록 맞춘다.
 - 단, 별도 alert 설정 UI는 이번 범위에 포함하지 않는다.
 - 기존 `terminal_ui_ver2_finhub/plan.md`를 기준 문서로 삼지 않고, 이 문서를 독립 작업 기록으로 사용한다.
 
@@ -31,6 +33,7 @@
   - Step 1: 이름 복사 UX
   - Step 2: DB 저장 구조 확인
   - Step 3: 프론트와 DB 연결 여부 정리
+  - Step 4: watchlist row 메타데이터 반영
 
 ## 프로세스 템플릿(plan 변경 + 단계 완료 확인)
 - 이미 구현된 항목이라도 사용자 확인 전에는 `⏳`로 둔다.
@@ -57,11 +60,13 @@
 ## 계획 중간 필수 확인
 - copy UX와 실제 DB 저장 흐름이 같은 창에서 동시에 동작하도록 맞춘다.
 - ticker 추가/삭제와 list 이름 변경도 DB에 반영되어야 한다.
+- watchlist row의 `market cap`, `industry`, `name`은 하드코딩 fallback이 아니라 backend DB 값을 우선 사용해야 한다.
 
 ## 제안하는 구현 순서(이유)
 1. backend update API 추가
 2. 프론트 load/create/update/delete 연결
 3. 삭제 버튼 및 문서/검증 반영
+4. watchlist item metadata 응답 추가 + 프론트 렌더링 전환
 
 ### 단계별 계획(각 단계: 구현 → 검증)
 
@@ -157,6 +162,42 @@
 ```
 - 사용자 확인 필요: **예**
 
+#### ⏳ Step 4 — Watchlist row 메타데이터 DB 반영
+
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 4-1 | `listWatchlists()`에 item별 `name`, `industry`, `marketCap` enrichment 추가 | `terminal/backend/src/services/watchlistRepository.ts` | `GET /api/watchlists` 응답에 `items[]` 포함 | ⏳ |
+| 4-2 | `industry`는 `securities.industry` 우선, 없으면 CSV fallback 사용 | `terminal/backend/src/services/watchlistRepository.ts` | industry 없는 ticker도 fallback 값 확인 가능 | ⏳ |
+| 4-3 | 프론트가 `row.items`를 우선 사용해 watchlist row를 hydrate 하도록 수정 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/WatchlistWindow.tsx` | `market cap`, `industry`, `name`이 API 응답 기준 표시 | ⏳ |
+| 4-4 | watchlist metadata regression test 추가 | `terminal/backend/tests/watchlistRepository.test.ts` | repository test에서 item metadata 검증 | ⏳ |
+| 4-5 | 문서/로그 동기화 | `figma_frontend_prompt.md`, `terminal/backend_prompt.md`, `ai_agent_plan/watchlist_copy_db/agent_log.md` | 변경 설명과 검증 결과 기록 | ⏳ |
+
+세부 단계 목적/설명
+- `4-1` 목적: watchlist CRUD와 별개로 row 표시 데이터도 backend에서 직접 공급하게 한다.
+  - 완료 조건(눈으로 확인): `GET /api/watchlists` payload 안에 ticker별 `items` 배열이 보인다.
+  - 사람 검증(비개발자): 개발자 도구 network 응답에서 `items[].marketCap`, `items[].industry`가 보이는지 확인.
+- `4-2` 목적: DB에 industry가 비어도 기존 CSV cache fallback을 활용해 빈칸을 줄인다.
+  - 완료 조건(눈으로 확인): 일부 종목이 DB industry가 없어도 `-` 대신 업종이 보일 수 있다.
+  - 사람 검증(비개발자): watchlist에서 업종 빈칸이 줄었는지 확인.
+- `4-3` 목적: 프론트가 더 이상 `TICKER_DB` 하드코딩에 의존해 `market cap`, `industry`, `name`을 채우지 않게 한다.
+  - 완료 조건(눈으로 확인): DB에 있는 종목명/시총이 watchlist에 반영된다.
+  - 사람 검증(비개발자): 기존에 `-`였던 시총/업종이 값으로 보이는지 확인.
+- `4-4` 목적: 이후 regression 시 watchlist metadata 누락을 테스트로 잡는다.
+  - 완료 조건(눈으로 확인): test에서 `items[0].marketCap` 같은 assertion이 존재한다.
+  - 사람 검증(비개발자): 테스트 로그에서 pass 여부만 보면 된다.
+- `4-5` 목적: 현재 동작 설명을 문서와 로그에 남겨 추후 혼선을 막는다.
+  - 완료 조건(눈으로 확인): prompt 문서와 agent log에 metadata 반영 내용이 기록된다.
+  - 사람 검증(비개발자): 문서에 `items`, `market cap`, `industry` 설명이 추가됐는지 본다.
+
+검증 훅
+```text
+1. GET /api/watchlists 호출
+2. 응답 payload의 items[].ticker/name/industry/marketCap 확인
+3. WatchlistWindow에서 같은 값이 테이블에 표시되는지 확인
+4. backend test에서 metadata assertion pass 확인
+```
+- 사용자 확인 필요: **예**
+
 ### 미확정 사항(명시 결정 필요)
 1. 향후 `enable_alerts`를 프론트 UI에서도 직접 편집할지 여부
 2. watchlist 상세 row를 실제 시세 API와도 연결할지 여부
@@ -188,6 +229,13 @@
                   ⏳ 2-3 repository update 확인
                   ⏳ 2-4 PUT API 추가
                   ⏳ 2-5 실제 row 수 확인
+
+⏳ Step 4 — Watchlist row 메타데이터 DB 반영
+│  ⏳ 4-1 listWatchlists item enrichment
+│  ⏳ 4-2 industry fallback
+│  ⏳ 4-3 frontend API metadata hydrate
+│  ⏳ 4-4 regression test
+│  ⏳ 4-5 docs/log sync
 ```
 
 ### 결정 상세
