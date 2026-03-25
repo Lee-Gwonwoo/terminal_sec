@@ -672,10 +672,11 @@ Control Window / localStorage 공통 설정:
 
 ### `POST /api/news/change/update-recent`
 
-- 요청 body: `{ "ibkrConcurrency": 30 }` (선택, 기본값 30, 1~100)
+- 요청 body: `{ "fmpConcurrency": 5, "fmpRequestIntervalMs": 250 }` (둘 다 선택)
+- 하위 호환용으로 `{ "ibkrConcurrency": 30 }`도 잠시 허용하지만, 현재 의미는 IBKR가 아니라 FMP fallback 동시성 alias다.
 - 최근 7일 뉴스 change % 재계산.
 - Phase 1: OHLC DB에서 데이터 읽기 → 있으면 바로 계산
-- Phase 1.5 (IBKR fallback): OHLC DB에 없는 티커는 IBKR에서 batch fetch → DB에 upsert → 재계산
+- Phase 1.5 (FMP fallback): OHLC DB에 없는 티커는 FMP 일봉 OHLC를 가져와 DB에 upsert → 재계산
 - Phase 2: 계산 결과 일괄 저장
 - 당일 뉴스는 **ET 시장일** 기준으로 판정하며, ET `16:00:00` 이전에는 `[][][]change_pct[][][]`, `[][][]change_from_open_pct[][][]`, `[][][]change_open_to_high_pct[][][]`를 비워 둔다.
 - 재계산 결과 조건을 만족하지 못한 뉴스는 기존 `news_change_metrics` 표준 8개 metric도 삭제하여 stale 값을 남기지 않는다.
@@ -683,9 +684,9 @@ Control Window / localStorage 공통 설정:
 
 ### `POST /api/news/change/update-custom`
 
-- 요청 body: `{ "from": "YYYY-MM-DD", "to": "YYYY-MM-DD", "ibkrConcurrency": 30 }` (ibkrConcurrency 선택, 기본값 30)
+- 요청 body: `{ "from": "YYYY-MM-DD", "to": "YYYY-MM-DD", "fmpConcurrency": 5, "fmpRequestIntervalMs": 250 }`
 - 선택한 날짜 범위 뉴스 change % 재계산.
-- Phase 1: OHLC DB → Phase 1.5: IBKR fallback → Phase 2: 저장 (위와 동일)
+- Phase 1: OHLC DB → Phase 1.5: FMP fallback → Phase 2: 저장 (위와 동일)
 - 응답 컬럼: `[][][]jobId[][][]`
 
 ### `GET /api/calendar/events`
@@ -1505,11 +1506,11 @@ query:
 요청 body:
 
 ```json
-{ "ibkrConcurrency": 30 }
+{ "fmpConcurrency": 5, "fmpRequestIntervalMs": 250 }
 ```
 
 - 최근 7일 뉴스 전체에 대해 표준 metric 재계산
-- OHLC DB에 데이터 없는 티커는 IBKR에서 batch fetch 후 계산 (Phase 1.5)
+- OHLC DB에 데이터 없는 티커는 FMP 일봉 OHLC를 fetch 후 계산 (Phase 1.5)
 - 뉴스 시각은 source별 원본 포맷과 무관하게 ET 시장일로 해석한다. timezone-aware timestamp는 ET로 변환하고, RTPR처럼 ET-naive timestamp는 이미 ET로 간주한다.
 - 현재 ET 시장일과 같은 뉴스는 ET `16:00:00` 이전이면 same-day change metric을 저장하지 않는다.
 - 이번 재계산에서 metric을 다시 계산하지 못한 뉴스는 기존 표준 metric도 함께 삭제한다.
@@ -1528,11 +1529,11 @@ query:
 요청 body:
 
 ```json
-{ "from": "2026-03-01", "to": "2026-03-06", "ibkrConcurrency": 30 }
+{ "from": "2026-03-01", "to": "2026-03-06", "fmpConcurrency": 5, "fmpRequestIntervalMs": 250 }
 ```
 
 - 지정 기간 뉴스 전체에 대해 표준 metric 재계산
-- OHLC DB에 데이터 없는 티커는 IBKR에서 batch fetch 후 계산 (Phase 1.5)
+- OHLC DB에 데이터 없는 티커는 FMP 일봉 OHLC를 fetch 후 계산 (Phase 1.5)
 - 즉시 `jobId` 반환
 - 완료 시 `update_status.news_change_custom` 갱신
 

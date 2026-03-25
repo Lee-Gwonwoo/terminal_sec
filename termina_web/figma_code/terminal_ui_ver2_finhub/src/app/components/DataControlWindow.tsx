@@ -97,17 +97,21 @@ export function DataControlWindow({
     try { localStorage.setItem('ft-concurrency', String(v)); } catch { /* SSR */ }
   };
 
-  // ─── IBKR Fetch Concurrency ───
-  const [ibkrConcurrency, setIbkrConcurrency] = useState(() => {
+  // ─── Change Update FMP Concurrency ───
+  const [changeFmpConcurrency, setChangeFmpConcurrency] = useState(() => {
     try {
-      const v = parseInt(localStorage.getItem('ibkr-concurrency') ?? '', 10);
-      return v >= 1 && v <= 100 ? v : 30;
-    } catch { return 30; }
+      const raw = localStorage.getItem('change-fmp-concurrency') ?? localStorage.getItem('ibkr-concurrency') ?? '';
+      const v = parseInt(raw, 10);
+      return v >= 1 && v <= 20 ? v : 5;
+    } catch { return 5; }
   });
-  const saveIbkrConcurrency = (n: number) => {
-    const v = Math.max(1, Math.min(100, n));
-    setIbkrConcurrency(v);
-    try { localStorage.setItem('ibkr-concurrency', String(v)); } catch { /* SSR */ }
+  const saveChangeFmpConcurrency = (n: number) => {
+    const v = Math.max(1, Math.min(20, n));
+    setChangeFmpConcurrency(v);
+    try {
+      localStorage.setItem('change-fmp-concurrency', String(v));
+      localStorage.removeItem('ibkr-concurrency');
+    } catch { /* SSR */ }
   };
 
   // ─── Finnhub Pull Ticker Concurrency ───
@@ -439,12 +443,12 @@ export function DataControlWindow({
         case 'recent':
           url = `${API_BASE}/api/news/change/update-recent`;
           headers['Content-Type'] = 'application/json';
-          body = JSON.stringify({ ibkrConcurrency });
+          body = JSON.stringify({ fmpConcurrency: changeFmpConcurrency });
           break;
         case 'custom':
           url = `${API_BASE}/api/news/change/update-custom`;
           headers['Content-Type'] = 'application/json';
-          body = JSON.stringify({ from: customChangeFrom, to: customChangeTo, ibkrConcurrency });
+          body = JSON.stringify({ from: customChangeFrom, to: customChangeTo, fmpConcurrency: changeFmpConcurrency });
           break;
       }
 
@@ -785,17 +789,17 @@ export function DataControlWindow({
             </div>
           </div>
           <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">
-            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">IBKR Fetch Concurrency</h3>
+            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">Change Update FMP Concurrency</h3>
             <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3">
-              Change% 계산 시 OHLC DB에 데이터가 없는 종목을 IBKR에서 병렬로 가져오는 동시 요청 수. 100 이상은 pacing 제한 위험.
+              Change% 계산 시 OHLC DB에 데이터가 없는 종목을 FMP 일봉 OHLC로 채우는 동시 요청 수. 값이 클수록 빠르지만 FMP rate limit 위험이 커집니다.
             </p>
             <div className="flex gap-2 mb-3 flex-wrap">
-              {[10, 30, 50, 100].map(preset => (
+              {[1, 3, 5, 10, 20].map(preset => (
                 <button
-                  key={`ibkr-c-${preset}`}
-                  onClick={() => saveIbkrConcurrency(preset)}
+                  key={`change-fmp-c-${preset}`}
+                  onClick={() => saveChangeFmpConcurrency(preset)}
                   className={`px-3 py-1 rounded border text-xs font-medium transition-colors ${
-                    ibkrConcurrency === preset
+                    changeFmpConcurrency === preset
                       ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
                       : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200'
                   }`}
@@ -809,14 +813,14 @@ export function DataControlWindow({
               <input
                 type="range"
                 min={1}
-                max={100}
+                max={20}
                 step={1}
-                value={ibkrConcurrency}
-                onChange={e => saveIbkrConcurrency(parseInt(e.target.value, 10))}
+                value={changeFmpConcurrency}
+                onChange={e => saveChangeFmpConcurrency(parseInt(e.target.value, 10))}
                 className="flex-1 accent-blue-500"
               />
-              <span className="text-[11px] text-gray-500 w-8 text-right">100</span>
-              <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300 w-10 text-right">{ibkrConcurrency}</span>
+              <span className="text-[11px] text-gray-500 w-8 text-right">20</span>
+              <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300 w-10 text-right">{changeFmpConcurrency}</span>
             </div>
           </div>
           <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">

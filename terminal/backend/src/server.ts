@@ -38,7 +38,7 @@ import {
   getConfirmedEmptyRange,
 } from "./services/finnhubNewsProvider.js";
 import type { FinnhubMappedItem } from "./services/finnhubNewsProvider.js";
-import { mergeChangeForNewItems, bulkUpdateRecentChange, bulkUpdateCustomChange, type IbkrFallbackOptions } from "./services/newsChangeMerger.js";
+import { mergeChangeForNewItems, bulkUpdateRecentChange, bulkUpdateCustomChange, type FmpFallbackOptions } from "./services/newsChangeMerger.js";
 import { createJob, getJob, getActiveJobs, updateProgress, appendLog, completeJob, failJob, cancelJob, isJobCancelled } from "./services/jobManager.js";
 import { getFulltext, getUnextractedNewsIds, deleteFailedFulltextRows, getFulltextStats, upsertProvidedFulltext } from "./services/fulltextRepository.js";
 import { runFulltextUpdate, runFulltextPlainTextBackfill, runRtprBodyBackfill, runOriginUrlBackfill, extractAndPersistFulltext } from "./services/fulltextUpdateService.js";
@@ -1891,14 +1891,19 @@ app.get("/api/news/fulltext/:newsId", async (req, res, next) => {
 
 app.post("/api/news/change/update-recent", async (req, res, next) => {
   try {
-    const ibkrConcurrency = Math.max(1, Math.min(100, parseInt(req.body?.ibkrConcurrency, 10) || 30));
-    const ibkrFallback: IbkrFallbackOptions = { enabled: true, concurrency: ibkrConcurrency };
+    const concurrencyRaw = Number(req.body?.fmpConcurrency ?? req.body?.ibkrConcurrency);
+    const intervalRaw = Number(req.body?.fmpRequestIntervalMs);
+    const fmpFallback: FmpFallbackOptions = {
+      enabled: true,
+      concurrency: clampFmpConcurrency(Number.isFinite(concurrencyRaw) ? concurrencyRaw : 5),
+      requestIntervalMs: clampFmpIntervalMs(Number.isFinite(intervalRaw) ? intervalRaw : 250),
+    };
     const jobId = createJob(0); // total unknown upfront
     (async () => {
       try {
         await bulkUpdateRecentChange((done, total) => {
           updateProgress(jobId, done, total);
-        }, undefined, () => isJobCancelled(jobId), ibkrFallback, (msg) => appendLog(jobId, msg));
+        }, undefined, () => isJobCancelled(jobId), fmpFallback, (msg) => appendLog(jobId, msg));
         if (isJobCancelled(jobId)) return;
         await setLastSuccess("news_change_recent", new Date().toISOString());
         completeJob(jobId);
@@ -1915,20 +1920,25 @@ app.post("/api/news/change/update-recent", async (req, res, next) => {
 const customChangeSchema = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  fmpConcurrency: z.number().int().min(1).max(20).optional(),
+  fmpRequestIntervalMs: z.number().int().min(0).max(5000).optional(),
   ibkrConcurrency: z.number().int().min(1).max(100).optional(),
 });
 
 app.post("/api/news/change/update-custom", async (req, res, next) => {
   try {
-    const { from, to, ibkrConcurrency: concRaw } = customChangeSchema.parse(req.body);
-    const ibkrConcurrency = concRaw ?? 30;
-    const ibkrFallback: IbkrFallbackOptions = { enabled: true, concurrency: ibkrConcurrency };
+    const { from, to, fmpConcurrency, fmpRequestIntervalMs, ibkrConcurrency } = customChangeSchema.parse(req.body);
+    const fmpFallback: FmpFallbackOptions = {
+      enabled: true,
+      concurrency: clampFmpConcurrency(fmpConcurrency ?? ibkrConcurrency ?? 5),
+      requestIntervalMs: clampFmpIntervalMs(fmpRequestIntervalMs),
+    };
     const jobId = createJob(0);
     (async () => {
       try {
         await bulkUpdateCustomChange(from, to, (done, total) => {
           updateProgress(jobId, done, total);
-        }, undefined, () => isJobCancelled(jobId), ibkrFallback, (msg) => appendLog(jobId, msg));
+        }, undefined, () => isJobCancelled(jobId), fmpFallback, (msg) => appendLog(jobId, msg));
         if (isJobCancelled(jobId)) return;
         await setLastSuccess("news_change_custom", new Date().toISOString(), { from, to });
         completeJob(jobId);

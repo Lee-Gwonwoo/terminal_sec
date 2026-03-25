@@ -565,6 +565,15 @@ localStorage 사용:
 - `GET /api/jobs/:jobId`
 - `GET /api/db/inspect`
 
+change update contract:
+
+- `POST /api/news/change/update-recent` → `{ jobId }`
+  - body에 `fmpConcurrency`(기본=5), `fmpRequestIntervalMs`(기본=250ms)를 선택적으로 보낼 수 있다.
+  - backend는 먼저 OHLC DB를 읽고, 비어 있는 ticker만 FMP 일봉 OHLC로 보강한 뒤 `news_change_metrics`를 다시 쓴다.
+- `POST /api/news/change/update-custom` → `{ jobId }`
+  - body는 `{ from, to, fmpConcurrency?, fmpRequestIntervalMs? }`.
+  - 동작은 recent와 같고 날짜 범위만 사용자가 지정한다.
+
 company data job contract:
 
 - `POST /api/company-profiles/pull-fmp` → `{ jobId }`

@@ -4,15 +4,14 @@ import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { getDb } from "../db.js";
-import { fetchOhlcBatch } from "./ibkrOhlcBatchProvider.js";
+import { fetchFmpOhlcBatch } from "./fmpOhlcProvider.js";
 import { shouldExcludeCurrentEtDailyBar, upsertBars } from "./ohlcWatchlistRepository.js";
 
-/** Options for IBKR fallback when OHLC DB has no data for a ticker. */
-export interface IbkrFallbackOptions {
+/** Options for FMP fallback when OHLC DB has no data for a ticker. */
+export interface FmpFallbackOptions {
   enabled: boolean;
-  concurrency: number; // max concurrent IBKR requests (1-100)
-  port?: number;       // TWS port, default 4001
-  clientId?: number;   // default 85
+  concurrency: number; // max concurrent FMP requests (1-20)
+  requestIntervalMs?: number;
 }
 
 // ---------- OHLC DB location ----------
@@ -316,11 +315,11 @@ async function computeMetricsForItem(
 
 const WRITE_CHUNK_SIZE = 1000;
 
-/** Fetch OHLC from IBKR for missing tickers, upsert to DB, re-compute metrics.
+/** Fetch OHLC from FMP for missing tickers, upsert to DB, re-compute metrics.
  *  Returns newly computed metrics. */
-async function ibkrFallbackFetch(
+async function fmpFallbackFetch(
   missingItems: Array<{ newsId: string; ticker: string; publishedAt: string }>,
-  ibkr: IbkrFallbackOptions,
+  fmp: FmpFallbackOptions,
   onLog?: (msg: string) => void,
   onProgress?: (completed: number, total: number) => void,
 ): Promise<ComputedMetrics[]> {
@@ -346,32 +345,36 @@ async function ibkrFallbackFetch(
   const startDate = startDt.toISOString().slice(0, 10);
   const endDate = endDt.toISOString().slice(0, 10);
 
-  onLog?.(`[IBKR fallback] fetching ${uniqueTickers.length} tickers (${startDate}~${endDate}), concurrency=${ibkr.concurrency}`);
+  onLog?.(`[FMP fallback] fetching ${uniqueTickers.length} tickers (${startDate}~${endDate}), concurrency=${fmp.concurrency}, interval=${fmp.requestIntervalMs ?? 250}ms`);
 
-  // Batch fetch from IBKR
-  const results = await fetchOhlcBatch(
+  const batch = await fetchFmpOhlcBatch(
     uniqueTickers,
     startDate,
     endDate,
-    ibkr.concurrency,
-    ibkr.port ?? 4001,
-    ibkr.clientId ?? 85,
+    {
+      concurrency: fmp.concurrency,
+      requestIntervalMs: fmp.requestIntervalMs,
+      onProgress,
+    },
   );
 
-  // Upsert fetched bars to OHLC DB
   let totalUpserted = 0;
   let fetchOk = 0;
   let fetchFail = 0;
-  for (const r of results) {
-    if (r.error || r.bars.length === 0) {
+  for (const ticker of uniqueTickers) {
+    const bars = batch.results.get(ticker) ?? [];
+    if (bars.length === 0) {
       fetchFail++;
       continue;
     }
     fetchOk++;
-    const n = await upsertBars(r.symbol, r.bars);
+    const n = await upsertBars(ticker, bars);
     totalUpserted += n;
   }
-  onLog?.(`[IBKR fallback] fetched=${fetchOk}, failed=${fetchFail}, upserted=${totalUpserted} bars`);
+  for (const [ticker, message] of batch.errors) {
+    onLog?.(`[FMP fallback] ${ticker}: ${message}`);
+  }
+  onLog?.(`[FMP fallback] fetched=${fetchOk}, failed=${fetchFail}, upserted=${totalUpserted} bars`);
 
   // Re-compute metrics for the missing items (now OHLC DB should have data)
   const recomputed: ComputedMetrics[] = [];
@@ -382,7 +385,7 @@ async function ibkrFallbackFetch(
     recomputedCount++;
     onProgress?.(recomputedCount, missingItems.length);
   }
-  onLog?.(`[IBKR fallback] re-computed ${recomputed.length}/${missingItems.length} items`);
+  onLog?.(`[FMP fallback] re-computed ${recomputed.length}/${missingItems.length} items`);
   return recomputed;
 }
 
@@ -503,14 +506,14 @@ export async function mergeChangeForNewItems(
 
 /** Compute ALL standard change metrics (open, 1d, 7d, 14d, 30d) for news
  *  published within the last 7 calendar days.
- *  If ibkrFallback is enabled, tickers missing from OHLC DB are batch-fetched
- *  from IBKR, upserted, then re-computed.
+ *  If fmpFallback is enabled, tickers missing from OHLC DB are batch-fetched
+ *  from FMP, upserted, then re-computed.
  *  Progress callback: (completed, total) */
 export async function bulkUpdateRecentChange(
   onProgress?: (completed: number, total: number) => void,
   concurrency = DEFAULT_MERGE_CONCURRENCY,
   isCancelled?: () => boolean,
-  ibkrFallback?: IbkrFallbackOptions,
+  fmpFallback?: FmpFallbackOptions,
   onLog?: (msg: string) => void,
 ): Promise<{ updated: number; skipped: number }> {
   const cutoff = new Date();
@@ -553,12 +556,12 @@ export async function bulkUpdateRecentChange(
 
   if (isCancelled?.()) return { updated: computed.length, skipped };
 
-  // Phase 1.5: IBKR fallback for missing tickers
-  if (ibkrFallback?.enabled && missingItems.length > 0) {
+  // Phase 1.5: FMP fallback for missing tickers
+  if (fmpFallback?.enabled && missingItems.length > 0) {
     onProgress?.(fallbackPhaseBase, totalUnits);
-    onLog?.(`[change] ${missingItems.length} items missing OHLC, starting IBKR fallback...`);
+    onLog?.(`[change] ${missingItems.length} items missing OHLC, starting FMP fallback...`);
     try {
-      const fallbackMetrics = await ibkrFallbackFetch(missingItems, ibkrFallback, onLog, (fallbackDone, fallbackTotal) => {
+      const fallbackMetrics = await fmpFallbackFetch(missingItems, fmpFallback, onLog, (fallbackDone, fallbackTotal) => {
         const phaseProgress = fallbackTotal > 0
           ? Math.floor((fallbackDone / fallbackTotal) * scanPhaseUnits)
           : scanPhaseUnits;
@@ -569,9 +572,9 @@ export async function bulkUpdateRecentChange(
         invalidMetricNewsIds.delete(metric.newsId);
       }
       skipped += missingItems.length - fallbackMetrics.length;
-      onLog?.(`[change] IBKR fallback done: ${fallbackMetrics.length} computed, ${missingItems.length - fallbackMetrics.length} still missing`);
+      onLog?.(`[change] FMP fallback done: ${fallbackMetrics.length} computed, ${missingItems.length - fallbackMetrics.length} still missing`);
     } catch (err) {
-      onLog?.(`[change] IBKR fallback error: ${err instanceof Error ? err.message : String(err)}`);
+      onLog?.(`[change] FMP fallback error: ${err instanceof Error ? err.message : String(err)}`);
       skipped += missingItems.length;
     }
   } else {
@@ -600,14 +603,14 @@ export async function bulkUpdateRecentChange(
 
 /** Compute ALL standard change metrics for news published within [from, to].
  *  from/to are ISO date strings (YYYY-MM-DD).
- *  If ibkrFallback is enabled, tickers missing from OHLC DB are batch-fetched. */
+ *  If fmpFallback is enabled, tickers missing from OHLC DB are batch-fetched. */
 export async function bulkUpdateCustomChange(
   from: string,
   to: string,
   onProgress?: (completed: number, total: number) => void,
   concurrency = DEFAULT_MERGE_CONCURRENCY,
   isCancelled?: () => boolean,
-  ibkrFallback?: IbkrFallbackOptions,
+  fmpFallback?: FmpFallbackOptions,
   onLog?: (msg: string) => void,
 ): Promise<{ updated: number; skipped: number }> {
   const rows = await getDb().all<{ id: string; tickers_csv: string; published_at: string }[]>(
@@ -646,12 +649,12 @@ export async function bulkUpdateCustomChange(
 
   if (isCancelled?.()) return { updated: computed.length, skipped };
 
-  // Phase 1.5: IBKR fallback for missing tickers
-  if (ibkrFallback?.enabled && missingItems.length > 0) {
+  // Phase 1.5: FMP fallback for missing tickers
+  if (fmpFallback?.enabled && missingItems.length > 0) {
     onProgress?.(fallbackPhaseBase, totalUnits);
-    onLog?.(`[change] ${missingItems.length} items missing OHLC, starting IBKR fallback...`);
+    onLog?.(`[change] ${missingItems.length} items missing OHLC, starting FMP fallback...`);
     try {
-      const fallbackMetrics = await ibkrFallbackFetch(missingItems, ibkrFallback, onLog, (fallbackDone, fallbackTotal) => {
+      const fallbackMetrics = await fmpFallbackFetch(missingItems, fmpFallback, onLog, (fallbackDone, fallbackTotal) => {
         const phaseProgress = fallbackTotal > 0
           ? Math.floor((fallbackDone / fallbackTotal) * scanPhaseUnits)
           : scanPhaseUnits;
@@ -662,9 +665,9 @@ export async function bulkUpdateCustomChange(
         invalidMetricNewsIds.delete(metric.newsId);
       }
       skipped += missingItems.length - fallbackMetrics.length;
-      onLog?.(`[change] IBKR fallback done: ${fallbackMetrics.length} computed, ${missingItems.length - fallbackMetrics.length} still missing`);
+      onLog?.(`[change] FMP fallback done: ${fallbackMetrics.length} computed, ${missingItems.length - fallbackMetrics.length} still missing`);
     } catch (err) {
-      onLog?.(`[change] IBKR fallback error: ${err instanceof Error ? err.message : String(err)}`);
+      onLog?.(`[change] FMP fallback error: ${err instanceof Error ? err.message : String(err)}`);
       skipped += missingItems.length;
     }
   } else {
