@@ -1,0 +1,474 @@
+{
+  "analysis_id": "2b5ab4d1-a1dd-4906-8226-e21d8bd41465",
+  "note_title": "Model 2 company_news taxonomy v3 (2025+)",
+  "since": "2025-01-01",
+  "until": "2026-03-26",
+  "scope": "company_news_2025_plus_taxonomy_v3",
+  "threshold_summary": {
+    "thresholds": {
+      "cap_10b_100b": 17.8436,
+      "cap_100b_300b": 14.8763,
+      "cap_300b_plus": 14.2983,
+      "cap_1b_10b": 25.2427,
+      "cap_300m_1b": 30.138200000000005,
+      "below_300m_or_unknown": 36.932900000000025
+    },
+    "bucket_meta": {
+      "cap_10b_100b": {
+        "count": 177871,
+        "p50": 9.4203,
+        "p80": 17.8436,
+        "p90": 24.7886,
+        "p95": 31.7626
+      },
+      "cap_100b_300b": {
+        "count": 78192,
+        "p50": 8.1419,
+        "p80": 14.8763,
+        "p90": 20.183410000000006,
+        "p95": 25.0211
+      },
+      "cap_300b_plus": {
+        "count": 82397,
+        "p50": 7.4967,
+        "p80": 14.2983,
+        "p90": 19.2773,
+        "p95": 24.1757
+      },
+      "cap_1b_10b": {
+        "count": 147328,
+        "p50": 13.461849999999998,
+        "p80": 25.2427,
+        "p90": 34.64501000000001,
+        "p95": 45.508109999999995
+      },
+      "cap_300m_1b": {
+        "count": 41700,
+        "p50": 16.721400000000003,
+        "p80": 30.138200000000005,
+        "p90": 41.412029999999994,
+        "p95": 56.00167499999986
+      },
+      "below_300m_or_unknown": {
+        "count": 388,
+        "p50": 17.9157,
+        "p80": 36.932900000000025,
+        "p90": 45.5951,
+        "p95": 48.5106
+      }
+    },
+    "global_p80": 19.913,
+    "total_rows": 599681,
+    "analyzable_rows": 527876,
+    "meaningless_rows": 371983,
+    "case_counts": {
+      "meaningless_others": 371983,
+      "analyst_upgrade_positive": 30672,
+      "mna_strategic_asset_positive": 11849,
+      "analyst_downgrade_negative": 18441,
+      "macro_market_commentary": 25451,
+      "commercial_launch_expansion_positive": 22505,
+      "valuation_narrative_positive": 5448,
+      "positioning_flow_positive": 1475,
+      "earnings_beat_raise_positive": 11894,
+      "litigation_regulatory_negative": 7647,
+      "demand_backlog_positive": 3131,
+      "generic_feature_commentary": 15549,
+      "valuation_narrative_negative": 1329,
+      "market_movers_roundup": 1514,
+      "peer_competition_negative": 13505,
+      "partnership_license_positive": 15789,
+      "analyst_note_amplification_positive": 981,
+      "media_amplification_positive": 2937,
+      "regulatory_clinical_positive": 1366,
+      "capital_structure_stress_negative": 354,
+      "customer_adoption_positive": 1870,
+      "media_amplification_negative": 3328,
+      "ipo_listing_event": 1221,
+      "government_contract_award_positive": 584,
+      "regulatory_clinical_negative": 373,
+      "restructuring_distress_negative": 2312,
+      "financing_dilution_negative": 3434,
+      "positioning_flow_negative": 248,
+      "analyst_note_amplification_negative": 117,
+      "supply_chain_headwind_negative": 1401,
+      "earnings_miss_cut_negative": 706,
+      "earnings_preview_watch": 1145,
+      "shareholder_return_positive": 2552,
+      "policy_regulatory_headwind_negative": 520,
+      "earnings_transcript_snapshot": 15686,
+      "management_governance_positive": 209,
+      "policy_regulatory_tailwind_positive": 85,
+      "management_governance_negative": 25,
+      "peer_readthrough_positive": 42,
+      "supply_chain_tailwind_positive": 3
+    }
+  },
+  "insert_summary": {
+    "impacted_rows": 105608,
+    "inserted_rows": 599681,
+    "case_impacted": {
+      "meaningless_others": 64575,
+      "macro_market_commentary": 4066,
+      "valuation_narrative_negative": 291,
+      "generic_feature_commentary": 3167,
+      "media_amplification_positive": 1138,
+      "analyst_upgrade_positive": 5075,
+      "capital_structure_stress_negative": 173,
+      "media_amplification_negative": 884,
+      "analyst_downgrade_negative": 2887,
+      "litigation_regulatory_negative": 1759,
+      "mna_strategic_asset_positive": 1711,
+      "commercial_launch_expansion_positive": 3622,
+      "regulatory_clinical_positive": 283,
+      "market_movers_roundup": 487,
+      "partnership_license_positive": 2767,
+      "valuation_narrative_positive": 738,
+      "restructuring_distress_negative": 366,
+      "peer_competition_negative": 1846,
+      "government_contract_award_positive": 157,
+      "regulatory_clinical_negative": 100,
+      "supply_chain_headwind_negative": 536,
+      "financing_dilution_negative": 881,
+      "demand_backlog_positive": 516,
+      "earnings_beat_raise_positive": 2396,
+      "analyst_note_amplification_positive": 243,
+      "shareholder_return_positive": 341,
+      "positioning_flow_positive": 266,
+      "analyst_note_amplification_negative": 22,
+      "customer_adoption_positive": 309,
+      "ipo_listing_event": 303,
+      "policy_regulatory_tailwind_positive": 20,
+      "earnings_transcript_snapshot": 3038,
+      "positioning_flow_negative": 81,
+      "earnings_miss_cut_negative": 164,
+      "earnings_preview_watch": 247,
+      "policy_regulatory_headwind_negative": 104,
+      "management_governance_positive": 35,
+      "peer_readthrough_positive": 7,
+      "management_governance_negative": 7
+    }
+  },
+  "case_summaries": [
+    {
+      "case_type": "meaningless_others",
+      "case_label_ko": "잡것들",
+      "top_level": "residual",
+      "total_count": 371983,
+      "impacted_count": 64575,
+      "max_impact_score": 3646.2687
+    },
+    {
+      "case_type": "analyst_upgrade_positive",
+      "case_label_ko": "애널리스트 상향·커버리지 개시",
+      "top_level": "long",
+      "total_count": 30672,
+      "impacted_count": 5075,
+      "max_impact_score": 976.5766
+    },
+    {
+      "case_type": "macro_market_commentary",
+      "case_label_ko": "매크로·시장 코멘터리",
+      "top_level": "residual",
+      "total_count": 25451,
+      "impacted_count": 4066,
+      "max_impact_score": 1042.654
+    },
+    {
+      "case_type": "commercial_launch_expansion_positive",
+      "case_label_ko": "출시·상업화·확장",
+      "top_level": "long",
+      "total_count": 22505,
+      "impacted_count": 3622,
+      "max_impact_score": 953.5211
+    },
+    {
+      "case_type": "analyst_downgrade_negative",
+      "case_label_ko": "애널리스트 하향·목표가 하향",
+      "top_level": "short",
+      "total_count": 18441,
+      "impacted_count": 2887,
+      "max_impact_score": 1073.6715
+    },
+    {
+      "case_type": "partnership_license_positive",
+      "case_label_ko": "제휴·라이선스·협업",
+      "top_level": "long",
+      "total_count": 15789,
+      "impacted_count": 2767,
+      "max_impact_score": 1044.2105
+    },
+    {
+      "case_type": "earnings_transcript_snapshot",
+      "case_label_ko": "실적 transcript·snapshot",
+      "top_level": "residual",
+      "total_count": 15686,
+      "impacted_count": 3038,
+      "max_impact_score": 1760.6557
+    },
+    {
+      "case_type": "generic_feature_commentary",
+      "case_label_ko": "feature·투자아이디어 해설",
+      "top_level": "residual",
+      "total_count": 15549,
+      "impacted_count": 3167,
+      "max_impact_score": 1002.6178
+    },
+    {
+      "case_type": "peer_competition_negative",
+      "case_label_ko": "peer 투자·경쟁 심화 read-through",
+      "top_level": "short",
+      "total_count": 13505,
+      "impacted_count": 1846,
+      "max_impact_score": 221.059
+    },
+    {
+      "case_type": "earnings_beat_raise_positive",
+      "case_label_ko": "실적 호조·가이던스 상향",
+      "top_level": "long",
+      "total_count": 11894,
+      "impacted_count": 2396,
+      "max_impact_score": 1114.5538
+    },
+    {
+      "case_type": "mna_strategic_asset_positive",
+      "case_label_ko": "M&A·전략자산 거래",
+      "top_level": "long",
+      "total_count": 11849,
+      "impacted_count": 1711,
+      "max_impact_score": 486.0606
+    },
+    {
+      "case_type": "litigation_regulatory_negative",
+      "case_label_ko": "소송·조사·회계 리스크",
+      "top_level": "short",
+      "total_count": 7647,
+      "impacted_count": 1759,
+      "max_impact_score": 795.8525
+    },
+    {
+      "case_type": "valuation_narrative_positive",
+      "case_label_ko": "밸류에이션 discount 해소 narrative",
+      "top_level": "long",
+      "total_count": 5448,
+      "impacted_count": 738,
+      "max_impact_score": 228.2246
+    },
+    {
+      "case_type": "financing_dilution_negative",
+      "case_label_ko": "희석성 자금조달",
+      "top_level": "short",
+      "total_count": 3434,
+      "impacted_count": 881,
+      "max_impact_score": 675.0968
+    },
+    {
+      "case_type": "media_amplification_negative",
+      "case_label_ko": "top mover·헤드라인 증폭·하락 해설",
+      "top_level": "short",
+      "total_count": 3328,
+      "impacted_count": 884,
+      "max_impact_score": 1117.1717
+    },
+    {
+      "case_type": "demand_backlog_positive",
+      "case_label_ko": "수요 급증·백로그 확대",
+      "top_level": "long",
+      "total_count": 3131,
+      "impacted_count": 516,
+      "max_impact_score": 118.8976
+    },
+    {
+      "case_type": "media_amplification_positive",
+      "case_label_ko": "top mover·헤드라인 증폭·상승 해설",
+      "top_level": "long",
+      "total_count": 2937,
+      "impacted_count": 1138,
+      "max_impact_score": 648.5573
+    },
+    {
+      "case_type": "shareholder_return_positive",
+      "case_label_ko": "자사주 매입·주주환원",
+      "top_level": "long",
+      "total_count": 2552,
+      "impacted_count": 341,
+      "max_impact_score": 216.5325
+    },
+    {
+      "case_type": "restructuring_distress_negative",
+      "case_label_ko": "구조조정·생존성 악화",
+      "top_level": "short",
+      "total_count": 2312,
+      "impacted_count": 366,
+      "max_impact_score": 133.5616
+    },
+    {
+      "case_type": "customer_adoption_positive",
+      "case_label_ko": "고객 채택·대형 고객 확보",
+      "top_level": "long",
+      "total_count": 1870,
+      "impacted_count": 309,
+      "max_impact_score": 120.0817
+    },
+    {
+      "case_type": "market_movers_roundup",
+      "case_label_ko": "멀티종목 movers·watchlist 기사",
+      "top_level": "residual",
+      "total_count": 1514,
+      "impacted_count": 487,
+      "max_impact_score": 638.4259
+    },
+    {
+      "case_type": "positioning_flow_positive",
+      "case_label_ko": "숏커버·포지셔닝 언와인드·매수 유입",
+      "top_level": "long",
+      "total_count": 1475,
+      "impacted_count": 266,
+      "max_impact_score": 712.753
+    },
+    {
+      "case_type": "supply_chain_headwind_negative",
+      "case_label_ko": "공급망 차질·원가 압박 read-through",
+      "top_level": "short",
+      "total_count": 1401,
+      "impacted_count": 536,
+      "max_impact_score": 258.7057
+    },
+    {
+      "case_type": "regulatory_clinical_positive",
+      "case_label_ko": "승인·임상 호재",
+      "top_level": "long",
+      "total_count": 1366,
+      "impacted_count": 283,
+      "max_impact_score": 648.5573
+    },
+    {
+      "case_type": "valuation_narrative_negative",
+      "case_label_ko": "밸류에이션 부담·multiple compression narrative",
+      "top_level": "short",
+      "total_count": 1329,
+      "impacted_count": 291,
+      "max_impact_score": 516.0523
+    },
+    {
+      "case_type": "ipo_listing_event",
+      "case_label_ko": "IPO·상장 이벤트",
+      "top_level": "residual",
+      "total_count": 1221,
+      "impacted_count": 303,
+      "max_impact_score": 675.0968
+    },
+    {
+      "case_type": "earnings_preview_watch",
+      "case_label_ko": "실적 발표 전 기대 기사",
+      "top_level": "residual",
+      "total_count": 1145,
+      "impacted_count": 247,
+      "max_impact_score": 183.8095
+    },
+    {
+      "case_type": "analyst_note_amplification_positive",
+      "case_label_ko": "애널리스트 코멘트 증폭·긍정",
+      "top_level": "long",
+      "total_count": 981,
+      "impacted_count": 243,
+      "max_impact_score": 92.1788
+    },
+    {
+      "case_type": "earnings_miss_cut_negative",
+      "case_label_ko": "실적 부진·가이던스 하향",
+      "top_level": "short",
+      "total_count": 706,
+      "impacted_count": 164,
+      "max_impact_score": 1760.6557
+    },
+    {
+      "case_type": "government_contract_award_positive",
+      "case_label_ko": "정부·대형 계약 수주",
+      "top_level": "long",
+      "total_count": 584,
+      "impacted_count": 157,
+      "max_impact_score": 1511.2583
+    },
+    {
+      "case_type": "policy_regulatory_headwind_negative",
+      "case_label_ko": "정책·법안 역풍 read-through",
+      "top_level": "short",
+      "total_count": 520,
+      "impacted_count": 104,
+      "max_impact_score": 64.5833
+    },
+    {
+      "case_type": "regulatory_clinical_negative",
+      "case_label_ko": "규제·임상 악재",
+      "top_level": "short",
+      "total_count": 373,
+      "impacted_count": 100,
+      "max_impact_score": 371.0692
+    },
+    {
+      "case_type": "capital_structure_stress_negative",
+      "case_label_ko": "거래정지·역분할·상장유지 스트레스",
+      "top_level": "short",
+      "total_count": 354,
+      "impacted_count": 173,
+      "max_impact_score": 3646.2687
+    },
+    {
+      "case_type": "positioning_flow_negative",
+      "case_label_ko": "차익실현·디그로싱·매도 수급",
+      "top_level": "short",
+      "total_count": 248,
+      "impacted_count": 81,
+      "max_impact_score": 120.1863
+    },
+    {
+      "case_type": "management_governance_positive",
+      "case_label_ko": "경영진 보강·거버넌스 개선",
+      "top_level": "long",
+      "total_count": 209,
+      "impacted_count": 35,
+      "max_impact_score": 93.8742
+    },
+    {
+      "case_type": "analyst_note_amplification_negative",
+      "case_label_ko": "애널리스트 코멘트 증폭·부정",
+      "top_level": "short",
+      "total_count": 117,
+      "impacted_count": 22,
+      "max_impact_score": 182.818
+    },
+    {
+      "case_type": "policy_regulatory_tailwind_positive",
+      "case_label_ko": "정책·법안 수혜 read-through",
+      "top_level": "long",
+      "total_count": 85,
+      "impacted_count": 20,
+      "max_impact_score": 63.7733
+    },
+    {
+      "case_type": "peer_readthrough_positive",
+      "case_label_ko": "peer 호조 read-through",
+      "top_level": "long",
+      "total_count": 42,
+      "impacted_count": 7,
+      "max_impact_score": 57.4121
+    },
+    {
+      "case_type": "management_governance_negative",
+      "case_label_ko": "경영진 이탈·거버넌스 충격",
+      "top_level": "short",
+      "total_count": 25,
+      "impacted_count": 7,
+      "max_impact_score": 235.8553
+    },
+    {
+      "case_type": "supply_chain_tailwind_positive",
+      "case_label_ko": "공급망 완화·원가 개선 read-through",
+      "top_level": "long",
+      "total_count": 3,
+      "impacted_count": 0,
+      "max_impact_score": 11.5143
+    }
+  ]
+}

@@ -166,3 +166,111 @@
 - 상태:
   - taxonomy 재설계 방향 정리 완료
   - 사용자 확인 대기
+
+## 2026-03-26
+**업데이트 시각:** 20:35 (local)
+
+- 후속기사 확장 판독:
+  - `test_model2_company_news_followup_wide_probe.mjs`로 explanation-style `company_news`를 더 넓게 추출
+  - 결과 파일: `terminal/backend/out/model2_company_news_followup_wide_probe.json`
+  - 범위: 샘플 `180건`, impacted 상위 `80건`
+- 핵심 확인 사항:
+  - `meaningless_others = 26,558`, `macro_sector_readthrough = 5,855`
+  - `meaningless_others` 안에 실제 가격 설명력이 있는 기사 패턴이 대량으로 남아 있음
+  - 반복적으로 보인 승격 후보 묶음:
+    - 정책/법안/규제 framework read-through
+    - peer capex / 경쟁 심화 read-through
+    - adjacent product / substitute threat
+    - analyst mention / note amplification
+    - valuation skepticism / multiple compression
+    - insider buy / fund positioning
+    - supplier / customer / ecosystem dependency
+    - media amplification / top mover explanation
+    - event-ahead speculation / breakout-failure
+    - low-information listicle / trending-stock recap
+- plan 반영:
+  - 넓게 읽은 결과를 바탕으로 `plan.md`에 corpus 2차 판독 결과와 우선 승격 후보 묶음을 추가
+
+## 2026-03-26
+**업데이트 시각:** 20:50 (local)
+
+- taxonomy 정제 진행:
+  - 1차 48개 후보를 실제 분류기 반영을 염두에 둔 `taxonomy v2 초안`으로 압축
+  - 구조:
+    - Direct Long 9
+    - Direct Short 9
+    - Indirect Long 8
+    - Indirect Short 8
+    - Information-Flow / Explanation Mechanics 5
+    - True Residual 3
+  - 총 42개로 정리
+- 대표 매핑 예시를 plan에 추가:
+  - `Clarity Act` -> `정책·법안 역풍 read-through`
+  - `Micron vs SK Hynix capex` -> `peer capex 확대 / 경쟁 심화 read-through`
+  - `ServiceNow vs Anthropic product` -> `adjacent product / substitute threat`
+  - `Corning top mover` -> `analyst mention` 또는 `media amplification`
+  - `Lucid reverse split + analyst cut` -> direct short 복합형
+- 상태:
+  - 실제 후속기사 기반 taxonomy 준비 단계 진행 중
+  - 다음은 각 case에 포함 신호 / 제외 신호 / 경계 사례를 붙이는 작업
+
+## 2026-03-26
+**업데이트 시각:** 16:37 (local)
+
+- taxonomy v3 코드 반영:
+  - `ai_research_tool/test_model2_company_news_analysis.py`
+    - company_news classifier를 taxonomy v3 기준으로 교체
+    - `macro_sector_readthrough` broad bucket을 유지하지 않고 policy / peer / supply-chain / valuation / flow / media / transcript / feature 계열로 세분화
+    - markdown note에 각 case별 정의, 가치 경로, 포함/제외 신호, 빠른 판별 질문, 대표 예시를 출력하도록 확장
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/model2CaseDescriptions.ts`
+    - evidence table 우클릭 description 창이 taxonomy v3 case key를 읽을 수 있게 교체
+    - 기존 run을 위해 legacy key alias도 유지
+- taxonomy v3 재실행:
+  - 실행 명령:
+    - `C:/Users/home/AppData/Local/Programs/Python/Python313/python.exe ai_research_tool/test_model2_company_news_analysis.py --page-id 99a89607-d943-4a57-8a98-be8ba86f731b`
+  - 결과:
+    - `analysis_id = 2b5ab4d1-a1dd-4906-8226-e21d8bd41465`
+    - `total_rows = 599681`
+    - `analyzable_rows = 527876`
+    - `impacted_rows = 105608`
+    - `meaningless_rows = 371983`
+    - target page 갱신 완료
+- 비교 확인:
+  - old run `meaningless_rows = 448556`
+  - new run `meaningless_rows = 371983`
+  - residual broad bucket에서 `76573` row가 독립 case로 이동
+- 대표 top case 확인:
+  - `analyst_upgrade_positive = 30672`
+  - `macro_market_commentary = 25451`
+  - `commercial_launch_expansion_positive = 22505`
+  - `peer_competition_negative = 13505`
+- 검증:
+  - frontend `npm.cmd run build` 성공
+  - backend API raw 확인:
+    - `GET /api/model2/analyses` -> 새 run 노출 확인
+    - `GET /api/model2/analyses/2b5ab4d1-a1dd-4906-8226-e21d8bd41465/cases` -> 새 taxonomy case label 노출 확인
+- 상태:
+  - taxonomy v3가 code -> DB run -> page -> API까지 반영됨
+  - 브라우저 시각 확인은 사용자 확인 대기
+
+## 2026-03-26
+**업데이트 시각:** 21:10 (local)
+
+- 사용자 버그 리포트 반영:
+  - evidence table 유형 메뉴에서 우클릭 후 `description` 클릭 시 설명 창이 안 열린다는 문제 확인
+  - 추가 요구: description 안에 어떤 키워드/신호를 기준으로 분류했는지도 보여주기
+- 원인 확인:
+  - context menu가 dropdown 바깥의 fixed layer에 렌더링되는데, 외부 클릭 감지가 해당 메뉴 클릭까지 바깥 클릭으로 처리해서 `mousedown` 시점에 먼저 닫히고 있었음
+  - 따라서 `description` 버튼 `onClick`이 실제로 실행되지 못하는 구조였음
+- 수정 내용:
+  - `EvidenceTableWindow.tsx`
+    - context menu ref를 추가하고 outside-click 판정에서 context menu 내부 클릭을 예외 처리
+  - `src/app/types.ts`, `src/app/model2CaseDescriptions.ts`
+    - `classificationBasis`, `keywordSignals` 필드 추가
+    - include/exclude signals 기준으로 기본 분류 기준 문구를 자동 생성하도록 보강
+  - `src/app/components/CaseDescriptionWindow.tsx`
+    - `분류 기준`, `분류 키워드` 섹션 추가
+- 검증 예정:
+  - frontend 정적 오류 확인
+  - frontend build 확인
+  - 우클릭 `description` -> `Case Description` 창 오픈 수동 확인

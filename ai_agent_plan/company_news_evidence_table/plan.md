@@ -181,6 +181,36 @@
   - 현재 residual bucket에는 `저정보 잡기사`와 `간접 영향 설명 기사`가 섞여 있다.
   - 따라서 taxonomy 재설계의 1차 목적은 **residual 정리**가 아니라 **가격 설명력 있는 indirect 후속기사의 독립 유형화**다.
 
+### 후속기사 corpus 2차 확장 판독에서 확인한 것
+- explanation-style filter를 넓혀 `2025-01-01+ company_news`에서 **180건 샘플 / impacted 상위 80건**을 추가 판독했다.
+- 집계 결과:
+  - `meaningless_others`: `26,558`건 (`impacted_count = 5,101`)
+  - `macro_sector_readthrough`: `5,855`건 (`impacted_count = 1,784`)
+  - 그 외 analyst/product/earnings/M&A는 상대적으로 작지만 안정적 패턴을 보임
+- publisher 분포:
+  - `YAHOO` 비중이 압도적으로 높고, 그 안에 **진짜 후속 설명 기사**와 **Zacks/24-7WS/listicle형 저정보 기사**가 혼재한다.
+  - `SEEKINGALPHA`, `BENZINGA`, `MARKETWATCH`는 상대적으로 설명 밀도가 높지만, opinion/commentary 기사도 많이 섞여 있다.
+- 추가로 확인한 반복 패턴:
+  - `formal analyst action`과 `analyst mention / single-line note`는 다른 유형으로 봐야 한다.
+  - `peer strong capex / peer aggressive investment / peer product launch`는 개별 회사 직접 이벤트가 아니지만 가격 설명력이 반복된다.
+  - `valuation skepticism`, `too expensive`, `buy the dip or fold`, `is it still a buy` 류는 단순 listicle과 달리 **valuation narrative** 자체가 핵심일 때가 있다.
+  - `insider purchase`, `fund letter`, `position established`, `de-grossing`, `profit-taking` 류는 수급/포지셔닝 explanation으로 독립성이 있다.
+  - `supply chain rule`, `rare earth sourcing`, `tariff exposure`, `yield ban`, `regulatory framework` 류는 policy / supply-chain read-through로 반복된다.
+  - 반면 `top stock`, `worth buying`, `trending stock`, `portfolio for now`, `momentum stock` 류는 여전히 진짜 `low-information residual`에 가깝다.
+
+### 넓게 읽은 뒤 정리한 우선 승격 후보 묶음
+- 아래 묶음들은 `meaningless_others`에서 우선 분리해야 할 가능성이 높다.
+1. 정책·법안·규제 framework read-through
+2. peer capex / 경쟁사 투자 / 경쟁 심화 read-through
+3. adjacent product / substitute threat read-through
+4. sell-side formal action과 별개인 `analyst mention / analyst note amplification`
+5. valuation skepticism / multiple compression narrative
+6. insider buy / fund positioning / ownership-change explanation
+7. supplier / customer / ecosystem dependency read-through
+8. media amplification / headline cascade / top mover explanation
+9. event-ahead speculation / breakout-failure / resistance-level narrative
+10. low-information listicle / generic recommendation / trending-stock recap
+
 ### 예비 taxonomy 후보 (최소 30개)
 아래 목록은 1차 corpus 판독 후 정리한 후보이며, 최종 taxonomy는 이 중 병합/분할을 거쳐 확정한다.
 
@@ -244,12 +274,106 @@
 47. generic portfolio advice / buy-now commentary
 48. low-information recap / 홍보성 반복 기사
 
+### taxonomy v2 초안 (실전 분류용 36개)
+아래 36개는 넓게 읽은 후속기사 샘플을 바탕으로 **실제로 분류기에 반영할 수 있는 수준**으로 1차 압축한 구조다.
+
+#### A. Direct Long (9)
+1. 실적 호조·가이던스 상향
+2. 애널리스트 상향·목표가 상향
+3. 대형 계약·수주 확보
+4. 전략적 파트너십·유통 제휴
+5. 신제품 출시·상업화 진전
+6. 수요 급증·백로그 확대
+7. 승인·임상 호재
+8. 자산 매각·전략가치 재평가·M&A 프리미엄
+9. 주주환원 강화·자사주 매입
+
+#### B. Direct Short (9)
+10. 실적 부진·가이던스 하향
+11. 애널리스트 하향·목표가 하향
+12. 희석성 자금조달·reverse split 포함 생존형 금융공학
+13. 규제·임상 악재
+14. 소송·조사·회계 리스크
+15. 구조조정·생존성 악화·상장유지 리스크
+16. 핵심 계약 해지·고객 이탈
+17. 제품 실패·리콜·출시 지연
+18. 경영진 이탈·지배구조 충격
+
+#### C. Indirect Long Read-through (8)
+19. 정책·법안 수혜 read-through
+20. 금리·거시 완화 수혜 read-through
+21. 섹터 심리 회복·risk-on read-through
+22. peer strong earnings / peer validation read-through
+23. 공급망 완화·원가 하락 수혜
+24. 경쟁사 약화에 따른 share-gain 기대
+25. ecosystem / supplier / customer expansion 수혜
+26. insider buy / ownership accumulation / positioning squeeze long
+
+#### D. Indirect Short Read-through (8)
+27. 정책·법안 역풍 read-through
+28. 금리·거시 악화 read-through
+29. 섹터 디레이팅·risk-off read-through
+30. peer capex 확대 / 경쟁 심화 read-through
+31. adjacent product / substitute threat read-through
+32. 공급망 규제·원가 상승·소재 제약 read-through
+33. customer spend cut / end-market 둔화 read-through
+34. valuation 부담·multiple compression narrative
+
+#### E. Information-Flow / Explanation Mechanics (5)
+35. analyst mention / single-line note amplification
+36. media amplification / top mover / headline cascade explanation
+37. event-ahead speculation / breakout-failure / technical narrative
+38. fund letter / portfolio rebalance / ownership-disclosure explanation
+39. meme / retail-flow / squeeze / profit-taking explanation
+
+#### F. True Residual / Low-Information (3)
+40. listicle / top stocks / trending-stock roundup
+41. generic portfolio advice / worth buying / hold-or-sell commentary
+42. low-information recap / 홍보성 반복 / 사건 불명확 기사
+
+### taxonomy v2 적용 원칙
+- `A, B`는 **직접 사건 유형**이다. headline/lead만 읽어도 회사 내부 또는 회사에 직접 연결된 경제 사건이 보인다.
+- `C, D`는 **간접 영향 read-through 유형**이다. 직접 공시는 아니지만 외부 사건이 현재 ticker의 가격 설명에 반복적으로 사용된다.
+- `E`는 **정보 전달 메커니즘 자체가 가격 설명에 등장하는 유형**이다. analyst formal action과는 다르지만, note mention / top mover 기사 / ownership disclosure / squeeze narrative처럼 반복성이 있다.
+- `F`만이 진짜 residual이다. 여기에는 사용자가 말한 `왜 올랐는가/왜 떨어졌는가` 설명력이 약한 기사만 남겨야 한다.
+
+### 넓게 읽은 샘플에서 v2 taxonomy로 바로 매핑되는 대표 예시
+- `Clarity Act Deal Could Ban Stablecoin Yields; Circle Leads Crypto Sell-Off`
+  - 현재: `meaningless_others`
+  - v2 후보: `27. 정책·법안 역풍 read-through`
+- `Circle Internet Group Tumbles. Why the Clarity Act Is Crushing Crypto Stocks.`
+  - 현재: `meaningless_others`
+  - v2 후보: `27. 정책·법안 역풍 read-through`
+- `SK Hynix Plans Big Investment Push. Why Micron Stock Is Dropping.`
+  - 현재: `meaningless_others`
+  - v2 후보: `30. peer capex 확대 / 경쟁 심화 read-through`
+- `Why ServiceNow Stock Was Drifting Lower Today`
+  - 현재: `macro_sector_readthrough`
+  - v2 후보: `31. adjacent product / substitute threat read-through`
+- `Corning Is Up 9%. Why It’s the Top Mover in the S&P 500.`
+  - 현재: `meaningless_others`
+  - v2 후보: `35. analyst mention / single-line note amplification` 또는 `36. media amplification / top mover explanation`
+- `Why Grocery Outlet Stock Soared 11% Higher Today`
+  - 현재: `macro_sector_readthrough`
+  - v2 후보: `38. fund letter / ownership-disclosure explanation`과 인접, 또는 insider/flow 설명 축 추가 검토
+- `Why Lucid (LCID) Stock Is Trading Lower Today`
+  - 현재: `macro_sector_readthrough`
+  - v2 후보: `12. 희석성 자금조달·reverse split 포함 생존형 금융공학` + `11. analyst 하향` 복합형
+
+### taxonomy v2에서 추가 확인이 필요한 경계
+- `formal analyst action`과 `analyst mention amplification`의 경계
+- `macro_sector_readthrough`와 `policy/legislation read-through`의 경계
+- `valuation narrative`와 `generic opinion commentary`의 경계
+- `ownership/positioning explanation`과 `meme-flow explanation`의 경계
+- `technical narrative`를 독립 유형으로 둘지, explanation mechanics 하위 subtype으로 둘지
+
 ### 제안하는 구현 순서(이유)
 1. 먼저 실제 후속기사들을 더 읽고, direct / indirect / meaningless를 가르는 판별선을 분명히 해야 한다.
 2. 그 다음 최소 30개 이상의 taxonomy 초안을 만든다.
-3. 그 다음 각 case의 포함/제외 신호와 경계 사례를 작성한다.
-4. 그 뒤에 그 taxonomy를 기존 analysis run과 evidence table에 어떻게 반영할지 결정한다.
-5. 마지막에 재분류 구현과 page/evidence 갱신을 진행한다.
+3. explanation-style 기사만 따로 놓고 `진짜 low-information residual`과 `독립 승격 후보`를 먼저 분리한다.
+4. 그 다음 각 case의 포함/제외 신호와 경계 사례를 작성한다.
+5. 그 뒤에 그 taxonomy를 기존 analysis run과 evidence table에 어떻게 반영할지 결정한다.
+6. 마지막에 재분류 구현과 page/evidence 갱신을 진행한다.
 
 ### 제안하는 구현 순서(이유)
 1. 먼저 `분석`이 규칙 기반 자동 분류인지, agent 주도 taxonomy 설계인지 확정해야 한다.
@@ -294,6 +418,33 @@
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
 | 2-1 | company news 전체를 어떤 source/source_type 범위로 볼지 확정 | `ai_agent_plan/company_news_evidence_table/plan.md` | 범위 정의 문구 확인 | ⬜ |
+
+### 2026-03-26 taxonomy v3 실행 반영 결과
+- 실제 반영 파일:
+  - `ai_research_tool/test_model2_company_news_analysis.py`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/model2CaseDescriptions.ts`
+- 실행 결과:
+  - 새 analysis id: `2b5ab4d1-a1dd-4906-8226-e21d8bd41465`
+  - page id `99a89607-d943-4a57-8a98-be8ba86f731b` 본문 갱신 완료
+  - scope: `company_news_2025_plus_taxonomy_v3`
+- 핵심 변화:
+  - 기존 broad residual이던 `macro_sector_readthrough`를 유지하지 않고 `macro_market_commentary`, `policy_regulatory_*`, `peer_competition_negative`, `supply_chain_*`, `valuation_narrative_*`, `media_amplification_*` 등으로 분리
+  - UI case description registry를 taxonomy v3 기준으로 교체하고, old run 조회를 위해 legacy key도 호환 유지
+- 1차 집계 비교:
+  - old run `meaningless_rows = 448,556`
+  - new run `meaningless_rows = 371,983`
+  - 즉 `76,573` row가 residual broad bucket 밖의 독립 case로 이동
+- API 확인 결과:
+  - `/api/model2/analyses`에서 새 run 노출 확인
+  - `/api/model2/analyses/2b5ab4d1-a1dd-4906-8226-e21d8bd41465/cases`에서 새 case key와 한글 라벨 노출 확인
+
+### 이번 단계 검증 결과
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `test_model2_company_news_analysis.py`, `model2CaseDescriptions.ts` 에러 0개 |
+| 빌드 | ✅ | frontend `npm.cmd run build` 성공 |
+| 자동 테스트 | ✅ | 변경 대상에 전용 테스트가 없어 분류 스크립트 실실행으로 대체 검증 |
+| 런타임 통합 | ✅ | taxonomy v3 스크립트 실행 완료 + page 저장 + backend API raw 응답 확인 |
 | 2-2 | company news용 case_type, top_level(long/short/residual), evidence row 최소 컬럼 설계 | `ai_agent_plan/company_news_evidence_table/plan.md` | 컬럼 목록 확인 | ⬜ |
 | 2-3 | summary 필드 정의를 고정 | `ai_agent_plan/company_news_evidence_table/plan.md` | summary가 body인지 full_text preview인지 명시 확인 | ⬜ |
 | 2-4 | 유형 메뉴와 표 필터에 필요한 key 구조 정의 | `ai_agent_plan/company_news_evidence_table/plan.md` | `case_type`, `top_level`, `news_id` 관계 확인 | ⬜ |
@@ -440,6 +591,13 @@
 - case 메뉴 우클릭 -> description 버튼 -> Case Description 창 렌더링 확인
 ```
 사용자 확인 필요: **예**
+
+### PLAN CHANGE — 2026-03-26 21:10
+
+- Step 5-6 / 5-7 보강:
+  - 우클릭 context menu가 `description` 클릭 전에 닫히는 pointer-down 충돌을 수정한다.
+  - `Case Description` 창에 `분류 기준`과 `분류 키워드` 섹션을 추가해, 어떤 keyword/signal을 기준으로 분류했는지 바로 읽을 수 있게 한다.
+  - taxonomy registry key가 없는 경우에도 fallback 설명은 유지하되, 기본 분류 기준 문구는 포함/제외 신호에서 자동 생성한다.
 
 #### ⬜ Step 6 — 전체 검증
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |

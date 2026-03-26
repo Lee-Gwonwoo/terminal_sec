@@ -31,6 +31,20 @@ export function CaseDescriptionWindow({ data }: CaseDescriptionWindowProps) {
         </section>
 
         <section>
+          <h3 className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">분류 기준</h3>
+          <p>{data.classificationBasis}</p>
+        </section>
+
+        <section>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">분류 키워드</h3>
+          <div className="flex flex-wrap gap-2">
+            {data.keywordSignals.map(item => (
+              <span key={item} className="rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-xs text-blue-700 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-300">{item}</span>
+            ))}
+          </div>
+        </section>
+
+        <section>
           <h3 className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">한 줄 정의</h3>
           <p>{data.definition}</p>
         </section>

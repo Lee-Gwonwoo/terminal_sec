@@ -109,6 +109,7 @@ export function EvidenceTableWindow() {
   const [isCaseMenuOpen, setIsCaseMenuOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: CaseSummary } | null>(null);
   const caseMenuRef = useRef<HTMLDivElement | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const effectiveAnalysisId = selectedAnalysisId || analyses[0]?.id || '';
 
   const selectedAnalysis = useMemo(
@@ -227,7 +228,10 @@ export function EvidenceTableWindow() {
 
   useEffect(() => {
     const handlePointerDown = (event: MouseEvent) => {
-      if (caseMenuRef.current && !caseMenuRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      const clickedInsideCaseMenu = caseMenuRef.current?.contains(target) ?? false;
+      const clickedInsideContextMenu = contextMenuRef.current?.contains(target) ?? false;
+      if (!clickedInsideCaseMenu && !clickedInsideContextMenu) {
         setIsCaseMenuOpen(false);
         setContextMenu(null);
       }
@@ -454,6 +458,7 @@ export function EvidenceTableWindow() {
 
       {contextMenu && (
         <div
+          ref={contextMenuRef}
           className="fixed z-40 min-w-[180px] rounded-lg border border-slate-200 bg-white p-1 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
           style={{ top: contextMenu.y, left: contextMenu.x }}
         >

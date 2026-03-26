@@ -7,6 +7,8 @@ export interface CaseDescriptionWindowData {
   caseLabelKo: string;
   topLevel: string;
   description: string;
+  classificationBasis: string;
+  keywordSignals: string[];
   definition: string;
   valuePath: string;
   includeSignals: string[];
