@@ -75,10 +75,10 @@ export interface ListModel2EvidenceOptions {
 }
 
 const SORT_COLUMN_SQL: Record<string, string> = {
-  published_at: "ni.published_at",
+  published_at: "er.published_at",
   ticker: "er.ticker",
-  title: "ni.title",
-  publisher: "ni.publisher",
+  title: "er.title",
+  publisher: "er.publisher",
   case_type: "er.case_type",
   reaction_tag: "er.reaction_tag",
   impact_score: "er.overall_impact_score",
@@ -136,17 +136,15 @@ export async function listModel2CaseSummaries(analysisId: string): Promise<Model
   const db = getDb();
   return db.all<Model2CaseSummary[]>(
     `SELECT
-       er.case_type AS caseType,
-       er.case_label_ko AS caseLabelKo,
-       er.top_level AS topLevel,
-       COUNT(*) AS totalCount,
-       SUM(CASE WHEN er.is_impacted = 1 THEN 1 ELSE 0 END) AS impactedCount,
-       MAX(ni.published_at) AS latestPublishedAt
-     FROM model2_evidence_rows er
-     JOIN news_items ni ON ni.id = er.news_id
-     WHERE er.analysis_id = ?
-     GROUP BY er.case_type, er.case_label_ko, er.top_level
-     ORDER BY totalCount DESC, impactedCount DESC, er.case_type ASC`,
+       case_type AS caseType,
+       case_label_ko AS caseLabelKo,
+       top_level AS topLevel,
+       total_count AS totalCount,
+       impacted_count AS impactedCount,
+       latest_published_at AS latestPublishedAt
+     FROM model2_case_summaries
+     WHERE analysis_id = ?
+     ORDER BY totalCount DESC, impactedCount DESC, case_type ASC`,
     analysisId,
   );
 }
@@ -155,34 +153,59 @@ export async function listModel2EvidenceRows(options: ListModel2EvidenceOptions)
   const db = getDb();
   const where: string[] = ["er.analysis_id = ?"];
   const values: unknown[] = [options.analysisId];
+  const normalizedCaseType = options.caseType && options.caseType !== "all" ? options.caseType : undefined;
+  const normalizedTicker = options.ticker && options.ticker.trim() ? options.ticker.trim().toUpperCase() : undefined;
+  const normalizedKeyword = options.keyword && options.keyword.trim() ? options.keyword.trim().toLowerCase() : undefined;
 
-  if (options.caseType && options.caseType !== "all") {
+  if (normalizedCaseType) {
     where.push("er.case_type = ?");
-    values.push(options.caseType);
+    values.push(normalizedCaseType);
   }
 
-  if (options.ticker && options.ticker.trim()) {
+  if (normalizedTicker) {
     where.push("er.ticker = ?");
-    values.push(options.ticker.trim().toUpperCase());
+    values.push(normalizedTicker);
   }
 
-  if (options.keyword && options.keyword.trim()) {
-    where.push("LOWER(COALESCE(ni.title, '') || ' ' || COALESCE(er.summary, '') || ' ' || COALESCE(ni.body, '')) LIKE ?");
-    values.push(`%${options.keyword.trim().toLowerCase()}%`);
+  if (normalizedKeyword) {
+    where.push("LOWER(COALESCE(er.title, '') || ' ' || COALESCE(er.summary, '') || ' ' || COALESCE(er.body_preview, '')) LIKE ?");
+    values.push(`%${normalizedKeyword}%`);
   }
 
   const whereSql = `WHERE ${where.join(" AND ")}`;
-  const totalRow = await db.get<{ total: number }>(
-    `SELECT COUNT(*) AS total
-     FROM model2_evidence_rows er
-     JOIN news_items ni ON ni.id = er.news_id
-     ${whereSql}`,
-    ...values,
-  );
+  let total = 0;
+  if (!normalizedKeyword && !normalizedTicker) {
+    if (!normalizedCaseType) {
+      const analysisRow = await db.get<{ total_rows: number }>(
+        `SELECT total_rows
+         FROM model2_analysis_runs
+         WHERE id = ?`,
+        options.analysisId,
+      );
+      total = analysisRow?.total_rows ?? 0;
+    } else {
+      const summaryRow = await db.get<{ total_count: number }>(
+        `SELECT total_count
+         FROM model2_case_summaries
+         WHERE analysis_id = ? AND case_type = ?`,
+        options.analysisId,
+        normalizedCaseType,
+      );
+      total = summaryRow?.total_count ?? 0;
+    }
+  } else {
+    const totalRow = await db.get<{ total: number }>(
+      `SELECT COUNT(*) AS total
+       FROM model2_evidence_rows er
+       ${whereSql}`,
+      ...values,
+    );
+    total = totalRow?.total ?? 0;
+  }
 
   const sortBy = normalizeSortBy(options.sortBy);
   const sortDir = normalizeSortDir(options.sortDir);
-  const orderSql = `${SORT_COLUMN_SQL[sortBy]} ${sortDir}, ni.id DESC`;
+  const orderSql = `${SORT_COLUMN_SQL[sortBy]} ${sortDir}, er.id DESC`;
   const limit = clampLimit(options.limit);
   const offset = clampOffset(options.offset);
 
@@ -214,15 +237,14 @@ export async function listModel2EvidenceRows(options: ListModel2EvidenceOptions)
        er.medium_persistence_score AS mediumPersistenceScore,
        er.overall_impact_score AS overallImpactScore,
        er.summary,
-       ni.published_at AS publishedAt,
-       ni.source,
-       ni.publisher,
-       ni.source_type AS sourceType,
-       ni.title,
-       ni.body,
-       ni.url
+       er.published_at AS publishedAt,
+       er.source,
+       er.publisher,
+       er.source_type AS sourceType,
+       er.title,
+       SUBSTR(COALESCE(er.body_preview, ''), 1, 280) AS body,
+       er.url
      FROM model2_evidence_rows er
-     JOIN news_items ni ON ni.id = er.news_id
      ${whereSql}
      ORDER BY ${orderSql}
      LIMIT ? OFFSET ?`,
@@ -232,7 +254,7 @@ export async function listModel2EvidenceRows(options: ListModel2EvidenceOptions)
   );
 
   return {
-    total: totalRow?.total ?? 0,
+    total,
     items: items.map(row => ({
       ...row,
       isImpacted: Boolean(row.isImpacted),

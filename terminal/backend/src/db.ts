@@ -433,15 +433,47 @@ export async function initDb(): Promise<void> {
       medium_persistence_score REAL,
       overall_impact_score REAL,
       summary TEXT,
+      published_at TEXT,
+      source TEXT,
+      publisher TEXT,
+      source_type TEXT,
+      title TEXT,
+      body_preview TEXT,
+      url TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE (analysis_id, news_id)
     );
   `);
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS model2_case_summaries (
+      analysis_id TEXT NOT NULL REFERENCES model2_analysis_runs(id) ON DELETE CASCADE,
+      case_type TEXT NOT NULL,
+      case_label_ko TEXT NOT NULL,
+      top_level TEXT NOT NULL,
+      total_count INTEGER NOT NULL DEFAULT 0,
+      impacted_count INTEGER NOT NULL DEFAULT 0,
+      latest_published_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (analysis_id, case_type)
+    );
+  `);
+  await ensureColumn("model2_evidence_rows", "published_at", "TEXT");
+  await ensureColumn("model2_evidence_rows", "source", "TEXT");
+  await ensureColumn("model2_evidence_rows", "publisher", "TEXT");
+  await ensureColumn("model2_evidence_rows", "source_type", "TEXT");
+  await ensureColumn("model2_evidence_rows", "title", "TEXT");
+  await ensureColumn("model2_evidence_rows", "body_preview", "TEXT");
+  await ensureColumn("model2_evidence_rows", "url", "TEXT");
   await db.exec("CREATE INDEX IF NOT EXISTS idx_model2_runs_page_created ON model2_analysis_runs(page_id, created_at DESC);");
   await db.exec("CREATE INDEX IF NOT EXISTS idx_model2_runs_source_created ON model2_analysis_runs(source_type, created_at DESC);");
   await db.exec("CREATE INDEX IF NOT EXISTS idx_model2_evidence_analysis_case ON model2_evidence_rows(analysis_id, case_type);");
   await db.exec("CREATE INDEX IF NOT EXISTS idx_model2_evidence_analysis_ticker ON model2_evidence_rows(analysis_id, ticker);");
   await db.exec("CREATE INDEX IF NOT EXISTS idx_model2_evidence_analysis_impact ON model2_evidence_rows(analysis_id, overall_impact_score DESC);");
+  await db.exec("CREATE INDEX IF NOT EXISTS idx_model2_evidence_analysis_published ON model2_evidence_rows(analysis_id, published_at DESC, id DESC);");
+  await db.exec("CREATE INDEX IF NOT EXISTS idx_model2_evidence_analysis_case_published ON model2_evidence_rows(analysis_id, case_type, published_at DESC, id DESC);");
+  await db.exec("CREATE INDEX IF NOT EXISTS idx_model2_evidence_analysis_ticker_published ON model2_evidence_rows(analysis_id, ticker, published_at DESC, id DESC);");
+  await db.exec("CREATE INDEX IF NOT EXISTS idx_model2_case_summaries_analysis_total ON model2_case_summaries(analysis_id, total_count DESC, impacted_count DESC, case_type);");
 
   // SEC Filings companion table — stores Finnhub SEC filing metadata alongside news_items
   await db.exec(`
@@ -466,6 +498,118 @@ export async function initDb(): Promise<void> {
 
   await purgeLegacyFinnhubSecFilings();
   await migrateFinnhubCompanyNewsPublishedAtToEt();
+  await backfillModel2EvidenceRowsNewsFields();
+  await refreshModel2CaseSummariesCache();
+}
+
+async function backfillModel2EvidenceRowsNewsFields(): Promise<void> {
+  const missing = await db.get<{ count: number }>(
+    `SELECT COUNT(*) AS count
+     FROM model2_evidence_rows
+     WHERE published_at IS NULL
+        OR source IS NULL
+        OR source_type IS NULL
+        OR title IS NULL
+        OR url IS NULL`,
+  );
+
+  if (!missing || missing.count === 0) {
+    return;
+  }
+
+  await db.exec("BEGIN TRANSACTION");
+  try {
+    await db.run(
+      `UPDATE model2_evidence_rows
+       SET published_at = COALESCE(
+             published_at,
+             (SELECT ni.published_at FROM news_items ni WHERE ni.id = model2_evidence_rows.news_id)
+           ),
+           source = COALESCE(
+             source,
+             (SELECT ni.source FROM news_items ni WHERE ni.id = model2_evidence_rows.news_id)
+           ),
+           publisher = COALESCE(
+             publisher,
+             (SELECT ni.publisher FROM news_items ni WHERE ni.id = model2_evidence_rows.news_id)
+           ),
+           source_type = COALESCE(
+             source_type,
+             (SELECT ni.source_type FROM news_items ni WHERE ni.id = model2_evidence_rows.news_id)
+           ),
+           title = COALESCE(
+             title,
+             (SELECT ni.title FROM news_items ni WHERE ni.id = model2_evidence_rows.news_id)
+           ),
+           body_preview = COALESCE(
+             body_preview,
+             SUBSTR((SELECT ni.body FROM news_items ni WHERE ni.id = model2_evidence_rows.news_id), 1, 600)
+           ),
+           url = COALESCE(
+             url,
+             (SELECT ni.url FROM news_items ni WHERE ni.id = model2_evidence_rows.news_id)
+           )
+       WHERE published_at IS NULL
+          OR source IS NULL
+          OR source_type IS NULL
+          OR title IS NULL
+          OR url IS NULL`,
+    );
+    await db.exec("COMMIT");
+    console.log(`[db] backfilled ${missing.count} model2 evidence rows with denormalized news fields`);
+  } catch (error) {
+    await db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+async function refreshModel2CaseSummariesCache(): Promise<void> {
+  const analysisRows = await db.all<{ id: string }[]>(
+    `SELECT id
+     FROM model2_analysis_runs
+     WHERE id NOT IN (SELECT DISTINCT analysis_id FROM model2_case_summaries)`,
+  );
+
+  if (analysisRows.length === 0) {
+    return;
+  }
+
+  await db.exec("BEGIN TRANSACTION");
+  try {
+    for (const row of analysisRows) {
+      await db.run("DELETE FROM model2_case_summaries WHERE analysis_id = ?", row.id);
+      await db.run(
+        `INSERT INTO model2_case_summaries (
+           analysis_id,
+           case_type,
+           case_label_ko,
+           top_level,
+           total_count,
+           impacted_count,
+           latest_published_at,
+           updated_at
+         )
+         SELECT
+           analysis_id,
+           case_type,
+           MAX(case_label_ko) AS case_label_ko,
+           MAX(top_level) AS top_level,
+           COUNT(*) AS total_count,
+           SUM(CASE WHEN is_impacted = 1 THEN 1 ELSE 0 END) AS impacted_count,
+           MAX(published_at) AS latest_published_at,
+           datetime('now') AS updated_at
+         FROM model2_evidence_rows
+         WHERE analysis_id = ?
+         GROUP BY analysis_id, case_type`,
+        row.id,
+      );
+    }
+    await db.exec("COMMIT");
+    console.log(`[db] refreshed model2 case summary cache for ${analysisRows.length} analyses`);
+  } catch (error) {
+    await db.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 async function migrateFinnhubCompanyNewsPublishedAtToEt(): Promise<void> {

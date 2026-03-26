@@ -1,9 +1,9 @@
 ### 목표
-- `page id = 99a89607-d943-4a57-8a98-be8ba86f731b` 대상의 Model 2 분석 결과를 company news 기준으로 정리한다.
-- 기존 research page 본문에는 company news 전체를 분류한 유형 체계와 유형 설명을 저장한다.
-- 별도 새 window `evidence table`을 추가해, 유형별 근거 뉴스 행들을 표 형태로 조회할 수 있게 한다.
-- `evidence table` window 안에서 유형별 메뉴 선택, 제목/발행시각/publish/summary 등 뉴스 필드 표시, 정렬, 키워드 검색, ticker 검색을 지원한다.
-- 이번 단계에서는 **plan만 작성**하고, 아직 분석 실행이나 UI 구현은 하지 않는다.
+- 최종 목적은 **`company_news` 후속기사들을 읽어, “왜 종목이 올랐고 왜 떨어졌는가”를 설명하는 정보 유형의 taxonomy를 만드는 것**이다.
+- 이 taxonomy는 **개별 티커의 직접 이벤트**뿐 아니라, **정책·섹터·peer·수급·경쟁사·밸류에이션·포지셔닝 변화처럼 간접적으로 가격에 영향을 미치는 read-through 정보**도 포함해야 한다.
+- `page id = 99a89607-d943-4a57-8a98-be8ba86f731b` 대상 research page 본문에는, 위 목적에 맞는 상세 taxonomy와 각 유형의 정의/경계/대표 예시를 저장한다.
+- `evidence table`은 최종 목적 자체가 아니라, **taxonomy가 실제 후속기사에 어떻게 적용되는지 검증하는 도구**로 유지한다.
+- 따라서 이번 plan의 중심은 `UI 구현`이 아니라, **후속기사 corpus 판독 -> 가격 영향 정보 유형 추출 -> 30개 이상 상세 taxonomy 설계 -> 그 taxonomy를 저장/검증 가능한 구조로 반영**이다.
 
 ### 현재 진행 상태(2026-03-26 업데이트)
 - 완료:
@@ -14,16 +14,50 @@
     - `GET /api/model2/analyses/:analysisId/cases`
     - `GET /api/model2/analyses/:analysisId/evidence`
   - frontend에 새 window type `evidence-table` 및 `EvidenceTableWindow.tsx` 추가
+  - 각 case가 어떤 기준으로 분류됐는지 보여주는 `Case Description` 창 및 description 데이터 추가
+  - `Evidence Table`의 case 메뉴 항목 우클릭 시 `description` 버튼이 나타나고, 클릭 시 새 창을 열도록 구현
   - `2025-01-01+ company_news` 대상 1차 Model 2 분석 run 생성 및 page 저장 완료
+  - `why stock moved` 성격의 `company_news` 후속기사 샘플 25건 1차 판독 완료
 - 생성된 첫 analysis run:
   - `analysis_id = 6ec343f2-d7be-43e1-9297-90e5c35643ea`
   - 전체 row: `599,681`
   - analyzable row: `527,876`
   - impacted row: `105,608`
   - `잡것들`: `448,556`
+- 후속기사 explanation-style 샘플 1차 점검 결과:
+  - 현재 분류기에서 `why / tumbles / surges / sell-off` 성격 기사 중 `18,489`건이 `meaningless_others`로 분류됨
+  - 같은 집합에서 `macro_sector_readthrough`는 `5,213`건으로, residual bucket이 가격 설명력 있는 기사까지 과도하게 삼키고 있음
+  - 실제 샘플에는 아래처럼 `직접 공시`는 아니지만 가격 영향 설명력이 분명한 기사가 포함됨
+    - `Clarity Act ... crypto sell-off` -> 정책/법안 read-through
+    - `SK Hynix Plans Big Investment Push. Why Micron Stock Is Dropping.` -> peer capex / 경쟁 구도 read-through
+    - `Corning Is Up 9%. Why It’s the Top Mover ...` -> sell-side single-line comment / 수급 반응
+    - `Why ServiceNow Stock Was Drifting Lower Today` -> sector shock / adjacent product threat
 - 남은 작업:
-  - taxonomy false positive를 보고 후속 규칙 보정
-  - web UI에서 실제 수동 확인 후 사용자 피드백 반영
+  - 후속기사 corpus를 더 넓게 읽고, 직접/간접 가격 영향 정보 유형을 30개 이상으로 재정의
+  - `meaningless_others`를 진짜 저정보 기사로 축소하고, 영향 설명력이 있는 residual 기사들을 독립 유형으로 승격
+  - 새 taxonomy 기준으로 case 정의, 포함/제외 신호, 경계 사례, 대표 예시를 다시 작성
+  - 이후 필요하면 기존 analysis run을 재분류하고 evidence table을 새 taxonomy 검증 창으로 사용
+
+### PLAN CHANGE (2026-03-26, taxonomy reset)
+- 배경: 사용자의 최종 목적은 `개별 직접 이슈 분류기`가 아니라, **후속기사에 나타나는 가격 영향 정보의 유형 체계화**였다. 현재 plan은 이 목적보다 UI와 1차 rule implementation에 과도하게 치우쳐 있었다.
+- 추가 배경: 실제 `company_news` 후속기사 샘플을 읽어보니, 정책/법안, peer 투자, 경쟁 구도 변화, analyst 한 줄 코멘트, valuation 부담, 섹터 read-through처럼 **직접 공시가 아니어도 가격 설명력이 있는 기사**가 다수 존재했다.
+- 변경: plan의 최종 목적을 `후속기사 판독 기반 direct + indirect price-impact taxonomy 구축`으로 재정의하고, 최소 30개 이상의 상세 case taxonomy 후보를 먼저 설계하는 방향으로 수정한다.
+- 영향: `meaningless_others`는 앞으로 `영향 설명력이 약한 저정보 기사`만 남기고, 현재 residual에 섞여 있던 설명형 기사들은 신규 case로 분리하는 것이 목표가 된다.
+
+### PLAN CHANGE (2026-03-26)
+- 배경: `cases` API가 약 38초, `evidence` API가 약 21초 수준으로 느려서 UI가 멈춘 것처럼 보였다.
+- 변경: `model2_evidence_rows`에 table 렌더링용 뉴스 필드를 비정규화 저장하고, `model2_case_summaries` 캐시 테이블을 추가해 조회 시 `news_items JOIN`과 대규모 `GROUP BY`를 피한다.
+- 영향: 기존 analysis run도 startup migration에서 backfill 대상이 되며, 이후 run부터는 insert 시점에 summary cache까지 즉시 채운다.
+
+### PLAN CHANGE (2026-03-26, follow-up)
+- 배경: SQL 병목 제거 후에도 frontend가 filter/sort 변경마다 `cases`를 다시 불러오고, 검색 입력 중 매 타이핑마다 즉시 요청을 날려 체감 지연이 남아 있었다.
+- 변경: `cases` fetch를 analysis 변경 시에만 수행하고, `keyword/ticker`는 debounce 후 evidence만 재조회한다. 초기 `limit`도 `100`으로 낮춰 첫 paint payload를 줄인다.
+- 영향: 초기 진입과 검색 타이핑 체감이 더 빨라지고, 서버의 불필요한 재요청 수가 줄어든다.
+
+### PLAN CHANGE (2026-03-26, bundle split)
+- 배경: API 속도는 충분히 빨라졌지만, frontend 메인 청크가 커서 앱 첫 진입 시 모든 window 컴포넌트가 한 번에 번들에 포함되고 있었다.
+- 변경: `DraggableWindow`에서 window 컴포넌트들을 `React.lazy`로 분리해 실제 창을 열 때만 로드하도록 한다.
+- 영향: 기능 변화 없이 초기 번들 다운로드/파싱 비용이 줄고, 자주 쓰지 않는 window는 필요할 때만 로드된다.
 
 ### 현재 레포 상태(중요, 확인됨)
 - 대상 research page는 이미 존재한다.
@@ -45,19 +79,20 @@
   - 이유: 현재 스크립트는 `press_release`용 taxonomy/패턴을 전제로 설계되어 있고, company news는 재서술 기사/언론 기사/요약 기사 성격이 더 강하다.
 
 ### 제약 / 비범위
-- 이번 1차 구현은 rule-based 분류다. 기사별 수동 판독형 taxonomy 보정은 아직 완료가 아니다.
-- 대규모 `company_news`에 대해 1차 전수 분류와 evidence UI 연결까지는 수행했지만, false positive 정제는 후속 단계다.
+- 이번 단계는 **taxonomy 설계와 준비 작업**이 중심이다. 즉시 전수 재분류까지 닫는 것은 후속 단계로 남을 수 있다.
+- 하지만 taxonomy 설계는 반드시 **실제 후속기사 판독 결과**를 기반으로 해야 하며, 단순 키워드 브레인스토밍으로 끝내면 안 된다.
+- direct / indirect 영향은 둘 다 포함한다. `간접이라서 residual`로 보내는 설계는 이번 목적과 맞지 않는다.
 - mock 데이터는 사용하지 않는다.
 - 기존 `FinnhubNewsWindow`의 운영 semantics를 함부로 바꾸지 않는다.
 - 기존 `CaseResearchWindow`를 제거하거나 대체하지 않는다. `evidence table`은 별도 window로 추가한다.
 
 ### 읽는 방법(비개발자/일반인 기준)
-- `Step 1`은 “무엇을 분석이라고 볼 것인가”를 먼저 고정하는 단계다.
-- `Step 2`는 company news용 유형 체계와 근거 표 데이터 구조를 정하는 단계다.
-- `Step 3`은 research page 본문과 evidence dataset을 실제로 만드는 단계다.
-- `Step 4`는 evidence table 전용 backend API를 만드는 단계다.
-- `Step 5`는 evidence table window를 UI에 붙이는 단계다.
-- `Step 6`은 전체 검증 단계다.
+- `Step 0`은 실제 후속기사들을 읽고, 현재 residual bucket이 무엇을 놓치고 있는지 파악하는 단계다.
+- `Step 1`은 최종 목적을 `직접+간접 가격 영향 정보 분류`로 명확히 고정하는 단계다.
+- `Step 2`는 최소 30개 이상의 상세 taxonomy를 초안으로 설계하는 단계다.
+- `Step 3`은 각 유형의 포함/제외 신호와 경계 사례를 정리하는 단계다.
+- `Step 4`는 그 taxonomy를 실제 evidence row와 page 본문에 어떻게 반영할지 설계하는 단계다.
+- 이후 API/UI는 taxonomy 검증 수단으로 이어진다.
 
 ### 프로세스 템플릿(plan 변경 + 단계 완료 확인)
 - company news 분석 방식이 바뀌면 `PLAN CHANGE`로 기록한다.
@@ -75,15 +110,15 @@
   - 반응률: `news_change_metrics`
   - 기업 컨텍스트: `company_profiles`, `securities`
 - 분석 산출물:
-  - research page 본문: 대상 page id의 `research_pages.body`
-  - evidence row dataset: 유형별 근거 뉴스 행 목록
+  - research page 본문: `왜 주가가 올랐고 내렸는가`를 설명하는 정보 유형 체계와 정의
+  - evidence row dataset: 각 유형의 대표 근거 기사와 경계 사례 목록
 - UI 출력:
-  - 기존 `AI Research Window`: 유형 설명/분석 note 확인
-  - 새 `evidence table` window: 유형 선택 후 근거 뉴스 표 조회
+  - 기존 `AI Research Window`: taxonomy note / 정의 / 경계 사례 확인
+  - 새 `evidence table` window: 유형 선택 후 근거 기사 검증
 - 권장 구현 방향:
-  1. company news용 분석 로직이 research page 본문과 evidence row를 함께 생성
-  2. backend가 evidence row를 JSON API로 제공
-  3. frontend evidence table window가 그 API를 받아 표 렌더링
+  1. 실제 후속기사 corpus를 읽고 direct / indirect price-impact information을 먼저 추출
+  2. 그 결과를 상세 taxonomy와 annotation guide로 정리
+  3. 이후 backend / evidence row / UI는 taxonomy를 저장하고 검증하는 수단으로 사용
 
 ### 결정/선행조건(초기에 확정 필요)
 - 결정 1: `분석`의 의미
@@ -108,6 +143,8 @@
   - 이유: 먼저 기능을 닫고, 이후 성능 병목이 있으면 캐시/테이블을 추가하는 편이 낫다.
 
 ### 계획 중간 필수 확인
+- 현재 `why stock moved` 기사들 중 어떤 비율이 `meaningless_others`로 빠지는지 계속 측정해야 한다.
+- `간접 영향`이라고 해서 residual로 버리지 말고, 정책/섹터/peer/경쟁/수급/valuation/read-through 축으로 독립 유형을 만들 수 있는지 먼저 본다.
 - company news 전수 범위를 정확히 고정해야 한다.
   - source 이름: `FINNHUB`인지, `FMP` company news도 함께 넣을지
   - source_type은 `company_news`만인지, `news`/`market_news`를 섞을지
@@ -124,6 +161,95 @@
   - `page_id`
   - `case_type`
   - `news_id`
+
+### 후속기사 corpus 1차 판독에서 확인한 것
+- `Why ServiceNow Stock Was Drifting Lower Today`:
+  - 핵심은 `Anthropic introduced a new product`라는 **adjacent product / competitive shock**다.
+  - 이는 실적/계약이 아니지만 주가 설명력이 분명하므로 독립 유형 후보가 필요하다.
+- `Clarity Act Deal Could Ban Stablecoin Yields; Circle Leads Crypto Sell-Off`:
+  - 핵심은 **법안/정책 변화가 crypto business model에 미치는 간접 영향**이다.
+  - 현재 rule에서는 residual로 빠지지만 실제로는 `policy / legislation read-through` 성격이다.
+- `SK Hynix Plans Big Investment Push. Why Micron Stock Is Dropping.`:
+  - 핵심은 **peer capex 확대 -> 경쟁 심화 우려 -> 상대 종목 약세**다.
+  - 이는 `peer competitive read-through` 유형 후보다.
+- `Corning Is Up 9%. Why It’s the Top Mover in the S&P 500.`:
+  - 핵심은 sell-side 코멘트 또는 한 줄 mention이 수급 트리거가 된 경우다.
+  - 이 역시 analyst formal upgrade와는 다른 독립 유형 후보다.
+- `Super Micro Stock Drops. Why Citi Just Slashed Its Price Target.`:
+  - 이는 기존 analyst downgrade로 충분히 설명 가능하다.
+- 결론:
+  - 현재 residual bucket에는 `저정보 잡기사`와 `간접 영향 설명 기사`가 섞여 있다.
+  - 따라서 taxonomy 재설계의 1차 목적은 **residual 정리**가 아니라 **가격 설명력 있는 indirect 후속기사의 독립 유형화**다.
+
+### 예비 taxonomy 후보 (최소 30개)
+아래 목록은 1차 corpus 판독 후 정리한 후보이며, 최종 taxonomy는 이 중 병합/분할을 거쳐 확정한다.
+
+#### long direct
+1. 실적 호조·가이던스 상향
+2. 애널리스트 상향·목표가 상향
+3. 대형 계약·수주 확보
+4. 전략적 파트너십·유통 제휴
+5. 신제품 출시·상업화 본격화
+6. 수요 급증·백로그 확대
+7. 승인·임상 호재
+8. 규제 리스크 해소·소송 해소
+9. 대형 고객 확보·채택 확대
+10. 자산 매각 / 사업부 unlock / 전략가치 재평가
+11. 인수합병 프리미엄·takeout 기대
+12. 자사주 매입·주주환원 강화
+
+#### short direct
+13. 실적 부진·가이던스 하향
+14. 애널리스트 하향·목표가 하향
+15. 희석성 자금조달
+16. 규제·임상 악재
+17. 소송·조사·회계 리스크
+18. 구조조정·생존성 악화
+19. 핵심 계약 해지·고객 이탈
+20. 제품 실패·리콜·출시 지연
+21. 경영진 이탈·지배구조 충격
+22. 배당 삭감·주주환원 후퇴
+
+#### indirect / read-through long
+23. 정책·법안 수혜 read-through
+24. 금리·거시 완화 수혜 read-through
+25. 섹터 심리 회복·risk-on read-through
+26. peer strong earnings read-through
+27. peer capex 확대 수혜 read-through
+28. 공급망 병목 완화·원가 하락 수혜
+29. 경쟁사 약화에 따른 share-gain 기대
+30. 대형 테마/플랫폼 채택 확산 수혜
+31. short squeeze / positioning unwind long
+32. valuation catch-up / discount 해소
+
+#### indirect / read-through short
+33. 정책·법안 역풍 read-through
+34. 금리·거시 악화 read-through
+35. 섹터 전반 디레이팅·risk-off read-through
+36. peer aggressive capex / 증설로 인한 경쟁 심화
+37. 경쟁사 신제품/기술 shock
+38. 공급망 차질·원가 상승 read-through
+39. 고객 spend cut / end-market 둔화 read-through
+40. valuation 부담 / multiple compression 기사
+41. short report / thesis attack / skeptical commentary
+42. positioning overcrowded / de-grossing / profit-taking explanation
+
+#### residual but not meaningless
+43. mixed-signal 기사 (호재·악재 혼재)
+44. event-driven volatility explanation (earnings eve, lockup, rebalance 등)
+45. single-line mention / media amplification / headline cascade
+
+#### true meaningless residual
+46. listicle / top stocks / watchlist roundup
+47. generic portfolio advice / buy-now commentary
+48. low-information recap / 홍보성 반복 기사
+
+### 제안하는 구현 순서(이유)
+1. 먼저 실제 후속기사들을 더 읽고, direct / indirect / meaningless를 가르는 판별선을 분명히 해야 한다.
+2. 그 다음 최소 30개 이상의 taxonomy 초안을 만든다.
+3. 그 다음 각 case의 포함/제외 신호와 경계 사례를 작성한다.
+4. 그 뒤에 그 taxonomy를 기존 analysis run과 evidence table에 어떻게 반영할지 결정한다.
+5. 마지막에 재분류 구현과 page/evidence 갱신을 진행한다.
 
 ### 제안하는 구현 순서(이유)
 1. 먼저 `분석`이 규칙 기반 자동 분류인지, agent 주도 taxonomy 설계인지 확정해야 한다.
@@ -268,6 +394,8 @@
 | 5-3 | `EvidenceTableWindow.tsx` 생성 | 새 컴포넌트 파일 | 컴포넌트 렌더링 확인 | ⬜ |
 | 5-4 | 유형 메뉴, 표, 정렬, 키워드 검색, ticker 검색, summary/title/publish 컬럼 구현 | `EvidenceTableWindow.tsx` | UI 상호작용 확인 | ⬜ |
 | 5-5 | 표 표현을 `FinnhubNewsWindow`와 유사한 스타일로 맞춤 | `EvidenceTableWindow.tsx` | 행/컬럼 스타일 확인 | ⬜ |
+| 5-6 | 유형 메뉴 항목 우클릭 시 `description` 컨텍스트 메뉴 표시 | `EvidenceTableWindow.tsx` | 우클릭 메뉴 표시 확인 | ⬜ |
+| 5-7 | `description` 버튼 클릭 시 `Case Description` 새 창에서 분류 기준 설명 표시 | `src/app/App.tsx`, `src/app/components/CaseDescriptionWindow.tsx`, `src/app/model2CaseDescriptions.ts` | 새 창 렌더링 확인 | ⬜ |
 
 - `5-1` 목적: window 시스템에 새 타입을 정식 등록하기 위함.
   설명: 기존 `case-research`와 별도인 새 타입을 만든다.
@@ -294,11 +422,22 @@
   완료 조건(눈으로 확인): 기존 news window와 비슷한 밀도와 상호작용을 가진다.
   사람 검증(비개발자): 새 창도 뉴스 창처럼 읽을 수 있다고 느낀다.
   흔한 문제/주의: 기존 창의 모든 기능을 복사하려 하면 범위가 과하게 커진다.
+- `5-6` 목적: 사용자가 유형 메뉴 안에서 바로 분류 기준 설명에 접근하게 하기 위함.
+  설명: native select 대신 custom case dropdown을 사용해 case item 우클릭 시 context menu를 연다.
+  완료 조건(눈으로 확인): case 목록 항목을 우클릭하면 `description` 버튼이 보인다.
+  사람 검증(비개발자): case를 오른쪽 클릭했을 때 작은 메뉴가 뜨는지 보면 된다.
+  흔한 문제/주의: 브라우저 기본 context menu가 먼저 뜨면 custom 이벤트 처리 누락일 수 있다.
+- `5-7` 목적: 분류 유형이 어떤 기준으로 나뉘는지 새 창에서 상세히 읽게 하기 위함.
+  설명: `Case Description` 창은 `한 줄 정의`, `핵심 가치 경로`, `포함 신호`, `제외 신호`, `경계 사례`, `빠른 판별 질문`을 보여준다.
+  완료 조건(눈으로 확인): description 버튼 클릭 후 새 창에 case 설명 섹션이 렌더링된다.
+  사람 검증(비개발자): `잡것들`이나 `애널리스트 상향` 등을 눌렀을 때 설명 문구가 구체적으로 보이면 된다.
+  흔한 문제/주의: case label은 바뀌는데 내부 설명이 기본값으로만 뜨면 mapping 누락일 수 있다.
 
 검증 훅:
 ```text
 - Add Tab에서 evidence table 선택 가능 여부 확인
 - 새 창에서 유형 선택, 키워드 검색, ticker 검색, 정렬이 각각 동작하는지 확인
+- case 메뉴 우클릭 -> description 버튼 -> Case Description 창 렌더링 확인
 ```
 사용자 확인 필요: **예**
 

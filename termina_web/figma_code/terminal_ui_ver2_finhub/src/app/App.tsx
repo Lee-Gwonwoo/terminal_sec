@@ -3,6 +3,7 @@ import { Plus, Edit2, Moon, Sun } from "lucide-react";
 import { TabData, WindowInstance, WindowType } from "./types";
 import { AddTabModal } from "./components/AddTabModal";
 import { DraggableWindow } from "./components/DraggableWindow";
+import type { CaseDescriptionWindowData } from "./types";
 
 function clampNumber(value: unknown, fallback: number, min: number, max: number) {
   if (typeof value !== "number" || Number.isNaN(value)) return fallback;
@@ -33,6 +34,58 @@ export default function App() {
   const [dragTabId, setDragTabId] = useState<string | null>(null);
   const [dragOverTabId, setDragOverTabId] = useState<string | null>(null);
   const [workspaceHydrated, setWorkspaceHydrated] = useState(false);
+
+  useEffect(() => {
+    const handleOpenCaseDescription = (event: Event) => {
+      const customEvent = event as CustomEvent<CaseDescriptionWindowData>;
+      const payload = customEvent.detail;
+      if (!payload) {
+        return;
+      }
+
+      setTabs(prevTabs => prevTabs.map(tab => {
+        if (tab.id !== activeTabId) {
+          return tab;
+        }
+
+        const existing = tab.windows.find(window => window.type === 'case-description' && window.data?.caseType === payload.caseType);
+        if (existing) {
+          return {
+            ...tab,
+            windows: tab.windows.map(window => window.id === existing.id ? {
+              ...window,
+              title: `Case Description: ${payload.caseLabelKo}`,
+              data: payload,
+            } : window),
+          };
+        }
+
+        const nextIndex = tab.windows.length;
+        const newWindow: WindowInstance = {
+          id: `${Date.now()}-case-description-${payload.caseType}`,
+          type: 'case-description',
+          title: `Case Description: ${payload.caseLabelKo}`,
+          data: payload,
+          position: {
+            top: 60 + nextIndex * 24,
+            left: 80 + nextIndex * 24,
+            width: 620,
+            height: 560,
+          },
+        };
+
+        return {
+          ...tab,
+          windows: [...tab.windows, newWindow],
+        };
+      }));
+    };
+
+    window.addEventListener('open-case-description', handleOpenCaseDescription as EventListener);
+    return () => {
+      window.removeEventListener('open-case-description', handleOpenCaseDescription as EventListener);
+    };
+  }, [activeTabId]);
 
   // ─── Restore workspace from localStorage ───
   useEffect(() => {
@@ -148,6 +201,8 @@ export default function App() {
           title = 'AI Research Window';
         } else if (type === 'evidence-table') {
           title = 'Evidence Table';
+        } else if (type === 'case-description') {
+          title = 'Case Description';
         } else {
           title = type.charAt(0).toUpperCase() + type.slice(1) + ' Window';
         }

@@ -1,5 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ExternalLink, RefreshCw, Search, TrendingUp } from 'lucide-react';
+import { getModel2CaseDescription } from '../model2CaseDescriptions';
+import type { CaseDescriptionWindowData } from '../types';
 
 const API_BASE = '';
 
@@ -95,17 +97,27 @@ export function EvidenceTableWindow() {
   const [selectedCaseType, setSelectedCaseType] = useState<string>('all');
   const [keyword, setKeyword] = useState('');
   const [ticker, setTicker] = useState('');
+  const [debouncedKeyword, setDebouncedKeyword] = useState('');
+  const [debouncedTicker, setDebouncedTicker] = useState('');
   const [rows, setRows] = useState<EvidenceRow[]>([]);
   const [total, setTotal] = useState(0);
-  const [limit, setLimit] = useState(300);
+  const [limit, setLimit] = useState(100);
   const [sortBy, setSortBy] = useState<SortBy>('published_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isCaseMenuOpen, setIsCaseMenuOpen] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: CaseSummary } | null>(null);
+  const caseMenuRef = useRef<HTMLDivElement | null>(null);
+  const effectiveAnalysisId = selectedAnalysisId || analyses[0]?.id || '';
 
   const selectedAnalysis = useMemo(
-    () => analyses.find(item => item.id === selectedAnalysisId) ?? null,
-    [analyses, selectedAnalysisId],
+    () => analyses.find(item => item.id === effectiveAnalysisId) ?? null,
+    [analyses, effectiveAnalysisId],
+  );
+  const selectedCase = useMemo(
+    () => cases.find(item => item.caseType === selectedCaseType) ?? null,
+    [cases, selectedCaseType],
   );
 
   const fetchAnalyses = useCallback(async () => {
@@ -115,13 +127,13 @@ export function EvidenceTableWindow() {
     }
     const data: AnalysisRun[] = await res.json();
     setAnalyses(data);
-    if (data.length > 0 && !selectedAnalysisId) {
+    if (data.length > 0 && (!selectedAnalysisId || !data.some(item => item.id === selectedAnalysisId))) {
       setSelectedAnalysisId(data[0].id);
     }
   }, [selectedAnalysisId]);
 
-  const fetchCases = useCallback(async (analysisId: string) => {
-    const res = await fetch(`${API_BASE}/api/model2/analyses/${analysisId}/cases`);
+  const fetchCases = useCallback(async (analysisId: string, signal?: AbortSignal) => {
+    const res = await fetch(`${API_BASE}/api/model2/analyses/${analysisId}/cases`, { signal });
     if (!res.ok) {
       throw new Error(`Failed to load cases (HTTP ${res.status})`);
     }
@@ -129,7 +141,7 @@ export function EvidenceTableWindow() {
     setCases(data);
   }, []);
 
-  const fetchEvidence = useCallback(async (analysisId: string, currentCaseType: string, currentKeyword: string, currentTicker: string, currentSortBy: SortBy, currentSortDir: SortDir, currentLimit: number) => {
+  const fetchEvidence = useCallback(async (analysisId: string, currentCaseType: string, currentKeyword: string, currentTicker: string, currentSortBy: SortBy, currentSortDir: SortDir, currentLimit: number, signal?: AbortSignal) => {
     const params = new URLSearchParams();
     if (currentCaseType && currentCaseType !== 'all') params.set('caseType', currentCaseType);
     if (currentKeyword.trim()) params.set('keyword', currentKeyword.trim());
@@ -137,7 +149,7 @@ export function EvidenceTableWindow() {
     params.set('sortBy', currentSortBy);
     params.set('sortDir', currentSortDir);
     params.set('limit', String(currentLimit));
-    const res = await fetch(`${API_BASE}/api/model2/analyses/${analysisId}/evidence?${params.toString()}`);
+    const res = await fetch(`${API_BASE}/api/model2/analyses/${analysisId}/evidence?${params.toString()}`, { signal });
     if (!res.ok) {
       throw new Error(`Failed to load evidence rows (HTTP ${res.status})`);
     }
@@ -151,32 +163,91 @@ export function EvidenceTableWindow() {
   }, [fetchAnalyses]);
 
   useEffect(() => {
-    if (!selectedAnalysisId) {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedKeyword(keyword);
+      setDebouncedTicker(ticker);
+    }, 250);
+    return () => window.clearTimeout(timeoutId);
+  }, [keyword, ticker]);
+
+  useEffect(() => {
+    if (!effectiveAnalysisId) {
       setCases([]);
+      return;
+    }
+    setError(null);
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        setLoading(true);
+        await fetchCases(effectiveAnalysisId, controller.signal);
+      } catch (err) {
+        if (controller.signal.aborted) {
+          return;
+        }
+        setError(err instanceof Error ? err.message : 'Failed to load evidence data');
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    })();
+    return () => controller.abort();
+  }, [effectiveAnalysisId, fetchCases]);
+
+  useEffect(() => {
+    if (!effectiveAnalysisId) {
       setRows([]);
       setTotal(0);
       return;
     }
     setError(null);
+    const controller = new AbortController();
     void (async () => {
       try {
         setLoading(true);
-        await fetchCases(selectedAnalysisId);
-        await fetchEvidence(selectedAnalysisId, selectedCaseType, keyword, ticker, sortBy, sortDir, limit);
+        await fetchEvidence(effectiveAnalysisId, selectedCaseType, debouncedKeyword, debouncedTicker, sortBy, sortDir, limit, controller.signal);
       } catch (err) {
+        if (controller.signal.aborted) {
+          return;
+        }
         setError(err instanceof Error ? err.message : 'Failed to load evidence data');
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
       }
     })();
-  }, [selectedAnalysisId, selectedCaseType, keyword, ticker, sortBy, sortDir, limit, fetchCases, fetchEvidence]);
+    return () => controller.abort();
+  }, [effectiveAnalysisId, selectedCaseType, debouncedKeyword, debouncedTicker, sortBy, sortDir, limit, fetchEvidence]);
 
   useEffect(() => {
     setSelectedCaseType('all');
-  }, [selectedAnalysisId]);
+  }, [effectiveAnalysisId]);
+
+  useEffect(() => {
+    const handlePointerDown = (event: MouseEvent) => {
+      if (caseMenuRef.current && !caseMenuRef.current.contains(event.target as Node)) {
+        setIsCaseMenuOpen(false);
+        setContextMenu(null);
+      }
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsCaseMenuOpen(false);
+        setContextMenu(null);
+      }
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, []);
 
   const handleRefresh = useCallback(() => {
-    if (!selectedAnalysisId) {
+    if (!effectiveAnalysisId) {
       void fetchAnalyses().catch(err => setError(err instanceof Error ? err.message : 'Failed to refresh analyses'));
       return;
     }
@@ -185,15 +256,17 @@ export function EvidenceTableWindow() {
       try {
         setLoading(true);
         await fetchAnalyses();
-        await fetchCases(selectedAnalysisId);
-        await fetchEvidence(selectedAnalysisId, selectedCaseType, keyword, ticker, sortBy, sortDir, limit);
+        await Promise.all([
+          fetchCases(effectiveAnalysisId),
+          fetchEvidence(effectiveAnalysisId, selectedCaseType, debouncedKeyword, debouncedTicker, sortBy, sortDir, limit),
+        ]);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to refresh evidence data');
       } finally {
         setLoading(false);
       }
     })();
-  }, [selectedAnalysisId, selectedCaseType, keyword, ticker, sortBy, sortDir, limit, fetchAnalyses, fetchCases, fetchEvidence]);
+  }, [effectiveAnalysisId, selectedCaseType, debouncedKeyword, debouncedTicker, sortBy, sortDir, limit, fetchAnalyses, fetchCases, fetchEvidence]);
 
   const handleSort = (nextSortBy: SortBy) => {
     if (sortBy === nextSortBy) {
@@ -203,6 +276,21 @@ export function EvidenceTableWindow() {
     setSortBy(nextSortBy);
     setSortDir('desc');
   };
+
+  const openDescriptionWindow = useCallback((item: CaseSummary) => {
+    const description = getModel2CaseDescription(item.caseType);
+    const payload: CaseDescriptionWindowData = {
+      ...description,
+      caseType: item.caseType,
+      caseLabelKo: item.caseLabelKo,
+      topLevel: item.topLevel,
+    };
+    window.dispatchEvent(new CustomEvent('open-case-description', { detail: payload }));
+    setContextMenu(null);
+    setIsCaseMenuOpen(false);
+  }, []);
+
+  const selectedCaseLabel = selectedCase ? `${selectedCase.caseLabelKo} (${selectedCase.totalCount})` : 'All cases';
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100">
@@ -218,15 +306,52 @@ export function EvidenceTableWindow() {
             </select>
           </label>
 
-          <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900">
-            <ChevronDown size={12} className="text-slate-400" />
-            <select value={selectedCaseType} onChange={e => setSelectedCaseType(e.target.value)} className="w-full bg-transparent outline-none" disabled={!selectedAnalysisId}>
-              <option value="all">All cases</option>
-              {cases.map(item => (
-                <option key={item.caseType} value={item.caseType}>{item.caseLabelKo} ({item.totalCount})</option>
-              ))}
-            </select>
-          </label>
+          <div ref={caseMenuRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setIsCaseMenuOpen(prev => !prev)}
+              disabled={!selectedAnalysisId}
+              className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <ChevronDown size={12} className="text-slate-400" />
+              <span className="truncate text-left">{selectedCaseLabel}</span>
+            </button>
+
+            {isCaseMenuOpen && (
+              <div className="absolute left-0 top-[calc(100%+6px)] z-30 max-h-80 w-full overflow-auto rounded-lg border border-slate-200 bg-white p-1 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                <button
+                  type="button"
+                  className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-xs hover:bg-slate-100 dark:hover:bg-slate-800 ${selectedCaseType === 'all' ? 'bg-slate-100 dark:bg-slate-800' : ''}`}
+                  onClick={() => {
+                    setSelectedCaseType('all');
+                    setIsCaseMenuOpen(false);
+                  }}
+                >
+                  <span>All cases</span>
+                  <span className="text-slate-400">{total.toLocaleString()}</span>
+                </button>
+                {cases.map(item => (
+                  <button
+                    key={item.caseType}
+                    type="button"
+                    className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-xs hover:bg-slate-100 dark:hover:bg-slate-800 ${selectedCaseType === item.caseType ? 'bg-slate-100 dark:bg-slate-800' : ''}`}
+                    onClick={() => {
+                      setSelectedCaseType(item.caseType);
+                      setIsCaseMenuOpen(false);
+                    }}
+                    onContextMenu={event => {
+                      event.preventDefault();
+                      setContextMenu({ x: event.clientX, y: event.clientY, item });
+                    }}
+                    title="Right click for description"
+                  >
+                    <span className="truncate">{item.caseLabelKo}</span>
+                    <span className="ml-3 shrink-0 text-slate-400">{item.totalCount.toLocaleString()}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900">
             <Search size={12} className="text-slate-400" />
@@ -257,7 +382,9 @@ export function EvidenceTableWindow() {
           <span>{selectedAnalysis ? `${selectedAnalysis.since} → ${selectedAnalysis.until}` : 'No analysis selected'}</span>
           <span>{`Rows ${rows.length}/${total}`}</span>
           {selectedAnalysis && <span>{`Analyzable ${selectedAnalysis.analyzable_rows.toLocaleString()} / Impacted ${selectedAnalysis.impacted_rows.toLocaleString()} / 잡것들 ${selectedAnalysis.meaningless_rows.toLocaleString()}`}</span>}
+          <span>Case menu item 우클릭 후 description 버튼으로 분류 기준 설명 창을 열 수 있습니다.</span>
           {error && <span className="text-red-500">{error}</span>}
+          {!error && analyses.length === 0 && !loading && <span>No saved analyses found.</span>}
         </div>
       </div>
 
@@ -324,6 +451,22 @@ export function EvidenceTableWindow() {
           </tbody>
         </table>
       </div>
+
+      {contextMenu && (
+        <div
+          className="fixed z-40 min-w-[180px] rounded-lg border border-slate-200 bg-white p-1 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+        >
+          <button
+            type="button"
+            className="flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-xs hover:bg-slate-100 dark:hover:bg-slate-800"
+            onClick={() => openDescriptionWindow(contextMenu.item)}
+          >
+            <span>description</span>
+            <span className="text-slate-400">{contextMenu.item.caseLabelKo}</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

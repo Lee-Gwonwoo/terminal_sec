@@ -1,6 +1,19 @@
 // Types for the stock news platform
 
-export type WindowType = 'news' | 'watchlist' | 'calendar' | 'finhub-news' | 'default-ticker' | 'data-control' | 'case-research' | 'evidence-table';
+export type WindowType = 'news' | 'watchlist' | 'calendar' | 'finhub-news' | 'default-ticker' | 'data-control' | 'case-research' | 'evidence-table' | 'case-description';
+
+export interface CaseDescriptionWindowData {
+  caseType: string;
+  caseLabelKo: string;
+  topLevel: string;
+  description: string;
+  definition: string;
+  valuePath: string;
+  includeSignals: string[];
+  excludeSignals: string[];
+  boundaryCase: string;
+  quickQuestions: string[];
+}
 
 export interface NewsItem {
   id: string;
@@ -95,6 +108,7 @@ export interface WindowInstance {
   type: WindowType;
   title: string;
   linkId?: number; // For linking windows together
+  data?: CaseDescriptionWindowData;
   position?: {
     top: number;
     left: number;

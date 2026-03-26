@@ -1,15 +1,17 @@
-import React, { useRef, useState } from 'react';
+import React, { Suspense, lazy, useRef, useState } from 'react';
 import { Resizable } from 're-resizable';
 import { X, Maximize2, Minimize2, GripVertical } from 'lucide-react';
 import { WindowInstance, WindowType } from '../types';
-import { NewsWindow } from './NewsWindow';
-import { WatchlistWindow } from './WatchlistWindow';
-import { CalendarWindow } from './CalendarWindow';
-import { FinnhubNewsWindow } from './FinnhubNewsWindow';
-import { DefaultTickerWindow } from './DefaultTickerWindow';
-import { DataControlWindow } from './DataControlWindow';
-import { CaseResearchWindow } from './CaseResearchWindow';
-import { EvidenceTableWindow } from './EvidenceTableWindow';
+
+const NewsWindow = lazy(async () => ({ default: (await import('./NewsWindow')).NewsWindow }));
+const WatchlistWindow = lazy(async () => ({ default: (await import('./WatchlistWindow')).WatchlistWindow }));
+const CalendarWindow = lazy(async () => ({ default: (await import('./CalendarWindow')).CalendarWindow }));
+const FinnhubNewsWindow = lazy(async () => ({ default: (await import('./FinnhubNewsWindow')).FinnhubNewsWindow }));
+const DefaultTickerWindow = lazy(async () => ({ default: (await import('./DefaultTickerWindow')).DefaultTickerWindow }));
+const DataControlWindow = lazy(async () => ({ default: (await import('./DataControlWindow')).DataControlWindow }));
+const CaseResearchWindow = lazy(async () => ({ default: (await import('./CaseResearchWindow')).CaseResearchWindow }));
+const EvidenceTableWindow = lazy(async () => ({ default: (await import('./EvidenceTableWindow')).EvidenceTableWindow }));
+const CaseDescriptionWindow = lazy(async () => ({ default: (await import('./CaseDescriptionWindow')).CaseDescriptionWindow }));
 
 interface DraggableWindowProps {
   window: WindowInstance;
@@ -60,6 +62,12 @@ export function DraggableWindow({
     height: window.position?.height || 500
   });
   const windowRef = useRef<HTMLDivElement>(null);
+
+  const loadingFallback = (
+    <div className="flex h-full items-center justify-center bg-white text-sm text-slate-500 dark:bg-gray-900 dark:text-slate-400">
+      Loading window...
+    </div>
+  );
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (isMaximized) return;
@@ -136,6 +144,8 @@ export function DraggableWindow({
         return <CaseResearchWindow />;
       case 'evidence-table':
         return <EvidenceTableWindow />;
+      case 'case-description':
+        return <CaseDescriptionWindow data={window.data} />;
       default:
         return <div>Unknown window type</div>;
     }
@@ -300,7 +310,9 @@ export function DraggableWindow({
 
         {/* Window Content */}
         <div className="flex-1 overflow-hidden">
-          {renderWindowContent()}
+          <Suspense fallback={loadingFallback}>
+            {renderWindowContent()}
+          </Suspense>
         </div>
       </div>
     </Resizable>

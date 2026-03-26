@@ -422,12 +422,36 @@ def flush_rows(conn: sqlite3.Connection, buffer: list[tuple]) -> None:
             change_pct, change_from_open_pct, change_open_to_high_pct, change_1d_pct, change_3d_pct,
             change_7d_pct, change_14d_pct, change_30d_pct,
             immediate_reaction_score, short_followthrough_score, medium_persistence_score,
-            overall_impact_score, summary
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            overall_impact_score, summary, published_at, source, publisher, source_type, title, body_preview, url
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         buffer,
     )
     buffer.clear()
+
+
+def refresh_case_summaries(conn: sqlite3.Connection, run_id: str) -> None:
+    conn.execute("DELETE FROM model2_case_summaries WHERE analysis_id = ?", (run_id,))
+    conn.execute(
+        """
+        INSERT INTO model2_case_summaries (
+            analysis_id, case_type, case_label_ko, top_level,
+            total_count, impacted_count, latest_published_at, updated_at
+        )
+        SELECT analysis_id,
+               case_type,
+               MAX(case_label_ko) AS case_label_ko,
+               MAX(top_level) AS top_level,
+               COUNT(*) AS total_count,
+               SUM(CASE WHEN is_impacted = 1 THEN 1 ELSE 0 END) AS impacted_count,
+               MAX(published_at) AS latest_published_at,
+               datetime('now') AS updated_at
+        FROM model2_evidence_rows
+        WHERE analysis_id = ?
+        GROUP BY analysis_id, case_type
+        """,
+        (run_id,),
+    )
 
 
 def populate_evidence_rows(conn: sqlite3.Connection, run_id: str, since: str, until: str, company_ctx: dict[str, dict], thresholds: dict[str, float], chunk_size: int, insert_batch: int) -> dict:
@@ -467,12 +491,20 @@ def populate_evidence_rows(conn: sqlite3.Connection, run_id: str, since: str, un
                 row.get("medium_persistence_score"),
                 row.get("overall_impact_score"),
                 row.get("summary"),
+                row.get("published_at"),
+                raw_row.get("source"),
+                raw_row.get("publisher"),
+                raw_row.get("source_type"),
+                raw_row.get("title"),
+                (raw_row.get("body") or "")[:600],
+                raw_row.get("url"),
             )
         )
         inserted_rows += 1
         if len(buffer) >= insert_batch:
             flush_rows(conn, buffer)
     flush_rows(conn, buffer)
+    refresh_case_summaries(conn, run_id)
     conn.execute(
         "UPDATE model2_analysis_runs SET impacted_rows = ?, updated_at = datetime('now') WHERE id = ?",
         (impacted_rows, run_id),
@@ -513,13 +545,12 @@ def fetch_top_examples(conn: sqlite3.Connection, run_id: str, case_type: str, li
                er.reaction_tag,
                er.overall_impact_score,
                er.summary,
-               ni.title,
-               ni.published_at
-        FROM model2_evidence_rows er
-        JOIN news_items ni ON ni.id = er.news_id
+             er.title,
+             er.published_at
+         FROM model2_evidence_rows er
         WHERE er.analysis_id = ?
           AND er.case_type = ?
-        ORDER BY er.is_impacted DESC, er.overall_impact_score DESC, ni.published_at DESC
+         ORDER BY er.is_impacted DESC, er.overall_impact_score DESC, er.published_at DESC
         LIMIT ?
         """,
         (run_id, case_type, limit),
