@@ -498,3 +498,45 @@ Step 1 -> Step 2 -> Step 3 -> Step 4 -> Step 5
   완료 조건(눈으로 확인): `ft-concurrency` fallback 상수와 backend fulltext default가 모두 200이다.
   사람 검증(비개발자): localStorage를 비우고 다시 열었을 때 Full Text 값이 200으로 보이면 된다.
   흔한 문제/주의: FMP PR 전용 fulltext 기본값까지 같이 200으로 올리면 Business Wire fallback 때문에 과도할 수 있으므로 분리 기본값 10은 유지한다.
+
+### PLAN CHANGE — 2026-03-26 14:50
+- 변경 내용: `GET /api/news`의 기능 변화 없이 `company_news` 및 기본 뉴스 피드 로딩을 줄이기 위해 `news_items`에 feed 조회용 복합 인덱스를 추가한다.
+- 변경 이유: 실측 기준 `source_type=company_news` 필터가 약 84초, 기본 뉴스 피드가 약 94초로 과도하게 느렸고, SQLite query plan에서 `USE TEMP B-TREE FOR ORDER BY`가 확인됐다.
+- 영향:
+  - 조회 결과, 필터 semantics, 정렬 순서, cursor semantics는 유지된다.
+  - 추가 대상 인덱스는 `source + published_at + id`, `source_type + source + published_at + id` 조합이다.
+  - 1차 범위는 인덱스 추가와 런타임 응답시간 재측정까지만 포함하고, ticker/keyword 검색 구조 변경은 이번 범위에서 제외한다.
+
+#### ⏳ Step 9 — news feed 1차 인덱스 최적화
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 9-1 | `news_items` feed 조회용 복합 인덱스 추가 | `terminal/backend/src/db.ts` | backend 재시작 후 인덱스 생성 확인 | ⏳ |
+| 9-2 | active plan/log에 1차 인덱스 작업 기록 | `ai_agent_plan/fmp_pr_fulltext_fix/plan.md`, `ai_agent_plan/fmp_pr_fulltext_fix/agent_log.md` | 문서 append 확인 | ⏳ |
+| 9-3 | backend build / test / 실제 `/api/news` 응답시간 재측정 | `terminal/backend` | `npm.cmd run build`, `npm.cmd run test`, HTTP latency 비교 | ⏳ |
+
+- `9-1` 목적: 결과 semantics를 바꾸지 않고 feed 조회가 인덱스를 더 직접 사용하게 만든다.
+  설명: `source` 전용 feed와 `source_type + source` feed 둘 다 `published_at DESC, id DESC` 정렬을 인덱스에 최대한 맞춘다.
+  완료 조건(눈으로 확인): `db.ts`에 두 복합 인덱스가 추가되어 있다.
+  사람 검증(비개발자): 코드에서 인덱스 이름 2개가 보이면 된다.
+  흔한 문제/주의: 기존 대용량 DB에서는 첫 인덱스 생성 시 startup 시간이 일시적으로 길어질 수 있다.
+- `9-2` 목적: 성능 작업 이력을 기존 plan 컨텍스트와 연결해 남긴다.
+  설명: 이번 변경은 기능 추가가 아니라 1차 성능 최적화라는 점을 plan/log에 명시한다.
+  완료 조건(눈으로 확인): plan/log 맨 아래에 2026-03-26 14:50 항목이 append된다.
+  사람 검증(비개발자): 문서 맨 아래에서 오늘 시각과 작업 이유를 읽을 수 있다.
+  흔한 문제/주의: 기존 기록을 재배치하지 않고 append만 사용해야 한다.
+- `9-3` 목적: 인덱스 추가만으로 실제 체감 개선이 있는지 수치로 닫는다.
+  설명: build/test 통과 후 `company_news`, `press_release`, 기본 feed의 응답시간을 다시 재고 비교한다.
+  완료 조건(눈으로 확인): 전/후 latency 수치가 로그에 기록된다.
+  사람 검증(비개발자): 같은 API가 이전보다 빨라졌는지 숫자만 보면 된다.
+  흔한 문제/주의: warm cache 1회 결과만으로 단정하지 않고 같은 형태의 측정을 다시 사용한다.
+
+검증 훅:
+```text
+- get_errors
+- terminal/backend: npm.cmd run build
+- terminal/backend: npm.cmd run test
+- GET /api/news?source_names=FINNHUB,RTPR,FMP&limit=500
+- GET /api/news?source_names=FINNHUB,RTPR,FMP&source_type=company_news&limit=500
+- GET /api/news?source_names=FINNHUB,RTPR,FMP&source_type=press_release&limit=500
+```
+사용자 확인 필요: **예**

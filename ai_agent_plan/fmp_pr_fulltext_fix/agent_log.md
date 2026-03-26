@@ -544,6 +544,60 @@
 
 - 상태: 구현 및 검증 완료, 사용자 확인 대기 (awaiting user confirmation)
 
+**작성 시각:** 2026-03-26 14:50 (local)
+
+### news feed 1차 인덱스 최적화 시작
+- 사용자 요청:
+  - 기능 변화 없는 1차 조치만 먼저 적용
+- 사전 확인:
+  - `GET /api/news?source_names=FINNHUB,RTPR,FMP&limit=500` 약 `94.2s`
+  - `GET /api/news?source_names=FINNHUB,RTPR,FMP&source_type=company_news&limit=500` 약 `83.8s`
+  - `GET /api/news?source_names=FINNHUB,RTPR,FMP&source_type=press_release&limit=500` 약 `34.4s`
+  - `news_items.source_type='company_news'` row 수는 `1,462,068`
+  - SQLite query plan에서 `USE TEMP B-TREE FOR ORDER BY`가 확인되어 feed 조회용 정렬 인덱스 부족이 핵심 병목으로 판단됨
+- 변경 파일:
+  - `terminal/backend/src/db.ts`
+  - `ai_agent_plan/fmp_pr_fulltext_fix/plan.md`
+  - `ai_agent_plan/fmp_pr_fulltext_fix/agent_log.md`
+- 구현 의도:
+  - 조회 결과나 필터 semantics는 바꾸지 않고, `news_items`에 `source + published_at + id`, `source_type + source + published_at + id` 복합 인덱스를 추가해 feed 조회를 가속한다.
+- 상태: 구현 진행 중 (확인 대기)
+
+**작성 시각:** 2026-03-26 14:50 (local)
+
+### news feed 1차 인덱스 최적화 검증
+- 구현 결과:
+  - `terminal/backend/src/db.ts`에 아래 인덱스를 추가함
+    - `idx_news_items_source_published (source, published_at DESC, id DESC)`
+    - `idx_news_items_source_type_source_published (source_type, source, published_at DESC, id DESC)`
+- 인덱스/플랜 확인:
+  - `sqlite_master`에서 두 인덱스 생성 확인
+  - `EXPLAIN QUERY PLAN` 기준
+    - 기본 feed: `idx_news_items_source_published` 사용 시작
+    - `company_news` feed: `idx_news_items_source_type_source_published` 사용 시작
+  - 다만 두 경로 모두 `USE TEMP B-TREE FOR ORDER BY`가 여전히 남아 있어, 정렬 병목은 완전히 제거되지 않음
+- 응답시간 전/후 비교:
+  - 기본 feed (`source_names=FINNHUB,RTPR,FMP&limit=500`): `94.2s -> 115.7s`
+  - `company_news` (`source_type=company_news&limit=500`): `83.8s -> 54.0s`
+  - `press_release` (`source_type=press_release&limit=500`): `34.4s -> 7.4s`
+- 해석:
+  - 사용자가 문제로 지적한 `company_news` 필터는 1차 인덱스만으로도 유의미하게 개선됨
+  - 작은 집합인 `press_release`도 크게 개선됨
+  - 하지만 기본 전체 feed는 여러 `source`를 함께 묶은 뒤 재정렬하는 비용이 여전히 커서, 이번 1차만으로는 개선되지 않았고 오히려 더 느린 측정이 나옴
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `terminal/backend/src/db.ts` diagnostics 0 errors |
+| 빌드 | ✅ | backend `npm.cmd run build` 성공 |
+| 자동 테스트 | ✅ | backend `npm.cmd run test` 13 files / 78 tests pass |
+| 런타임 통합 | ✅ | `/api/news` 3종 실측 + `sqlite_master` / `EXPLAIN QUERY PLAN` 확인 |
+
+- 잔여 리스크:
+  - `source IN (FINNHUB,RTPR,FMP)` 전체 feed는 여전히 ORDER BY temp sort가 남아 있어, 다음 단계에서는 query rewrite 또는 source별 merge 전략이 필요함
+  - 첫 인덱스 생성 직후 startup 비용이 증가할 수 있음
+
+- 상태: 1차 인덱스 적용 및 검증 완료, 사용자 확인 대기 (awaiting user confirmation)
+
 *** Delete File: c:\github_coding\terminal_sec\terminal\backend\tmp_test_finnhub_publishers.mjs
 *** Delete File: c:\github_coding\terminal_sec\terminal\backend\tmp_verify_publisher_fix.mjs
 *** Delete File: c:\github_coding\terminal_sec\terminal\backend\tmp_read_publisher_fix.mjs

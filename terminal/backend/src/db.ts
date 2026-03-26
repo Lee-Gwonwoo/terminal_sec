@@ -40,6 +40,8 @@ export async function initDb(): Promise<void> {
     );
 
     CREATE INDEX IF NOT EXISTS idx_news_items_published ON news_items (published_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_news_items_source_published ON news_items (source, published_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_news_items_source_type_source_published ON news_items (source_type, source, published_at DESC, id DESC);
 
     CREATE TABLE IF NOT EXISTS news_saved_views (
       id TEXT PRIMARY KEY,
@@ -120,6 +122,12 @@ export async function initDb(): Promise<void> {
   await ensureColumn("news_items", "change_14d_pct", "REAL");
   await ensureColumn("news_items", "change_30d_pct", "REAL");
   await ensureColumn("news_items", "change_computed_at", "TEXT");
+  await db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_news_items_source_published ON news_items (source, published_at DESC, id DESC);"
+  );
+  await db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_news_items_source_type_source_published ON news_items (source_type, source, published_at DESC, id DESC);"
+  );
 
   // Step 4-2: news_change_metrics table (separate change data — forward-looking)
   // PLAN CHANGE #10: renamed anchor_date→target_date, lookback→forward
