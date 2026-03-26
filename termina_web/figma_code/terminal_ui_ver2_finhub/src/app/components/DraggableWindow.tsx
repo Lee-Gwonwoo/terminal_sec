@@ -9,6 +9,7 @@ import { FinnhubNewsWindow } from './FinnhubNewsWindow';
 import { DefaultTickerWindow } from './DefaultTickerWindow';
 import { DataControlWindow } from './DataControlWindow';
 import { CaseResearchWindow } from './CaseResearchWindow';
+import { EvidenceTableWindow } from './EvidenceTableWindow';
 
 interface DraggableWindowProps {
   window: WindowInstance;
@@ -133,6 +134,8 @@ export function DraggableWindow({
         );
       case 'case-research':
         return <CaseResearchWindow />;
+      case 'evidence-table':
+        return <EvidenceTableWindow />;
       default:
         return <div>Unknown window type</div>;
     }

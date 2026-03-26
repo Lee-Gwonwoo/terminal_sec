@@ -86,6 +86,12 @@ import {
   searchResearch,
   purgeExpiredResearchTrash,
 } from "./services/researchRepository.js";
+import {
+  getModel2AnalysisRun,
+  listModel2Analyses,
+  listModel2CaseSummaries,
+  listModel2EvidenceRows,
+} from "./services/model2AnalysisRepository.js";
 import { fetchRtprArticles, fetchRtprArticlesByTicker } from "./services/ptprNewsProvider.js";
 import { fetchFmpPressReleasesByTicker } from "./services/fmpPressReleaseProvider.js";
 import { fetchFmpStockNewsByTicker } from "./services/fmpStockNewsProvider.js";
@@ -4234,6 +4240,64 @@ app.get("/api/research/search", async (req, res, next) => {
     if (!q) { res.json([]); return; }
     const results = await searchResearch(DEMO_USER_ID, q);
     res.json(results);
+  } catch (err) { next(err); }
+});
+
+// ── Model 2 analysis / evidence ──
+
+app.get("/api/model2/analyses", async (req, res, next) => {
+  try {
+    await runResearchMaintenance();
+    const pageId = typeof req.query.pageId === "string" && req.query.pageId.trim() ? req.query.pageId.trim() : undefined;
+    const analyses = await listModel2Analyses(pageId);
+    res.json(analyses);
+  } catch (err) { next(err); }
+});
+
+app.get("/api/model2/analyses/:analysisId", async (req, res, next) => {
+  try {
+    await runResearchMaintenance();
+    const analysis = await getModel2AnalysisRun(req.params.analysisId);
+    if (!analysis) {
+      res.status(404).json({ error: "Analysis not found" });
+      return;
+    }
+    res.json(analysis);
+  } catch (err) { next(err); }
+});
+
+app.get("/api/model2/analyses/:analysisId/cases", async (req, res, next) => {
+  try {
+    await runResearchMaintenance();
+    const analysis = await getModel2AnalysisRun(req.params.analysisId);
+    if (!analysis) {
+      res.status(404).json({ error: "Analysis not found" });
+      return;
+    }
+    const cases = await listModel2CaseSummaries(req.params.analysisId);
+    res.json(cases);
+  } catch (err) { next(err); }
+});
+
+app.get("/api/model2/analyses/:analysisId/evidence", async (req, res, next) => {
+  try {
+    await runResearchMaintenance();
+    const analysis = await getModel2AnalysisRun(req.params.analysisId);
+    if (!analysis) {
+      res.status(404).json({ error: "Analysis not found" });
+      return;
+    }
+    const result = await listModel2EvidenceRows({
+      analysisId: req.params.analysisId,
+      caseType: typeof req.query.caseType === "string" ? req.query.caseType : undefined,
+      keyword: typeof req.query.keyword === "string" ? req.query.keyword : undefined,
+      ticker: typeof req.query.ticker === "string" ? req.query.ticker : undefined,
+      sortBy: typeof req.query.sortBy === "string" ? req.query.sortBy : undefined,
+      sortDir: typeof req.query.sortDir === "string" ? req.query.sortDir : undefined,
+      limit: typeof req.query.limit === "string" ? Number(req.query.limit) : undefined,
+      offset: typeof req.query.offset === "string" ? Number(req.query.offset) : undefined,
+    });
+    res.json(result);
   } catch (err) { next(err); }
 });
 

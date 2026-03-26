@@ -1,0 +1,215 @@
+{
+  "analysis_id": "6ec343f2-d7be-43e1-9297-90e5c35643ea",
+  "note_title": "Model 2 company_news issue analysis (2025+)",
+  "since": "2025-01-01",
+  "until": "2026-03-26",
+  "scope": "company_news_2025_plus",
+  "threshold_summary": {
+    "thresholds": {
+      "cap_10b_100b": 17.8436,
+      "cap_100b_300b": 14.8763,
+      "cap_300b_plus": 14.2983,
+      "cap_1b_10b": 25.2427,
+      "cap_300m_1b": 30.138200000000005,
+      "below_300m_or_unknown": 36.932900000000025
+    },
+    "bucket_meta": {
+      "cap_10b_100b": {
+        "count": 177871,
+        "p50": 9.4203,
+        "p80": 17.8436,
+        "p90": 24.7886,
+        "p95": 31.7626
+      },
+      "cap_100b_300b": {
+        "count": 78192,
+        "p50": 8.1419,
+        "p80": 14.8763,
+        "p90": 20.183410000000006,
+        "p95": 25.0211
+      },
+      "cap_300b_plus": {
+        "count": 82397,
+        "p50": 7.4967,
+        "p80": 14.2983,
+        "p90": 19.2773,
+        "p95": 24.1757
+      },
+      "cap_1b_10b": {
+        "count": 147328,
+        "p50": 13.461849999999998,
+        "p80": 25.2427,
+        "p90": 34.64501000000001,
+        "p95": 45.508109999999995
+      },
+      "cap_300m_1b": {
+        "count": 41700,
+        "p50": 16.721400000000003,
+        "p80": 30.138200000000005,
+        "p90": 41.412029999999994,
+        "p95": 56.00167499999986
+      },
+      "below_300m_or_unknown": {
+        "count": 388,
+        "p50": 17.9157,
+        "p80": 36.932900000000025,
+        "p90": 45.5951,
+        "p95": 48.5106
+      }
+    },
+    "global_p80": 19.913,
+    "total_rows": 599681,
+    "analyzable_rows": 527876,
+    "meaningless_rows": 448556,
+    "case_counts": {
+      "meaningless_others": 448556,
+      "mna_asset_value_positive": 14351,
+      "analyst_downgrade_negative": 7042,
+      "financing_dilution_negative": 4268,
+      "analyst_upgrade_positive": 36670,
+      "litigation_regulatory_negative": 7521,
+      "product_growth_positive": 19606,
+      "earnings_guidance_positive": 11090,
+      "macro_sector_readthrough": 30000,
+      "contract_partnership_positive": 15198,
+      "regulatory_clinical_positive": 1385,
+      "earnings_guidance_negative": 1334,
+      "regulatory_clinical_negative": 373,
+      "restructuring_distress_negative": 2287
+    }
+  },
+  "insert_summary": {
+    "impacted_rows": 105608,
+    "inserted_rows": 599681,
+    "case_impacted": {
+      "meaningless_others": 78094,
+      "macro_sector_readthrough": 5841,
+      "product_growth_positive": 3224,
+      "analyst_upgrade_positive": 6101,
+      "mna_asset_value_positive": 2233,
+      "litigation_regulatory_negative": 1737,
+      "regulatory_clinical_positive": 292,
+      "regulatory_clinical_negative": 98,
+      "contract_partnership_positive": 2729,
+      "restructuring_distress_negative": 365,
+      "analyst_downgrade_negative": 1334,
+      "financing_dilution_negative": 1054,
+      "earnings_guidance_positive": 2236,
+      "earnings_guidance_negative": 270
+    }
+  },
+  "case_summaries": [
+    {
+      "case_type": "meaningless_others",
+      "case_label_ko": "잡것들",
+      "top_level": "residual",
+      "total_count": 448556,
+      "impacted_count": 78094,
+      "max_impact_score": 3646.2687
+    },
+    {
+      "case_type": "analyst_upgrade_positive",
+      "case_label_ko": "애널리스트 상향·목표가 상향",
+      "top_level": "long",
+      "total_count": 36670,
+      "impacted_count": 6101,
+      "max_impact_score": 976.5766
+    },
+    {
+      "case_type": "macro_sector_readthrough",
+      "case_label_ko": "매크로·섹터 read-through",
+      "top_level": "residual",
+      "total_count": 30000,
+      "impacted_count": 5841,
+      "max_impact_score": 1117.1717
+    },
+    {
+      "case_type": "product_growth_positive",
+      "case_label_ko": "제품·서비스 성장 기대",
+      "top_level": "long",
+      "total_count": 19606,
+      "impacted_count": 3224,
+      "max_impact_score": 953.5211
+    },
+    {
+      "case_type": "contract_partnership_positive",
+      "case_label_ko": "대형 계약·제휴·수주",
+      "top_level": "long",
+      "total_count": 15198,
+      "impacted_count": 2729,
+      "max_impact_score": 1044.2105
+    },
+    {
+      "case_type": "mna_asset_value_positive",
+      "case_label_ko": "M&A·전략가치 재평가",
+      "top_level": "long",
+      "total_count": 14351,
+      "impacted_count": 2233,
+      "max_impact_score": 486.0606
+    },
+    {
+      "case_type": "earnings_guidance_positive",
+      "case_label_ko": "실적 호조·가이던스 상향",
+      "top_level": "long",
+      "total_count": 11090,
+      "impacted_count": 2236,
+      "max_impact_score": 1114.5538
+    },
+    {
+      "case_type": "litigation_regulatory_negative",
+      "case_label_ko": "소송·조사·회계 리스크",
+      "top_level": "short",
+      "total_count": 7521,
+      "impacted_count": 1737,
+      "max_impact_score": 795.8525
+    },
+    {
+      "case_type": "analyst_downgrade_negative",
+      "case_label_ko": "애널리스트 하향·목표가 하향",
+      "top_level": "short",
+      "total_count": 7042,
+      "impacted_count": 1334,
+      "max_impact_score": 1073.6715
+    },
+    {
+      "case_type": "financing_dilution_negative",
+      "case_label_ko": "희석성 자금조달",
+      "top_level": "short",
+      "total_count": 4268,
+      "impacted_count": 1054,
+      "max_impact_score": 675.0968
+    },
+    {
+      "case_type": "restructuring_distress_negative",
+      "case_label_ko": "구조조정·생존성 악화",
+      "top_level": "short",
+      "total_count": 2287,
+      "impacted_count": 365,
+      "max_impact_score": 187.5493
+    },
+    {
+      "case_type": "regulatory_clinical_positive",
+      "case_label_ko": "승인·임상 호재",
+      "top_level": "long",
+      "total_count": 1385,
+      "impacted_count": 292,
+      "max_impact_score": 648.5573
+    },
+    {
+      "case_type": "earnings_guidance_negative",
+      "case_label_ko": "실적 부진·가이던스 하향",
+      "top_level": "short",
+      "total_count": 1334,
+      "impacted_count": 270,
+      "max_impact_score": 787.4142
+    },
+    {
+      "case_type": "regulatory_clinical_negative",
+      "case_label_ko": "규제·임상 악재",
+      "top_level": "short",
+      "total_count": 373,
+      "impacted_count": 98,
+      "max_impact_score": 371.0692
+    }
+  ]
+}

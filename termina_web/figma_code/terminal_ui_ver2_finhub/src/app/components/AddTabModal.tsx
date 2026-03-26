@@ -114,6 +114,16 @@ export function AddTabModal({ isOpen, onClose, onStart }: AddTabModalProps) {
               />
                 <span>AI Research Window</span>
             </label>
+
+            <label className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={selectedWindows.includes('evidence-table')}
+                onChange={() => toggleWindow('evidence-table')}
+                className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span>Evidence Table</span>
+            </label>
           </div>
         </div>
 

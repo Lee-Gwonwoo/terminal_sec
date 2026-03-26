@@ -378,6 +378,63 @@ export async function initDb(): Promise<void> {
   await db.exec("CREATE INDEX IF NOT EXISTS idx_research_pages_deleted_at ON research_pages(deleted_at);");
   await db.exec("CREATE INDEX IF NOT EXISTS idx_research_pages_fts ON research_pages(title, body);");
 
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS model2_analysis_runs (
+      id TEXT PRIMARY KEY,
+      page_id TEXT REFERENCES research_pages(id) ON DELETE SET NULL,
+      title TEXT NOT NULL,
+      note_title TEXT NOT NULL,
+      source_type TEXT NOT NULL,
+      source_name TEXT,
+      since TEXT NOT NULL,
+      until TEXT NOT NULL,
+      scope TEXT NOT NULL DEFAULT 'company_news',
+      total_rows INTEGER NOT NULL DEFAULT 0,
+      analyzable_rows INTEGER NOT NULL DEFAULT 0,
+      impacted_rows INTEGER NOT NULL DEFAULT 0,
+      meaningless_rows INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS model2_evidence_rows (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      analysis_id TEXT NOT NULL REFERENCES model2_analysis_runs(id) ON DELETE CASCADE,
+      news_id TEXT NOT NULL REFERENCES news_items(id) ON DELETE CASCADE,
+      case_type TEXT NOT NULL,
+      case_label_ko TEXT NOT NULL,
+      top_level TEXT NOT NULL,
+      reaction_tag TEXT NOT NULL DEFAULT 'pending',
+      is_impacted INTEGER NOT NULL DEFAULT 0,
+      ticker TEXT,
+      market_cap REAL,
+      market_cap_bucket TEXT,
+      industry TEXT,
+      ipo_date TEXT,
+      change_pct REAL,
+      change_from_open_pct REAL,
+      change_open_to_high_pct REAL,
+      change_1d_pct REAL,
+      change_3d_pct REAL,
+      change_7d_pct REAL,
+      change_14d_pct REAL,
+      change_30d_pct REAL,
+      immediate_reaction_score REAL,
+      short_followthrough_score REAL,
+      medium_persistence_score REAL,
+      overall_impact_score REAL,
+      summary TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (analysis_id, news_id)
+    );
+  `);
+  await db.exec("CREATE INDEX IF NOT EXISTS idx_model2_runs_page_created ON model2_analysis_runs(page_id, created_at DESC);");
+  await db.exec("CREATE INDEX IF NOT EXISTS idx_model2_runs_source_created ON model2_analysis_runs(source_type, created_at DESC);");
+  await db.exec("CREATE INDEX IF NOT EXISTS idx_model2_evidence_analysis_case ON model2_evidence_rows(analysis_id, case_type);");
+  await db.exec("CREATE INDEX IF NOT EXISTS idx_model2_evidence_analysis_ticker ON model2_evidence_rows(analysis_id, ticker);");
+  await db.exec("CREATE INDEX IF NOT EXISTS idx_model2_evidence_analysis_impact ON model2_evidence_rows(analysis_id, overall_impact_score DESC);");
+
   // SEC Filings companion table — stores Finnhub SEC filing metadata alongside news_items
   await db.exec(`
     CREATE TABLE IF NOT EXISTS sec_filings (

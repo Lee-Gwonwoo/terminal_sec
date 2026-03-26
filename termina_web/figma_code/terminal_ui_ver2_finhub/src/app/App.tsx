@@ -145,7 +145,9 @@ export default function App() {
         } else if (type === 'data-control') {
           title = 'Data Control';
         } else if (type === 'case-research') {
-            title = 'AI Research Window';
+          title = 'AI Research Window';
+        } else if (type === 'evidence-table') {
+          title = 'Evidence Table';
         } else {
           title = type.charAt(0).toUpperCase() + type.slice(1) + ' Window';
         }
