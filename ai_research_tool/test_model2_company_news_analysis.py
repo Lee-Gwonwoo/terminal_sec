@@ -65,12 +65,80 @@ CASE_META: dict[str, dict[str, object]] = {
     "media_amplification_negative": {"label_ko": "top mover·헤드라인 증폭·하락 해설", "top_level": "short", "definition": "why stock is falling, tumbles, sell-off 같은 하락 해설 기사다.", "value_path": "약세 headline cascade가 공포와 추가 매도를 증폭한다.", "include_signals": ["trading lower today", "tumbles", "sell-off", "plunges"], "exclude_signals": ["formal downgrade", "public offering"], "quick_questions": ["이미 내린 뒤 해설 기사인가?", "headline cascade가 중심인가?"]},
     "macro_market_commentary": {"label_ko": "매크로·시장 코멘터리", "top_level": "residual", "definition": "금리, Fed, 인플레이션, 지수 움직임처럼 광범위한 시장 설명 기사다.", "value_path": "개별 기업보다 외부 환경 read-through를 다룬다.", "include_signals": ["stock market today", "fed", "inflation", "nasdaq", "s&p 500"], "exclude_signals": ["single-company event", "peer competition"], "quick_questions": ["여러 종목 공통 설명인가?"]},
     "market_movers_roundup": {"label_ko": "멀티종목 movers·watchlist 기사", "top_level": "residual", "definition": "여러 종목을 묶어 top movers 또는 radar로 나열하는 기사다.", "value_path": "개별 사건보다 스크리너/요약 기사에 가깝다.", "include_signals": ["other big stocks moving", "investors' radars", "most active stocks", "top stocks"], "exclude_signals": ["single-ticker explainer", "direct event"], "quick_questions": ["멀티종목 roundup인가?"]},
+    "promotional_appearance_noise": {"label_ko": "행사·인터뷰·홍보성 appearance", "top_level": "residual", "definition": "conference participation, fireside chat, podcast, webinar, event appearance 같은 홍보성 노출 기사다.", "value_path": "직접 가격 설명보다 investor-relations 노출 성격이 강해 true residual에 가깝다.", "include_signals": ["participate in", "investor conference", "podcast featuring", "fireside chat"], "exclude_signals": ["실적발표", "계약수주", "정책 read-through"], "quick_questions": ["행사 참가/인터뷰 공지인가?", "직접 가치 경로보다 홍보성 노출이 중심인가?"]},
+    "screener_listicle_noise": {"label_ko": "리스트형 screener·주간 요약 노이즈", "top_level": "residual", "definition": "Why these stocks, top meme stocks, penny stocks listicle, week-in-review 같은 리스트형 기사다.", "value_path": "개별 종목의 독립 원인보다 트래픽 유도형 큐레이션 성격이 강하다.", "include_signals": ["why these", "best meme stocks", "penny stocks", "what you need to know"], "exclude_signals": ["single-ticker explainer", "구체적 직접 사건"], "quick_questions": ["리스트형/큐레이션 기사인가?", "개별 원인 설명보다 모음집 구조인가?"]},
     "ipo_listing_event": {"label_ko": "IPO·상장 이벤트", "top_level": "residual", "definition": "IPO, debut, direct listing, goes public가 핵심인 기사다.", "value_path": "시장접근/유동성 이벤트지만 방향성은 케이스별로 다르다.", "include_signals": ["goes public", "ipo", "direct listing", "debut"], "exclude_signals": ["trading halt", "reverse split"], "quick_questions": ["상장 자체가 headline 핵심인가?"]},
     "generic_feature_commentary": {"label_ko": "feature·투자아이디어 해설", "top_level": "residual", "definition": "deep dive, feature, is it a buy, storytelling 성격의 기사다.", "value_path": "직접 이벤트보다 opinion/feature layer다.", "include_signals": ["is it a buy", "worth buying", "deep dive", "feature"], "exclude_signals": ["formal analyst action", "earnings beat"], "quick_questions": ["직접 사건보다 feature/opinion인가?"]},
     "meaningless_others": {"label_ko": "잡것들", "top_level": "residual", "definition": "위 유형으로 재현 가능하게 설명하기 어려운 저정보 잔여 기사다.", "value_path": "직접 가치 경로가 약하거나 불명확하다.", "include_signals": ["generic promotion", "ambiguous article"], "exclude_signals": ["명확한 earnings/analyst/contract/policy read-through 기사"], "quick_questions": ["독립 유형으로 승격시킬 만큼 반복 패턴이 약한가?"]},
 }
 
-ORDERED_RULES: list[tuple[str, tuple[str, ...]]] = [("capital_structure_stress_negative", ("trading halt", "quotation resumption", "halt news pending", "reverse stock split", "minimum bid", "increase authorized shares", "authorized common stock", "non-compliance")), ("financing_dilution_negative", ("public offering", "proposed public offering", "registered direct", "private placement", "warrants", "convertible notes", "convertible senior notes", "common stock offering", "secondary offering")), ("restructuring_distress_negative", ("chapter 11", "bankruptcy", "going concern", "strategic alternatives", "restructuring", "layoffs", "liquidity concerns", "delisting notice")), ("litigation_regulatory_negative", ("lawsuit", "class action", "investigation", "subpoena", "restatement", "fraud", "sec probe", "doj")), ("regulatory_clinical_negative", ("complete response letter", "clinical hold", "failed to meet", "did not meet", "fda rejection", "missed endpoint", "trial failure")), ("policy_regulatory_headwind_negative", ("regulatory framework", "yield ban", "ban stablecoin", "policy risk", "lawmakers", "clarity act", "bill could", "act could")), ("supply_chain_headwind_negative", ("tariff exposure", "rare earth", "component shortage", "supply chain disruption", "cost inflation", "input costs rise")), ("peer_competition_negative", ("competitive pressure", "rival", "competitor", "investment push", "new product from", "competition intensifies", "substitute threat")), ("earnings_miss_cut_negative", ("misses estimates", "misses estimate", "lags revenue estimates", "cuts guidance", "lowered guidance", "weak outlook", "profit warning", "below expectations")), ("analyst_downgrade_negative", ("downgrades", "downgraded", "underperform", "underweight", "lowers price target", "target cut", "price target cut", "sell rating")), ("analyst_note_amplification_negative", ("analyst warns", "cautious note", "bearish note", "skeptical analyst", "analyst concern")), ("management_governance_negative", ("ceo resigns", "cfo resigns", "executive departs", "board dispute", "management turmoil")), ("positioning_flow_negative", ("profit-taking", "taking profits", "de-grossing", "fund selling", "positioning unwind")), ("valuation_narrative_negative", ("too expensive", "stretched valuation", "multiple compression", "overvalued", "valuation concern")), ("government_contract_award_positive", ("contract award", "wins contract", "secures contract", "prime contractor", "definitive contract", "government contract", "awarded a contract")), ("partnership_license_positive", ("partnership", "collaboration", "license agreement", "licensing deal", "exclusive global license", "supply agreement")), ("mna_strategic_asset_positive", ("acquisition", "acquires", "merger", "buyout", "strategic investment", "asset sale", "takeover")), ("regulatory_clinical_positive", ("fda approval", "approved by the fda", "positive topline", "topline results", "phase 3 success", "phase 2 success", "nda acceptance", "bla acceptance", "pivotal data")), ("customer_adoption_positive", ("selected by", "customer win", "deployment", "customer adoption", "adopted by", "major customer")), ("demand_backlog_positive", ("strong demand", "demand surge", "backlog", "bookings growth", "order growth")), ("commercial_launch_expansion_positive", ("launches", "launch", "prepared to launch", "expands", "expansion", "platform expansion", "capacity expansion", "production ramp", "commercial launch")), ("earnings_beat_raise_positive", ("better-than-expected", "beat estimates", "beats estimates", "raises guidance", "record revenue", "earnings beat", "above estimates", "strong results")), ("analyst_upgrade_positive", ("maintains buy", "initiates coverage", "assumes", "outperform", "raises price target", "market outperform", "overweight", "buy rating")), ("analyst_note_amplification_positive", ("analyst says", "citi says", "bofa says", "bullish note", "analyst comment helped")), ("shareholder_return_positive", ("share repurchase", "buyback", "repurchase program", "increases dividend", "returns capital")), ("management_governance_positive", ("appoints new ceo", "appoints veteran", "governance agreement", "board refresh", "new leadership")), ("policy_regulatory_tailwind_positive", ("regulatory clarity", "policy support", "bill boosts", "rule benefits", "tailwind from policy")), ("supply_chain_tailwind_positive", ("supply chain easing", "input costs fall", "sourcing improves", "cost relief", "normalization helps")), ("peer_readthrough_positive", ("read-through", "peer strength", "peer results", "sector leader", "peer demand signal")), ("positioning_flow_positive", ("short squeeze", "fund buying", "position established", "covering", "squeeze higher")), ("valuation_narrative_positive", ("undervalued", "discount", "catch-up", "rerating potential", "cheap stock")), ("ipo_listing_event", ("goes public", "direct listing", "market debut", "stock debut", "initial public offering", " ipo ")), ("earnings_transcript_snapshot", ("earnings call transcript", "earnings snapshot", "earnings call highlights", "conference call transcript")), ("earnings_preview_watch", ("to report q1 results", "to report q2 results", "to report q3 results", "to report q4 results", "wall street expects", "ahead of earnings")), ("market_movers_roundup", ("other big stocks moving", "investors' radars", "most active stocks", "top stocks", "watch these stocks", "wall street's favorite", "best ai stock")), ("macro_market_commentary", ("stock market today", "nasdaq down", "s&p 500", "interest rates", "fed", "inflation", "recession", "macro headwind", "economic slowdown", "geopolitical")), ("generic_feature_commentary", ("is it a buy", "worth buying", "deep dive", "feature", "interesting analyst questions", "show promise"))]
+DIRECT_SHORT_RULES: list[tuple[str, tuple[str, ...]]] = [
+    ("capital_structure_stress_negative", ("trading halt", "quotation resumption", "halt news pending", "reverse stock split", "reverse-splitting", "reverse splitting", "minimum bid", "increase authorized shares", "increases authorized shares", "authorized shares", "authorized common stock", "non-compliance", "regain compliance")),
+    ("financing_dilution_negative", ("public offering", "proposed public offering", "registered direct", "private placement", "warrants", "convertible notes", "convertible senior notes", "common stock offering", "secondary offering")),
+    ("restructuring_distress_negative", ("chapter 11", "bankruptcy", "going concern", "strategic alternatives", "restructuring", "layoffs", "liquidity concerns", "delisting notice")),
+    ("litigation_regulatory_negative", ("lawsuit", "class action", "investigation", "subpoena", "restatement", "fraud", "sec probe", "doj")),
+    ("regulatory_clinical_negative", ("complete response letter", "clinical hold", "failed to meet", "did not meet", "fda rejection", "missed endpoint", "trial failure", "drug-induced liver injury")),
+    ("earnings_miss_cut_negative", ("misses estimates", "misses estimate", "lags revenue estimates", "cuts guidance", "lowered guidance", "weak outlook", "profit warning", "below expectations", "loss wider than expected", "revenues fall y/y", "revenue fell", "drops production forecast")),
+    ("analyst_downgrade_negative", ("downgrades", "downgraded", "underperform", "underweight", "lowers price target", "target cut", "price target cut", "sell rating", "holds neutral rating", "neutral rating", "slashed its price target", "analysts are cutting their estimates", "analysts are downgrading")),
+    ("analyst_note_amplification_negative", ("analyst warns", "cautious note", "bearish note", "skeptical analyst", "analyst concern", "bears are raising a caution flag")),
+    ("management_governance_negative", ("ceo resigns", "cfo resigns", "executive departs", "board dispute", "management turmoil")),
+]
+
+INDIRECT_SHORT_RULES: list[tuple[str, tuple[str, ...]]] = [
+    ("policy_regulatory_headwind_negative", ("regulatory framework", "yield ban", "ban stablecoin", "policy risk", "lawmakers", "clarity act", "bill could", "act could", "federal tax credit", "lose the federal tax credit")),
+    ("supply_chain_headwind_negative", ("tariff exposure", "rare earth", "component shortage", "supply chain disruption", "cost inflation", "input costs rise", "critical materials", "tariffs on gross margin")),
+    ("peer_competition_negative", ("competitive pressure", "rival", "competitor", "investment push", "new product from", "competition intensifies", "substitute threat", "teamed up with spacex", "partnered with spacex", "starlink", "takes market share", "stiff competition")),
+    ("positioning_flow_negative", ("profit-taking", "taking profits", "de-grossing", "fund selling", "positioning unwind")),
+    ("valuation_narrative_negative", ("too expensive", "stretched valuation", "multiple compression", "overvalued", "valuation concern", "still a sell")),
+]
+
+DIRECT_LONG_RULES: list[tuple[str, tuple[str, ...]]] = [
+    ("government_contract_award_positive", ("contract award", "wins contract", "secures contract", "prime contractor", "definitive contract", "government contract", "awarded a contract")),
+    ("partnership_license_positive", ("partnership", "collaboration", "license agreement", "licensing deal", "exclusive global license", "supply agreement")),
+    ("mna_strategic_asset_positive", ("acquisition", "acquires", "merger", "buyout", "strategic investment", "asset sale", "takeover")),
+    ("regulatory_clinical_positive", ("fda approval", "approved by the fda", "positive topline", "topline results", "phase 3 success", "phase 2 success", "nda acceptance", "bla acceptance", "pivotal data", "slowed kidney function decline")),
+    ("customer_adoption_positive", ("selected by", "customer win", "deployment", "customer adoption", "adopted by", "major customer")),
+    ("demand_backlog_positive", ("strong demand", "demand surge", "backlog", "bookings growth", "order growth", "sales dramatically increase", "35% boost")),
+    ("commercial_launch_expansion_positive", ("launches", "launch", "prepared to launch", "expands", "expansion", "platform expansion", "capacity expansion", "production ramp", "commercial launch", "unveils")),
+    ("earnings_beat_raise_positive", ("better-than-expected", "beat estimates", "beats estimates", "raises guidance", "record revenue", "earnings beat", "above estimates", "strong results")),
+    ("analyst_upgrade_positive", ("maintains buy", "initiates coverage", "assumes", "outperform", "raises price target", "market outperform", "overweight", "buy rating")),
+    ("analyst_note_amplification_positive", ("analyst says", "citi says", "bofa says", "bullish note", "analyst comment helped")),
+    ("shareholder_return_positive", ("share repurchase", "buyback", "repurchase program", "increases dividend", "returns capital")),
+    ("management_governance_positive", ("appoints new ceo", "appoints veteran", "governance agreement", "board refresh", "new leadership")),
+]
+
+INDIRECT_LONG_RULES: list[tuple[str, tuple[str, ...]]] = [
+    ("policy_regulatory_tailwind_positive", ("regulatory clarity", "policy support", "bill boosts", "rule benefits", "tailwind from policy")),
+    ("supply_chain_tailwind_positive", ("supply chain easing", "input costs fall", "sourcing improves", "cost relief", "normalization helps")),
+    ("peer_readthrough_positive", ("read-through", "peer strength", "peer results", "sector leader", "peer demand signal", "spending massively on artificial intelligence", "earnings calls")),
+    ("positioning_flow_positive", ("short squeeze", "fund buying", "position established", "covering", "squeeze higher", "surprise stake", "takes stake", "took a stake", "disclosed stake", "sends .* shares flying")),
+    ("valuation_narrative_positive", ("undervalued", "discount", "catch-up", "rerating potential", "cheap stock")),
+]
+
+INFORMATION_FLOW_RULES: list[tuple[str, tuple[str, ...]]] = [
+    ("media_amplification_negative", ("trading lower today", "sinking today", "plummeting today", "stock sank", "shares are trading lower", "sell-off", "tumbles", "plunges", "drifting lower today", "crashed this week", "tumbling wednesday", "pumping the brakes")),
+    ("media_amplification_positive", ("surging today", "soaring today", "trading higher today", "stock soared", "shares are trading higher", "top mover", "biggest gainer", "jumped today", "skyrocketing today", "popped today", "soaring this week")),
+    ("market_movers_roundup", ("other big stocks moving", "investors' radars", "most active stocks", "top stocks", "watch these stocks", "wall street's favorite", "stocks trade up, what you need to know", "shares skyrocket, what you need to know")),
+    ("generic_feature_commentary", ("is it a buy", "worth buying", "deep dive", "feature", "interesting analyst questions", "show promise", "buy, sell, or hold", "everyone is talking about", "how is the market feeling about")),
+]
+
+TRUE_RESIDUAL_RULES: list[tuple[str, tuple[str, ...]]] = [
+    ("promotional_appearance_noise", ("participate in the", "investor conference", "podcast featuring", "webcasting its participation", "fireside chat", "panel discussion", "conference presentation")),
+    ("screener_listicle_noise", ("why these", "healthcare stocks are surging", "penny stocks with market caps", "best meme stocks", "wall street but", "what you need to know", "stocks are surging in", "promising penny stocks")),
+    ("macro_market_commentary", ("stock market today", "nasdaq down", "s&p 500", "interest rates", "fed", "inflation", "recession", "macro headwind", "economic slowdown", "geopolitical", "producer inflation stalls", "crude oil stocks fall", "consumer price index")),
+    ("ipo_listing_event", ("goes public", "direct listing", "market debut", "stock debut", "initial public offering", " ipo ")),
+    ("earnings_transcript_snapshot", ("earnings call transcript", "earnings snapshot", "earnings call highlights", "conference call transcript", "q1 2025 earnings call")),
+    ("earnings_preview_watch", ("to report q1 results", "to report q2 results", "to report q3 results", "to report q4 results", "wall street expects", "ahead of earnings", "earnings: a preview")),
+]
+
+CASE_RULE_GROUPS: list[tuple[str, list[tuple[str, tuple[str, ...]]]]] = [
+    ("direct_short", DIRECT_SHORT_RULES),
+    ("indirect_short", INDIRECT_SHORT_RULES),
+    ("direct_long", DIRECT_LONG_RULES),
+    ("indirect_long", INDIRECT_LONG_RULES),
+    ("information_flow", INFORMATION_FLOW_RULES),
+    ("true_residual", TRUE_RESIDUAL_RULES),
+]
 
 POSITIVE_EXPLAINERS = ("surging today", "soaring today", "trading higher today", "stock soared", "shares are trading higher", "top mover", "biggest gainer")
 NEGATIVE_EXPLAINERS = ("trading lower today", "sinking today", "plummeting today", "stock sank", "shares are trading lower", "sell-off", "tumbles", "plunges", "drifting lower today")
@@ -81,19 +149,27 @@ def normalize_text(*parts: str | None) -> str:
 
 
 def contains_any(text: str, patterns: tuple[str, ...]) -> bool:
-    return any(pattern in text for pattern in patterns)
+    for pattern in patterns:
+        if ".*" in pattern:
+            if re.search(pattern, text):
+                return True
+            continue
+        if pattern in text:
+            return True
+    return False
 
 
-def classify_company_news(title: str, body: str, publisher: str = "") -> str:
+def classify_company_news(title: str, body: str, full_text: str = "", publisher: str = "") -> str:
     title_text = (title or "").lower()
-    text = normalize_text(title, body, publisher)
+    text = normalize_text(title, body, full_text, publisher)
     if not text.strip():
         return "meaningless_others"
-    for case_type, patterns in ORDERED_RULES:
-        if contains_any(text, patterns):
-            if case_type == "ipo_listing_event" and "trading halt" in text:
-                continue
-            return case_type
+    for _, rules in CASE_RULE_GROUPS:
+        for case_type, patterns in rules:
+            if contains_any(text, patterns):
+                if case_type == "ipo_listing_event" and "trading halt" in text:
+                    continue
+                return case_type
     if "why" in text or "shares are trading" in text:
         if contains_any(text, NEGATIVE_EXPLAINERS):
             return "media_amplification_negative"
@@ -116,7 +192,7 @@ def case_meta(case_type: str) -> dict[str, object]:
 
 
 def summary_text(row: dict) -> str:
-    source = (row.get("body") or "").strip()
+    source = (row.get("full_text") or row.get("body") or "").strip()
     if not source:
         return ""
     trimmed = " ".join(source.split())
@@ -135,6 +211,7 @@ def iter_company_news_rows(conn: sqlite3.Connection, since: str, until: str, chu
                ni.source_type,
                ni.title,
                ni.body,
+             nf.full_text,
                ni.url,
                ni.tickers_csv,
                MAX(CASE WHEN m.metric_key='change_pct' THEN m.value_pct END) AS change_pct,
@@ -146,6 +223,7 @@ def iter_company_news_rows(conn: sqlite3.Connection, since: str, until: str, chu
                MAX(CASE WHEN m.metric_key='change_14d_pct' THEN m.value_pct END) AS change_14d_pct,
                MAX(CASE WHEN m.metric_key='change_30d_pct' THEN m.value_pct END) AS change_30d_pct
         FROM news_items ni
+        LEFT JOIN news_fulltext nf ON nf.news_id = ni.id
         LEFT JOIN news_change_metrics m ON m.news_id = ni.id
         WHERE ni.source_type = 'company_news'
           AND ni.published_at >= ?
@@ -172,7 +250,7 @@ def prepare_row(base_row: dict, company_ctx: dict[str, dict], thresholds: dict[s
     row["industry"] = context.get("industry") or ""
     row["ipo_date"] = context.get("ipo_date") or ""
     row["market_cap_bucket"] = cap_bucket(row.get("market_cap"))
-    row["case_type"] = classify_company_news(row.get("title") or "", row.get("body") or "", row.get("publisher") or "")
+    row["case_type"] = classify_company_news(row.get("title") or "", row.get("body") or "", row.get("full_text") or "", row.get("publisher") or "")
     case_label_ko, top_level = meta_for_case(row["case_type"])
     row["case_label_ko"] = case_label_ko
     row["top_level"] = top_level
@@ -203,7 +281,7 @@ def compute_thresholds(conn: sqlite3.Connection, since: str, until: str, company
         context = company_ctx.get(ticker or "", {}) if ticker else {}
         raw_row["market_cap"] = context.get("market_cap")
         raw_row["market_cap_bucket"] = cap_bucket(raw_row.get("market_cap"))
-        raw_row["case_type"] = classify_company_news(raw_row.get("title") or "", raw_row.get("body") or "", raw_row.get("publisher") or "")
+        raw_row["case_type"] = classify_company_news(raw_row.get("title") or "", raw_row.get("body") or "", raw_row.get("full_text") or "", raw_row.get("publisher") or "")
         case_counts[raw_row["case_type"]] += 1
         if raw_row["case_type"] == "meaningless_others":
             meaningless_rows += 1
@@ -337,7 +415,7 @@ def populate_evidence_rows(conn: sqlite3.Connection, run_id: str, since: str, un
                 raw_row.get("publisher"),
                 raw_row.get("source_type"),
                 raw_row.get("title"),
-                (raw_row.get("body") or "")[:600],
+                (raw_row.get("full_text") or raw_row.get("body") or "")[:600],
                 raw_row.get("url"),
             )
         )

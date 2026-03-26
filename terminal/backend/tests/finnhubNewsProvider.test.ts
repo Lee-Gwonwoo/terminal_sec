@@ -120,6 +120,36 @@ describe("finnhubNewsProvider mapping", () => {
       expect(items[0].publisher).toBe("YAHOO");
     });
 
+    it("should infer publisher from content when Finnhub source stays FINNHUB", async () => {
+      mockFetchOnce([
+        {
+          datetime: 1709683200,
+          headline: "Stock Picks From Seeking Alpha's New Analysts",
+          summary: "Meet Seeking Alpha's newest analysts and their stock picks.",
+          url: "https://finnhub.io/api/news?id=test",
+          source: "Finnhub",
+        },
+      ]);
+
+      const items = await fetchCompanyNewsRaw("AAPL", "2024-03-01", "2024-03-07");
+      expect(items[0].publisher).toBe("SEEKINGALPHA");
+    });
+
+    it("should infer Yahoo publisher only for Yahoo-branded show or transcript patterns", async () => {
+      mockFetchOnce([
+        {
+          datetime: 1709683200,
+          headline: "Retail investor buying holds strong: Why these names are winning",
+          summary: "Yahoo Finance Senior Business Reporter Ines Ferre and B. Riley Wealth chief market strategist Art Hogan join Opening Bid host Brian Sozzi.",
+          url: "https://finnhub.io/api/news?id=test-yahoo",
+          source: "Finnhub",
+        },
+      ]);
+
+      const items = await fetchCompanyNewsRaw("AAPL", "2024-03-01", "2024-03-07");
+      expect(items[0].publisher).toBe("YAHOO");
+    });
+
     it("should never expose API key in mapped output", async () => {
       mockFetchOnce([
         {
@@ -271,6 +301,9 @@ describe("finnhubNewsProvider mapping", () => {
           url: "https://finnhub.io/api/news?id=abc",
           origin_url: "https://finance.yahoo.com/news/example-123.html",
           publisher: "FINNHUB",
+          title: "Example title",
+          body: "Example body",
+          source_type: "company_news",
         },
       ] as any);
       mockDb.run.mockResolvedValue({ changes: 1 });
@@ -280,6 +313,50 @@ describe("finnhubNewsProvider mapping", () => {
       expect(mockDb.run).toHaveBeenCalledWith(
         "UPDATE news_items SET publisher = ? WHERE id = ?",
         ["YAHOO", "row-1"],
+      );
+    });
+
+    it("should infer publisher from title or body for FINNHUB company_news rows without origin_url", async () => {
+      mockDb.all.mockResolvedValueOnce([
+        {
+          id: "row-2",
+          url: "https://finnhub.io/api/news?id=def",
+          origin_url: null,
+          publisher: "FINNHUB",
+          title: "Stock Picks From Seeking Alpha's February 2026 New Analysts",
+          body: "Meet Seeking Alpha's 17 new analysts and their stock picks.",
+          source_type: "company_news",
+        },
+      ] as any);
+      mockDb.run.mockResolvedValue({ changes: 1 });
+
+      const updated = await backfillPublisher();
+      expect(updated).toBe(1);
+      expect(mockDb.run).toHaveBeenCalledWith(
+        "UPDATE news_items SET publisher = ? WHERE id = ?",
+        ["SEEKINGALPHA", "row-2"],
+      );
+    });
+
+    it("should infer Yahoo publisher from Yahoo-branded transcript cues, not generic citation text", async () => {
+      mockDb.all.mockResolvedValueOnce([
+        {
+          id: "row-3",
+          url: "https://finnhub.io/api/news?id=ghi",
+          origin_url: null,
+          publisher: "FINNHUB",
+          title: "Tesla, Target, Ross: Top analyst calls today",
+          body: "Yahoo Finance Senior Reporter Brooke DiPalma outlines some of Wall Street's top analyst calls today. To watch more expert insights and analysis on the latest market action, check out more Market Domination.",
+          source_type: "company_news",
+        },
+      ] as any);
+      mockDb.run.mockResolvedValue({ changes: 1 });
+
+      const updated = await backfillPublisher();
+      expect(updated).toBe(1);
+      expect(mockDb.run).toHaveBeenCalledWith(
+        "UPDATE news_items SET publisher = ? WHERE id = ?",
+        ["YAHOO", "row-3"],
       );
     });
   });

@@ -76,6 +76,35 @@ const PUBLISHER_CANONICAL_MAP: Record<string, string> = {
   "GLOBE NEWS WIRE": "GLOBENEWSWIRE",
 };
 
+const CONTENT_PUBLISHER_HINTS: Array<{ publisher: string; patterns: RegExp[] }> = [
+  {
+    publisher: "YAHOO",
+    patterns: [
+      /yahoo finance(?:'s)?\s+(?:senior reporter|reporter|anchor|executive editor)/i,
+      /joins?\s+opening bid host/i,
+      /in this market minute/i,
+      /good buy or goodbye/i,
+      /yahoo finance polymarket hub/i,
+      /to watch more expert insights and analysis on the latest market action/i,
+      /yahoo finance's john hyland/i,
+      /yahoo finance senior reporter/i,
+    ],
+  },
+  { publisher: "REUTERS", patterns: [/\(reuters\)/i, /\breuters\s*-\s*/i, /\bby\s+[^\n]{1,120}\(reuters\)/i] },
+  { publisher: "BENZINGA", patterns: [/\bbenzinga\b/i, /benzinga edge/i, /benzinga pro/i, /analyst stock ratings/i] },
+  { publisher: "SEEKINGALPHA", patterns: [/\bseeking alpha\b/i] },
+  { publisher: "TIPRANKS", patterns: [/\btipranks\b/i, /tipranks premium/i] },
+  { publisher: "MARKETWATCH", patterns: [/\bmarketwatch\b/i] },
+  { publisher: "CNBC", patterns: [/\bcnbc\b/i] },
+  { publisher: "INVESTORPLACE", patterns: [/\binvestorplace\b/i] },
+  { publisher: "MOTLEY FOOL", patterns: [/\bmotley fool\b/i] },
+  { publisher: "ZACKS", patterns: [/\bzacks\b/i, /zacks rank/i] },
+  { publisher: "GURUFOCUS", patterns: [/\bgurufocus\b/i] },
+  { publisher: "THEFLY.COM", patterns: [/\bthe fly\b/i, /fly intel/i] },
+  { publisher: "STOCK OPTIONS CHANNEL", patterns: [/stock options channel/i] },
+  { publisher: "FINTEL", patterns: [/\bfintel\b/i] },
+];
+
 export interface MarketNewsBatchProgress {
   batchNumber: number;
   batchPagesFetched: number;
@@ -248,7 +277,12 @@ export async function fetchCompanyNewsRaw(
           .filter(Boolean)
       : [symbol.toUpperCase()],
     tags: item.category ? [item.category.toLowerCase()] : [],
-    publisher: item.source ? canonicalizePublisherLabel(String(item.source)) : derivePublisher(item.url ?? ""),
+    publisher: resolveBestPublisher({
+      url: item.url ?? "",
+      providerSource: item.source,
+      title: item.headline ?? "",
+      body: item.summary ?? "",
+    }),
   }));
 }
 
@@ -671,12 +705,52 @@ export function canonicalizePublisherLabel(value: string | null | undefined): st
   return PUBLISHER_CANONICAL_MAP[normalized] ?? normalized;
 }
 
-function deriveBestPublisher(url: string, originUrl?: string | null): string {
-  const originPublisher = originUrl ? derivePublisher(originUrl) : "UNKNOWN";
+function inferPublisherFromContent(title: string | null | undefined, body: string | null | undefined): string | null {
+  const text = [title, body]
+    .filter((part): part is string => Boolean(part && part.trim()))
+    .join("\n");
+  if (!text) {
+    return null;
+  }
+  for (const hint of CONTENT_PUBLISHER_HINTS) {
+    if (hint.patterns.some((pattern) => pattern.test(text))) {
+      return hint.publisher;
+    }
+  }
+  return null;
+}
+
+function resolveBestPublisher(params: {
+  url: string;
+  providerSource?: string | null;
+  title?: string | null;
+  body?: string | null;
+  originUrl?: string | null;
+}): string {
+  const originPublisher = params.originUrl ? derivePublisher(params.originUrl) : "UNKNOWN";
   if (originPublisher !== "UNKNOWN" && originPublisher !== "FINNHUB") {
     return originPublisher;
   }
-  return derivePublisher(url);
+
+  const providerPublisher = canonicalizePublisherLabel(params.providerSource);
+  if (providerPublisher !== "UNKNOWN" && providerPublisher !== "FINNHUB") {
+    return providerPublisher;
+  }
+
+  const inferredPublisher = inferPublisherFromContent(params.title, params.body);
+  if (inferredPublisher) {
+    return inferredPublisher;
+  }
+
+  const urlPublisher = derivePublisher(params.url);
+  if (urlPublisher !== "UNKNOWN" && urlPublisher !== "FINNHUB") {
+    return urlPublisher;
+  }
+
+  if (providerPublisher !== "UNKNOWN") {
+    return providerPublisher;
+  }
+  return urlPublisher;
 }
 
 /**
@@ -684,16 +758,25 @@ function deriveBestPublisher(url: string, originUrl?: string | null): string {
  * Returns the number of rows updated.
  */
 export async function backfillPublisher(): Promise<number> {
-  const rows = await getDb().all<{ id: string; url: string; origin_url: string | null; publisher: string | null }[]>(
-    `SELECT id, url, origin_url, publisher
+  const rows = await getDb().all<{ id: string; url: string; origin_url: string | null; publisher: string | null; title: string | null; body: string | null; source_type: string | null }[]>(
+    `SELECT id, url, origin_url, publisher, title, body, source_type
        FROM news_items
       WHERE publisher IS NULL
          OR publisher = 'UNKNOWN'
-         OR (publisher = 'FINNHUB' AND origin_url IS NOT NULL AND TRIM(origin_url) <> '')`,
+         OR (publisher = 'FINNHUB' AND (
+              (origin_url IS NOT NULL AND TRIM(origin_url) <> '')
+              OR source_type = 'company_news'
+            ))`,
   );
   let updated = 0;
   for (const row of rows) {
-    const publisher = deriveBestPublisher(row.url, row.origin_url);
+    const publisher = resolveBestPublisher({
+      url: row.url,
+      providerSource: row.publisher,
+      title: row.title,
+      body: row.body,
+      originUrl: row.origin_url,
+    });
     const currentPublisher = canonicalizePublisherLabel(row.publisher);
     if (publisher === currentPublisher) {
       continue;

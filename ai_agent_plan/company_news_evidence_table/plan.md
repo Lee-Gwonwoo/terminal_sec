@@ -599,6 +599,39 @@
   - `Case Description` 창에 `분류 기준`과 `분류 키워드` 섹션을 추가해, 어떤 keyword/signal을 기준으로 분류했는지 바로 읽을 수 있게 한다.
   - taxonomy registry key가 없는 경우에도 fallback 설명은 유지하되, 기본 분류 기준 문구는 포함/제외 신호에서 자동 생성한다.
 
+### PLAN CHANGE — 2026-03-26 21:35
+
+- 최종 목적 정렬:
+  - `company_news` taxonomy를 headline/body 표면 분류기 수준에서 멈추지 않고, `title + body + full_text`를 함께 읽는 후속기사 분류기로 올린다.
+  - rule set도 flat keyword 나열에서 `direct short -> indirect short -> direct long -> indirect long -> information-flow -> true residual` 순의 상위 그룹 구조로 재배치한다.
+- residual 축소 방향:
+  - `행사/appearance`와 `listicle/screener`를 `meaningless_others`에서 분리해 true residual을 더 투명하게 만든다.
+  - `generic feature`는 buy/sell/hold, everyone is talking about 같은 decision-framework 기사만 남기고, 구체 원인이 읽히는 기사는 direct/indirect case로 먼저 보내도록 한다.
+- 검증 목표:
+  - 새 run에서 `meaningless_others` 비중이 더 줄어드는지 확인한다.
+  - evidence table에서 새 residual case(`행사·인터뷰·홍보성 appearance`, `리스트형 screener·주간 요약 노이즈`)가 독립적으로 보이는지 확인한다.
+
+### PLAN CHANGE — 2026-03-26 17:52
+
+- publisher 선정 순서 보정:
+  - taxonomy 확장 전에 `company_news` publisher 축부터 바로잡는다.
+  - 실제 기사 출처가 `SEEKINGALPHA`, `BENZINGA`, `REUTERS`, `TIPRANKS` 등인데 `FINNHUB`로 남아 있는 legacy row를 우선 교정한다.
+- 적용 규칙:
+  - `origin_url`이 있으면 도메인 기준 publisher를 최우선으로 복원한다.
+  - `origin_url`이 없는 wrapper row는 `title/body` 안의 명시적 출처 신호(`Seeking Alpha`, `Benzinga`, `(Reuters)` 등)로 publisher를 재분류한다.
+  - 위 두 정보가 모두 없을 때만 기존 provider source/url domain fallback을 유지한다.
+- 기대 효과:
+  - evidence table과 taxonomy 분석에서 publisher 축 신뢰도를 먼저 회복한다.
+  - residual 샘플 조사 시 실제 media/source 기준으로 묶음을 다시 볼 수 있다.
+
+### PLAN CHANGE — 2026-03-26 18:02
+
+- Yahoo branded 기사 보강:
+  - `Yahoo Finance` 문자열 자체만으로는 타사 기사의 citation과 구분이 안 되므로, Yahoo branded show/transcript 패턴만 별도로 승격한다.
+  - `Yahoo Finance Senior Reporter`, `Opening Bid`, `Market Minute`, `Good Buy or Goodbye` 같은 강한 신호가 있을 때만 `YAHOO`로 분류한다.
+- 목적:
+  - `according to Yahoo Finance` 같은 일반 인용문 오분류는 피하고, 실제 Yahoo 콘텐츠만 `FINNHUB -> YAHOO`로 교정한다.
+
 #### ⬜ Step 6 — 전체 검증
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|

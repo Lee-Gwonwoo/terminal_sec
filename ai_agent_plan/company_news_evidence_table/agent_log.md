@@ -274,3 +274,144 @@
   - frontend 정적 오류 확인
   - frontend build 확인
   - 우클릭 `description` -> `Case Description` 창 오픈 수동 확인
+
+## 2026-03-26
+**업데이트 시각:** 21:35 (local)
+
+- 사용자 지시 반영:
+  - 현재 taxonomy를 더 체계화하고, plan의 최종 목적(후속기사의 direct + indirect 가격 영향 정보 유형화)에 맞춰 다시 정렬하라는 요청 반영
+- 샘플 재점검 결과:
+  - `meaningless_others` 상위 샘플에 `authorized shares`, `analyst estimate cut`, `conference participation` 같은 반복 패턴이 남아 있었음
+  - `generic_feature_commentary` 상위 샘플에 `Apple/SpaceX -> Globalstar`, `surprise stake`, `buy/sell/hold`, `interesting analyst questions`처럼 direct/indirect/decision-framework가 뒤섞여 있었음
+  - 특히 기존 분류기는 `full_text`를 읽지 않고 `title/body` 위주로 분류해서, 기사 안의 실제 가격 영향 설명 문장을 놓치는 구조였음
+- 구조 수정:
+  - `test_model2_company_news_analysis.py`
+    - 분류 입력을 `title + body + full_text + publisher`로 확장
+    - rule set을 `direct short -> indirect short -> direct long -> indirect long -> information-flow -> true residual` 상위 그룹 구조로 재배치
+    - `promotional_appearance_noise`, `screener_listicle_noise` residual case 추가
+    - `capital_structure_stress_negative`, `peer_competition_negative`, `positioning_flow_positive`, `generic_feature_commentary` 등 패턴 확장
+    - evidence preview도 `full_text` 우선으로 저장하게 보강
+  - `model2CaseDescriptions.ts`
+    - 새 residual case 2개 설명 추가
+    - `generic_feature_commentary` 설명을 decision-framework 중심으로 보강
+- 검증 예정:
+  - Python 문법 오류 확인
+  - frontend 정적 오류 + build 확인
+  - company_news taxonomy v4 재실행 후 새 analysis 수치 확인
+
+## 2026-03-26
+**업데이트 시각:** 21:48 (local)
+
+- 재검증 결과:
+  - Python `py_compile` 통과
+  - frontend `get_errors` 0건
+  - frontend `npm.cmd run build` 성공
+  - taxonomy 재실행 완료:
+    - `analysis_id = da7d8093-b878-48c9-8055-1851ab9d041a`
+    - `total_rows = 599681`
+    - `analyzable_rows = 527876`
+    - `impacted_rows = 105608`
+    - `meaningless_rows = 359680`
+  - 비교:
+    - 직전 run `meaningless_rows = 371983`
+    - 이번 run `meaningless_rows = 359680`
+    - 추가로 `12303` row가 `잡것들` 밖의 독립 case로 이동
+- API 확인:
+  - 최신 run `cases` 응답에서 새 residual case 노출 확인
+    - `promotional_appearance_noise = 3512`
+    - `screener_listicle_noise = 3975`
+  - `generic_feature_commentary = 16440`, `meaningless_others = 359680` 확인
+- 해석:
+  - 이번 수정으로 taxonomy가 `flat keyword residual 분류기`에서 `full_text 기반 + 상위 그룹 구조` 분류기로 한 단계 올라감
+  - 다만 `meaningless_others`가 여전히 절대 규모가 커서, 다음 보정은 남은 residual 샘플을 다시 읽어 `decision-framework`, `ecosystem substitution`, `estimate-reset` 같은 반복 패턴을 더 독립화하는 쪽이 필요함
+
+## 2026-03-26
+**업데이트 시각:** 21:55 (local)
+
+- 추가 회귀 검증:
+  - backend `npm run build` 성공
+  - backend `npm run test` 성공 (`13 files / 78 tests`)
+- 최종 상태:
+  - frontend description 변경, Python taxonomy 재설계, analysis 재실행, backend 회귀 검증까지 마침
+  - 브라우저 시각 확인은 사용자 확인 대기
+
+## 2026-03-26
+**업데이트 시각:** 17:52 (local)
+
+- 사용자 추가 요구 반영:
+  - taxonomy 확장 전에 `company_news` publisher 분류부터 바로잡아 달라는 요청 반영
+  - 실제 기사 출처가 `SEEKINGALPHA` 등인데 `FINNHUB`로 보이는 문제를 우선 해결 대상으로 전환
+- 원인 확인:
+  - `fetchCompanyNewsRaw()`가 Finnhub payload의 `item.source`를 우선 신뢰해 publisher를 저장하고 있었고, 이 값이 `FINNHUB`인 경우 wrapper row가 그대로 `FINNHUB`로 남았음
+  - startup `backfillPublisher()`는 `origin_url`이 있는 일부 `FINNHUB` row만 교정해서, `origin_url` 없는 legacy `company_news` wrapper row는 계속 `FINNHUB`에 묶여 있었음
+  - 실DB 확인 결과 `source='FINNHUB' AND source_type='company_news' AND publisher='FINNHUB'` row가 `88,596`건 존재했고, 샘플 row도 `origin_url = NULL` 상태였음
+  - 추가 샘플 확인에서 body/title에 `Seeking Alpha`, `Benzinga`, `(Reuters)`, `TipRanks` 같은 명시적 출처 단서가 반복적으로 남아 있음을 확인
+- 수정 내용:
+  - `terminal/backend/src/services/finnhubNewsProvider.ts`
+    - `title/body` 내 명시적 publisher 신호를 읽는 content-based inference helper 추가
+    - 새 `company_news` 수집 시 `FINNHUB`를 그대로 저장하지 않고 `origin_url -> provider source -> content hint -> url domain` 우선순위로 publisher를 결정하도록 변경
+    - `backfillPublisher()`가 `publisher='FINNHUB' AND source_type='company_news'` legacy row까지 대상으로 삼고, `title/body/origin_url` 기반으로 publisher를 재분류하도록 확장
+- 검증 예정:
+  - backend 정적 오류 확인
+  - backend `npm run build`
+  - backend `npm run test`
+  - 실DB에서 `publisher='FINNHUB'` 건수 감소와 샘플 row 교정 여부 확인
+  - `/api/news` 또는 model2 cases/evidence에서 publisher 표기 확인
+
+## 2026-03-26
+**업데이트 시각:** 17:55 (local)
+
+- 검증 완료:
+  - backend 정적 오류 0건 확인
+  - backend `npm run build` 성공
+  - backend `npm run test` 성공 (`13 files / 78 tests`)
+  - `terminal/backend/tests/finnhubNewsProvider.test.ts`에 content-based publisher inference / backfill 테스트 2건 추가
+- 런타임 통합 확인:
+  - running backend API에서 `keyword=Seeking Alpha` 조회 시 sample row `4d57f8cf-de14-47ed-b3d3-02e3c0a87a9b`의 publisher가 `SEEKINGALPHA`로 노출됨 확인
+  - 실DB 확인 결과 `source='FINNHUB' AND source_type='company_news' AND publisher='FINNHUB'` 건수는 `88,596 -> 88,264`로 감소
+  - 대표 교정 샘플 확인:
+    - `4d57f8cf-de14-47ed-b3d3-02e3c0a87a9b` -> `SEEKINGALPHA`
+    - `d4ac22ec-0a36-4652-91a3-1791ee6fd65c` -> `BENZINGA`
+    - `f77c2765-df46-4155-bef9-be32ccb523c8` -> `REUTERS`
+- 상태:
+  - 새 수집 + startup backfill 모두 publisher 보정 로직이 반영됨
+  - 아직 `FINNHUB`로 남는 row는 명시적 출처 단서가 부족한 케이스라, 필요하면 다음 단계에서 wrapper HTML 파싱 또는 추가 content heuristic로 더 줄일 수 있음
+
+## 2026-03-26
+**업데이트 시각:** 18:02 (local)
+
+- 추가 확인:
+  - `publisher='FINNHUB'`이면서 body/title에 `Yahoo Finance`가 보이는 row를 따로 확인해 보니, 두 종류가 섞여 있었음
+  - 하나는 실제 Yahoo branded transcript/video 기사(`Yahoo Finance Senior Reporter`, `Opening Bid`, `Market Minute`, `Good Buy or Goodbye`)였고, 다른 하나는 단순 citation(`according to Yahoo Finance`)이었음
+- 수정 내용:
+  - `terminal/backend/src/services/finnhubNewsProvider.ts`
+    - Yahoo 전용 content hint를 추가하되, 단순 `Yahoo Finance` 문자열이 아니라 branded show/transcript 패턴만 `YAHOO`로 승격하도록 제한
+  - `terminal/backend/tests/finnhubNewsProvider.test.ts`
+    - Yahoo branded transcript 패턴을 `YAHOO`로 인식하는 테스트 추가
+    - generic citation 오분류를 피하기 위한 전제 아래 backfill 테스트 추가
+- 검증 예정:
+  - backend 정적 오류 확인
+  - backend `npm run build`
+  - backend `npm run test`
+  - 실DB에서 Yahoo branded sample row 교정 여부 확인
+
+## 2026-03-26
+**업데이트 시각:** 18:02 (local)
+
+- 검증 완료:
+  - backend 정적 오류 0건 확인
+  - backend `npm run build` 성공
+  - backend `npm run test` 성공 (`13 files / 80 tests`)
+- 런타임 통합 확인:
+  - 실DB에서 Yahoo branded sample row 4건 확인:
+    - `d99d7c2f-d9b7-4926-a771-721c3c059875` -> `YAHOO`
+    - `c2d868d3-e03d-454e-ac87-b856c8b538b6` -> `YAHOO`
+    - `19c77389-4926-4e43-b540-1d9b6608bf78` -> `YAHOO`
+    - `42a006b1-99a8-49c4-a9a8-c8ebfe8ab5ba` -> `YAHOO`
+  - running backend API에서 `keyword=Opening Bid` 조회 시 Yahoo branded row들이 `publisher='YAHOO'`로 노출됨 확인
+  - 실DB 집계 기준 `source='FINNHUB' AND source_type='company_news'`에서
+    - `publisher='YAHOO'`: `686205`
+    - `publisher='FINNHUB'`: `88239`
+- 상태:
+  - Yahoo branded transcript/video 기사까지 `FINNHUB -> YAHOO` 교정 로직이 반영됨
+  - 남은 `FINNHUB` row는 Yahoo 단순 citation 또는 출처 단서 부족 케이스가 중심이라, 필요하면 다음 단계에서 wrapper HTML 파싱으로 더 줄일 수 있음
