@@ -1,64 +1,115 @@
 {
-  "version": "2.0.0",
-  "tasks": [
-    {
-      "label": "backend: dev (npm.cmd)",
-      "type": "shell",
-      "command": "npm.cmd",
-      "args": ["run", "dev"],
-      "options": {
-        "cwd": "${workspaceFolder}\\terminal\\backend"
-      },
-      "isBackground": true,
-      "problemMatcher": []
-    },
-    {
-      "label": "webui: dev (npm.cmd)",
-      "type": "shell",
-      "command": "npm.cmd",
-      "args": ["run", "dev"],
-      "options": {
-        "cwd": "${workspaceFolder}\\termina_web\\figma_code\\terminal_ui_ver2_finhub"
-      },
-      "isBackground": true,
-      "problemMatcher": []
-    },
-    {
-      "label": "webui: dev (all)",
-      "dependsOn": ["backend: dev (npm.cmd)", "webui: dev (npm.cmd)"],
-      "dependsOrder": "parallel",
-      "problemMatcher": []
-    },
-    {
-      "label": "terminal: dev (npm.cmd)",
-      "type": "shell",
-      "command": "npm.cmd",
-      "args": ["run", "dev"],
-      "options": {
-        "cwd": "${workspaceFolder}\\terminal"
-      },
-      "isBackground": true,
-      "problemMatcher": []
-    },
-    {
-      "label": "terminal: build (npm.cmd)",
-      "type": "shell",
-      "command": "npm.cmd",
-      "args": ["run", "build"],
-      "options": {
-        "cwd": "${workspaceFolder}\\terminal"
-      },
-      "problemMatcher": []
-    },
-    {
-      "label": "terminal: test (npm.cmd)",
-      "type": "shell",
-      "command": "npm.cmd",
-      "args": ["run", "test"],
-      "options": {
-        "cwd": "${workspaceFolder}\\terminal"
-      },
-      "problemMatcher": []
-    }
-  ]
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "backend: dev (npm.cmd)",
+			"type": "shell",
+			"command": "npm.cmd",
+			"args": [
+				"run",
+				"dev"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}\\terminal\\backend"
+			},
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "webui: dev (npm.cmd)",
+			"type": "shell",
+			"command": "npm.cmd",
+			"args": [
+				"run",
+				"dev"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}\\termina_web\\figma_code\\terminal_ui_ver2_finhub"
+			},
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "webui: dev (all)",
+			"dependsOn": [
+				"backend: dev (npm.cmd)",
+				"webui: dev (npm.cmd)"
+			],
+			"dependsOrder": "parallel",
+			"problemMatcher": []
+		},
+		{
+			"label": "terminal: dev (npm.cmd)",
+			"type": "shell",
+			"command": "npm.cmd",
+			"args": [
+				"run",
+				"dev"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}\\terminal"
+			},
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "terminal: build (npm.cmd)",
+			"type": "shell",
+			"command": "npm.cmd",
+			"args": [
+				"run",
+				"build"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}\\terminal"
+			},
+			"problemMatcher": []
+		},
+		{
+			"label": "terminal: test (npm.cmd)",
+			"type": "shell",
+			"command": "npm.cmd",
+			"args": [
+				"run",
+				"test"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}\\terminal"
+			},
+			"problemMatcher": []
+		},
+		{
+			"label": "tmp: check 8080 listener",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue | Select-Object LocalAddress,LocalPort,State,OwningProcess | Format-List"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "tmp: curl analyses",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"try { Invoke-RestMethod -Uri 'http://localhost:8080/api/model2/analyses' | Select-Object -First 3 | ConvertTo-Json -Depth 5 } catch { $_ | Out-String }"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "tmp: identify 8080 pid",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"Get-CimInstance Win32_Process -Filter \"ProcessId = 46984\" | Select-Object ProcessId,CommandLine | Format-List"
+			],
+			"isBackground": false
+		}
+	]
 }

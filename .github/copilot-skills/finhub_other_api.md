@@ -117,7 +117,7 @@
   - `NASDAQ` (`press_release`): `scrape-success`
   - `TMX` (`press_release`): `scrape-success`
   - `YAHOO` (`company_news`): 기존 대표 샘플은 `body-fallback-success`였지만, wrapper redirect를 따라 Yahoo 원문 page를 브라우저로 열면 `scrape-success` 경로로 승격 가능
-  - `BENZINGA` (`company_news`): 기존 대표 샘플은 `body-fallback-success`였지만, wrapper redirect 후 원문 page의 `itemprop=articleBody`를 읽으면 `scrape-success` 경로로 승격 가능
+  - `BENZINGA` (`company_news`): 현재는 `unavailable`로 보는 것이 맞다. 코드상 `benzinga-scrape`가 성공처럼 기록될 수 있지만, 실측 샘플 `c65d1d2e-718c-4795-bcd0-6d5f6b1419b0`에서는 실제 기사 본문이 아니라 `headline only article` / `Benzinga Pro` 홍보 문구만 저장됐다. 따라서 현 시점의 `benzinga-scrape`는 실질적 본문 추출 성공으로 간주하면 안 된다.
   - `SEEKINGALPHA` (`company_news`): 현재 `unavailable`로 보는 것이 맞다. 원문 page anti-bot 차단이 있고 summary fallback 저장은 금지해야 한다.
   - `CHARTMILL` (`company_news`): 현재 `unavailable`
   - `CNBC` (`company_news`): 현재 `unavailable`
@@ -132,7 +132,8 @@
   - `UNKNOWN` (`press_release`): `body-fallback-success`
 - 현재 코드 기준 결론:
   - FINNHUB `company_news`는 `finnhub.io/api/news?id=...` wrapper를 직접 읽지 말고, 먼저 `302 Location`으로 원문 `origin_url`을 복구해야 한다.
-  - 현재 원문 추출을 성공으로 남기도록 지원한 `company_news` publisher는 `YAHOO`, `BENZINGA`다.
+  - 현재 원문 추출을 성공으로 볼 수 있는 `company_news` publisher는 `YAHOO`만 확정이다.
+  - `BENZINGA`는 코드상 시도 대상이지만, 현재 확인된 결과로는 promo / headline-only 페이지가 false positive success로 저장될 수 있으므로 지침상 `unavailable`로 취급한다.
   - 나머지 `company_news` publisher는 summary/body fallback success로 남기지 말고 `unavailable`로 남겨야 한다.
 
 ### company_news 재처리 운영 규칙
@@ -146,7 +147,7 @@
 - 권장 순서:
   1. `POST /api/news/fulltext/reset-company-news`
   2. `POST /api/news/fulltext/update` with `{ "sourceType": "company_news" }`
-  3. `news_fulltext.extraction_note`에서 `yahoo-finance-browser`, `benzinga-scrape`, `company-news-no-scraper:*` 분포를 확인
+  3. `news_fulltext.extraction_note`에서 `yahoo-finance-browser`, `benzinga-scrape`, `company-news-no-scraper:*` 분포를 확인하되, `benzinga-scrape`는 실제 저장 본문이 `headline only article`, `Benzinga Pro`, `Join 10,000+ serious traders` 같은 홍보 문구인지 반드시 샘플 검수한다.
 
 ### 왜 화면에서 publisher가 `FINNHUB`로 보일 수 있는가
 - 현재 수집 코드는 `item.source`가 있으면 그 값을 publisher로 저장하지만, 기존 row는 `INSERT OR IGNORE` 때문에 중복 수집 시 업데이트되지 않는다.

@@ -584,6 +584,19 @@ export async function getNewsIdBySourceUrl(source: string, url: string): Promise
   return row?.id ?? null;
 }
 
+export async function deleteBlockedFinnhubCompanyNews(): Promise<number> {
+  const result = await getDb().run(
+    `DELETE FROM news_items
+     WHERE source = 'FINNHUB'
+       AND source_type = 'company_news'
+       AND (
+         TRIM(COALESCE(url, '')) = ''
+         OR UPPER(REPLACE(TRIM(COALESCE(publisher, '')), ' ', '')) IN ('SEEKINGALPHA', 'MOTLEYFOOL')
+       )`,
+  );
+  return result.changes ?? 0;
+}
+
 function mapNewsRow(
   row: any,
   sentimentMap?: Map<string, { bullishPct: number | null; bearishPct: number | null; newsScore: number | null }>,

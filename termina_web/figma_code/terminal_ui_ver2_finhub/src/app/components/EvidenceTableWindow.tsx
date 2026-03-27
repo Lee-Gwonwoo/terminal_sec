@@ -128,6 +128,7 @@ export function EvidenceTableWindow() {
     }
     const data: AnalysisRun[] = await res.json();
     setAnalyses(data);
+    setError(null);
     if (data.length > 0 && (!selectedAnalysisId || !data.some(item => item.id === selectedAnalysisId))) {
       setSelectedAnalysisId(data[0].id);
     }
@@ -160,8 +161,27 @@ export function EvidenceTableWindow() {
   }, []);
 
   useEffect(() => {
-    void fetchAnalyses().catch(err => setError(err instanceof Error ? err.message : 'Failed to load analyses'));
+    void (async () => {
+      try {
+        setLoading(true);
+        await fetchAnalyses();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load analyses');
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [fetchAnalyses]);
+
+  useEffect(() => {
+    if (analyses.length > 0 || !error?.startsWith('Failed to load analyses')) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      void fetchAnalyses().catch(err => setError(err instanceof Error ? err.message : 'Failed to load analyses'));
+    }, 3000);
+    return () => window.clearTimeout(timeoutId);
+  }, [analyses.length, error, fetchAnalyses]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -252,6 +272,7 @@ export function EvidenceTableWindow() {
 
   const handleRefresh = useCallback(() => {
     if (!effectiveAnalysisId) {
+      setError(null);
       void fetchAnalyses().catch(err => setError(err instanceof Error ? err.message : 'Failed to refresh analyses'));
       return;
     }

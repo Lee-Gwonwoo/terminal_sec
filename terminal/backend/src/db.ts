@@ -16,6 +16,8 @@ export async function initDb(): Promise<void> {
     driver: sqlite3.Database
   });
 
+  await db.exec("PRAGMA journal_mode = WAL;");
+  await db.exec("PRAGMA busy_timeout = 10000;");
   await db.exec("PRAGMA foreign_keys = ON;");
 
   await db.exec(`

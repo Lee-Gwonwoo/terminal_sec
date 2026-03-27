@@ -4,7 +4,7 @@ import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { config } from "./config.js";
 import { initDb } from "./db.js";
-import { getModel1News, getModel1NewsById, getNews, getNewsById, getNewsIdBySourceUrl } from "./services/newsRepository.js";
+import { deleteBlockedFinnhubCompanyNews, getModel1News, getModel1NewsById, getNews, getNewsById, getNewsIdBySourceUrl } from "./services/newsRepository.js";
 import { createSavedView, deleteSavedView, listSavedViews } from "./services/savedViewRepository.js";
 import { createWatchlist, deleteWatchlist, listWatchlists, updateWatchlist, backfillWatchlistSecurityIds } from "./services/watchlistRepository.js";
 import {
@@ -87,6 +87,7 @@ import {
   purgeExpiredResearchTrash,
 } from "./services/researchRepository.js";
 import {
+  cleanupBlockedFinnhubCompanyNewsEvidence,
   getModel2AnalysisRun,
   listModel2Analyses,
   listModel2CaseSummaries,
@@ -4303,6 +4304,14 @@ app.get("/api/model2/analyses/:analysisId/evidence", async (req, res, next) => {
 
 async function start(): Promise<void> {
   await initDb();
+  const deletedBlockedCompanyNews = await deleteBlockedFinnhubCompanyNews();
+  if (deletedBlockedCompanyNews > 0) {
+    console.log(`[startup] deleted blocked FINNHUB company_news rows: ${deletedBlockedCompanyNews}`);
+  }
+  const blockedEvidenceCleanup = await cleanupBlockedFinnhubCompanyNewsEvidence();
+  if (blockedEvidenceCleanup.deletedEvidenceRows > 0) {
+    console.log(`[startup] deleted blocked FINNHUB company_news evidence rows: ${blockedEvidenceCleanup.deletedEvidenceRows} (analyses=${blockedEvidenceCleanup.affectedAnalysisIds.join(",")})`);
+  }
   const publisherBackfilled = await backfillPublisher();
   if (publisherBackfilled > 0) {
     console.log(`[startup] backfilled publisher for ${publisherBackfilled} news_items rows`);

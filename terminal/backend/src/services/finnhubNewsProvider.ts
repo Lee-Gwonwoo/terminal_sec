@@ -69,6 +69,8 @@ export type FinnhubMappedItem = {
   bodyHtml?: string;
 };
 
+const COMPANY_NEWS_BLOCKED_PUBLISHERS = new Set(["SEEKINGALPHA", "MOTLEY FOOL"]);
+
 const PUBLISHER_CANONICAL_MAP: Record<string, string> = {
   "YAHOO FINANCE": "YAHOO",
   "SEEKING ALPHA": "SEEKINGALPHA",
@@ -263,27 +265,38 @@ export async function fetchCompanyNewsRaw(
   const raw = await fetchWithRetry(url);
   if (!Array.isArray(raw)) return [];
 
-  return raw.map((item: any) => ({
-    publishedAt: item.datetime ? toEtNaiveIso(item.datetime * 1000) : toEtNaiveIso(new Date()),
-    source: "FINNHUB",
-    sourceType: "company_news",
-    title: item.headline ?? "(untitled)",
-    body: item.summary ?? "",
-    url: item.url ?? "",
-    providerTickers: item.related
-      ? item.related
-          .split(",")
-          .map((s: string) => s.trim().toUpperCase())
-          .filter(Boolean)
-      : [symbol.toUpperCase()],
-    tags: item.category ? [item.category.toLowerCase()] : [],
-    publisher: resolveBestPublisher({
-      url: item.url ?? "",
-      providerSource: item.source,
-      title: item.headline ?? "",
-      body: item.summary ?? "",
-    }),
-  }));
+  return raw
+    .map((item: any) => {
+      const publisher = resolveBestPublisher({
+        url: item.url ?? "",
+        providerSource: item.source,
+        title: item.headline ?? "",
+        body: item.summary ?? "",
+      });
+
+      return {
+        publishedAt: item.datetime ? toEtNaiveIso(item.datetime * 1000) : toEtNaiveIso(new Date()),
+        source: "FINNHUB",
+        sourceType: "company_news",
+        title: item.headline ?? "(untitled)",
+        body: item.summary ?? "",
+        url: item.url ?? "",
+        providerTickers: item.related
+          ? item.related
+              .split(",")
+              .map((s: string) => s.trim().toUpperCase())
+              .filter(Boolean)
+          : [symbol.toUpperCase()],
+        tags: item.category ? [item.category.toLowerCase()] : [],
+        publisher,
+      };
+    })
+    .filter((item) => {
+      if (!item.url.trim()) {
+        return false;
+      }
+      return !COMPANY_NEWS_BLOCKED_PUBLISHERS.has(item.publisher ?? "UNKNOWN");
+    });
 }
 
 export async function fetchPressReleasesRaw(

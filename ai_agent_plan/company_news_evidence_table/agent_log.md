@@ -415,3 +415,111 @@
 - 상태:
   - Yahoo branded transcript/video 기사까지 `FINNHUB -> YAHOO` 교정 로직이 반영됨
   - 남은 `FINNHUB` row는 Yahoo 단순 citation 또는 출처 단서 부족 케이스가 중심이라, 필요하면 다음 단계에서 wrapper HTML 파싱으로 더 줄일 수 있음
+
+## 2026-03-26
+**업데이트 시각:** 18:10 (local)
+
+- runtime 재확인:
+  - `backend: dev` task는 `EADDRINUSE :8080`로 죽어 있었지만, 실제 `8080` 리스너는 별도 `node.exe ... src/server.ts` 프로세스로 살아 있음을 확인
+  - 직접 backend `GET /api/model2/analyses` 응답 `200` 확인
+  - Vite proxy `GET /api/model2/analyses` 응답 `200` 확인
+- 추가 원인 확인:
+  - `EvidenceTableWindow.tsx`는 초기 `analyses` fetch가 실패하면 error 문구를 남긴 채 자동 회복하지 않았음
+  - 이후 backend가 살아나도 성공 시 stale error를 지우지 않았고, `effectiveAnalysisId`가 비어 있으면 refresh에서도 recovery가 약했음
+- 수정 내용:
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/EvidenceTableWindow.tsx`
+    - `fetchAnalyses()` 성공 시 `setError(null)` 추가
+    - 초기 analyses fetch에 `loading` 상태 적용
+    - `Failed to load analyses` 상태일 때 3초 후 자동 재시도 추가
+    - 분석 목록이 비어 있는 상태에서 `Refresh`를 눌러도 stale error가 남지 않도록 보강
+- 검증 완료:
+  - frontend `npm.cmd run build` 성공
+  - direct backend `/api/model2/analyses` -> `200`
+  - Vite proxy `/api/model2/analyses` -> `200`
+- 상태:
+  - 코드 레벨 recovery 수정 완료
+  - 브라우저에서 Evidence Table이 실제로 자동 복구/표시되는지는 사용자 확인 대기
+
+## 2026-03-26
+**업데이트 시각:** 18:35 (local)
+
+- 사용자 추가 요구 반영:
+  - `company_news`에서 링크가 없는 row, `SEEKINGALPHA`, `MOTLEY FOOL` publisher row를 기존 DB에서 제거하고, 이후 pull 시에도 저장되지 않게 해달라는 요청 반영
+- 수정 내용:
+  - `terminal/backend/src/services/finnhubNewsProvider.ts`
+    - `fetchCompanyNewsRaw()`에 company_news 블랙리스트 필터 추가
+    - blank URL row는 매핑 후 즉시 제외
+    - resolved publisher가 `SEEKINGALPHA`, `MOTLEY FOOL`이면 제외
+  - `terminal/backend/src/services/newsRepository.ts`
+    - 기존 `FINNHUB/company_news` 중 blank URL 또는 블랙리스트 publisher row를 삭제하는 `deleteBlockedFinnhubCompanyNews()` helper 추가
+  - `terminal/backend/src/server.ts`
+    - startup 시 위 cleanup helper를 먼저 실행하도록 추가
+  - `terminal/backend/tests/finnhubNewsProvider.test.ts`
+    - blank URL skip 테스트 추가
+    - `SEEKINGALPHA` / `MOTLEY FOOL` company_news skip 테스트 추가
+- 검증 결과:
+  - backend `get_errors` 0건
+  - backend `npm run build` 성공
+  - backend `npm run test` 최신 결과 `13 files / 82 tests` pass 확인
+  - runtime 확인:
+    - 현재 `8080` 리스너는 `node ... src/server.ts` 프로세스임을 확인
+    - 기존 dev task는 재기동 과정에서 `SQLITE_READONLY`가 한 번 발생해, 런타임 상태는 추가 정리가 필요함
+- 상태:
+  - 코드상 future ingest 차단은 완료
+  - 기존 DB cleanup은 startup 경로에 반영됨
+  - 정확한 삭제 건수는 터미널 SQLite one-shot 출력 캡처 한계로 별도 수치 확보 실패, 필요 시 다음 단계에서 전용 maintenance endpoint 또는 안정적인 DB probe 스크립트로 재확인 가능
+
+## 2026-03-26
+**업데이트 시각:** 18:55 (local)
+
+- 사용자 스크린샷 재확인 결과:
+  - Evidence Table에 `publisher='MOTLEY FOOL'` row가 실제로 계속 보이고 있었음
+  - live evidence API 확인 결과, analysis `da7d8093-b878-48c9-8055-1851ab9d041a`에서 `MOTLEY FOOL` row가 `78`건 노출됨을 확인
+  - sample row `newsId = 06e7f58c-2efd-48af-9146-74f778ca6deb`는 `/api/news/:id` 조회 시 `News item not found`여서, source `news_items`는 이미 지워졌지만 evidence cache가 orphan으로 남아 있었음을 확인
+- 원인:
+  - `Evidence Table`은 `news_items`가 아니라 denormalized `model2_evidence_rows`를 직접 읽고 있었음
+  - 기존 블랙리스트 cleanup은 `news_items` 중심이어서 orphaned evidence cache row까지는 지우지 못했음
+- 수정 내용:
+  - `terminal/backend/src/services/model2AnalysisRepository.ts`
+    - blocked/orphaned `FINNHUB/company_news` row를 제외하는 공통 WHERE 추가
+    - `listModel2CaseSummaries()`를 cache table 대신 filtered evidence 집계 기반으로 변경
+    - `listModel2EvidenceRows()` total/items 모두 같은 blacklist/orphan filter를 적용하도록 변경
+    - startup용 `cleanupBlockedFinnhubCompanyNewsEvidence()` helper 추가 (evidence row 삭제 + case summary + analysis counts 재계산)
+  - `terminal/backend/src/server.ts`
+    - startup 시 evidence cache cleanup helper 실행 추가
+- 검증/리스크:
+  - 정적 오류 0건, backend build 통과
+  - 현재 런타임에서는 Windows SQLite file lock으로 `SQLITE_BUSY`가 반복되어 startup cleanup을 live DB에 끝까지 적용하지는 못함
+  - 다만 코드상 API query-layer filter는 반영돼, backend가 정상 재기동되면 Evidence Table에서 같은 row가 즉시 숨겨져야 함
+
+- 사용자 버그 리포트 반영:
+  - `Evidence Table`에서 `Failed to load analyses (HTTP 500)`가 발생하는 로딩 오류 확인
+- 원인 확인:
+  - backend dev task가 startup 중 `SQLITE_BUSY: database is locked`로 종료되고 있었음
+  - frontend Vite proxy도 `/api/model2/analyses` 포함 여러 API에 대해 `ECONNREFUSED`를 출력하고 있었음
+  - 즉 화면의 500/로딩 실패는 Evidence Table 로직 자체보다 backend startup failure가 직접 원인이었음
+- 수정 내용:
+  - `terminal/backend/src/db.ts`
+    - SQLite open 직후 `PRAGMA journal_mode = WAL`
+    - `PRAGMA busy_timeout = 10000`
+    - 를 추가해 일시적 lock 충돌에 즉시 실패하지 않도록 보강
+- 검증 예정:
+  - backend 정적 오류 확인
+  - backend `npm run build`
+  - backend `npm run test`
+  - backend dev 재기동 후 `/api/model2/analyses` 응답 복구 확인
+
+## 2026-03-26
+**업데이트 시각:** 18:14 (local)
+
+- 검증 완료:
+  - backend 정적 오류 0건 확인
+  - backend `npm run build` 성공
+  - backend `npm run test` 성공 (`13 files / 82 tests`)
+- 런타임 통합 확인:
+  - `8080` 포트 listener 존재 확인 (`OwningProcess = 46984`)
+  - `GET /api/model2/analyses` 직접 호출 시 최신 analysis 목록이 정상 JSON으로 반환됨 확인
+  - 따라서 `Evidence Table`의 `Failed to load analyses`는 backend startup failure가 원인이었고, 현재 API 레벨에서는 복구된 상태임
+- 추가 메모:
+  - backend dev task를 새로 띄울 때는 한 번 `EADDRINUSE`가 났지만, 이는 이미 다른 backend process가 `8080`에서 정상 listen 중이었기 때문이었음
+  - 현재는 `SQLITE_BUSY` 즉시 종료보다는 실제 응답 가능한 backend가 살아 있는 상태로 확인됨

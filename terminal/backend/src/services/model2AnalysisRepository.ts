@@ -74,6 +74,11 @@ export interface ListModel2EvidenceOptions {
   offset?: number;
 }
 
+export interface Model2BlockedEvidenceCleanupResult {
+  deletedEvidenceRows: number;
+  affectedAnalysisIds: string[];
+}
+
 const SORT_COLUMN_SQL: Record<string, string> = {
   published_at: "er.published_at",
   ticker: "er.ticker",
@@ -83,6 +88,16 @@ const SORT_COLUMN_SQL: Record<string, string> = {
   reaction_tag: "er.reaction_tag",
   impact_score: "er.overall_impact_score",
 };
+
+const BLOCKED_FINNHUB_COMPANY_NEWS_EVIDENCE_WHERE = `NOT (
+  er.source = 'FINNHUB'
+  AND er.source_type = 'company_news'
+  AND (
+    TRIM(COALESCE(er.url, '')) = ''
+    OR UPPER(REPLACE(TRIM(COALESCE(er.publisher, '')), ' ', '')) IN ('SEEKINGALPHA', 'MOTLEYFOOL')
+    OR NOT EXISTS (SELECT 1 FROM news_items ni WHERE ni.id = er.news_id)
+  )
+)`;
 
 function clampLimit(limit?: number): number {
   if (typeof limit !== "number" || !Number.isFinite(limit)) {
@@ -107,6 +122,113 @@ function normalizeSortBy(sortBy?: string): string {
 
 function normalizeSortDir(sortDir?: string): "ASC" | "DESC" {
   return sortDir?.toLowerCase() === "asc" ? "ASC" : "DESC";
+}
+
+export async function cleanupBlockedFinnhubCompanyNewsEvidence(): Promise<Model2BlockedEvidenceCleanupResult> {
+  const db = getDb();
+  const blockedWhere = `
+    er.source = 'FINNHUB'
+    AND er.source_type = 'company_news'
+    AND (
+      TRIM(COALESCE(er.url, '')) = ''
+      OR UPPER(REPLACE(TRIM(COALESCE(er.publisher, '')), ' ', '')) IN ('SEEKINGALPHA', 'MOTLEYFOOL')
+      OR NOT EXISTS (SELECT 1 FROM news_items ni WHERE ni.id = er.news_id)
+    )`;
+  const blockedWhereDelete = `
+    source = 'FINNHUB'
+    AND source_type = 'company_news'
+    AND (
+      TRIM(COALESCE(url, '')) = ''
+      OR UPPER(REPLACE(TRIM(COALESCE(publisher, '')), ' ', '')) IN ('SEEKINGALPHA', 'MOTLEYFOOL')
+      OR NOT EXISTS (SELECT 1 FROM news_items ni WHERE ni.id = model2_evidence_rows.news_id)
+    )`;
+
+  const affected = await db.all<{ analysis_id: string }[]>(
+    `SELECT DISTINCT er.analysis_id
+     FROM model2_evidence_rows er
+     WHERE ${blockedWhere}`,
+  );
+  const affectedAnalysisIds = affected.map((row) => row.analysis_id);
+  if (affectedAnalysisIds.length === 0) {
+    return { deletedEvidenceRows: 0, affectedAnalysisIds: [] };
+  }
+
+  await db.exec("BEGIN TRANSACTION");
+  try {
+    const deleted = await db.run(
+      `DELETE FROM model2_evidence_rows
+       WHERE ${blockedWhereDelete}`,
+    );
+
+    for (const analysisId of affectedAnalysisIds) {
+      await db.run("DELETE FROM model2_case_summaries WHERE analysis_id = ?", analysisId);
+      await db.run(
+        `INSERT INTO model2_case_summaries (
+           analysis_id,
+           case_type,
+           case_label_ko,
+           top_level,
+           total_count,
+           impacted_count,
+           latest_published_at,
+           updated_at
+         )
+         SELECT
+           analysis_id,
+           case_type,
+           MAX(case_label_ko) AS case_label_ko,
+           MAX(top_level) AS top_level,
+           COUNT(*) AS total_count,
+           SUM(CASE WHEN is_impacted = 1 THEN 1 ELSE 0 END) AS impacted_count,
+           MAX(published_at) AS latest_published_at,
+           datetime('now') AS updated_at
+         FROM model2_evidence_rows
+         WHERE analysis_id = ?
+         GROUP BY analysis_id, case_type`,
+        analysisId,
+      );
+
+      const aggregate = await db.get<{
+        total_rows: number;
+        analyzable_rows: number;
+        impacted_rows: number;
+        meaningless_rows: number;
+      }>(
+        `SELECT
+           COUNT(*) AS total_rows,
+           SUM(CASE WHEN overall_impact_score IS NOT NULL THEN 1 ELSE 0 END) AS analyzable_rows,
+           SUM(CASE WHEN is_impacted = 1 THEN 1 ELSE 0 END) AS impacted_rows,
+           SUM(CASE WHEN case_type = 'meaningless_others' THEN 1 ELSE 0 END) AS meaningless_rows
+         FROM model2_evidence_rows
+         WHERE analysis_id = ?`,
+        analysisId,
+      );
+
+      await db.run(
+        `UPDATE model2_analysis_runs
+         SET total_rows = ?,
+             analyzable_rows = ?,
+             impacted_rows = ?,
+             meaningless_rows = ?,
+             updated_at = datetime('now')
+         WHERE id = ?`,
+        aggregate?.total_rows ?? 0,
+        aggregate?.analyzable_rows ?? 0,
+        aggregate?.impacted_rows ?? 0,
+        aggregate?.meaningless_rows ?? 0,
+        analysisId,
+      );
+    }
+
+    await db.exec("COMMIT");
+    return {
+      deletedEvidenceRows: deleted.changes ?? 0,
+      affectedAnalysisIds,
+    };
+  } catch (error) {
+    await db.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 export async function listModel2Analyses(pageId?: string): Promise<Model2AnalysisRun[]> {
@@ -136,22 +258,24 @@ export async function listModel2CaseSummaries(analysisId: string): Promise<Model
   const db = getDb();
   return db.all<Model2CaseSummary[]>(
     `SELECT
-       case_type AS caseType,
-       case_label_ko AS caseLabelKo,
-       top_level AS topLevel,
-       total_count AS totalCount,
-       impacted_count AS impactedCount,
-       latest_published_at AS latestPublishedAt
-     FROM model2_case_summaries
-     WHERE analysis_id = ?
-     ORDER BY totalCount DESC, impactedCount DESC, case_type ASC`,
+       er.case_type AS caseType,
+       MAX(er.case_label_ko) AS caseLabelKo,
+       MAX(er.top_level) AS topLevel,
+       COUNT(*) AS totalCount,
+       SUM(CASE WHEN er.is_impacted = 1 THEN 1 ELSE 0 END) AS impactedCount,
+       MAX(er.published_at) AS latestPublishedAt
+     FROM model2_evidence_rows er
+     WHERE er.analysis_id = ?
+       AND ${BLOCKED_FINNHUB_COMPANY_NEWS_EVIDENCE_WHERE}
+     GROUP BY er.case_type
+     ORDER BY totalCount DESC, impactedCount DESC, er.case_type ASC`,
     analysisId,
   );
 }
 
 export async function listModel2EvidenceRows(options: ListModel2EvidenceOptions): Promise<{ total: number; items: Model2EvidenceRow[] }> {
   const db = getDb();
-  const where: string[] = ["er.analysis_id = ?"];
+  const where: string[] = ["er.analysis_id = ?", BLOCKED_FINNHUB_COMPANY_NEWS_EVIDENCE_WHERE];
   const values: unknown[] = [options.analysisId];
   const normalizedCaseType = options.caseType && options.caseType !== "all" ? options.caseType : undefined;
   const normalizedTicker = options.ticker && options.ticker.trim() ? options.ticker.trim().toUpperCase() : undefined;
@@ -173,35 +297,13 @@ export async function listModel2EvidenceRows(options: ListModel2EvidenceOptions)
   }
 
   const whereSql = `WHERE ${where.join(" AND ")}`;
-  let total = 0;
-  if (!normalizedKeyword && !normalizedTicker) {
-    if (!normalizedCaseType) {
-      const analysisRow = await db.get<{ total_rows: number }>(
-        `SELECT total_rows
-         FROM model2_analysis_runs
-         WHERE id = ?`,
-        options.analysisId,
-      );
-      total = analysisRow?.total_rows ?? 0;
-    } else {
-      const summaryRow = await db.get<{ total_count: number }>(
-        `SELECT total_count
-         FROM model2_case_summaries
-         WHERE analysis_id = ? AND case_type = ?`,
-        options.analysisId,
-        normalizedCaseType,
-      );
-      total = summaryRow?.total_count ?? 0;
-    }
-  } else {
-    const totalRow = await db.get<{ total: number }>(
-      `SELECT COUNT(*) AS total
-       FROM model2_evidence_rows er
-       ${whereSql}`,
-      ...values,
-    );
-    total = totalRow?.total ?? 0;
-  }
+  const totalRow = await db.get<{ total: number }>(
+    `SELECT COUNT(*) AS total
+     FROM model2_evidence_rows er
+     ${whereSql}`,
+    ...values,
+  );
+  const total = totalRow?.total ?? 0;
 
   const sortBy = normalizeSortBy(options.sortBy);
   const sortDir = normalizeSortDir(options.sortDir);

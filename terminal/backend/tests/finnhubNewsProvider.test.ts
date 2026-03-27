@@ -150,6 +150,43 @@ describe("finnhubNewsProvider mapping", () => {
       expect(items[0].publisher).toBe("YAHOO");
     });
 
+    it("should skip company news items with blank links", async () => {
+      mockFetchOnce([
+        {
+          datetime: 1709683200,
+          headline: "No link item",
+          summary: "Missing url should be dropped",
+          url: "",
+          source: "Finnhub",
+        },
+      ]);
+
+      const items = await fetchCompanyNewsRaw("AAPL", "2024-03-01", "2024-03-07");
+      expect(items).toEqual([]);
+    });
+
+    it("should skip blacklisted company news publishers", async () => {
+      mockFetchOnce([
+        {
+          datetime: 1709683200,
+          headline: "Why Motley Fool likes this AI stock",
+          summary: "Motley Fool says the AI story is just getting started.",
+          url: "https://www.fool.com/investing/example",
+          source: "Motley Fool",
+        },
+        {
+          datetime: 1709683201,
+          headline: "Stock Picks From Seeking Alpha's New Analysts",
+          summary: "Seeking Alpha analysts share their latest picks.",
+          url: "https://finnhub.io/api/news?id=test",
+          source: "Finnhub",
+        },
+      ]);
+
+      const items = await fetchCompanyNewsRaw("AAPL", "2024-03-01", "2024-03-07");
+      expect(items).toEqual([]);
+    });
+
     it("should never expose API key in mapped output", async () => {
       mockFetchOnce([
         {

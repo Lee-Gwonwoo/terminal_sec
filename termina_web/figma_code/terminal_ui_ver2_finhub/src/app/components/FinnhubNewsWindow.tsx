@@ -824,6 +824,13 @@ export function FinnhubNewsWindow({
     setShowBookmarkMenu(true);
   }, []);
 
+  const handleCopyBookmarkFolderName = useCallback(async (folderId: string) => {
+    const folder = bookmarkFolders.find((item) => item.id === folderId);
+    if (!folder) return;
+    await copyToClipboard(folder.name);
+    setBookmarkFolderCtxMenu(null);
+  }, [bookmarkFolders, copyToClipboard]);
+
   useEffect(() => {
     if (!bookmarkFolderCtxMenu) return;
 
@@ -2240,9 +2247,17 @@ export function FinnhubNewsWindow({
                     className="fixed z-[60] min-w-[140px] overflow-hidden rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg"
                     style={{
                       left: Math.min(bookmarkFolderCtxMenu.x, typeof window !== 'undefined' ? window.innerWidth - 160 : bookmarkFolderCtxMenu.x),
-                      top: Math.min(bookmarkFolderCtxMenu.y, typeof window !== 'undefined' ? window.innerHeight - 80 : bookmarkFolderCtxMenu.y),
+                      top: Math.min(bookmarkFolderCtxMenu.y, typeof window !== 'undefined' ? window.innerHeight - 116 : bookmarkFolderCtxMenu.y),
                     }}
                   >
+                    <button
+                      onClick={() => {
+                        void handleCopyBookmarkFolderName(bookmarkFolderCtxMenu.folderId);
+                      }}
+                      className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800"
+                    >
+                      Copy bookmark name
+                    </button>
                     <button
                       onClick={() => {
                         const folder = bookmarkFolders.find((item) => item.id === bookmarkFolderCtxMenu.folderId);

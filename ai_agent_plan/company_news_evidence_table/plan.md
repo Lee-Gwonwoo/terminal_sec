@@ -59,6 +59,21 @@
 - 변경: `DraggableWindow`에서 window 컴포넌트들을 `React.lazy`로 분리해 실제 창을 열 때만 로드하도록 한다.
 - 영향: 기능 변화 없이 초기 번들 다운로드/파싱 비용이 줄고, 자주 쓰지 않는 window는 필요할 때만 로드된다.
 
+### PLAN CHANGE (2026-03-26, evidence table recovery)
+- 배경: backend가 일시적으로 unavailable했다가 살아난 뒤에도, `EvidenceTableWindow`는 초기 `analyses` fetch 실패 상태를 그대로 유지해 `Failed to load analyses (HTTP 500)` 문구와 빈 선택창이 남을 수 있었다.
+- 변경: `analyses` fetch 성공 시 stale error를 즉시 지우고, 초기 실패 후에는 자동 재시도하도록 frontend recovery 흐름을 추가한다.
+- 영향: backend startup 지연이나 일시적 proxy 오류가 있어도 Evidence Table이 새로고침 없이 스스로 회복할 수 있다.
+
+### PLAN CHANGE (2026-03-26, company_news blacklist cleanup)
+- 배경: 사용자가 `링크 없음`, `SEEKINGALPHA`, `MOTLEY FOOL` company_news를 실DB에서 제거하고, 이후 FINNHUB company_news pull에서도 동일 조건을 저장하지 않도록 요청했다.
+- 변경: `fetchCompanyNewsRaw()`에서 blank URL 및 블랙리스트 publisher(`SEEKINGALPHA`, `MOTLEY FOOL`)를 반환 단계에서 제거하고, backend startup에서 기존 `FINNHUB/company_news` 블랙리스트 row를 삭제하는 cleanup을 추가한다.
+- 영향: 이후 수집분은 insert 전에 차단되고, 재기동 시 기존 누적 row도 함께 정리된다.
+
+### PLAN CHANGE (2026-03-26, evidence cache blacklist filter)
+- 배경: `news_items`에서는 블랙리스트 company_news가 제거됐더라도, Evidence Table은 denormalized cache인 `model2_evidence_rows`를 직접 읽기 때문에 `MOTLEY FOOL` 같은 orphan/legacy row가 계속 보일 수 있었다.
+- 변경: `model2AnalysisRepository.ts`의 evidence/case summary 조회에서 blocked/orphaned `FINNHUB/company_news` row를 공통 WHERE로 제외하고, startup cleanup helper에서도 같은 조건의 evidence cache row를 제거하도록 확장한다.
+- 영향: live Evidence Table은 블랙리스트 publisher/blank-link/orphan cache row를 더 이상 노출하지 않게 된다.
+
 ### 현재 레포 상태(중요, 확인됨)
 - 대상 research page는 이미 존재한다.
   - `page id`: `99a89607-d943-4a57-8a98-be8ba86f731b`
@@ -631,6 +646,16 @@
   - `Yahoo Finance Senior Reporter`, `Opening Bid`, `Market Minute`, `Good Buy or Goodbye` 같은 강한 신호가 있을 때만 `YAHOO`로 분류한다.
 - 목적:
   - `according to Yahoo Finance` 같은 일반 인용문 오분류는 피하고, 실제 Yahoo 콘텐츠만 `FINNHUB -> YAHOO`로 교정한다.
+
+### PLAN CHANGE — 2026-03-26 18:10
+
+- 로딩 오류 대응:
+  - `Evidence Table` 로딩 실패의 직접 원인은 `api/model2/analyses` 자체가 아니라 backend dev 서버 startup 실패였다.
+  - 로그상 `SQLITE_BUSY: database is locked`가 발생해 backend가 listen 전에 종료되고, frontend는 proxy `ECONNREFUSED`를 연쇄적으로 내고 있었다.
+- 변경:
+  - SQLite open 직후 `journal_mode=WAL`, `busy_timeout=10000`을 적용해 일시적 잠금에 즉시 실패하지 않도록 보강한다.
+- 기대 효과:
+  - startup 시 publisher backfill 또는 다른 짧은 DB 접근과 겹쳐도 backend가 바로 죽지 않고 대기 후 정상 기동할 가능성을 높인다.
 
 #### ⬜ Step 6 — 전체 검증
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
