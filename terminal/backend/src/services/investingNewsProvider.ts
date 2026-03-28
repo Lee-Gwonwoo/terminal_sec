@@ -19,6 +19,8 @@ export type InvestingCategory = "stock-market-news" | "cryptocurrency-news";
 export interface InvestingFetchOptions {
   maxPages?: number;
   requestIntervalMs?: number;
+  fromDate?: string;
+  toDate?: string;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -216,10 +218,15 @@ export async function fetchInvestingCategory(
     0,
     Math.min(Math.floor(options.requestIntervalMs ?? 1000), 10_000),
   );
+  const fromDate = options.fromDate?.trim() || "";
+  const toDate = options.toDate?.trim() || "";
+  const fromTs = fromDate ? new Date(`${fromDate}T00:00:00Z`).getTime() : Number.NEGATIVE_INFINITY;
+  const toTs = toDate ? new Date(`${toDate}T23:59:59Z`).getTime() : Number.POSITIVE_INFINITY;
 
   const allItems: FinnhubMappedItem[] = [];
   const seenUrls = new Set<string>();
   let consecutiveEmptyPages = 0;
+  let reachedOlderThanFrom = false;
 
   for (let page = 1; page <= maxPages; page++) {
     const pageUrl =
@@ -250,10 +257,26 @@ export async function fetchInvestingCategory(
 
       const html = await res.text();
       const pageItems = parseListingPage(html, category);
+      const filteredPageItems: FinnhubMappedItem[] = [];
 
-      if (pageItems.length === 0) {
+      for (const item of pageItems) {
+        const publishedTs = new Date(item.publishedAt).getTime();
+        if (Number.isNaN(publishedTs)) {
+          continue;
+        }
+        if (publishedTs < fromTs) {
+          reachedOlderThanFrom = true;
+          continue;
+        }
+        if (publishedTs > toTs) {
+          continue;
+        }
+        filteredPageItems.push(item);
+      }
+
+      if (filteredPageItems.length === 0) {
         consecutiveEmptyPages++;
-        if (consecutiveEmptyPages >= 2) {
+        if (reachedOlderThanFrom || consecutiveEmptyPages >= 2) {
           break; // stop after 2 consecutive empty pages
         }
         continue;
@@ -261,11 +284,15 @@ export async function fetchInvestingCategory(
 
       consecutiveEmptyPages = 0;
 
-      for (const item of pageItems) {
+      for (const item of filteredPageItems) {
         if (!seenUrls.has(item.url)) {
           seenUrls.add(item.url);
           allItems.push(item);
         }
+      }
+
+      if (reachedOlderThanFrom) {
+        break;
       }
     } catch (err: any) {
       console.error(

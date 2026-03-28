@@ -247,12 +247,12 @@ export function InvestingNewsWindow({
   const [error, setError] = useState<string | null>(null);
 
   // Update config
-  type UpdateCategory = 'all' | 'stock-market-news' | 'cryptocurrency-news';
-  const [lastUpdateCategory, setLastUpdateCategory] = useState<UpdateCategory>('all');
+  type UpdateCategory = 'stock-market-news' | 'cryptocurrency-news';
+  const [lastUpdateCategory, setLastUpdateCategory] = useState<UpdateCategory>('stock-market-news');
   const [showCustomDateModal, setShowCustomDateModal] = useState(false);
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState(() => new Date().toISOString().slice(0, 10));
-  const [pendingUpdateCategory, setPendingUpdateCategory] = useState<UpdateCategory>('all');
+  const [pendingUpdateCategory, setPendingUpdateCategory] = useState<UpdateCategory>('stock-market-news');
 
   // Background job tracking
   const [pullJobId, setPullJobId] = useState<string | null>(null);
@@ -275,6 +275,18 @@ export function InvestingNewsWindow({
   // Row context menu
   const [rowCtxMenu, setRowCtxMenu] = useState<null | { x: number; y: number; newsId: string }>(null);
   const rowCtxMenuRef = useRef<HTMLDivElement>(null);
+
+  const readJsonResponse = useCallback(async (res: Response) => {
+    const text = await res.text();
+    if (!text) {
+      return {} as Record<string, any>;
+    }
+    try {
+      return JSON.parse(text) as Record<string, any>;
+    } catch {
+      throw new Error(`Server returned non-JSON response (HTTP ${res.status})`);
+    }
+  }, []);
 
   const copyToClipboard = useCallback(async (text: string) => {
     try { await navigator.clipboard.writeText(text); return; } catch { /* fallback */ }
@@ -491,60 +503,31 @@ export function InvestingNewsWindow({
   }, [selectedJobId, syncJobState]);
 
   // ─── Update (pull from Investing) ───
-  const handleUpdate = async (category: UpdateCategory = 'all') => {
+  const handleUpdate = async (
+    mode: 'recent' | 'custom' = 'recent',
+    category: UpdateCategory = 'stock-market-news',
+    from?: string,
+    to?: string,
+  ) => {
     setLastUpdateCategory(category);
     setUpdating(true);
     setError(null);
     try {
       const body: Record<string, unknown> = {
-        mode: 'recent',
+        mode,
         category,
-        maxPages: 5,
+        maxPages: mode === 'custom' ? 50 : 5,
         requestIntervalMs: 1000,
         fulltextConcurrency: 10,
       };
+      if (from) body.from = from;
+      if (to) body.to = to;
       const res = await fetch(`${API_BASE}/api/news/pull-investing`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        if (res.status === 409 && data.existingJobId) {
-          registerJob(data.existingJobId, 'news-update');
-          setShowLogPanel(true);
-          setError(data.error || 'Investing pull job is already running');
-          return;
-        }
-        setError(data.error || `HTTP ${res.status}`);
-        setUpdating(false);
-        return;
-      }
-      registerJob(data.jobId, 'news-update');
-    } catch (err: any) {
-      setError(err.message || 'Failed to start update');
-      setUpdating(false);
-    }
-  };
-
-  const handleCustomUpdate = async (category: UpdateCategory, from: string, to: string) => {
-    setLastUpdateCategory(category);
-    setUpdating(true);
-    setError(null);
-    try {
-      const body: Record<string, unknown> = {
-        mode: 'custom',
-        category,
-        maxPages: 10,
-        requestIntervalMs: 1000,
-        fulltextConcurrency: 10,
-      };
-      const res = await fetch(`${API_BASE}/api/news/pull-investing`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
+      const data = await readJsonResponse(res);
       if (!res.ok) {
         if (res.status === 409 && data.existingJobId) {
           registerJob(data.existingJobId, 'news-update');
@@ -565,6 +548,7 @@ export function InvestingNewsWindow({
 
   const handleCustomStart = (category: UpdateCategory) => {
     setPendingUpdateCategory(category);
+    setCustomFrom('');
     setCustomTo(new Date().toISOString().slice(0, 10));
     setShowCustomDateModal(true);
   };
@@ -584,7 +568,7 @@ export function InvestingNewsWindow({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
+      const data = await readJsonResponse(res);
       if (!res.ok) {
         setError(data.error || `HTTP ${res.status}`);
         setFtUpdating(false);
@@ -604,7 +588,7 @@ export function InvestingNewsWindow({
     setFulltextData(null);
     try {
       const res = await fetch(`${API_BASE}/api/news/fulltext/${newsId}`);
-      const data = await res.json();
+      const data = await readJsonResponse(res);
       if (!res.ok) {
         setFulltextData({ title: 'Error', text: data.error || `HTTP ${res.status}`, wordCount: 0, status: 'error' });
         return;
@@ -625,12 +609,11 @@ export function InvestingNewsWindow({
   // ─── Main button label ───
   const mainBtnLabel = (() => {
     if (lastUpdateCategory === 'stock-market-news') return 'Stock Market';
-    if (lastUpdateCategory === 'cryptocurrency-news') return 'Crypto';
-    return 'All Investing';
+    return 'Crypto';
   })();
 
   const handleMainButtonClick = () => {
-    handleUpdate(lastUpdateCategory);
+    handleUpdate('recent', lastUpdateCategory);
   };
 
   // ─── Sort & group data ───
@@ -1031,15 +1014,11 @@ export function InvestingNewsWindow({
                   <div className="p-1.5">
                     {/* Recent */}
                     <div className="px-2 py-1 text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Recent Update</div>
-                    <button onClick={() => { setShowUpdateMenu(false); handleUpdate('all'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
-                      <Download className="w-3.5 h-3.5 shrink-0" />
-                      <div><div className="font-medium">All Investing</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Stock Market + Cryptocurrency</div></div>
-                    </button>
-                    <button onClick={() => { setShowUpdateMenu(false); handleUpdate('stock-market-news'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                    <button onClick={() => { setShowUpdateMenu(false); handleUpdate('recent', 'stock-market-news'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                       <Download className="w-3.5 h-3.5 shrink-0 text-blue-500" />
                       <div><div className="font-medium">Stock Market News</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Stock market articles only</div></div>
                     </button>
-                    <button onClick={() => { setShowUpdateMenu(false); handleUpdate('cryptocurrency-news'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                    <button onClick={() => { setShowUpdateMenu(false); handleUpdate('recent', 'cryptocurrency-news'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                       <Download className="w-3.5 h-3.5 shrink-0 text-amber-500" />
                       <div><div className="font-medium">Cryptocurrency News</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Crypto articles only</div></div>
                     </button>
@@ -1047,17 +1026,13 @@ export function InvestingNewsWindow({
                     {/* Custom */}
                     <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
                     <div className="px-2 py-1 text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Custom Update</div>
-                    <button onClick={() => { setShowUpdateMenu(false); handleCustomStart('all'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
-                      <Calendar className="w-3.5 h-3.5 shrink-0 text-orange-500" />
-                      <div><div className="font-medium">Custom All Investing</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick max pages · all categories</div></div>
-                    </button>
                     <button onClick={() => { setShowUpdateMenu(false); handleCustomStart('stock-market-news'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                       <Calendar className="w-3.5 h-3.5 shrink-0 text-blue-500" />
-                      <div><div className="font-medium">Custom Stock Market</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick max pages · stock market only</div></div>
+                      <div><div className="font-medium">Custom Stock Market</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Date range · stock market only</div></div>
                     </button>
                     <button onClick={() => { setShowUpdateMenu(false); handleCustomStart('cryptocurrency-news'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                       <Calendar className="w-3.5 h-3.5 shrink-0 text-amber-500" />
-                      <div><div className="font-medium">Custom Cryptocurrency</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick max pages · crypto only</div></div>
+                      <div><div className="font-medium">Custom Cryptocurrency</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Date range · crypto only</div></div>
                     </button>
                   </div>
                 </div>
@@ -1338,22 +1313,28 @@ export function InvestingNewsWindow({
             <h3 className="text-sm font-medium mb-4">Custom Investing Update</h3>
             <div className="text-xs text-gray-500 mb-3">
               Category: <span className="font-medium text-gray-700 dark:text-gray-300">
-                {pendingUpdateCategory === 'stock-market-news' ? 'Stock Market' : pendingUpdateCategory === 'cryptocurrency-news' ? 'Crypto' : 'All'}
+                {pendingUpdateCategory === 'stock-market-news' ? 'Stock Market' : 'Crypto'}
               </span>
             </div>
             <div className="space-y-3 mb-4">
               <div>
-                <label className="text-xs text-gray-500 mb-1 block">Max Pages</label>
-                <input type="number" defaultValue={10} min={1} max={50} id="investing-custom-pages" className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800" />
+                <label className="text-xs text-gray-500 mb-1 block">From</label>
+                <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">To</label>
+                <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800" />
               </div>
             </div>
             <div className="flex justify-end gap-2">
               <button onClick={() => setShowCustomDateModal(false)} className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
               <button
                 onClick={() => {
+                  if (!customFrom || !customTo) return;
                   setShowCustomDateModal(false);
-                  handleCustomUpdate(pendingUpdateCategory, '', '');
+                  handleUpdate('custom', pendingUpdateCategory, customFrom, customTo);
                 }}
+                disabled={!customFrom || !customTo}
                 className="px-4 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
               >
                 Start

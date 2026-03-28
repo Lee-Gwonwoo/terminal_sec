@@ -596,6 +596,7 @@ async function insertFetchedItems(
       title: rawItem.title,
       body: rawItem.body,
       url: rawItem.url,
+      originUrl: rawItem.originUrl,
       tickers: rawItem.providerTickers,
       tags: rawItem.tags,
       publisher: rawItem.publisher,
@@ -863,14 +864,22 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
                     appendLog(jobId, `  company_news ${ticker}: confirmed-empty skip (${emptyRange.rangeFrom}~${emptyRange.rangeTo})`);
                     items = [];
                   } else {
-                    items = await fetchCompanyNewsRaw(ticker, tickerFrom, effectiveTo);
+                    items = await fetchCompanyNewsRaw(ticker, tickerFrom, effectiveTo, {
+                      onOriginResolveFinalFailure: ({ symbol, url, title, attempts }) => {
+                        appendLog(jobId, `  ⚠ company_news ${symbol}: origin_url unresolved after ${attempts} retries :: ${title || "(untitled)"} :: ${url}`);
+                      },
+                    });
                     // Record confirmed-empty if HTTP 200 + empty array (only for range before today)
                     if (items.length === 0 && tickerFrom <= yesterday) {
                       await recordConfirmedEmpty(ticker, "company_news", tickerFrom, yesterday);
                     }
                   }
                 } else {
-                  items = await fetchCompanyNewsRaw(ticker, tickerFrom, effectiveTo);
+                  items = await fetchCompanyNewsRaw(ticker, tickerFrom, effectiveTo, {
+                    onOriginResolveFinalFailure: ({ symbol, url, title, attempts }) => {
+                      appendLog(jobId, `  ⚠ company_news ${symbol}: origin_url unresolved after ${attempts} retries :: ${title || "(untitled)"} :: ${url}`);
+                    },
+                  });
                 }
               }
               const companyNewsStart = newItems.length;
@@ -2093,6 +2102,8 @@ app.post("/api/news/pull-fmp-sec-filing", async (req, res, next) => {
 // ── Investing News pull ──
 const pullInvestingSchema = z.object({
   mode: z.enum(["recent", "custom"]).optional().default("recent"),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   category: z.enum(["all", "stock-market-news", "cryptocurrency-news"]).optional().default("all"),
   maxPages: z.number().int().min(1).max(50).optional().default(5),
   requestIntervalMs: z.number().int().min(0).max(10_000).optional().default(1000),
@@ -2102,6 +2113,11 @@ const pullInvestingSchema = z.object({
 app.post("/api/news/pull-investing", async (req, res, next) => {
   try {
     const input = pullInvestingSchema.parse(req.body ?? {});
+    const isCustom = input.mode === "custom";
+    if (isCustom && !input.from) {
+      res.status(400).json({ error: "Custom mode requires 'from' date" });
+      return;
+    }
 
     const jobKey = "investing_news";
     const existingJobId = activePullJobs.get(jobKey);
@@ -2121,13 +2137,17 @@ app.post("/api/news/pull-investing", async (req, res, next) => {
       input.category === "all"
         ? ["stock-market-news", "cryptocurrency-news"]
         : [input.category];
+    const todayEt = getEtDateString(new Date());
+    const fallback7d = getEtDateString(new Date(Date.now() - 7 * 86_400_000));
+    const effectiveFrom = isCustom ? input.from! : fallback7d;
+    const effectiveTo = input.to ?? todayEt;
 
     const jobId = createJob(categories.length, {
       category: "news-update",
       label: `Investing Pull (${input.category})`,
     });
     activePullJobs.set(jobKey, jobId);
-    appendLog(jobId, `Starting Investing ${input.mode} pull — categories: ${categories.join(", ")}, maxPages=${input.maxPages}`);
+    appendLog(jobId, `Starting Investing ${input.mode} pull — categories: ${categories.join(", ")}, from=${effectiveFrom}, to=${effectiveTo}, maxPages=${input.maxPages}`);
 
     res.json({ jobId });
 
@@ -2143,6 +2163,8 @@ app.post("/api/news/pull-investing", async (req, res, next) => {
           const items = await fetchInvestingCategory(category, {
             maxPages: input.maxPages,
             requestIntervalMs: input.requestIntervalMs,
+            fromDate: effectiveFrom,
+            toDate: effectiveTo,
           });
 
           appendLog(jobId, `  ${category}: ${items.length} articles found`);
@@ -2190,6 +2212,8 @@ app.post("/api/news/pull-investing", async (req, res, next) => {
           source: "INVESTING",
           mode: input.mode,
           category: input.category,
+          from: effectiveFrom,
+          to: effectiveTo,
           inserted: counters.totalInserted,
           skipped: counters.totalSkipped,
           fulltextSuccess: fulltextResult.success,
@@ -4454,39 +4478,49 @@ app.get("/api/model2/analyses/:analysisId/evidence", async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+async function runStartupMaintenance(): Promise<void> {
+  try {
+    const deletedBlockedCompanyNews = await deleteBlockedFinnhubCompanyNews();
+    if (deletedBlockedCompanyNews > 0) {
+      console.log(`[startup] deleted blocked FINNHUB company_news rows: ${deletedBlockedCompanyNews}`);
+    }
+
+    const blockedEvidenceCleanup = await cleanupBlockedFinnhubCompanyNewsEvidence();
+    if (blockedEvidenceCleanup.deletedEvidenceRows > 0) {
+      console.log(`[startup] deleted blocked FINNHUB company_news evidence rows: ${blockedEvidenceCleanup.deletedEvidenceRows} (analyses=${blockedEvidenceCleanup.affectedAnalysisIds.join(",")})`);
+    }
+
+    const publisherBackfilled = await backfillPublisher();
+    if (publisherBackfilled > 0) {
+      console.log(`[startup] backfilled publisher for ${publisherBackfilled} news_items rows`);
+    }
+
+    const addedCols = await ensureDerivedColumns();
+    if (addedCols.length > 0) {
+      console.log(`[startup] added derived columns to ohlc_1d: ${addedCols.join(", ")}`);
+    }
+
+    await ensureSeedData();
+    await importDefaultTickerUniverse();
+
+    const wlBackfilled = await backfillWatchlistSecurityIds();
+    if (wlBackfilled > 0) {
+      console.log(`[startup] backfilled security_id for ${wlBackfilled} watchlist_items rows`);
+    }
+
+    console.log("[startup] maintenance complete");
+  } catch (error) {
+    console.error("[startup] maintenance failed", error);
+  }
+}
+
 async function start(): Promise<void> {
   await initDb();
-  const deletedBlockedCompanyNews = await deleteBlockedFinnhubCompanyNews();
-  if (deletedBlockedCompanyNews > 0) {
-    console.log(`[startup] deleted blocked FINNHUB company_news rows: ${deletedBlockedCompanyNews}`);
-  }
-  const blockedEvidenceCleanup = await cleanupBlockedFinnhubCompanyNewsEvidence();
-  if (blockedEvidenceCleanup.deletedEvidenceRows > 0) {
-    console.log(`[startup] deleted blocked FINNHUB company_news evidence rows: ${blockedEvidenceCleanup.deletedEvidenceRows} (analyses=${blockedEvidenceCleanup.affectedAnalysisIds.join(",")})`);
-  }
-  const publisherBackfilled = await backfillPublisher();
-  if (publisherBackfilled > 0) {
-    console.log(`[startup] backfilled publisher for ${publisherBackfilled} news_items rows`);
-  }
-  // Step 7-2: ensure derived columns exist in ohlc_1d
-  const addedCols = await ensureDerivedColumns();
-  if (addedCols.length > 0) {
-    console.log(`[startup] added derived columns to ohlc_1d: ${addedCols.join(", ")}`);
-  }
   await ensureSeedData();
-  // startCalendarIngestionWorkers() removed — Step 6-2 (mock 생성기 중지)
-
-  // Step 5-2: import default ticker CSV into canonical securities + universe
-  await importDefaultTickerUniverse();
-
-  // Step 5-4: backfill security_id for existing watchlist_items
-  const wlBackfilled = await backfillWatchlistSecurityIds();
-  if (wlBackfilled > 0) {
-    console.log(`[startup] backfilled security_id for ${wlBackfilled} watchlist_items rows`);
-  }
 
   app.listen(config.port, () => {
     console.log(`Backend listening on http://localhost:${config.port}`);
+    void runStartupMaintenance();
   });
 }
 

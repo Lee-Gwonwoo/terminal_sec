@@ -6,7 +6,8 @@
  */
 
 import { getFmpSecFulltextBackfillRows, getRtprBodyBackfillRows, getUnextractedNewsIds, getUnextractedNewsRowsByIds, insertFulltext, upsertProvidedFulltext, type UnextractedNewsRow } from "./fulltextRepository.js";
-import { extractByDomain, htmlToPlainText, resolveFinnhubNewsOriginUrl } from "./fulltextExtractors.js";
+import { extractByDomain, htmlToPlainText } from "./fulltextExtractors.js";
+import { resolveFinnhubNewsOriginUrl } from "./finnhubRedirectResolver.js";
 import { updateProgress, appendLog, completeJob, failJob, isJobCancelled } from "./jobManager.js";
 import { getDb } from "../db.js";
 import { fetchRtprArticlesByTicker } from "./ptprNewsProvider.js";
@@ -18,8 +19,44 @@ import { derivePublisher } from "./finnhubNewsProvider.js";
 const DEFAULT_CONCURRENCY = 200;
 const MAX_CONCURRENCY = 200;
 
+const SQLITE_BUSY_RETRY_MAX = 10;
+const SQLITE_BUSY_RETRY_BASE_MS = 100;
+const COMPANY_ORIGIN_BACKFILL_MAX_CONCURRENCY = 20;
+const COMPANY_ORIGIN_BACKFILL_DEFAULT_CONCURRENCY = 20;
+const COMPANY_ORIGIN_BACKFILL_MAX_RETRIES = 10;
+const COMPANY_ORIGIN_BACKFILL_BASE_DELAY_MS = 100;
+const COMPANY_ORIGIN_BACKFILL_TIMEOUT_MS = 8000;
+const COMPANY_ORIGIN_BACKFILL_WRITE_CHUNK_SIZE = 100;
+const COMPANY_ORIGIN_BACKFILL_PROGRESS_LOG_INTERVAL = 250;
+const COMPANY_ORIGIN_BACKFILL_FINAL_FAILURE_LOG_LIMIT = 100;
+
 function countWords(text: string): number {
   return text.split(/\s+/).filter(Boolean).length;
+}
+
+function isSqliteBusyError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /SQLITE_BUSY/i.test(message);
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function runSqliteBusyRetry<T>(action: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= SQLITE_BUSY_RETRY_MAX; attempt++) {
+    try {
+      return await action();
+    } catch (error) {
+      lastError = error;
+      if (!isSqliteBusyError(error) || attempt === SQLITE_BUSY_RETRY_MAX) {
+        throw error;
+      }
+      await sleep(SQLITE_BUSY_RETRY_BASE_MS * attempt);
+    }
+  }
+  throw lastError;
 }
 
 export async function extractAndPersistFulltext(
@@ -477,21 +514,23 @@ export async function runOriginUrlBackfill(jobId: string): Promise<void> {
 
 export async function runCompanyNewsOriginUrlBackfill(
   jobId: string,
-  concurrency: number = 20,
-  batchSize: number = 500,
+  concurrency: number = COMPANY_ORIGIN_BACKFILL_DEFAULT_CONCURRENCY,
+  batchSize: number = 250,
 ): Promise<void> {
-  const effectiveConcurrency = Math.max(1, Math.min(concurrency, 100));
-  const effectiveBatchSize = Math.max(effectiveConcurrency, Math.min(batchSize, 5_000));
+  const effectiveConcurrency = Math.max(1, Math.min(concurrency, COMPANY_ORIGIN_BACKFILL_MAX_CONCURRENCY));
+  const effectiveBatchSize = Math.max(effectiveConcurrency, Math.min(batchSize, 1_000));
 
   try {
     const db = getDb();
-    const countRow = await db.get<{ count: number }>(
+    await runSqliteBusyRetry(() => db.exec("PRAGMA busy_timeout = 60000"));
+
+    const countRow = await runSqliteBusyRetry(() => db.get<{ count: number }>(
       `SELECT COUNT(*) AS count
        FROM news_items
        WHERE source = 'FINNHUB'
          AND source_type = 'company_news'
          AND (origin_url IS NULL OR TRIM(origin_url) = '')`,
-    );
+    ));
 
     const total = countRow?.count ?? 0;
     appendLog(jobId, `company_news origin_url backfill: ${total} missing rows, concurrency=${effectiveConcurrency}, batchSize=${effectiveBatchSize}`);
@@ -507,11 +546,13 @@ export async function runCompanyNewsOriginUrlBackfill(
     let updated = 0;
     let unresolved = 0;
     let failed = 0;
+    let finalFailureLogs = 0;
+    let suppressedFinalFailureLogs = 0;
     let lastRowId = 0;
     let batchNumber = 0;
 
     while (!isJobCancelled(jobId)) {
-      const rows = await db.all<{ sqlite_rowid: number; id: string; url: string; origin_url: string | null }[]>(
+      const rows = await runSqliteBusyRetry(() => db.all<{ sqlite_rowid: number; id: string; url: string; origin_url: string | null }[]>(
         `SELECT rowid AS sqlite_rowid, id, url, origin_url
          FROM news_items
          WHERE source = 'FINNHUB'
@@ -521,7 +562,7 @@ export async function runCompanyNewsOriginUrlBackfill(
          ORDER BY rowid ASC
          LIMIT ?`,
         [lastRowId, effectiveBatchSize],
-      );
+      ));
 
       if (rows.length === 0) {
         break;
@@ -532,6 +573,7 @@ export async function runCompanyNewsOriginUrlBackfill(
       appendLog(jobId, `[batch ${batchNumber}] fetched ${rows.length} rows (rowid<=${lastRowId})`);
 
       let cursor = 0;
+      const resolvedUpdates: Array<{ id: string; originUrl: string; publisher: string }> = [];
       async function worker(): Promise<void> {
         while (cursor < rows.length) {
           if (isJobCancelled(jobId)) return;
@@ -541,29 +583,40 @@ export async function runCompanyNewsOriginUrlBackfill(
           const row = rows[index];
 
           try {
-            const originUrl = await resolveFinnhubNewsOriginUrl(row.url);
+            const originUrl = await resolveFinnhubNewsOriginUrl(row.url, {
+              maxRetries: COMPANY_ORIGIN_BACKFILL_MAX_RETRIES,
+              baseDelayMs: COMPANY_ORIGIN_BACKFILL_BASE_DELAY_MS,
+              timeoutMs: COMPANY_ORIGIN_BACKFILL_TIMEOUT_MS,
+            });
             if (originUrl) {
-              await db.run(
-                `UPDATE news_items
-                 SET origin_url = ?,
-                     publisher = COALESCE(NULLIF(?, 'UNKNOWN'), publisher)
-                 WHERE id = ?`,
-                [originUrl, derivePublisher(originUrl), row.id],
-              );
+              resolvedUpdates.push({
+                id: row.id,
+                originUrl,
+                publisher: derivePublisher(originUrl),
+              });
               updated++;
             } else {
               unresolved++;
+              if (finalFailureLogs < COMPANY_ORIGIN_BACKFILL_FINAL_FAILURE_LOG_LIMIT) {
+                appendLog(jobId, `⚠ final origin_url unresolved after ${COMPANY_ORIGIN_BACKFILL_MAX_RETRIES} retries: ${row.id} :: ${row.url}`);
+                finalFailureLogs++;
+              } else {
+                suppressedFinalFailureLogs++;
+              }
             }
           } catch (error: any) {
             failed++;
-            if (failed <= 20) {
-              appendLog(jobId, `⚠ company_news origin ${row.id}: ${error?.message ?? String(error)}`);
+            if (finalFailureLogs < COMPANY_ORIGIN_BACKFILL_FINAL_FAILURE_LOG_LIMIT) {
+              appendLog(jobId, `⚠ final origin_url error after ${COMPANY_ORIGIN_BACKFILL_MAX_RETRIES} retries: ${row.id} :: ${row.url} :: ${error?.message ?? String(error)}`);
+              finalFailureLogs++;
+            } else {
+              suppressedFinalFailureLogs++;
             }
           }
 
           processed++;
           updateProgress(jobId, processed, total);
-          if (processed % 100 === 0 || processed === total) {
+          if (processed % COMPANY_ORIGIN_BACKFILL_PROGRESS_LOG_INTERVAL === 0 || processed === total) {
             appendLog(jobId, `[${processed}/${total}] updated=${updated} unresolved=${unresolved} failed=${failed}`);
           }
         }
@@ -571,6 +624,31 @@ export async function runCompanyNewsOriginUrlBackfill(
 
       const workerCount = Math.min(effectiveConcurrency, rows.length);
       await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+      if (resolvedUpdates.length > 0) {
+        for (let index = 0; index < resolvedUpdates.length; index += COMPANY_ORIGIN_BACKFILL_WRITE_CHUNK_SIZE) {
+          const chunk = resolvedUpdates.slice(index, index + COMPANY_ORIGIN_BACKFILL_WRITE_CHUNK_SIZE);
+          await runSqliteBusyRetry(async () => {
+            await db.exec("BEGIN TRANSACTION");
+            try {
+              for (const item of chunk) {
+                await db.run(
+                  `UPDATE news_items
+                   SET origin_url = ?,
+                       publisher = COALESCE(NULLIF(?, 'UNKNOWN'), publisher)
+                   WHERE id = ?`,
+                  [item.originUrl, item.publisher, item.id],
+                );
+              }
+              await db.exec("COMMIT");
+            } catch (error) {
+              await db.exec("ROLLBACK");
+              throw error;
+            }
+          });
+          await sleep(25);
+        }
+      }
     }
 
     if (isJobCancelled(jobId)) {
@@ -579,6 +657,9 @@ export async function runCompanyNewsOriginUrlBackfill(
     }
 
     appendLog(jobId, `company_news origin_url backfill complete: processed=${processed}, updated=${updated}, unresolved=${unresolved}, failed=${failed}`);
+    if (suppressedFinalFailureLogs > 0) {
+      appendLog(jobId, `company_news origin_url backfill final-failure logs suppressed=${suppressedFinalFailureLogs}`);
+    }
     completeJob(jobId, { processed, updated, unresolved, failed, sourceType: "company_news" });
   } catch (err: any) {
     failJob(jobId, err.message ?? "Unknown error in runCompanyNewsOriginUrlBackfill");

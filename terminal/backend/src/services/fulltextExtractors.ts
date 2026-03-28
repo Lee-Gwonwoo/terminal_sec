@@ -9,6 +9,7 @@
 import * as cheerio from "cheerio";
 import { chromium, type Browser } from "playwright";
 import { derivePublisher } from "./finnhubNewsProvider.js";
+import { isFinnhubNewsRedirectUrl, resolveFinnhubNewsOriginUrl } from "./finnhubRedirectResolver.js";
 
 const MAX_RETRIES = 10;
 const BASE_DELAY_MS = 500;
@@ -168,38 +169,6 @@ function unavailableResult(note: string): ExtractionResult {
 
 function fallbackOrUnavailable(body: string | null, note: string, fallbackBody: boolean): ExtractionResult {
   return fallbackBody ? bodyFallback(body, note) : unavailableResult(note);
-}
-
-export function isFinnhubNewsRedirectUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    return parsed.hostname.toLowerCase() === "finnhub.io"
-      && parsed.pathname === "/api/news"
-      && parsed.searchParams.has("id");
-  } catch {
-    return false;
-  }
-}
-
-export async function resolveFinnhubNewsOriginUrl(url: string): Promise<string | null> {
-  if (!isFinnhubNewsRedirectUrl(url)) {
-    return null;
-  }
-
-  try {
-    const res = await fetchWithRetry(url, {
-      redirect: "manual",
-      headers: {
-        "User-Agent": UA,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-      },
-    });
-    const location = res.headers.get("location");
-    return location ? new URL(location, url).toString() : null;
-  } catch {
-    return null;
-  }
 }
 
 async function extractTextViaHttp(

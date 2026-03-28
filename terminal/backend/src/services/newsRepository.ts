@@ -477,6 +477,7 @@ export async function insertNewsItem(params: {
   title: string;
   body: string;
   url: string;
+  originUrl?: string;
   tickers: string[];
   tags: string[];
   publisher?: string;
@@ -489,8 +490,8 @@ export async function insertNewsItem(params: {
 
   const result = await getDb().run(
     `INSERT OR IGNORE INTO news_items
-      (id, published_at, source, source_type, title, body, url, tickers_csv, tags_csv, publisher)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, published_at, source, source_type, title, body, url, origin_url, tickers_csv, tags_csv, publisher)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       params.publishedAt,
@@ -499,6 +500,7 @@ export async function insertNewsItem(params: {
       params.title,
       params.body,
       params.url,
+      params.originUrl?.trim() || null,
       tickersCsv,
       tagsCsv,
       params.publisher ?? null
@@ -506,19 +508,27 @@ export async function insertNewsItem(params: {
   );
 
   if (!result.changes) {
-    const existing = await getDb().get<{ publisher: string | null }>(
-      `SELECT publisher FROM news_items WHERE source = ? AND url = ?`,
+    const existing = await getDb().get<{ publisher: string | null; origin_url: string | null }>(
+      `SELECT publisher, origin_url FROM news_items WHERE source = ? AND url = ?`,
       [params.source, params.url],
     );
     const nextPublisher = canonicalizePublisherLabel(params.publisher ?? null);
     const currentPublisher = canonicalizePublisherLabel(existing?.publisher ?? null);
+    const nextOriginUrl = params.originUrl?.trim() || "";
     const shouldUpgradePublisher = nextPublisher !== "UNKNOWN"
       && (currentPublisher === "UNKNOWN" || (currentPublisher === "FINNHUB" && nextPublisher !== "FINNHUB"));
+    const shouldFillOriginUrl = Boolean(nextOriginUrl) && !String(existing?.origin_url ?? "").trim();
 
     if (shouldUpgradePublisher) {
       await getDb().run(
         `UPDATE news_items SET publisher = ? WHERE source = ? AND url = ?`,
         [nextPublisher, params.source, params.url],
+      );
+    }
+    if (shouldFillOriginUrl) {
+      await getDb().run(
+        `UPDATE news_items SET origin_url = ? WHERE source = ? AND url = ?`,
+        [nextOriginUrl, params.source, params.url],
       );
     }
     return null;
@@ -529,6 +539,7 @@ export async function insertNewsItem(params: {
     published_at: params.publishedAt,
     source: params.source,
     publisher: params.publisher ? canonicalizePublisherLabel(params.publisher) : null,
+    origin_url: params.originUrl?.trim() || null,
     source_type: params.sourceType,
     title: params.title,
     body: params.body,

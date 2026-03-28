@@ -104,3 +104,133 @@
 - 관측 메모:
 	- 복구는 실제로 진행 중이다.
 	- 다만 전체 대상이 매우 커서 장시간 실행이 필요하다.
+
+### 진행 확인 (최신)
+
+- 최신 DB 확인 시점:
+	- `total_rows=1,309,467`
+	- `missing_origin=1,229,815`
+	- `with_origin=79,652`
+- fast direct backfill 로그 최신 구간:
+	- `completed=78,301 / 1,303,048`
+	- 진행률 표시는 아직 `6%`
+	- 로그상 실패 중단 없이 계속 증가 중
+- 해석:
+	- 초기 `with_origin=6,510` 대비 약 `+73,142`건이 추가로 채워졌다.
+	- 전체 job은 아직 완료 전이며, 계속 실행 중이다.
+
+## 2026-03-28
+
+**작성 시각:** 16:40 (local)
+
+### 작업 항목
+
+- visible/optimized/direct backfill terminal들이 현재는 모두 종료됐음을 재확인했다.
+- 종료 원인이 주로 `SQLITE_BUSY`였고, 긴 batch write transaction과 backend dev 병행 실행이 주 원인이라고 판단했다.
+- company_news origin backfill 기본 실행값을 저동시성으로 낮추고, DB update를 작은 write chunk로 쪼개는 수정 계획을 plan에 반영했다.
+
+### 변경 파일
+
+- `ai_agent_plan/company_news_fulltext_exact/plan.md`
+- `ai_agent_plan/company_news_fulltext_exact/agent_log.md`
+
+### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ⏳ | 코드 수정 전 계획/로그 반영 단계 |
+| 빌드 | ⏳ | 코드 수정 후 실행 예정 |
+| 자동 테스트 | ⏳ | 코드 수정 후 실행 예정 |
+| 런타임 통합 | ✅ | 현재 active backfill 프로세스 없음, DB 수치 정지 상태 확인 |
+
+### 사용자 확인 상태
+
+- 상태: 확인 대기 (awaiting user confirmation)
+- 사용자 최신 지시에 따라 확인을 기다리지 않고 origin_url 복구 완료를 목표로 다음 수정/실행 단계로 계속 진행한다.
+
+### 리스크 / 메모
+
+- backend dev server가 같은 DB에 쓰기를 시도하면 long-running backfill과 다시 충돌할 수 있다.
+- write chunk를 너무 작게 하면 안정성은 오르지만 전체 완료 시간은 늘어날 수 있다.
+- 이번 단계는 `origin_url` 복구만 끝내는 것이며 exact fulltext 재추출은 아직 아니다.
+
+## 2026-03-28
+
+**작성 시각:** 21:11 (local)
+
+### 작업 항목
+
+- `runCompanyNewsOriginUrlBackfill()`의 company_news 기본 실행값을 낮추고, batch write를 작은 chunk로 나누는 코드를 반영했다.
+- `terminal` 전체 빌드와 backend test를 다시 실행해 수정이 깨지지 않았는지 확인했다.
+- backend dev watcher가 실제로 backfill batch write를 막고 있는 것을 재현 확인한 뒤, watcher tree를 종료하고 single-writer run으로 재시작했다.
+- 이후 더 빠른 single-writer-fast run(`concurrency=12`, `batchSize=360`)으로 재시작했고, DB 카운트가 다시 증가하는 것을 확인했다.
+
+### 변경 파일
+
+- `terminal/backend/src/services/fulltextUpdateService.ts`
+- `ai_agent_plan/company_news_fulltext_exact/plan.md`
+- `ai_agent_plan/company_news_fulltext_exact/agent_log.md`
+
+### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `fulltextUpdateService.ts` 기준 0 errors |
+| 빌드 | ✅ | `npm.cmd run build` (`terminal/`) 성공 |
+| 자동 테스트 | ✅ | `npm.cmd run test` (`terminal/backend`) 84/84 pass |
+| 런타임 통합 | ✅ | single-writer-fast 실행 후 `with_origin=82,710`, `missing_origin=1,226,757` 확인 |
+
+### 사용자 확인 상태
+
+- 상태: 확인 대기 (awaiting user confirmation)
+- 사용자 최신 지시에 따라 origin_url 전체 복구 job은 계속 진행 중이다.
+
+### 리스크 / 메모
+
+- `company-origin-single-writer` 초기 run은 backend watcher가 살아 있는 상태여서 batch 1 이후 장시간 정지했다.
+- watcher 종료 뒤에는 다시 진행이 살아났지만, row 구간별 redirect 생존율 차이로 `updated/unresolved` 비율은 batch마다 달라질 수 있다.
+- backfill이 끝날 때까지 backend dev server를 다시 올리지 않는 편이 안전하다.
+
+## 2026-03-28
+
+**작성 시각:** 18:16 (local)
+
+### 작업 항목
+
+- `company_news` live pull/update 경로에서도 Finnhub wrapper redirect를 즉시 resolve하도록 공용 resolver를 분리했다.
+- `fetchCompanyNewsRaw()`에 `concurrency=20`, `maxRetries=10` 정책을 반영하고, resolve 실패 row는 `origin_url unresolved after 10 retries` 형식으로 live job log에 남기도록 했다.
+- `insertNewsItem()`이 신규 insert뿐 아니라 duplicate row에도 비어 있던 `origin_url`을 채우도록 수정했다.
+- historical backfill도 동일하게 `maxRetries=10`으로 올리고, 최종 실패 row를 `final origin_url unresolved after 10 retries` 형식으로 job log에 남기도록 했다.
+- `.github/copilot-skills/finhub_other_api.md`와 `plan.md`를 실측 운영 규칙에 맞게 동기화했다.
+
+### 변경 파일
+
+- `terminal/backend/src/services/finnhubRedirectResolver.ts`
+- `terminal/backend/src/services/fulltextExtractors.ts`
+- `terminal/backend/src/services/fulltextUpdateService.ts`
+- `terminal/backend/src/services/finnhubNewsProvider.ts`
+- `terminal/backend/src/services/newsRepository.ts`
+- `terminal/backend/src/server.ts`
+- `.github/copilot-skills/finhub_other_api.md`
+- `ai_agent_plan/company_news_fulltext_exact/plan.md`
+- `ai_agent_plan/company_news_fulltext_exact/agent_log.md`
+
+### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 수정 파일 `get_errors` 기준 0 errors |
+| 빌드 | ✅ | `npm.cmd run build` (`terminal/`) 성공 |
+| 자동 테스트 | ✅ | `npm.cmd run test` (`terminal/`) 84/84 pass |
+| 런타임 통합 | ✅ | backend listener(`http://localhost:8080`) 확인 후, built service direct run으로 `AAPL`, `2026-03-27~2026-03-28`, `total=45`, `withOrigin=45`, sample `finnhub.io/api/news?id=... -> finance.yahoo.com/...`, `publisher=YAHOO` 확인 |
+
+### 사용자 확인 상태
+
+- 상태: 확인 대기 (awaiting user confirmation)
+- Step 1의 구현은 반영됐지만, 사용자가 실제 운영 승인 여부를 확인하기 전까지 plan 상태는 `⏳`로 유지한다.
+
+### 리스크 / 메모
+
+- local dev server에 대한 HTTP POST route 자체는 shared terminal 환경에서 응답 캡처가 비정상적으로 지연돼 별도 shell-level 확인이 추가로 필요할 수 있다.
+- live pull에서 redirect resolve를 insert 전에 수행하므로, company_news pull latency는 이전보다 늘 수 있다.
+- final failure log는 무제한 출력이 아니라 cap을 두었으므로, 대량 실패 run에서는 suppressed count를 같이 확인해야 한다.

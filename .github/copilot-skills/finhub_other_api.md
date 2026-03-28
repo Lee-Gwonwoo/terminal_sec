@@ -138,6 +138,9 @@
 
 ### company_news 재처리 운영 규칙
 - 기존 실DB 상태에서는 `source='FINNHUB' AND source_type='company_news'`의 `origin_url`이 0건일 수 있다. 이 경우 fulltext 단계에서 wrapper redirect를 읽어 `origin_url`을 채우는 경로가 필요하다.
+- `company_news`의 `finnhub.io/api/news?id=...` wrapper redirect 복구는 이제 backfill 전용 보정이 아니라, **live pull/update 시점에도 동일하게 적용**한다. 즉 `fetchCompanyNewsRaw()` 단계에서 redirect를 먼저 resolve해서 신규 insert row의 `origin_url`을 같이 저장한다.
+- 실측 기준 운영 기본값은 `concurrency=20`, `maxRetries=10`, `baseDelayMs=100ms`, `timeoutMs=8000ms`다. 더 높은 동시성(`50`, `100`, `500`)은 wall-clock은 짧아져도 최종 recoverability가 크게 떨어졌으므로 기본값으로 쓰지 않는다.
+- `maxRetries=10`까지 wrapper redirect origin을 얻지 못한 row는 silent drop 하지 않고 **최종 실패 로그(final failure log)** 로 남긴다. 이 규칙은 live company_news update/pull과 historical origin_url backfill 둘 다에 적용한다.
 - 기존 `company_news` fulltext row는 대부분 summary/body fallback semantics로 저장돼 있으므로, 새 규칙으로 다시 채우려면 먼저 reset endpoint로 비우는 것이 맞다.
 - 현재 backend는 `POST /api/news/pull-finhub`에서 `sourceType='company_news'`이면서 `mode='recent' | 'custom'`이고 새 row가 실제 insert되면, pull job 완료 직전에 그 새 row들만 대상으로 `news-fulltext` background job을 자동으로 이어서 시작한다.
 - 이 자동 후속 fulltext는 수동 `Full Text > Company News Only`와 같은 `ft-concurrency` 값을 사용한다. 프론트가 `fulltextConcurrency`를 pull payload에 같이 보내고, backend가 그 값을 자동 후속 job에 전달한다.
@@ -148,6 +151,21 @@
   1. `POST /api/news/fulltext/reset-company-news`
   2. `POST /api/news/fulltext/update` with `{ "sourceType": "company_news" }`
   3. `news_fulltext.extraction_note`에서 `yahoo-finance-browser`, `benzinga-scrape`, `company-news-no-scraper:*` 분포를 확인하되, `benzinga-scrape`는 실제 저장 본문이 `headline only article`, `Benzinga Pro`, `Join 10,000+ serious traders` 같은 홍보 문구인지 반드시 샘플 검수한다.
+
+### 2026-03-28 concurrency / retry 실측 결론
+- 600-sample 단일 패스 측정:
+  - `12`: `resolved=398`, `unresolved=202`, `elapsed≈27.1s`
+  - `100`: `resolved=70`, `unresolved=530`, `elapsed≈4.9s`
+  - `500`: `resolved=30`, `unresolved=570`, `elapsed≈2.0s`
+- 600-sample, 5-pass retry 측정:
+  - `12`: cumulative `600/600`, final unresolved `0`, total `≈40.3s`
+  - `50`: cumulative `413`, final unresolved `187`, total `≈27.6s`
+  - `100`: cumulative `275`, final unresolved `325`, total `≈18.3s`
+  - `500`: cumulative `113`, final unresolved `487`, total `≈7.8s`
+- 운영 해석:
+  - 병목은 CPU가 아니라 외부 redirect 처리 성공률이다.
+  - 따라서 `company_news` origin resolve는 “무조건 최고 동시성”이 아니라 **recoverability를 보존하는 중간 동시성**이 우선이다.
+  - 현재 운영 기본 제안은 `20`이며, 필요 시 `12~20` 범위에서만 조정한다.
 
 ### 왜 화면에서 publisher가 `FINNHUB`로 보일 수 있는가
 - 현재 수집 코드는 `item.source`가 있으면 그 값을 publisher로 저장하지만, 기존 row는 `INSERT OR IGNORE` 때문에 중복 수집 시 업데이트되지 않는다.

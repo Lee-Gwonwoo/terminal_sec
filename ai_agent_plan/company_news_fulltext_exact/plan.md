@@ -9,6 +9,18 @@
   - `server.ts`에 `/api/news/fulltext/backfill-company-origin-url` endpoint 추가
 - 실행 목표: `news_items.source='FINNHUB' AND source_type='company_news' AND origin_url IS NULL/empty` 전체를 대상으로 원문 URL backfill 수행
 
+### PLAN CHANGE (2026-03-28 16:40 local)
+
+- visible / optimized direct backfill이 중간에 `SQLITE_BUSY`로 종료된 것을 확인했다.
+- 실행 전략을 backend dev server 병행 상태에서의 고동시성 실행에서, **lock 회피용 저동시성 + 짧은 write chunk + 단독 foreground 실행**으로 변경한다.
+- 이번 단계 목표는 fulltext 재추출이 아니라 `origin_url` 복구를 끝까지 완료하는 것이다.
+
+### PLAN CHANGE (2026-03-28 17:57 local)
+
+- 실측 concurrency benchmark 결과를 반영해 `company_news` origin resolve 기본 정책을 `concurrency=20`, `maxRetries=10`으로 고정한다.
+- 이 정책은 historical backfill뿐 아니라 **live `company_news` update/pull insert 경로**에도 동일하게 적용한다.
+- `10`회 재시도 후에도 `origin_url`을 얻지 못한 row는 최종 실패 로그로 남기고 silent skip 하지 않는다.
+
 ### 목표
 
 - FINNHUB `company_news`에서 지금 저장 중인 `summary` snippet이 아니라 **publisher 원문 기사 본문**만 `news_fulltext.full_text`에 저장되도록 경로를 다시 설계한다.
@@ -180,32 +192,38 @@ select extraction_status, count(*) from news_items ni left join news_fulltext nf
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 1-1 | insert 시점에 Finnhub redirect를 즉시 resolve해서 `origin_url` 저장하는 설계 확정 | `terminal/backend/src/services/finnhubNewsProvider.ts` | 새로 삽입된 company_news row의 `origin_url` 채워짐 확인 | ⬜ |
-| 1-2 | 기존 row용 origin_url backfill job 추가 | `terminal/backend/src/services/fulltextUpdateService.ts`, `terminal/backend/src/server.ts`, `terminal/backend/src/services/fulltextExtractors.ts` | 전용 endpoint 생성 + 전체 대상 job 시작 확인 | ⏳ |
-| 1-3 | 재시도/실패 사유를 publisher 감사에 쓸 수 있게 로그 포맷 정리 | `terminal/backend/src/services/fulltextUpdateService.ts` | job log에 resolve 성공/실패 이유 표시 | ⏳ |
+| 1-1 | insert 시점에 Finnhub redirect를 즉시 resolve해서 `origin_url` 저장하는 설계 확정 | `terminal/backend/src/services/finnhubNewsProvider.ts`, `terminal/backend/src/services/newsRepository.ts`, `terminal/backend/src/server.ts` | 새로 삽입된 company_news row의 `origin_url` 채워짐 확인 | ⏳ |
+| 1-2 | 기존 row용 origin_url backfill job 추가 및 lock 회피 실행 전략 반영 | `terminal/backend/src/services/fulltextUpdateService.ts`, `terminal/backend/src/server.ts`, `terminal/backend/src/services/finnhubRedirectResolver.ts` | 전용 endpoint 생성 + 단일 실행 경로로 전체 대상 job 시작 확인 | ⏳ |
+| 1-3 | 재시도/실패 사유를 publisher 감사에 쓸 수 있게 로그 포맷 정리 | `terminal/backend/src/services/fulltextUpdateService.ts`, `terminal/backend/src/server.ts` | job log에 resolve 성공/실패 이유 표시 | ⏳ |
 
 1-1 목적: 새 데이터부터는 원문 URL을 잃지 않게 만든다.
 설명: company_news를 insert할 때 redirect resolve를 미루면 대부분 row가 forever missing 상태로 남는다.
 완료 조건(눈으로 확인): 새로 수집한 company_news row에 `origin_url`이 비어 있지 않다.
 사람 검증(비개발자): 최근 기사 하나를 API/DB에서 열었을 때 `finnhub.io`가 아닌 원문 사이트 URL이 보인다.
 흔한 문제/주의: redirect resolve가 느리면 pull 속도가 급락할 수 있어 concurrency 조절이 필요하다.
+추가 구현 메모(2026-03-28 17:57 local): `fetchCompanyNewsRaw()`에서 wrapper redirect를 `concurrency=20`, `maxRetries=10`으로 선해결한 뒤 `insertNewsItem()`에 `origin_url`을 같이 넘기고, duplicate row에도 비어 있던 `origin_url`을 채우도록 수정한다.
 
 1-2 목적: 과거 데이터에도 실제 publisher 원문 URL을 복구한다.
 설명: scraper를 늘려도 `origin_url`이 없으면 과거 130만 건 중 대부분은 재활용할 수 없다.
 완료 조건(눈으로 확인): 샘플 batch에서 `origin_url` 보유 수가 증가한다.
 사람 검증(비개발자): 감사 표에서 `origin_url_resolved_count`가 늘어난다.
 흔한 문제/주의: 사이트/redirect 변경으로 과거 링크 일부는 영구 실패할 수 있다.
+추가 실행 규칙(2026-03-28 21:10 local): backend dev watcher가 같은 SQLite DB를 잡고 있으면 backfill이 batch write 단계에서 장시간 정지할 수 있으므로, 전체 복구 실행 중에는 backend dev server를 중지한 단일 writer 상태를 유지한다.
+추가 실행 규칙(2026-03-28 17:57 local): historical backfill 기본값도 동일하게 `concurrency=20`, `maxRetries=10`을 사용하고, 최종 실패 row는 job log에 남긴다. 로그 폭증을 막기 위해 동일 run에서는 final-failure log count cap을 둔다.
 
 사전 작성됨(검증 필요):
 - `runCompanyNewsOriginUrlBackfill(jobId, concurrency, batchSize)` 구현 완료
 - `/api/news/fulltext/backfill-company-origin-url` endpoint 추가 완료
 - batch + worker pool로 전체 missing row를 순차 페이지네이션 처리하도록 설계
+- 2026-03-28 16:40 기준으로 write transaction을 짧은 chunk로 분할하고, 기본 동시성을 낮춘 단독 실행 전략으로 재조정
+- 2026-03-28 21:10 기준으로 backend dev watcher 중지 후 `concurrency=12`, `batchSize=360` foreground run에서 DB 카운트 증가를 재확인
 
 1-3 목적: 나중에 publisher별 가능/불가를 정확히 설명할 근거를 남긴다.
 설명: 단순 실패가 아니라 401/403/video/paywall/no-body 등을 분리해야 한다.
 완료 조건(눈으로 확인): job log 또는 DB note에 세부 사유가 남는다.
 사람 검증(비개발자): 실패 기사 note를 보면 이유가 읽힌다.
 흔한 문제/주의: note를 너무 자유 텍스트로 쓰면 집계가 어려워진다.
+추가 구현 메모(2026-03-28 17:57 local): live pull 경로는 `company_news <symbol>: origin_url unresolved after 10 retries` 형식으로 남기고, backfill job은 `final origin_url unresolved after 10 retries` 형식으로 남긴다.
 
 검증 훅:
 

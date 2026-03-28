@@ -110,6 +110,38 @@
 				"Get-CimInstance Win32_Process -Filter \"ProcessId = 46984\" | Select-Object ProcessId,CommandLine | Format-List"
 			],
 			"isBackground": false
+		},
+		{
+			"label": "tmp: validate company pull endpoint",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"$payload = @{ tickers = @('AAPL'); sourceType = 'company_news'; days = 1 } | ConvertTo-Json -Compress; try { Invoke-RestMethod -Method Post -Uri 'http://localhost:8080/api/news/pull-finhub' -ContentType 'application/json' -Body $payload | ConvertTo-Json -Depth 5 } catch { $_ | Out-String }"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "tmp: validate company pull endpoint 2",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"$payload = '{\\\"tickers\\\":[\\\"AAPL\\\"],\\\"sourceType\\\":\\\"company_news\\\",\\\"days\\\":1}'; try { Invoke-RestMethod -Method Post -Uri 'http://localhost:8080/api/news/pull-finhub' -ContentType 'application/json' -Body $payload | ConvertTo-Json -Depth 5 } catch { $_ | Out-String }"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "tmp: validate company pull endpoint 3",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"curl.exe -s -X POST http://localhost:8080/api/news/pull-finhub -H \"Content-Type: application/json\" -d \"{\\\"tickers\\\":[\\\"AAPL\\\"],\\\"sourceType\\\":\\\"company_news\\\",\\\"days\\\":1}\""
+			],
+			"isBackground": false
 		}
 	]
 }

@@ -1,6 +1,7 @@
 import { config } from "../config.js";
 import { getDb } from "../db.js";
 import { getEtDateString, toEtNaiveIso } from "./timeUtils.js";
+import { isFinnhubNewsRedirectUrl, resolveFinnhubNewsOriginUrl } from "./finnhubRedirectResolver.js";
 
 const FINNHUB_BASE = "https://finnhub.io/api/v1";
 const MAX_RETRIES = 10;
@@ -9,6 +10,10 @@ const MARKET_NEWS_CATEGORY = "general";
 const MARKET_NEWS_PAGE_DELAY_MS = 250;
 const MARKET_NEWS_PAGE_BATCH_SIZE = 30;
 const MARKET_NEWS_MAX_TOTAL_PAGES = 300;
+const COMPANY_NEWS_ORIGIN_RESOLVE_CONCURRENCY = 20;
+const COMPANY_NEWS_ORIGIN_RESOLVE_MAX_RETRIES = 10;
+const COMPANY_NEWS_ORIGIN_RESOLVE_BASE_DELAY_MS = 100;
+const COMPANY_NEWS_ORIGIN_RESOLVE_TIMEOUT_MS = 8000;
 
 /**
  * Global token-bucket rate limiter for Finnhub API.
@@ -65,8 +70,16 @@ export type FinnhubMappedItem = {
   providerTickers: string[];
   tags: string[];
   publisher?: string;
+  originUrl?: string;
   /** Raw HTML body from provider (RTPR article_body_html). Undefined for non-HTML sources. */
   bodyHtml?: string;
+};
+
+type CompanyNewsOriginResolveFailure = {
+  symbol: string;
+  url: string;
+  title: string;
+  attempts: number;
 };
 
 const COMPANY_NEWS_BLOCKED_PUBLISHERS = new Set(["SEEKINGALPHA"]);
@@ -201,6 +214,92 @@ async function fetchWithRetry(url: string): Promise<any> {
   }
 }
 
+async function resolveCompanyNewsOrigins(
+  symbol: string,
+  items: FinnhubMappedItem[],
+  options?: { onOriginResolveFinalFailure?: (failure: CompanyNewsOriginResolveFailure) => void | Promise<void> },
+): Promise<FinnhubMappedItem[]> {
+  const wrapperUrls = Array.from(
+    new Set(items.map((item) => item.url).filter((url) => isFinnhubNewsRedirectUrl(url))),
+  );
+
+  if (wrapperUrls.length === 0) {
+    return items.map((item) => ({
+      ...item,
+      originUrl: item.url,
+      publisher: resolveBestPublisher({
+        url: item.url,
+        providerSource: item.publisher,
+        title: item.title,
+        body: item.body,
+        originUrl: item.url,
+      }),
+    }));
+  }
+
+  const titleByUrl = new Map<string, string>();
+  for (const item of items) {
+    if (isFinnhubNewsRedirectUrl(item.url) && !titleByUrl.has(item.url)) {
+      titleByUrl.set(item.url, item.title);
+    }
+  }
+
+  let cursor = 0;
+  const resolvedByUrl = new Map<string, string | null>();
+
+  async function worker(): Promise<void> {
+    while (true) {
+      const index = cursor++;
+      if (index >= wrapperUrls.length) {
+        return;
+      }
+
+      const wrapperUrl = wrapperUrls[index];
+      const resolvedOriginUrl = await resolveFinnhubNewsOriginUrl(wrapperUrl, {
+        maxRetries: COMPANY_NEWS_ORIGIN_RESOLVE_MAX_RETRIES,
+        baseDelayMs: COMPANY_NEWS_ORIGIN_RESOLVE_BASE_DELAY_MS,
+        timeoutMs: COMPANY_NEWS_ORIGIN_RESOLVE_TIMEOUT_MS,
+      });
+      resolvedByUrl.set(wrapperUrl, resolvedOriginUrl);
+
+      if (!resolvedOriginUrl && options?.onOriginResolveFinalFailure) {
+        try {
+          await options.onOriginResolveFinalFailure({
+            symbol,
+            url: wrapperUrl,
+            title: titleByUrl.get(wrapperUrl) ?? "",
+            attempts: COMPANY_NEWS_ORIGIN_RESOLVE_MAX_RETRIES,
+          });
+        } catch {
+          // Do not fail news ingestion because logging failed.
+        }
+      }
+    }
+  }
+
+  const workerCount = Math.min(COMPANY_NEWS_ORIGIN_RESOLVE_CONCURRENCY, wrapperUrls.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+  return items.map((item) => {
+    const resolvedOriginUrl = isFinnhubNewsRedirectUrl(item.url)
+      ? (resolvedByUrl.get(item.url) ?? "")
+      : item.url;
+    const publisher = resolveBestPublisher({
+      url: item.url,
+      providerSource: item.publisher,
+      title: item.title,
+      body: item.body,
+      originUrl: resolvedOriginUrl,
+    });
+
+    return {
+      ...item,
+      originUrl: resolvedOriginUrl || undefined,
+      publisher,
+    };
+  });
+}
+
 function compareNumericIds(a: string, b: string): number {
   try {
     const left = BigInt(a);
@@ -260,12 +359,13 @@ export async function fetchCompanyNewsRaw(
   symbol: string,
   from: string,
   to: string,
+  options?: { onOriginResolveFinalFailure?: (failure: CompanyNewsOriginResolveFailure) => void | Promise<void> },
 ): Promise<FinnhubMappedItem[]> {
   const url = `${FINNHUB_BASE}/company-news?symbol=${encodeURIComponent(symbol)}&from=${from}&to=${to}&token=${config.finnhubApiKey}`;
   const raw = await fetchWithRetry(url);
   if (!Array.isArray(raw)) return [];
 
-  return raw
+  const mapped = raw
     .map((item: any) => {
       const publisher = resolveBestPublisher({
         url: item.url ?? "",
@@ -297,6 +397,8 @@ export async function fetchCompanyNewsRaw(
       }
       return !COMPANY_NEWS_BLOCKED_PUBLISHERS.has(item.publisher ?? "UNKNOWN");
     });
+
+  return resolveCompanyNewsOrigins(symbol, mapped, options);
 }
 
 export async function fetchPressReleasesRaw(

@@ -84,7 +84,7 @@
 - frontend 흐름:
   1. 새 `InvestingNewsWindow`가 `FinnhubNewsWindow`의 리스트/컬럼/북마크/job panel 골격을 재사용한다.
   2. source filter 대신 `Investing category filter`를 사용한다.
-  3. update 메뉴는 `stock-market-news`, `cryptocurrency-news`, `all investing` 중심으로 재구성한다.
+  3. update 메뉴는 `stock-market-news`, `cryptocurrency-news` 대상의 `recent/custom` 2x2 구조로 재구성한다.
   4. 데이터 조회는 기존 `GET /api/news`를 재사용하되 `source_names=INVESTING`와 Investing 전용 `source_type`을 사용한다.
 - 저장 규칙 제안:
   - `source`: `INVESTING`
@@ -246,10 +246,10 @@
 - `4-2` 목적: 사용자에게 Investing category만 노출한다.
   설명: source type 대신 category filter만 보여주고 대상 카테고리 2개만 선택 가능하게 만든다.
   완료 조건(눈으로 확인): filter 메뉴에 3개 항목만 보인다.
-  사람 검증(비개발자): `All Investing`, `Stock Market News`, `Cryptocurrency News` 정도의 항목을 볼 수 있다.
+  사람 검증(비개발자): `All`, `Stock Market`, `Crypto` 정도의 항목을 볼 수 있다.
   흔한 문제/주의: source_names와 source_type query를 동시에 안 맞추면 다른 source 뉴스가 섞일 수 있다.
 - `4-3` 목적: update 버튼 의미를 Investing 수집 목적과 맞춘다.
-  설명: `Recent All`, `Recent Stock Market`, `Recent Crypto`, `Custom All`, `Custom Stock Market`, `Custom Crypto` 같이 재구성한다.
+  설명: `Recent Stock Market`, `Recent Crypto`, `Custom Stock Market`, `Custom Crypto` 같이 재구성하고, custom modal은 기존처럼 날짜 범위를 받는다.
   완료 조건(눈으로 확인): Finnhub/FMP/PTPR 관련 update 항목이 사라진다.
   사람 검증(비개발자): update 메뉴가 Investing category 중심으로 보인다.
   흔한 문제/주의: custom modal 재사용 시 어떤 category로 실행되는지 pending state를 별도로 유지해야 한다.
@@ -263,7 +263,7 @@
 ```text
 - Investing News Window 열기
 - category filter 변경 후 목록 재조회
-- Recent Stock Market / Recent Crypto / Custom All 실행
+- Recent Stock Market / Recent Crypto / Custom Stock Market / Custom Crypto 실행
 - 기사 row 클릭 후 full text modal 확인
 ```
 사용자 확인 필요: **예**
@@ -383,7 +383,7 @@ Track E — integration / docs
   - 후속 리팩터링에서 공용 hook 또는 shared view model로 정리할 수 있다.
 
 ### 결정 #3 — update 범위(상세)
-- 권장안: `Recent All`, `Recent Stock Market`, `Recent Crypto`, `Custom All`, `Custom Stock Market`, `Custom Crypto`
+- 권장안: `Recent Stock Market`, `Recent Crypto`, `Custom Stock Market`, `Custom Crypto`
 - 이유:
   - 사용자가 명시한 두 카테고리를 그대로 버튼 의미에 반영할 수 있다.
   - 단일 category만 재수집하고 싶을 때도 버튼 의미가 분명하다.
