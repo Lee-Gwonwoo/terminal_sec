@@ -276,6 +276,27 @@ export async function deleteFmpPressReleaseFallbackRows(): Promise<number> {
   return result.changes ?? 0;
 }
 
+/**
+ * Delete FMP stock_news body-fallback rows (no-scraper false "success") so they can be re-extracted
+ * with the new gate that properly marks them as unavailable.
+ */
+export async function deleteFmpStockNewsFallbackRows(): Promise<number> {
+  const result = await getDb().run(
+    `DELETE FROM news_fulltext
+     WHERE news_id IN (
+       SELECT nf.news_id
+       FROM news_fulltext nf
+       JOIN news_items ni ON ni.id = nf.news_id
+       WHERE ni.source_type = 'fmp_stock_news'
+         AND (
+           nf.extraction_note LIKE 'body-fallback (no-scraper:%'
+           OR nf.extraction_note LIKE 'body-fallback (accesswire-%'
+         )
+     )`,
+  );
+  return result.changes ?? 0;
+}
+
 export async function deleteCompanyNewsFulltextRows(): Promise<number> {
   const result = await getDb().run(
     `DELETE FROM news_fulltext

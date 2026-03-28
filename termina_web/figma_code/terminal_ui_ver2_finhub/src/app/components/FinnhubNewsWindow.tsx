@@ -1449,6 +1449,23 @@ export function FinnhubNewsWindow({
     await handleFulltextUpdate('fmp_press_release');
   };
 
+  const handleResetFmpStockFallbackAndRetry = async () => {
+    if (ftUpdating) return;
+    try {
+      const resetRes = await fetch(`${API_BASE}/api/news/fulltext/reset-fmp-stock-fallback`, { method: 'POST' });
+      const resetData = await resetRes.json();
+      if (!resetRes.ok) {
+        setError(resetData.error || `HTTP ${resetRes.status}`);
+        return;
+      }
+      console.log(`[fulltext] reset-fmp-stock-fallback: deleted ${resetData.deleted} rows`);
+    } catch (err: any) {
+      setError(err.message || 'Failed to reset stale FMP stock fulltext rows');
+      return;
+    }
+    await handleFulltextUpdate('fmp_stock_news');
+  };
+
   // ─── Main button label (reflects last used config) ───
   const mainBtnLabel = (() => {
     const m = lastUpdateConfig.mode;
@@ -2594,6 +2611,10 @@ export function FinnhubNewsWindow({
                       <button onClick={async () => { setShowFtMenu(false); await handleResetFmpPrFallbackAndRetry(); }} disabled={ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50 text-emerald-700 dark:text-emerald-300">
                         <RotateCw className="w-3.5 h-3.5 shrink-0" />
                         <div><div className="font-medium">Reset FMP PR Fallback</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">기존 잘못된 fallback full text 삭제 후 missing-only update 재실행</div></div>
+                      </button>
+                      <button onClick={async () => { setShowFtMenu(false); await handleResetFmpStockFallbackAndRetry(); }} disabled={ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50 text-cyan-700 dark:text-cyan-300">
+                        <RotateCw className="w-3.5 h-3.5 shrink-0" />
+                        <div><div className="font-medium">Reset FMP Stock Fallback</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">FMP stock news body-fallback(가짜 성공) 삭제 → PR wire만 재추출</div></div>
                       </button>
                       <button onClick={() => { setShowFtMenu(false); handleFulltextUpdate('fmp_sec_filing'); }} disabled={ftUpdating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <FileText className="w-3.5 h-3.5 shrink-0 text-violet-500" />

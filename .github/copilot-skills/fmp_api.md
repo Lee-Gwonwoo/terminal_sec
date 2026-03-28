@@ -19,13 +19,16 @@
   - `terminal/backend/src/services/fmpCompanyProfileProvider.ts`
   - `terminal/backend/src/services/fmpPressReleaseProvider.ts`
   - `terminal/backend/src/services/fmpSecFilingProvider.ts`
+  - `terminal/backend/src/services/fmpStockNewsProvider.ts`
 - backend route:
   - `POST /api/company-profiles/pull-fmp`
   - `POST /api/news/pull-fmp-press-release`
   - `POST /api/news/pull-fmp-sec-filing`
+  - `POST /api/news/fulltext/reset-fmp-stock-fallback` (FMP stock news body-fallback 정리)
 - 현재 레포에서 실제 구현된 FMP 저장 대상:
   - 회사 description/profile 계열 (`company_profiles`의 `source='fmp'`)
   - FMP press release (`news_items`의 `source='FMP' AND source_type='fmp_press_release'`)
+  - FMP stock news (`news_items`의 `source='FMP' AND source_type='fmp_stock_news'`)
   - FMP SEC filing (`news_items`의 `source='FMP' AND source_type='fmp_sec_filing'` + `sec_filings` companion)
 - 현재 대화 기준 live probe로 접근 확인된 주요 뉴스/규제 계열:
   - `stable/news/general-latest`
@@ -81,6 +84,7 @@
   - 응답에 `[][][]text[][][]` 필드가 있지만, 이 값은 일반적으로 전체 원문 full text가 아니라 요약/발췌에 가깝다.
   - UI에서 종목 뉴스 섹션을 구성할 때 붙이기 쉽다.
   - 같은 symbol이라도 press release만이 아니라 기사/리포트/콜 transcript 링크 등 다양한 기사 성격이 섞일 수 있다.
+  - **fulltext 추출**: publisher 61개 중 전용 scraper가 있는 ~11개만 진짜 원문 추출 가능. 나머지는 gate에서 `unavailable` 처리. 상세: 아래 "2-1" 섹션.
 - 실제 확인된 대표 필드:
   - `[][][]symbol[][][]`
   - `[][][]title[][][]`
@@ -90,6 +94,74 @@
   - `[][][]publisher[][][]`
   - `[][][]site[][][]`
   - `[][][]image[][][]`
+
+#### 2-1. FMP Stock News — Fulltext 추출 현황 및 구현 (2026-03-27 검증)
+
+##### 문제 배경
+- FMP stock news는 61개 publisher에서 63,241건의 뉴스를 수집한다.
+- FMP API `[][][]text[][][]` 필드는 1~3문장 짧은 요약(20~60 단어)이지 원문 full text가 아니다.
+- 기존 `extractByDomain()`의 `default` 분기가 이 짧은 요약을 `bodyFallback()`으로 `status=success`로 저장해서, DB의 ~83%가 "가짜 성공"(false-success)이었다.
+
+##### Publisher별 원문 추출 가능 여부
+
+| 구분 | Publisher (대표) | 평균 word count | 추출 방식 | 비고 |
+|------|-----------------|----------------|-----------|------|
+| **진짜 fulltext** | GlobeNewsWire | ~910 | `globenewswire-scrape` | 전용 scraper |
+| | Business Wire | ~1,222 | `businesswire-browser` | Playwright |
+| | PRNewsWire | ~947 | `prnewswire-scrape` | 전용 scraper |
+| | Newsfile Corp | ~1,016 | `newsfile-scrape` | 전용 scraper |
+| | Accesswire | 가변 | `accesswire-scrape` | 부분 성공 |
+| | MCAP MediaWire | 가변 | 전용 scraper | |
+| | Nasdaq / TMX | 가변 | 전용 scraper | |
+| **body-fallback (가짜)** | Defense World | ~54 | ~~body-fallback~~ → `unavailable` | FMP 요약뿐 |
+| | Zacks | ~26 | ~~body-fallback~~ → `unavailable` | FMP 요약뿐 |
+| | Seeking Alpha | ~49 | ~~body-fallback~~ → `unavailable` | paywall |
+| | Motley Fool | ~30 | ~~body-fallback~~ → `unavailable` | FMP 요약뿐 |
+| | Benzinga | ~24 | ~~body-fallback~~ → `unavailable` | paywall |
+| | GuruFocus, Reuters, Forbes, Barrons, WSJ, CNBC, MarketBeat, 24/7 Wall Street 등 ~50개 | 20~60 | ~~body-fallback~~ → `unavailable` | scraper 없음 |
+
+##### 구현된 수정 사항 (파일별)
+
+**1. `fulltextExtractors.ts`**
+- `FMP_STOCK_NEWS_SCRAPE_PUBLISHERS` 상수 추가: 전용 scraper가 있는 publisher 화이트리스트
+  ```
+  GLOBENEWSWIRE, GLOBE NEWS WIRE, PRNEWSWIRE, BUSINESS WIRE,
+  NEWSFILE CORP, ACCESSWIRE, MCAP MEDIAWIRE, THENEWSWIRE,
+  NASDAQ, TMX, SEC/EDGAR
+  ```
+- `extractByDomain()` 진입부에 gate 로직 추가:
+  - `sourceType === "fmp_stock_news"` AND publisher가 화이트리스트에 없으면 → `unavailableResult("fmp-stock-no-scraper: {publisher}")` 반환
+  - 화이트리스트에 있는 publisher만 기존 switch/scraper 로직으로 진입
+
+**2. `fulltextRepository.ts`**
+- `deleteFmpStockNewsFallbackRows()` 함수 추가
+  - `news_fulltext`에서 `source_type='fmp_stock_news'` AND `extraction_note LIKE 'body-fallback (no-scraper:%'` 인 row 삭제
+  - 기존 false-success 정리용
+
+**3. `server.ts`**
+- `POST /api/news/fulltext/reset-fmp-stock-fallback` 엔드포인트 추가
+  - `deleteFmpStockNewsFallbackRows()` 호출 → `{ deleted: N }` 반환
+
+**4. `FinnhubNewsWindow.tsx`**
+- Fulltext 드롭다운 메뉴에 "Reset FMP Stock Fallback" 버튼 추가
+  - 기존 body-fallback false-success row 삭제 → FMP Stock Only fulltext update 재실행
+  - "Reset FMP PR Fallback" 버튼 바로 아래 배치
+
+##### 운영 절차
+1. **최초 1회 정리**: "Reset FMP Stock Fullback" 버튼 클릭 → 기존 ~41,000건 false-success row 삭제 후 scraper 있는 publisher만 재추출
+2. **이후 신규 수집**: "FMP Stock Only" fulltext update → gate 로직에 의해 scraper 없는 publisher는 자동으로 `unavailable`, scraper 있는 것만 추출 시도
+3. **결과 확인**: DB에서 `extraction_status` 분포 확인
+   - `success`: 진짜 원문 추출 성공 (PR wire 계열)
+   - `unavailable`: scraper 없는 publisher (정상 동작)
+   - `failed`: scraper 있지만 추출 실패 (네트워크/차단 등)
+
+##### 수량 추정 (변경 전 → 변경 후)
+| 상태 | 변경 전 | 변경 후 (예상) |
+|------|---------|---------------|
+| success (진짜) | ~10,700 | ~10,700 |
+| success (가짜 body-fallback) | ~42,000 | 0 |
+| unavailable | ~2,000 | ~44,000 |
+| no_row (미추출) | ~8,400 | → unavailable 또는 success로 분류 |
 
 #### 3. General News
 - 대표 endpoint:
@@ -276,6 +348,7 @@
 - 운영적 의미:
   - FMP `text`는 UI preview/summary 용도로는 충분할 수 있다.
   - 하지만 본문 검색, fulltext backfill, 원문 추출 품질이 중요한 기능에서는 원문 URL을 다시 fetch하는 단계가 필요할 수 있다.
+  - **FMP stock news의 publisher별 fulltext 추출 가능 여부와 구현 상세는 위 "2-1. FMP Stock News — Fulltext 추출 현황 및 구현" 섹션 참조.**
 - 예외적으로 `stable/fmp-articles`의 `[][][]content[][][]`는 훨씬 길고 본문형에 가깝다.
 
 ### FMP press release vs RTPR 차이

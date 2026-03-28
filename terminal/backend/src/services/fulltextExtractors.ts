@@ -17,6 +17,23 @@ const MIN_SEC_FULLTEXT_LEN = 200;
 const BROWSER_TIMEOUT_MS = 15000;
 const COMPANY_NEWS_SCRAPE_PUBLISHERS = new Set(["YAHOO", "BENZINGA"]);
 
+/**
+ * FMP stock news: only these publishers have dedicated scrapers that produce real fulltext.
+ * All others fall through to body-fallback which only stores the FMP API summary snippet (not real articles).
+ */
+const FMP_STOCK_NEWS_SCRAPE_PUBLISHERS = new Set([
+  "GLOBENEWSWIRE", "GLOBE NEWS WIRE",
+  "PRNEWSWIRE",
+  "BUSINESS WIRE",
+  "NEWSFILE CORP",
+  "ACCESSWIRE",
+  "MCAP MEDIAWIRE",
+  "THENEWSWIRE",
+  "NASDAQ",
+  "TMX",
+  "SEC/EDGAR",
+]);
+
 // ─── Types ───
 
 export interface ExtractionResult {
@@ -797,6 +814,11 @@ export async function extractByDomain(
       resolvedUrl: resolvedUrl || undefined,
       resolvedPublisher: effectivePub && effectivePub !== pub ? effectivePub : undefined,
     };
+  }
+
+  // FMP stock news gate: only attempt extraction for publishers with real scrapers
+  if (options?.sourceType === "fmp_stock_news" && !FMP_STOCK_NEWS_SCRAPE_PUBLISHERS.has(effectivePub)) {
+    return unavailableResult(`fmp-stock-no-scraper: ${effectivePub || "(empty)"}`);
   }
 
   switch (effectivePub) {
