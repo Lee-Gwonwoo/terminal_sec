@@ -24,6 +24,7 @@
   - 즉, `meaningless_others`가 `185,223`건 줄었고, 사용자 대화에서 핵심으로 잡은 `v3 대비 371,983 -> 218,383` 기준으로도 대폭 감소가 확인되었다.
 - active classifier 파일은 `ai_research_tool/test_model2_company_news_analysis.py`이며, 현재 `CASE_META = 100`이 확인되었다.
 - UI description registry는 `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/model2CaseDescriptions.ts`가 담당한다.
+- Evidence Table window는 현재 `analysis / case / keyword / ticker / 날짜(from~to) / limit` 필터를 지원한다.
 - frontend production build는 2026-03-27 로컬 검증에서 성공했다.
 - backend `/api/model2/analyses` 응답은 2026-03-27 로컬 검증에서 정상 `200` 응답이 확인되었다.
 
@@ -181,6 +182,7 @@
 |-----------|------|------|------|------|
 | 4-1 | case description registry를 v4 key에 맞게 동기화 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/model2CaseDescriptions.ts` | registry compile 확인 | ⏳ |
 | 4-2 | Evidence Table / Case Description 창이 새 key를 읽도록 유지 | frontend code | build 확인 | ⏳ |
+| 4-3 | Evidence Table에 날짜 range filter 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/EvidenceTableWindow.tsx`, `terminal/backend/src/services/model2AnalysisRepository.ts` | build + filtered API 응답 확인 | ⏳ |
 
 - `4-1` 목적: classifier key와 UI key drift를 막기 위함.
   설명: UI description registry가 taxonomy v4 key를 읽도록 맞췄다.
@@ -192,11 +194,17 @@
   완료 조건(눈으로 확인): build가 통과한다.
   사람 검증(비개발자): 유형 메뉴에서 description을 눌렀을 때 설명이 열린다.
   흔한 문제/주의: custom context menu와 outside click 처리 충돌이 재발할 수 있다.
+- `4-3` 목적: Evidence Table에서 특정 뉴스 기간만 빠르게 좁혀서 검토하기 위함.
+  설명: 상단 필터 바에 `fromDate` / `toDate`를 추가하고, backend evidence query가 `published_at` 기준 날짜 범위를 직접 받도록 확장했다.
+  완료 조건(눈으로 확인): 날짜를 넣으면 행 수와 목록이 해당 기간으로 줄어든다.
+  사람 검증(비개발자): 예를 들어 `2026-03-20 ~ 2026-03-21`만 입력했을 때 해당 날짜 기사만 보여야 한다.
+  흔한 문제/주의: analysis 전체 기간보다 더 좁은 날짜를 넣으면 결과가 0건일 수 있고, `from > to` 입력은 브라우저 date input 제약에 의존한다.
 
 검증 훅:
 ```text
 - model2CaseDescriptions.ts가 frontend build를 통과하는지 확인
 - description registry가 현재 taxonomy v4와 mismatch 없는지 코드 리뷰 확인
+- /api/model2/analyses/:analysisId/evidence?fromDate=2026-03-20&toDate=2026-03-21&limit=5 응답의 total이 전체보다 작아지는지 확인
 ```
 사용자 확인 필요: **예**
 

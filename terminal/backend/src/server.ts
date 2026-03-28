@@ -41,7 +41,7 @@ import type { FinnhubMappedItem } from "./services/finnhubNewsProvider.js";
 import { mergeChangeForNewItems, bulkUpdateRecentChange, bulkUpdateCustomChange, type FmpFallbackOptions } from "./services/newsChangeMerger.js";
 import { createJob, getJob, getActiveJobs, updateProgress, appendLog, completeJob, failJob, cancelJob, isJobCancelled } from "./services/jobManager.js";
 import { getFmpSecFulltextBackfillRows, getFulltext, getUnextractedNewsIds, deleteFailedFulltextRows, deleteFmpPressReleaseFallbackRows, deleteFmpStockNewsFallbackRows, deleteCompanyNewsFulltextRows, getFulltextStats, upsertProvidedFulltext } from "./services/fulltextRepository.js";
-import { runFulltextUpdate, runFulltextUpdateForNewsIds, runFulltextPlainTextBackfill, runRtprBodyBackfill, runOriginUrlBackfill, extractAndPersistFulltext } from "./services/fulltextUpdateService.js";
+import { runFulltextUpdate, runFulltextUpdateForNewsIds, runFulltextPlainTextBackfill, runRtprBodyBackfill, runOriginUrlBackfill, runCompanyNewsOriginUrlBackfill, extractAndPersistFulltext } from "./services/fulltextUpdateService.js";
 import { extractOriginUrl } from "./services/rtprOriginUrlExtractor.js";
 import { htmlToPlainText } from "./services/fulltextExtractors.js";
 import { backfillPublisher } from "./services/finnhubNewsProvider.js";
@@ -2327,6 +2327,32 @@ app.post("/api/news/fulltext/backfill-origin-url", async (req, res, next) => {
   }
 });
 
+app.post("/api/news/fulltext/backfill-company-origin-url", async (req, res, next) => {
+  try {
+    const concurrency = Math.max(1, Math.min(Number(req.body?.concurrency) || 20, 100));
+    const batchSize = Math.max(concurrency, Math.min(Number(req.body?.batchSize) || 500, 5000));
+    const totalRow = await getDb().get<{ count: number }>(
+      `SELECT COUNT(*) AS count
+       FROM news_items
+       WHERE source = 'FINNHUB'
+         AND source_type = 'company_news'
+         AND (origin_url IS NULL OR TRIM(origin_url) = '')`,
+    );
+    const total = totalRow?.count ?? 0;
+
+    const jobId = createJob(total, {
+      category: "news-fulltext",
+      label: "Company News Origin URL Backfill",
+    });
+    runCompanyNewsOriginUrlBackfill(jobId, concurrency, batchSize).catch((err) => {
+      console.error("[backfill-company-origin-url] unhandled:", err);
+    });
+    res.json({ jobId, total, concurrency, batchSize });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // ── Full text: stats & reset failed ──
 // NOTE: these must be before :newsId to avoid Express treating "stats" as a param
 
@@ -4417,6 +4443,8 @@ app.get("/api/model2/analyses/:analysisId/evidence", async (req, res, next) => {
       caseType: typeof req.query.caseType === "string" ? req.query.caseType : undefined,
       keyword: typeof req.query.keyword === "string" ? req.query.keyword : undefined,
       ticker: typeof req.query.ticker === "string" ? req.query.ticker : undefined,
+      fromDate: typeof req.query.fromDate === "string" ? req.query.fromDate : undefined,
+      toDate: typeof req.query.toDate === "string" ? req.query.toDate : undefined,
       sortBy: typeof req.query.sortBy === "string" ? req.query.sortBy : undefined,
       sortDir: typeof req.query.sortDir === "string" ? req.query.sortDir : undefined,
       limit: typeof req.query.limit === "string" ? Number(req.query.limit) : undefined,

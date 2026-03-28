@@ -68,6 +68,8 @@ export interface ListModel2EvidenceOptions {
   caseType?: string;
   keyword?: string;
   ticker?: string;
+  fromDate?: string;
+  toDate?: string;
   sortBy?: string;
   sortDir?: string;
   limit?: number;
@@ -122,6 +124,14 @@ function normalizeSortBy(sortBy?: string): string {
 
 function normalizeSortDir(sortDir?: string): "ASC" | "DESC" {
   return sortDir?.toLowerCase() === "asc" ? "ASC" : "DESC";
+}
+
+function normalizeDateInput(value?: string): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : undefined;
 }
 
 export async function cleanupBlockedFinnhubCompanyNewsEvidence(): Promise<Model2BlockedEvidenceCleanupResult> {
@@ -280,6 +290,8 @@ export async function listModel2EvidenceRows(options: ListModel2EvidenceOptions)
   const normalizedCaseType = options.caseType && options.caseType !== "all" ? options.caseType : undefined;
   const normalizedTicker = options.ticker && options.ticker.trim() ? options.ticker.trim().toUpperCase() : undefined;
   const normalizedKeyword = options.keyword && options.keyword.trim() ? options.keyword.trim().toLowerCase() : undefined;
+  const normalizedFromDate = normalizeDateInput(options.fromDate);
+  const normalizedToDate = normalizeDateInput(options.toDate);
 
   if (normalizedCaseType) {
     where.push("er.case_type = ?");
@@ -294,6 +306,16 @@ export async function listModel2EvidenceRows(options: ListModel2EvidenceOptions)
   if (normalizedKeyword) {
     where.push("LOWER(COALESCE(er.title, '') || ' ' || COALESCE(er.summary, '') || ' ' || COALESCE(er.body_preview, '')) LIKE ?");
     values.push(`%${normalizedKeyword}%`);
+  }
+
+  if (normalizedFromDate) {
+    where.push("SUBSTR(er.published_at, 1, 10) >= ?");
+    values.push(normalizedFromDate);
+  }
+
+  if (normalizedToDate) {
+    where.push("SUBSTR(er.published_at, 1, 10) <= ?");
+    values.push(normalizedToDate);
   }
 
   const whereSql = `WHERE ${where.join(" AND ")}`;

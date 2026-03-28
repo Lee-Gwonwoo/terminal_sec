@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ExternalLink, RefreshCw, Search, TrendingUp } from 'lucide-react';
+import { CalendarRange, ChevronDown, ExternalLink, RefreshCw, Search, TrendingUp } from 'lucide-react';
 import { getModel2CaseDescription } from '../model2CaseDescriptions';
 import type { CaseDescriptionWindowData } from '../types';
 
@@ -97,8 +97,12 @@ export function EvidenceTableWindow() {
   const [selectedCaseType, setSelectedCaseType] = useState<string>('all');
   const [keyword, setKeyword] = useState('');
   const [ticker, setTicker] = useState('');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const [debouncedKeyword, setDebouncedKeyword] = useState('');
   const [debouncedTicker, setDebouncedTicker] = useState('');
+  const [debouncedFromDate, setDebouncedFromDate] = useState('');
+  const [debouncedToDate, setDebouncedToDate] = useState('');
   const [rows, setRows] = useState<EvidenceRow[]>([]);
   const [total, setTotal] = useState(0);
   const [limit, setLimit] = useState(100);
@@ -120,6 +124,12 @@ export function EvidenceTableWindow() {
     () => cases.find(item => item.caseType === selectedCaseType) ?? null,
     [cases, selectedCaseType],
   );
+  const activeDateRangeLabel = useMemo(() => {
+    if (!debouncedFromDate && !debouncedToDate) {
+      return null;
+    }
+    return `${debouncedFromDate || '...'} -> ${debouncedToDate || '...'}`;
+  }, [debouncedFromDate, debouncedToDate]);
 
   const fetchAnalyses = useCallback(async () => {
     const res = await fetch(`${API_BASE}/api/model2/analyses`);
@@ -143,11 +153,24 @@ export function EvidenceTableWindow() {
     setCases(data);
   }, []);
 
-  const fetchEvidence = useCallback(async (analysisId: string, currentCaseType: string, currentKeyword: string, currentTicker: string, currentSortBy: SortBy, currentSortDir: SortDir, currentLimit: number, signal?: AbortSignal) => {
+  const fetchEvidence = useCallback(async (
+    analysisId: string,
+    currentCaseType: string,
+    currentKeyword: string,
+    currentTicker: string,
+    currentFromDate: string,
+    currentToDate: string,
+    currentSortBy: SortBy,
+    currentSortDir: SortDir,
+    currentLimit: number,
+    signal?: AbortSignal,
+  ) => {
     const params = new URLSearchParams();
     if (currentCaseType && currentCaseType !== 'all') params.set('caseType', currentCaseType);
     if (currentKeyword.trim()) params.set('keyword', currentKeyword.trim());
     if (currentTicker.trim()) params.set('ticker', currentTicker.trim().toUpperCase());
+    if (currentFromDate) params.set('fromDate', currentFromDate);
+    if (currentToDate) params.set('toDate', currentToDate);
     params.set('sortBy', currentSortBy);
     params.set('sortDir', currentSortDir);
     params.set('limit', String(currentLimit));
@@ -187,9 +210,11 @@ export function EvidenceTableWindow() {
     const timeoutId = window.setTimeout(() => {
       setDebouncedKeyword(keyword);
       setDebouncedTicker(ticker);
+      setDebouncedFromDate(fromDate);
+      setDebouncedToDate(toDate);
     }, 250);
     return () => window.clearTimeout(timeoutId);
-  }, [keyword, ticker]);
+  }, [keyword, ticker, fromDate, toDate]);
 
   useEffect(() => {
     if (!effectiveAnalysisId) {
@@ -227,7 +252,7 @@ export function EvidenceTableWindow() {
     void (async () => {
       try {
         setLoading(true);
-        await fetchEvidence(effectiveAnalysisId, selectedCaseType, debouncedKeyword, debouncedTicker, sortBy, sortDir, limit, controller.signal);
+        await fetchEvidence(effectiveAnalysisId, selectedCaseType, debouncedKeyword, debouncedTicker, debouncedFromDate, debouncedToDate, sortBy, sortDir, limit, controller.signal);
       } catch (err) {
         if (controller.signal.aborted) {
           return;
@@ -240,7 +265,7 @@ export function EvidenceTableWindow() {
       }
     })();
     return () => controller.abort();
-  }, [effectiveAnalysisId, selectedCaseType, debouncedKeyword, debouncedTicker, sortBy, sortDir, limit, fetchEvidence]);
+  }, [effectiveAnalysisId, selectedCaseType, debouncedKeyword, debouncedTicker, debouncedFromDate, debouncedToDate, sortBy, sortDir, limit, fetchEvidence]);
 
   useEffect(() => {
     setSelectedCaseType('all');
@@ -283,7 +308,7 @@ export function EvidenceTableWindow() {
         await fetchAnalyses();
         await Promise.all([
           fetchCases(effectiveAnalysisId),
-          fetchEvidence(effectiveAnalysisId, selectedCaseType, debouncedKeyword, debouncedTicker, sortBy, sortDir, limit),
+          fetchEvidence(effectiveAnalysisId, selectedCaseType, debouncedKeyword, debouncedTicker, debouncedFromDate, debouncedToDate, sortBy, sortDir, limit),
         ]);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to refresh evidence data');
@@ -291,7 +316,7 @@ export function EvidenceTableWindow() {
         setLoading(false);
       }
     })();
-  }, [effectiveAnalysisId, selectedCaseType, debouncedKeyword, debouncedTicker, sortBy, sortDir, limit, fetchAnalyses, fetchCases, fetchEvidence]);
+  }, [effectiveAnalysisId, selectedCaseType, debouncedKeyword, debouncedTicker, debouncedFromDate, debouncedToDate, sortBy, sortDir, limit, fetchAnalyses, fetchCases, fetchEvidence]);
 
   const handleSort = (nextSortBy: SortBy) => {
     if (sortBy === nextSortBy) {
@@ -320,7 +345,7 @@ export function EvidenceTableWindow() {
   return (
     <div className="flex h-full min-h-0 flex-col bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       <div className="border-b border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-800 dark:bg-slate-900">
-        <div className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(220px,1.2fr)_minmax(200px,1fr)_minmax(200px,1fr)_minmax(160px,0.8fr)_auto_auto]">
+        <div className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(220px,1.2fr)_minmax(220px,1.1fr)_minmax(200px,1fr)_minmax(140px,0.8fr)_minmax(170px,0.9fr)_minmax(170px,0.9fr)_minmax(120px,0.7fr)_auto]">
           <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900">
             <ChevronDown size={12} className="text-slate-400" />
             <select value={selectedAnalysisId} onChange={e => setSelectedAnalysisId(e.target.value)} className="w-full bg-transparent outline-none">
@@ -388,6 +413,32 @@ export function EvidenceTableWindow() {
             <input value={ticker} onChange={e => setTicker(e.target.value.toUpperCase())} placeholder="Ticker" className="w-full bg-transparent outline-none" />
           </label>
 
+          <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900">
+            <CalendarRange size={12} className="text-slate-400" />
+            <input
+              type="date"
+              value={fromDate}
+              max={toDate || undefined}
+              onChange={e => setFromDate(e.target.value)}
+              className="w-full bg-transparent outline-none"
+              aria-label="From date"
+              title="From date"
+            />
+          </label>
+
+          <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900">
+            <CalendarRange size={12} className="text-slate-400" />
+            <input
+              type="date"
+              value={toDate}
+              min={fromDate || undefined}
+              onChange={e => setToDate(e.target.value)}
+              className="w-full bg-transparent outline-none"
+              aria-label="To date"
+              title="To date"
+            />
+          </label>
+
           <label className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900">
             <select value={limit} onChange={e => setLimit(parseInt(e.target.value, 10))} className="w-full bg-transparent outline-none">
               <option value={100}>100 rows</option>
@@ -406,6 +457,7 @@ export function EvidenceTableWindow() {
         <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400">
           <span>{selectedAnalysis ? `${selectedAnalysis.since} → ${selectedAnalysis.until}` : 'No analysis selected'}</span>
           <span>{`Rows ${rows.length}/${total}`}</span>
+          {activeDateRangeLabel && <span>{`Date filter ${activeDateRangeLabel}`}</span>}
           {selectedAnalysis && <span>{`Analyzable ${selectedAnalysis.analyzable_rows.toLocaleString()} / Impacted ${selectedAnalysis.impacted_rows.toLocaleString()} / 잡것들 ${selectedAnalysis.meaningless_rows.toLocaleString()}`}</span>}
           <span>Case menu item 우클릭 후 description 버튼으로 분류 기준 설명 창을 열 수 있습니다.</span>
           {error && <span className="text-red-500">{error}</span>}

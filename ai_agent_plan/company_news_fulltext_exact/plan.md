@@ -1,5 +1,14 @@
 ## company_news exact fulltext 복구 / publisher 재감사 plan
 
+### PLAN CHANGE (2026-03-28 14:45 local)
+
+- 사용자 요청에 따라 범위를 샘플 검증에서 멈추지 않고, **기존 저장된 FINNHUB company_news 전체의 missing `origin_url` 복구 실행**까지 확장한다.
+- 구현 변경:
+  - `fulltextExtractors.ts`의 Finnhub redirect resolver를 재사용 가능하게 export
+  - `fulltextUpdateService.ts`에 company_news 전용 batch backfill 추가
+  - `server.ts`에 `/api/news/fulltext/backfill-company-origin-url` endpoint 추가
+- 실행 목표: `news_items.source='FINNHUB' AND source_type='company_news' AND origin_url IS NULL/empty` 전체를 대상으로 원문 URL backfill 수행
+
 ### 목표
 
 - FINNHUB `company_news`에서 지금 저장 중인 `summary` snippet이 아니라 **publisher 원문 기사 본문**만 `news_fulltext.full_text`에 저장되도록 경로를 다시 설계한다.
@@ -167,13 +176,13 @@ select extraction_status, count(*) from news_items ni left join news_fulltext nf
 
 사용자 확인 필요: **예**
 
-#### ⬜ Step 1 — origin_url 보존/복구 경로 정비
+#### ⏳ Step 1 — origin_url 보존/복구 경로 정비
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
 | 1-1 | insert 시점에 Finnhub redirect를 즉시 resolve해서 `origin_url` 저장하는 설계 확정 | `terminal/backend/src/services/finnhubNewsProvider.ts` | 새로 삽입된 company_news row의 `origin_url` 채워짐 확인 | ⬜ |
-| 1-2 | 기존 row용 origin_url backfill job 추가 | `terminal/backend/src/services/fulltextUpdateService.ts` 또는 신규 service | 샘플 100건에 대해 `origin_url` 채워진 수 확인 | ⬜ |
-| 1-3 | 재시도/실패 사유를 publisher 감사에 쓸 수 있게 로그 포맷 정리 | `terminal/backend/src/services/fulltextUpdateService.ts` | job log에 resolve 성공/실패 이유 표시 | ⬜ |
+| 1-2 | 기존 row용 origin_url backfill job 추가 | `terminal/backend/src/services/fulltextUpdateService.ts`, `terminal/backend/src/server.ts`, `terminal/backend/src/services/fulltextExtractors.ts` | 전용 endpoint 생성 + 전체 대상 job 시작 확인 | ⏳ |
+| 1-3 | 재시도/실패 사유를 publisher 감사에 쓸 수 있게 로그 포맷 정리 | `terminal/backend/src/services/fulltextUpdateService.ts` | job log에 resolve 성공/실패 이유 표시 | ⏳ |
 
 1-1 목적: 새 데이터부터는 원문 URL을 잃지 않게 만든다.
 설명: company_news를 insert할 때 redirect resolve를 미루면 대부분 row가 forever missing 상태로 남는다.
@@ -186,6 +195,11 @@ select extraction_status, count(*) from news_items ni left join news_fulltext nf
 완료 조건(눈으로 확인): 샘플 batch에서 `origin_url` 보유 수가 증가한다.
 사람 검증(비개발자): 감사 표에서 `origin_url_resolved_count`가 늘어난다.
 흔한 문제/주의: 사이트/redirect 변경으로 과거 링크 일부는 영구 실패할 수 있다.
+
+사전 작성됨(검증 필요):
+- `runCompanyNewsOriginUrlBackfill(jobId, concurrency, batchSize)` 구현 완료
+- `/api/news/fulltext/backfill-company-origin-url` endpoint 추가 완료
+- batch + worker pool로 전체 missing row를 순차 페이지네이션 처리하도록 설계
 
 1-3 목적: 나중에 publisher별 가능/불가를 정확히 설명할 근거를 남긴다.
 설명: 단순 실패가 아니라 401/403/video/paywall/no-body 등을 분리해야 한다.
@@ -290,19 +304,19 @@ npm.cmd run test
 
 사용자 확인 필요: **예**
 
-#### 🚫 Step 4 — 재처리/backfill 및 운영 검증
+#### ⏳ Step 4 — 재처리/backfill 및 운영 검증
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 4-1 | Step 1/3 결과로 샘플 backfill 실행 | `terminal/backend/src/services/fulltextUpdateService.ts` 또는 관련 route | 샘플 window success 증가 확인 | 🚫 |
+| 4-1 | Step 1/3 결과로 샘플 또는 전체 origin backfill 실행 | `terminal/backend/src/services/fulltextUpdateService.ts` 또는 관련 route | missing `origin_url` 감소 확인 | ⏳ |
 | 4-2 | publisher별 성공/실패 리포트 생성 | `ai_agent_plan/company_news_fulltext_exact/agent_log.md` | before/after 비교표 작성 | 🚫 |
 | 4-3 | live auto company_news fulltext 동작 확인 | backend API + runtime DB | 신규 row success/blocked 사유 확인 | 🚫 |
 
-4-1 목적: 과거 row에도 실제 개선 효과가 있는지 본다.
-설명: 전체가 아니라 작은 샘플부터 돌려 success/non-success 비율을 확인한다.
-완료 조건(눈으로 확인): 샘플 batch에서 success row가 증가한다.
-사람 검증(비개발자): 같은 publisher의 기사 몇 건을 열어 본문이 들어갔는지 본다.
-흔한 문제/주의: 대량 동시 실행 시 사이트 차단과 SQLite lock이 날 수 있다.
+4-1 목적: 과거 row에도 실제 origin 복구 효과가 있는지 본다.
+설명: 이번 변경에서는 사용자 요청에 따라 전체 missing `origin_url` 복구를 바로 실행한다. fulltext 재추출은 다음 단계다.
+완료 조건(눈으로 확인): missing `origin_url` count가 감소한다.
+사람 검증(비개발자): 예전 기사 하나를 열었을 때 `origin_url`이 `finnhub.io`가 아니라 원문 사이트 URL로 채워져 있다.
+흔한 문제/주의: 대량 동시 실행 시 SQLite lock, 네트워크 지연, 일부 redirect 만료가 날 수 있다.
 
 4-2 목적: publisher별로 무엇이 해결됐고 무엇이 아직 안 되는지 공식 결과를 남긴다.
 설명: 사용자가 나중에 바로 볼 수 있는 운영 리포트 형태로 남긴다.
@@ -348,8 +362,8 @@ try {
 - `⏳ 0-2` DB baseline 집계
 - `⏳ 0-3` plan/log 생성
 - `⬜ 1-1` insert 시 origin_url 저장
-- `⬜ 1-2` 기존 row origin backfill job
-- `⬜ 1-3` resolve/failure 로그 정비
+- `⏳ 1-2` 기존 row origin backfill job
+- `⏳ 1-3` resolve/failure 로그 정비
 
 트랙 B — publisher 감사 / extractor
 - `⬜ 2-1` 샘플링 규칙 정의
@@ -361,7 +375,7 @@ try {
 - `🚫 3-3` note 코드 표준화
 
 트랙 C — 재처리 / 운영 검증
-- `🚫 4-1` 샘플 backfill 실행
+- `⏳ 4-1` 전체 origin backfill 실행
 - `🚫 4-2` publisher별 before/after 리포트
 - `🚫 4-3` live auto fulltext 검증
 

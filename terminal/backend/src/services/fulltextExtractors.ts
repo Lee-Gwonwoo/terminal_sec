@@ -170,7 +170,7 @@ function fallbackOrUnavailable(body: string | null, note: string, fallbackBody: 
   return fallbackBody ? bodyFallback(body, note) : unavailableResult(note);
 }
 
-function isFinnhubNewsRedirectUrl(url: string): boolean {
+export function isFinnhubNewsRedirectUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
     return parsed.hostname.toLowerCase() === "finnhub.io"
@@ -181,7 +181,7 @@ function isFinnhubNewsRedirectUrl(url: string): boolean {
   }
 }
 
-async function resolveFinnhubNewsOriginUrl(url: string): Promise<string | null> {
+export async function resolveFinnhubNewsOriginUrl(url: string): Promise<string | null> {
   if (!isFinnhubNewsRedirectUrl(url)) {
     return null;
   }

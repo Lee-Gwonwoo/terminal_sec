@@ -6,12 +6,13 @@
  */
 
 import { getFmpSecFulltextBackfillRows, getRtprBodyBackfillRows, getUnextractedNewsIds, getUnextractedNewsRowsByIds, insertFulltext, upsertProvidedFulltext, type UnextractedNewsRow } from "./fulltextRepository.js";
-import { extractByDomain, htmlToPlainText } from "./fulltextExtractors.js";
+import { extractByDomain, htmlToPlainText, resolveFinnhubNewsOriginUrl } from "./fulltextExtractors.js";
 import { updateProgress, appendLog, completeJob, failJob, isJobCancelled } from "./jobManager.js";
 import { getDb } from "../db.js";
 import { fetchRtprArticlesByTicker } from "./ptprNewsProvider.js";
 import { extractOriginUrl } from "./rtprOriginUrlExtractor.js";
 import { buildSecFilingMetadataSummary, summarizeSecDocumentText } from "./secFilingSummary.js";
+import { derivePublisher } from "./finnhubNewsProvider.js";
 
 /** Default concurrency for full text extraction */
 const DEFAULT_CONCURRENCY = 200;
@@ -471,5 +472,115 @@ export async function runOriginUrlBackfill(jobId: string): Promise<void> {
     completeJob(jobId, { total, updated, skipped, noMatch });
   } catch (err: any) {
     failJob(jobId, err.message ?? "Unknown error in runOriginUrlBackfill");
+  }
+}
+
+export async function runCompanyNewsOriginUrlBackfill(
+  jobId: string,
+  concurrency: number = 20,
+  batchSize: number = 500,
+): Promise<void> {
+  const effectiveConcurrency = Math.max(1, Math.min(concurrency, 100));
+  const effectiveBatchSize = Math.max(effectiveConcurrency, Math.min(batchSize, 5_000));
+
+  try {
+    const db = getDb();
+    const countRow = await db.get<{ count: number }>(
+      `SELECT COUNT(*) AS count
+       FROM news_items
+       WHERE source = 'FINNHUB'
+         AND source_type = 'company_news'
+         AND (origin_url IS NULL OR TRIM(origin_url) = '')`,
+    );
+
+    const total = countRow?.count ?? 0;
+    appendLog(jobId, `company_news origin_url backfill: ${total} missing rows, concurrency=${effectiveConcurrency}, batchSize=${effectiveBatchSize}`);
+    updateProgress(jobId, 0, total);
+
+    if (total === 0) {
+      appendLog(jobId, "No FINNHUB company_news rows are missing origin_url — nothing to do");
+      completeJob(jobId, { processed: 0, updated: 0, unresolved: 0, failed: 0, sourceType: "company_news" });
+      return;
+    }
+
+    let processed = 0;
+    let updated = 0;
+    let unresolved = 0;
+    let failed = 0;
+    let lastRowId = 0;
+    let batchNumber = 0;
+
+    while (!isJobCancelled(jobId)) {
+      const rows = await db.all<{ sqlite_rowid: number; id: string; url: string; origin_url: string | null }[]>(
+        `SELECT rowid AS sqlite_rowid, id, url, origin_url
+         FROM news_items
+         WHERE source = 'FINNHUB'
+           AND source_type = 'company_news'
+           AND (origin_url IS NULL OR TRIM(origin_url) = '')
+           AND rowid > ?
+         ORDER BY rowid ASC
+         LIMIT ?`,
+        [lastRowId, effectiveBatchSize],
+      );
+
+      if (rows.length === 0) {
+        break;
+      }
+
+      batchNumber++;
+      lastRowId = rows[rows.length - 1].sqlite_rowid;
+      appendLog(jobId, `[batch ${batchNumber}] fetched ${rows.length} rows (rowid<=${lastRowId})`);
+
+      let cursor = 0;
+      async function worker(): Promise<void> {
+        while (cursor < rows.length) {
+          if (isJobCancelled(jobId)) return;
+          const index = cursor++;
+          if (index >= rows.length) return;
+
+          const row = rows[index];
+
+          try {
+            const originUrl = await resolveFinnhubNewsOriginUrl(row.url);
+            if (originUrl) {
+              await db.run(
+                `UPDATE news_items
+                 SET origin_url = ?,
+                     publisher = COALESCE(NULLIF(?, 'UNKNOWN'), publisher)
+                 WHERE id = ?`,
+                [originUrl, derivePublisher(originUrl), row.id],
+              );
+              updated++;
+            } else {
+              unresolved++;
+            }
+          } catch (error: any) {
+            failed++;
+            if (failed <= 20) {
+              appendLog(jobId, `⚠ company_news origin ${row.id}: ${error?.message ?? String(error)}`);
+            }
+          }
+
+          processed++;
+          updateProgress(jobId, processed, total);
+          if (processed % 100 === 0 || processed === total) {
+            appendLog(jobId, `[${processed}/${total}] updated=${updated} unresolved=${unresolved} failed=${failed}`);
+          }
+        }
+      }
+
+      const workerCount = Math.min(effectiveConcurrency, rows.length);
+      await Promise.all(Array.from({ length: workerCount }, () => worker()));
+    }
+
+    if (isJobCancelled(jobId)) {
+      appendLog(jobId, `🛑 Cancelled — processed=${processed}, updated=${updated}, unresolved=${unresolved}, failed=${failed}`);
+      return;
+    }
+
+    appendLog(jobId, `company_news origin_url backfill complete: processed=${processed}, updated=${updated}, unresolved=${unresolved}, failed=${failed}`);
+    completeJob(jobId, { processed, updated, unresolved, failed, sourceType: "company_news" });
+  } catch (err: any) {
+    failJob(jobId, err.message ?? "Unknown error in runCompanyNewsOriginUrlBackfill");
   }
 }

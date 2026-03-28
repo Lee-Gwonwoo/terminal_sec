@@ -258,6 +258,33 @@
 
 - 사용자 버그 리포트 반영:
   - evidence table 유형 메뉴에서 우클릭 후 `description` 클릭 시 설명 창이 안 열린다는 문제 확인
+
+## 2026-03-28
+**업데이트 시각:** 14:22 (local)
+
+- 사용자 추가 요구 반영:
+  - Evidence Table window에 날짜 필터를 추가해 특정 기간 기사만 볼 수 있게 해달라는 요청 반영
+- 구현 내용:
+  - `terminal/backend/src/services/model2AnalysisRepository.ts`
+    - `listModel2EvidenceRows()`에 `fromDate`, `toDate` 옵션 추가
+    - `published_at`의 날짜 부분(`YYYY-MM-DD`) 기준 range filter 적용
+    - 잘못된 형식은 무시하도록 날짜 입력 정규화 추가
+  - `terminal/backend/src/server.ts`
+    - `/api/model2/analyses/:analysisId/evidence`가 `fromDate`, `toDate` query string을 backend repository로 전달하도록 수정
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/EvidenceTableWindow.tsx`
+    - 상단 toolbar에 시작일/종료일 date input 추가
+    - 기존 keyword/ticker debounce 흐름에 날짜 필터도 포함
+    - 현재 적용된 날짜 필터를 summary line에 표시
+- 검증:
+  - backend `npm.cmd run build` 성공
+  - frontend `npm.cmd run build` 성공
+  - API 확인:
+    - 전체: `/api/model2/analyses/36a99839-1570-4b08-a364-121c453d1b98/evidence?limit=5` -> `total = 541970`
+    - 날짜 필터: `/api/model2/analyses/36a99839-1570-4b08-a364-121c453d1b98/evidence?limit=5&fromDate=2026-03-20&toDate=2026-03-21` -> `total = 1395`
+    - filtered row `publishedAt`가 실제로 `2026-03-21` 범위에 들어오는 것 확인
+- 상태:
+  - 날짜 필터 구현/빌드/API 검증 완료
+  - 사용자 확인 대기
   - 추가 요구: description 안에 어떤 키워드/신호를 기준으로 분류했는지도 보여주기
 - 원인 확인:
   - context menu가 dropdown 바깥의 fixed layer에 렌더링되는데, 외부 클릭 감지가 해당 메뉴 클릭까지 바깥 클릭으로 처리해서 `mousedown` 시점에 먼저 닫히고 있었음
