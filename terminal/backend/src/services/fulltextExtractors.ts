@@ -32,6 +32,15 @@ const FMP_STOCK_NEWS_SCRAPE_PUBLISHERS = new Set([
   "NASDAQ",
   "TMX",
   "SEC/EDGAR",
+  // --- scrapers added 2026-03-27 ---
+  "BENZINGA",
+  "CNBC",
+  "DEFENSE WORLD",
+  "24/7 WALL STREET", "247 WALLST",
+  "PROACTIVE INVESTORS", "PROACTIVE INVESTORS - FINANCE",
+  "PYMNTS",
+  "TECHCRUNCH",
+  "SCHAEFFERS RESEARCH",
 ]);
 
 // ─── Types ───
@@ -857,6 +866,148 @@ export async function extractByDomain(
 
     case "MCAP MEDIAWIRE":
       return extractMcapMediaWire(effectiveUrl, body ?? null);
+
+    case "BENZINGA":
+      return extractBenzinga(effectiveUrl, body ?? null);
+
+    case "CNBC":
+      return extractTextViaHttp(effectiveUrl, body ?? null, {
+        notePrefix: "cnbc",
+        selectors: [
+          ".ArticleBody-articleBody",
+          '[class*="articleBody"]',
+          "article",
+          "main",
+        ],
+        removeSelectors: [
+          "header", "footer", "nav", "aside",
+          '[class*="ad-"]', '[class*="Ad-"]', '[class*="newsletter"]',
+        ],
+        clipMarkers: ["Get In Touch", "WATCH:", "Don't miss these insights"],
+        fallbackBody: false,
+      });
+
+    case "DEFENSE WORLD":
+      return extractTextViaHttp(effectiveUrl, body ?? null, {
+        notePrefix: "defenseworld",
+        selectors: [
+          "article",
+          '[class*="entry"]',
+          "main",
+        ],
+        removeSelectors: [
+          "header", "footer", "nav", "aside", ".sidebar",
+          ".share-buttons", ".related-posts",
+        ],
+        clipMarkers: [
+          "Receive News & Ratings",
+          "Related News", "More Posts", "About Defense World",
+          "About the author",
+        ],
+        fallbackBody: false,
+      });
+
+    case "24/7 WALL STREET":
+    case "247 WALLST":
+      return extractTextViaHttp(effectiveUrl, body ?? null, {
+        notePrefix: "247wallst",
+        selectors: [
+          "article",
+          ".entry-content",
+          "main",
+        ],
+        removeSelectors: [
+          "header", "footer", "nav", "aside",
+          ".sidebar", ".share-buttons", ".related-posts",
+          '[class*="ad-"]', '[class*="newsletter"]',
+        ],
+        clipMarkers: [
+          "Sponsored:", "Take This Retirement Quiz",
+          "Get Ready To Retire", "The Average American",
+        ],
+        fallbackBody: false,
+      });
+
+    case "PROACTIVE INVESTORS":
+    case "PROACTIVE INVESTORS - FINANCE":
+      return extractTextViaHttp(effectiveUrl, body ?? null, {
+        notePrefix: "proactive",
+        selectors: [
+          '[itemprop="articleBody"]',
+          ".article-content",
+          "article",
+          "main",
+        ],
+        removeSelectors: [
+          "header", "footer", "nav", "aside",
+          ".share-buttons", ".related-articles",
+        ],
+        clipMarkers: ["Contact the author", "Proactive Investors"],
+        fallbackBody: false,
+      });
+
+    case "PYMNTS":
+      return extractTextViaHttp(effectiveUrl, body ?? null, {
+        notePrefix: "pymnts",
+        selectors: [
+          "article",
+          ".entry-content",
+          "main",
+        ],
+        removeSelectors: [
+          "header", "footer", "nav", "aside",
+          ".share-buttons", '[class*="newsletter"]',
+        ],
+        clipMarkers: ["See also:", "For all PYMNTS"],
+        fallbackBody: false,
+      });
+
+    case "TECHCRUNCH":
+      return extractTextViaHttp(effectiveUrl, body ?? null, {
+        notePrefix: "techcrunch",
+        selectors: [
+          ".entry-content",
+          "article",
+          "main",
+        ],
+        removeSelectors: [
+          "header", "footer", "nav", "aside",
+          '[class*="newsletter"]', '[class*="ad-"]',
+        ],
+        clipMarkers: ["Read more on TechCrunch"],
+        fallbackBody: false,
+      });
+
+    case "THENEWSWIRE":
+      return extractTextViaHttp(effectiveUrl, body ?? null, {
+        notePrefix: "thenewswire",
+        selectors: [
+          ".press-release",
+          '[class*="release"]',
+          "main",
+        ],
+        removeSelectors: [
+          "header", "footer", "nav",
+        ],
+        clipMarkers: ["About TheNewswire"],
+        fallbackBody: false,
+      });
+
+    case "SCHAEFFERS RESEARCH":
+      return extractTextViaHttp(effectiveUrl, body ?? null, {
+        notePrefix: "schaeffers",
+        selectors: [
+          '[class*="body"]',
+          "article",
+          "main",
+        ],
+        removeSelectors: [
+          "header", "footer", "nav", "aside",
+          ".sidebar", '[class*="ad"]',
+        ],
+        clipMarkers: ["More From Schaeffers"],
+        fallbackBody: false,
+      });
 
     case "FINNHUB":
       return bodyFallback(body ?? null, "finnhub-no-external-page");

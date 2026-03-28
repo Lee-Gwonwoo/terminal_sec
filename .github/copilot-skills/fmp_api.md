@@ -104,34 +104,51 @@
 
 ##### Publisher별 원문 추출 가능 여부
 
-| 구분 | Publisher (대표) | 평균 word count | 추출 방식 | 비고 |
+| 구분 | Publisher (대표) | 검증 word count | 추출 방식 | 비고 |
 |------|-----------------|----------------|-----------|------|
 | **진짜 fulltext** | GlobeNewsWire | ~910 | `globenewswire-scrape` | 전용 scraper |
 | | Business Wire | ~1,222 | `businesswire-browser` | Playwright |
 | | PRNewsWire | ~947 | `prnewswire-scrape` | 전용 scraper |
 | | Newsfile Corp | ~1,016 | `newsfile-scrape` | 전용 scraper |
-| | Accesswire | 가변 | `accesswire-scrape` | 부분 성공 |
-| | MCAP MediaWire | 가변 | 전용 scraper | |
+| | Accesswire | 가변 | `accesswire-scrape` | 403 빈발 |
+| | MCAP MediaWire | 가변 | `mcap-mediawire-scrape` | |
 | | Nasdaq / TMX | 가변 | 전용 scraper | |
-| **body-fallback (가짜)** | Defense World | ~54 | ~~body-fallback~~ → `unavailable` | FMP 요약뿐 |
-| | Zacks | ~26 | ~~body-fallback~~ → `unavailable` | FMP 요약뿐 |
-| | Seeking Alpha | ~49 | ~~body-fallback~~ → `unavailable` | paywall |
-| | Motley Fool | ~30 | ~~body-fallback~~ → `unavailable` | FMP 요약뿐 |
-| | Benzinga | ~24 | ~~body-fallback~~ → `unavailable` | paywall |
-| | GuruFocus, Reuters, Forbes, Barrons, WSJ, CNBC, MarketBeat, 24/7 Wall Street 등 ~50개 | 20~60 | ~~body-fallback~~ → `unavailable` | scraper 없음 |
+| | **Benzinga** | **502** | `benzinga-scrape` | **Fix-2: 화이트리스트 등록** |
+| | **TheNewswire** | **852** | `thenewswire-scrape` | **Fix-1: switch case 추가** |
+| | **CNBC** | **462** | `cnbc-scrape` | **신규 scraper** |
+| | **Defense World** | **1,255** | `defenseworld-scrape` | **신규** (일부 구 URL 404) |
+| | **24/7 Wall Street / 247 Wallst** | **808** | `247wallst-scrape` | **신규** |
+| | **Proactive Investors** (2 variant) | **703** | `proactive-scrape` | **신규** |
+| | **PYMNTS** | **535** | `pymnts-scrape` | **신규** |
+| | **TechCrunch** | **177** | `techcrunch-scrape` | **신규** |
+| | **Schaeffers Research** | **664** | `schaeffers-scrape` | **신규** |
+| **차단/페이월** | Seeking Alpha | — | `unavailable` | 페이월 강함 |
+| | Zacks | snippet뿐 | `unavailable` | 대부분 프리미엄 |
+| | WSJ / Barrons | — | `unavailable` | 구독 필수 |
+| | GuruFocus | — | `unavailable` | 403 차단 |
+| | MarketBeat | — | `unavailable` | 403 차단 |
+| | Reuters | — | `unavailable` | 401 인증 |
+| | Invezz / Investopedia | — | `unavailable` | 403/402 |
+| | Motley Fool / Forbes | — | `unavailable` | 소프트 페이월 |
+| **YouTube (텍스트 불가)** | CNBC Television, Bloomberg 등 | — | `unavailable` | 동영상 |
 
 ##### 구현된 수정 사항 (파일별)
 
 **1. `fulltextExtractors.ts`**
-- `FMP_STOCK_NEWS_SCRAPE_PUBLISHERS` 상수 추가: 전용 scraper가 있는 publisher 화이트리스트
+- `FMP_STOCK_NEWS_SCRAPE_PUBLISHERS` 상수: 전용 scraper가 있는 publisher 화이트리스트
   ```
   GLOBENEWSWIRE, GLOBE NEWS WIRE, PRNEWSWIRE, BUSINESS WIRE,
   NEWSFILE CORP, ACCESSWIRE, MCAP MEDIAWIRE, THENEWSWIRE,
-  NASDAQ, TMX, SEC/EDGAR
+  NASDAQ, TMX, SEC/EDGAR,
+  BENZINGA, CNBC, DEFENSE WORLD,
+  24/7 WALL STREET, 247 WALLST,
+  PROACTIVE INVESTORS, PROACTIVE INVESTORS - FINANCE,
+  PYMNTS, TECHCRUNCH, SCHAEFFERS RESEARCH
   ```
-- `extractByDomain()` 진입부에 gate 로직 추가:
+- `extractByDomain()` 진입부에 gate 로직:
   - `sourceType === "fmp_stock_news"` AND publisher가 화이트리스트에 없으면 → `unavailableResult("fmp-stock-no-scraper: {publisher}")` 반환
-  - 화이트리스트에 있는 publisher만 기존 switch/scraper 로직으로 진입
+  - 화이트리스트에 있는 publisher만 switch/scraper 로직으로 진입
+- switch문에 신규 case 9개 추가 (BENZINGA, CNBC, DEFENSE WORLD, 24/7 WALL STREET, 247 WALLST, PROACTIVE INVESTORS, PYMNTS, TECHCRUNCH, THENEWSWIRE, SCHAEFFERS RESEARCH)
 
 **2. `fulltextRepository.ts`**
 - `deleteFmpStockNewsFallbackRows()` 함수 추가
