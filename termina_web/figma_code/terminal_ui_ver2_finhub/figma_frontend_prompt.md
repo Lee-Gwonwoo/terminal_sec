@@ -7,17 +7,18 @@
 
 - 앱은 React + TypeScript + Vite 기반이다.
 - 창(window) 기반 데스크톱 스타일 UI이며, 각 창은 드래그/리사이즈/최대화/닫기를 지원한다.
-- 실제 API 연동이 살아 있는 주요 창은 `Finnhub News`, `Default Ticker`, `Data Control`, `AI Research Window` 이다.
+- 실제 API 연동이 살아 있는 주요 창은 `Finnhub News`, `Default Ticker`, `Data Control`, `AI Research Window`, `Evidence Table` 이다.
 - `News` 창도 `GET /api/news`, `POST /api/news/pull-eodhd`를 실제로 호출하지만, 현재 운영 기준의 주력 뉴스 창은 아니다.
 - `Watchlist`, `Calendar` 창은 현재 mock data 기반이다.
 - `BraveNewsWindow.tsx` 파일은 남아 있지만 현재 `WindowType`에 연결되어 있지 않아 UI에서 열 수 없다.
 - 탭/창 레이아웃, 다크 모드, 전역 글자 크기, 뉴스 제목/요약 글자 크기, linked ticker는 `terminal-workspace-v1`로 localStorage에 저장된다.
-- 추가 UI 상태로 `finhub-news-ui-state`, `finnhub-last-update-config`, `data-control-active-tab`, `ft-concurrency`, `fmp-pr-fulltext-concurrency`, `ibkr-concurrency`, `finnhub-ticker-concurrency`, `finnhub-request-interval-sec`, `finnhub-company-news-ticker-concurrency`, `finnhub-company-news-request-interval-sec`, `rtpr-ticker-concurrency`, `fmp-concurrency`, `fmp-request-interval-ms`, `fmp-skip-existing`, `peers-skip-existing`, `ipo-skip-existing`, `yahoo-concurrency`, `yahoo-request-interval-ms`, `yahoo-skip-existing`를 사용한다.
+- 추가 UI 상태로 `finhub-news-ui-state`, `finnhub-last-update-config`, `data-control-active-tab`, `ft-concurrency`, `fmp-pr-fulltext-concurrency`, `change-fmp-concurrency`, `finnhub-ticker-concurrency`, `finnhub-request-interval-sec`, `finnhub-company-news-ticker-concurrency`, `finnhub-company-news-request-interval-sec`, `rtpr-ticker-concurrency`, `fmp-concurrency`, `fmp-request-interval-ms`, `fmp-pr-page-limit`, `fmp-pr-max-pages`, `fmp-sec-max-pages`, `fmp-skip-existing`, `peers-skip-existing`, `ipo-skip-existing`, `yahoo-concurrency`, `yahoo-request-interval-ms`, `yahoo-skip-existing`를 사용한다.
 - `FinnhubNewsWindow`의 `Control` modal과 `DataControlWindow` Settings 탭은 `fmp-concurrency`, `fmp-request-interval-ms`를 공유한다. 즉 FMP press release / FMP stock news / FMP SEC filing pull 속도 설정은 두 화면에서 같은 값을 편집한다.
+- 같은 두 화면은 `fmp-pr-page-limit`, `fmp-pr-max-pages`, `fmp-sec-max-pages`도 공유한다. 즉 FMP press release / FMP stock news / FMP SEC filing의 페이지 단위 수집 제한도 같은 저장 키를 본다.
 - `FinnhubNewsWindow`의 `Control` modal과 `DataControlWindow` Settings 탭은 `finnhub-company-news-ticker-concurrency`, `finnhub-company-news-request-interval-sec`도 공유한다. 즉 `Company News` pull 전용 속도 설정은 두 화면에서 같은 값을 편집한다.
-- 일반 full text 추출은 `ft-concurrency`를 사용한다.
 - 일반 full text 추출은 `ft-concurrency`를 사용하고, 현재 기본값은 `200`이다.
 - `FMP PR Only`와 `Reset FMP PR Fallback` 뒤 재실행은 전용 키 `fmp-pr-fulltext-concurrency`를 우선 사용하고, 값이 없으면 `ft-concurrency`를 fallback으로 사용한다.
+- manual `FMP Stock Only` fulltext는 일반 `ft-concurrency`를 사용하지만, `Recent/Custom FMP Stock` pull 안에서 새 row에 대해 자동으로 도는 fulltext는 pull payload의 `tickerConcurrency`를 그대로 사용한다.
 - `FinnhubNewsWindow`는 pull/update 계열 job과 fulltext 계열 job을 서로 다른 state/job id로 추적한다. 즉 `Update`는 `updating`만, `Full Text`는 `ftUpdating`만 차단한다.
 - API 호출 base는 빈 문자열 `""` 이고, dev 환경에서는 Vite proxy가 `/api`, `/healthz`를 `http://localhost:8080`으로 보낸다.
 
@@ -89,8 +90,14 @@ Vite dev proxy:
 - `default-ticker`
 - `data-control`
 - `case-research`
+- `evidence-table`
+- `case-description`
 
-`brave-news`는 타입 정의에 없다. 즉 파일은 있지만 앱에서 선택/렌더링되지 않는다.
+주의:
+
+- `evidence-table`은 실제 렌더링되는 정식 창 타입이며 backend `model2` API를 사용한다.
+- `case-description`은 Add Tab Modal에서 직접 고르는 타입이 아니라, `EvidenceTableWindow`가 `open-case-description` 이벤트를 보낼 때 같은 탭 안에 동적으로 열리는 보조 설명 창이다.
+- `brave-news`는 타입 정의에 없다. 즉 파일은 있지만 앱에서 선택/렌더링되지 않는다.
 
 ## Add Tab Modal
 
@@ -103,6 +110,7 @@ Vite dev proxy:
 - Default Ticker
 - Data Control
 - AI Research Window
+- Evidence Table
 
 초기 창 배치 규칙:
 
@@ -116,6 +124,8 @@ Vite dev proxy:
 - `default-ticker` → `Default Ticker`
 - `data-control` → `Data Control`
 - `case-research` → `AI Research Window`
+- `evidence-table` → `Evidence Table`
+- `case-description` → `Case Description`
 - 나머지 → `<Type> Window`
 
 ## 창 연결(linked ticker)
@@ -270,6 +280,9 @@ score/scoreEvidence/sentiment 컬럼 규칙:
 - `all`
 - `company_news`
 - `press_release`
+- `fmp_press_release`
+- `fmp_stock_news`
+- `fmp_sec_filing`
 - `market_news`
 
 ### Market Cap 필터
@@ -295,12 +308,21 @@ Finnhub 뉴스 적재는 직접 API response를 표에 그리지 않고, backend
   - All
   - Company News
   - Press Release
+  - FMP PR
+  - FMP Stock
+  - FMP SEC Filing
   - Market News
 - Custom Update
   - All
   - Company News
   - Press Release
+  - FMP PR
+  - FMP Stock
+  - FMP SEC Filing
   - Market News
+- PTPR Press Release
+  - Recent PTPR Press Release
+  - Custom PTPR Press Release
 
 관련 API:
 
@@ -340,6 +362,7 @@ custom update는 별도 날짜 선택 modal에서 `from/to`를 입력한 뒤 시
 - 따라서 실제 UI 기준으로는 한 update가 running이면 다른 종류의 update 버튼도 대부분 같이 잠긴다.
 - 즉 "서로 다른 플랫폼/종류 update를 동시에 시작"하는 UX는 현재 완전히 열려 있지 않다.
 - 예외적으로 backend에 이미 여러 running job이 있으면(다른 탭, 새로고침 복구, 직접 API 호출 등) `View Log`에서 이들 중 하나를 선택해 볼 수 있다.
+- `PTPR Press Release`는 update dropdown 내부의 별도 그룹으로 노출되며, 최근/커스텀 두 모드 모두 `POST /api/news/pull-rtpr`를 호출한다.
 
 중복 실행 현재 상태:
 
@@ -381,30 +404,46 @@ Change update 후 News Feed가 다시 `GET /api/news`를 읽으면, 날짜 관�
 - Company News
 - Press Release
 - FMP PR Only
+- FMP Stock Only
 - Reset FMP PR Fallback
+- Reset FMP Stock Fallback
 - FMP SEC Filing Only
 - Market News
+- RTPR Body Backfill
+- Reset Failed & Retry
 
 API:
 
 - `POST /api/news/fulltext/update`
+- `POST /api/news/fulltext/backfill-rtpr`
+- `POST /api/news/fulltext/reset-failed`
+- `POST /api/news/fulltext/reset-fmp-pr-fallback`
+- `POST /api/news/fulltext/reset-fmp-stock-fallback`
 
 현재 코드 상태:
 
 - 일반 Update 메뉴(Finnhub/FMP/FMP SEC/Market/Calendar/PTPR/Change)는 현재 `disabled={updating}`만 사용한다.
 - 즉 `updating=true`인 일반 update 계열 job이 running이면 같은 메뉴의 다른 update 버튼들이 잠긴다.
-- Full Text 메뉴 버튼은 `disabled={updating || ftUpdating}` 조건으로 비활성화된다.
-- 따라서 일반 update가 running이면 Full Text Update도 잠기지만, 반대로 Full Text job만 running인 상태가 일반 Update 버튼을 직접 비활성화하지는 않는다.
-- `handleFulltextUpdate()`와 reset 계열 fulltext action은 내부에서도 `if (updating || ftUpdating) return;` 가드가 있다.
+- Full Text 메뉴 버튼은 현재 `disabled={ftUpdating}` 조건만 사용한다.
+- `handleFulltextUpdate()`와 reset 계열 fulltext action도 내부에서 `ftUpdating`만 가드한다.
 - 반면 `handleUpdate()` 자체에는 `ftUpdating` 가드가 없다. 현재 코드만 보면 fulltext job running 중에도 일반 update 시작 시도는 가능하다.
 - backend 자체는 fulltext endpoint에 Finnhub/RTPR pull과 같은 `409 + existingJobId` duplicate guard가 없다.
-- 즉 현재 UX는 "모든 작업 전역 단일 lock"이 아니라, `updating` 상태를 공유하는 일반 update 묶음 + `updating || ftUpdating`를 보는 fulltext 묶음으로 나뉘어 있다.
+- 즉 현재 UX는 "모든 작업 전역 단일 lock"이 아니라, `updating` 상태를 공유하는 일반 update 묶음 + `ftUpdating`만 보는 fulltext 묶음으로 나뉘어 있다.
 - `View Log`는 backend의 여러 running job을 동시에 보여줄 수 있으므로, 다른 경로(다른 탭/직접 API 호출)에서 병렬 job이 있으면 UI에서 함께 관찰할 수 있다.
 - `Recent Update (Company News)` 또는 `Custom Update (Company News)` 직후에는 backend가 자동으로 후속 `news-fulltext` job을 생성할 수 있으므로, 로그 패널 dropdown에서 `news-update`와 `news-fulltext` 두 job이 연속으로 보일 수 있다.
 - `FMP PR Only`는 missing-only 동작이다. 이미 `news_fulltext` row가 있는 FMP PR id는 건드리지 않는다.
+- `FMP Stock Only`도 missing-only 동작이다. 잘못 저장된 fallback success row를 다시 처리하려면 `Reset FMP Stock Fallback`을 먼저 실행해야 한다.
 - 기존에 잘못 저장된 FMP PR fallback success row를 다시 처리하려면 `Reset FMP PR Fallback`을 먼저 실행해 해당 row를 삭제한 뒤, 이어서 `FMP PR Only`를 실행한다.
 - FMP PR fulltext는 `RTPR` 같은 다른 source body를 재사용하지 않고, FMP로 새로 적재된 기사 URL에서 직접 원문 추출한다.
+- `Reset FMP Stock Fallback`은 모든 stock row를 지우는 것이 아니라, `body-fallback (no-scraper:...)`, `body-fallback (accesswire-...)`, `fmp-stock-no-scraper:...` note를 가진 old false-success / blocked row만 지운다.
+- 현재 `fmp_stock_news` extractor는 allowlist publisher만 실제 scraper를 시도하고, allowlist 밖 publisher는 `unavailable (fmp-stock-no-scraper: PUBLISHER)`로 남는다.
+- `RTPR Body Backfill`은 `POST /api/news/fulltext/backfill-rtpr`를 호출하며, 저장돼 있는 RTPR body를 이용해 누락된 full text를 채운다.
+- `Reset Failed & Retry`는 `POST /api/news/fulltext/reset-failed` 뒤 `Full Text (All)`을 연쇄 호출한다.
 - 현재 extractor는 `GlobeNewswire`, `PRNewswire`, `Newsfile Corp`, `Accesswire`, `MCAP MediaWire` 기사 페이지 본문 scrape를 시도하고, `Business Wire`는 브라우저 fallback으로 직접 추출한다.
+- manual fulltext와 pull 중 auto fulltext의 concurrency source는 다르다.
+  - manual `FMP PR Only` = `fmp-pr-fulltext-concurrency`
+  - manual `FMP Stock Only` = `ft-concurrency`
+  - pull 중 auto fulltext = 해당 pull payload의 `tickerConcurrency`
 
 ### Log 패널
 
@@ -496,13 +535,17 @@ localStorage 사용:
 - `terminal-workspace-v1`: 탭 순서, 탭/창 레이아웃, `isDarkMode`, `fontScale`, `newsTitleFontSize`, `newsSummaryFontSize`, `linkedTicker`
 - `data-control-active-tab`: DataControl의 현재 탭(`updates | settings | appdb`)
 - `ft-concurrency`: Full Text Update 동시성 설정
-- `ibkr-concurrency`: Change Update용 IBKR 동시성 설정
+- `fmp-pr-fulltext-concurrency`: FMP PR manual fulltext 전용 동시성 설정
+- `change-fmp-concurrency`: Change Update용 FMP fallback 동시성 설정
+- `ibkr-concurrency`: 과거 키. 현재는 `change-fmp-concurrency`로 migration fallback만 남아 있고 저장 시 제거된다.
 - `finnhub-ticker-concurrency`: Finnhub pull 대상 ticker 동시성 설정
 - `finnhub-request-interval-sec`: Finnhub pull 요청 간격(초)
 - `finnhub-company-news-ticker-concurrency`: Finnhub `Company News` pull 전용 ticker 동시성 설정. 값이 없으면 공용 Finnhub 동시성을 fallback으로 사용
 - `finnhub-company-news-request-interval-sec`: Finnhub `Company News` pull 전용 요청 간격(초). 값이 없으면 공용 Finnhub 간격을 fallback으로 사용
 - `rtpr-ticker-concurrency`: RTPR press release pull ticker 동시성 설정
-- `fmp-concurrency`, `fmp-request-interval-ms`, `fmp-skip-existing`: FMP description pull 설정
+- `fmp-concurrency`, `fmp-request-interval-ms`: FMP press release / stock news / SEC filing pull 설정
+- `fmp-pr-page-limit`, `fmp-pr-max-pages`, `fmp-sec-max-pages`: FMP PR / Stock / SEC page 관련 설정
+- `fmp-skip-existing`: FMP company description pull 설정
 - `peers-skip-existing`, `ipo-skip-existing`: Finnhub peers / IPO date pull의 skip-existing 설정
 - `yahoo-concurrency`, `yahoo-request-interval-ms`, `yahoo-skip-existing`: Yahoo description pull 설정
 
@@ -844,6 +887,96 @@ API:
 - 24시간이 지난 soft delete row는 다음 `research` API 접근 시 backend가 정리한다. 별도 polling timer는 사용하지 않는다.
 - Restore 패널은 deleted section/page를 분리해서 보여 주고, page의 부모 section도 deleted 상태면 먼저 section을 복구해야 한다.
 
+## Evidence Table Window
+
+파일: `src/app/components/EvidenceTableWindow.tsx`
+
+이 창은 Model_2 분석 결과를 읽는 전용 evidence browser다. source of truth는 backend의 `model2_analysis_runs`, `model2_case_summaries`, `model2_evidence_rows`이며, localStorage를 사용하지 않는다.
+
+### 초기 로드 구조
+
+1. `GET /api/model2/analyses`
+2. 선택된 `analysisId` 기준으로 `GET /api/model2/analyses/:analysisId/cases`
+3. 같은 `analysisId` 기준으로 `GET /api/model2/analyses/:analysisId/evidence?...`
+
+초기 동작 규칙:
+
+- analyses 목록이 비어 있지 않으면 첫 번째 run을 자동 선택한다.
+- analysis가 바뀌면 `selectedCaseType`은 자동으로 `all`로 리셋된다.
+- analyses 로드 실패 시 3초 뒤 재시도 effect가 한 번 더 돈다.
+
+### 툴바 구성
+
+- Analysis dropdown: 저장된 analysis run 선택
+- Case dropdown: case summary 목록 선택
+- Keyword search: 250ms debounce
+- Ticker search: 250ms debounce, 입력 즉시 대문자화
+- Row limit: `100 | 300 | 500 | 1000`
+- Refresh: analyses + cases + evidence를 다시 fetch
+
+### Evidence API query 구조
+
+`GET /api/model2/analyses/:analysisId/evidence` 호출 시 현재 프론트가 보내는 query는 아래와 같다.
+
+- `caseType`: `all`이 아닐 때만 전송
+- `keyword`: 공백 제거 후 값이 있을 때만 전송
+- `ticker`: 공백 제거 후 대문자로 만들어 전송
+- `sortBy`: `published_at | ticker | title | publisher | case_type | reaction_tag | impact_score`
+- `sortDir`: `asc | desc`
+- `limit`: `100 | 300 | 500 | 1000`
+
+정렬 규칙:
+
+- 첫 기본값은 `sortBy='published_at'`, `sortDir='desc'`
+- 같은 헤더를 다시 누르면 `desc ↔ asc` 토글
+- 다른 헤더를 누르면 그 컬럼 기준 `desc`로 다시 시작
+
+### Case 설명 창 열기 구조
+
+- case dropdown의 각 항목은 우클릭 컨텍스트 메뉴를 지원한다.
+- 우클릭 후 설명 열기 동작을 선택하면 `openDescriptionWindow()`가 호출된다.
+- 이 함수는 backend를 다시 호출하지 않고, `getModel2CaseDescription(caseType)`로 로컬 taxonomy 정의를 읽는다.
+- 그 결과를 `window.dispatchEvent(new CustomEvent('open-case-description', { detail: payload }))`로 App에 전달한다.
+
+### 화면 하단 상태 줄
+
+- 선택된 analysis의 `since → until`
+- 현재 row 표시 수 `rows.length / total`
+- `Analyzable / Impacted / 잡것들` aggregate 수치
+- description 창을 여는 방법 안내 문구
+- 현재 에러 또는 empty 상태
+
+## Case Description Window
+
+파일: `src/app/components/CaseDescriptionWindow.tsx`
+
+이 창은 Add Tab Modal에서 직접 생성하는 창이 아니라, Evidence Table에서 case 설명을 열 때만 programmatic하게 추가되는 보조 창이다.
+
+생성 구조:
+
+- `App.tsx`가 전역 `open-case-description` 이벤트를 listen 한다.
+- 이벤트 payload는 `CaseDescriptionWindowData` 타입이다.
+- 현재 active tab 안에서 같은 `caseType`의 `case-description` 창이 이미 있으면 새 창을 만들지 않고 기존 창의 title/data만 갱신한다.
+- 없으면 `id = ${Date.now()}-case-description-${caseType}` 형식의 새 창을 추가한다.
+
+데이터 구조:
+
+- backend API를 호출하지 않는다.
+- `model2CaseDescriptions.ts`의 taxonomy seed와 Evidence Table이 전달한 `caseType`, `caseLabelKo`, `topLevel`를 합쳐 렌더링한다.
+
+표시 섹션:
+
+- top-level badge + case label
+- `Description`
+- `분류 기준`
+- `분류 키워드`
+- `한 줄 정의`
+- `핵심 가치 경로`
+- `포함 신호`
+- `제외 신호`
+- `경계 사례`
+- `빠른 판별 질문`
+
 ## Brave News Window
 
 파일: `src/app/components/BraveNewsWindow.tsx`
@@ -868,6 +1001,10 @@ API:
 - `POST /api/news/change/update-custom`
 - `GET /api/news/fulltext/:newsId`
 - `POST /api/news/fulltext/update`
+- `POST /api/news/fulltext/backfill-rtpr`
+- `POST /api/news/fulltext/reset-failed`
+- `POST /api/news/fulltext/reset-fmp-pr-fallback`
+- `POST /api/news/fulltext/reset-fmp-stock-fallback`
 - `GET /api/updates/status`
 - `GET /api/ibkr/ohlc1d/status`
 - `POST /api/ibkr/ohlc1d/update`
@@ -894,6 +1031,9 @@ API:
 - `PATCH /api/research/pages/:id`
 - `DELETE /api/research/pages/:id`
 - `GET /api/research/search`
+- `GET /api/model2/analyses`
+- `GET /api/model2/analyses/:analysisId/cases`
+- `GET /api/model2/analyses/:analysisId/evidence`
 - `GET /api/bookmarks/folders`
 - `POST /api/bookmarks/folders`
 - `PUT /api/bookmarks/folders/:id`
@@ -935,7 +1075,7 @@ API:
 
 ## 현재 한계와 주의점
 
-- active window 중 backend와 완전히 맞물려 있는 것은 `Finnhub News`, `Default Ticker`, `Data Control`, `AI Research Window` 중심이다.
+- active window 중 backend와 완전히 맞물려 있는 것은 `Finnhub News`, `Default Ticker`, `Data Control`, `AI Research Window`, `Evidence Table` 중심이다.
 - `NewsWindow`는 일부 backend를 사용하지만 현재 운영 기준의 주력 뉴스 창은 아니다.
 - `CalendarWindow`와 `WatchlistWindow`는 UI만 있고 운영 데이터와 연결되어 있지 않다.
 - `keywords`는 backend 응답으로 내려오고 `DEFAULT_COLUMNS`에 포함되어 있으며 컬럼 매뉴에서 표시/숨김 가능하다. 단 기본 숨김 상태다.

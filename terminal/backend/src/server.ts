@@ -115,6 +115,7 @@ const DEMO_USER_ID = "11111111-1111-1111-1111-111111111111";
 const DEFAULT_FINNHUB_TICKER_CONCURRENCY = 5;
 const DEFAULT_FINNHUB_REQUEST_INTERVAL_MS = 1000;
 const DEFAULT_RTPR_TICKER_CONCURRENCY = 5;
+const DEFAULT_FMP_STOCK_FULLTEXT_CONCURRENCY = 25;
 const DEFAULT_FINNHUB_COMPANY_DATA = getFinnhubCompanyDataDefaults();
 
 function buildBatchLevels(requestedConcurrency: number): number[] {
@@ -650,6 +651,50 @@ async function persistRtprFulltext(newsId: string | null, bodyHtml: string | und
   }
 }
 
+async function runInlineFulltextExtraction(
+  jobId: string,
+  targets: Array<{ id: string; url: string; publisher: string | null; body: string | null; source_type: string }>,
+  concurrency: number,
+  label: string,
+): Promise<{ success: number; skipped: number; failed: number }> {
+  const fulltextResult = { success: 0, skipped: 0, failed: 0 };
+  if (targets.length === 0 || isJobCancelled(jobId)) {
+    return fulltextResult;
+  }
+
+  appendLog(jobId, `Extracting full text for ${targets.length} new ${label} items...`);
+  const workerCount = Math.max(1, Math.min(concurrency, targets.length));
+  let fulltextCursor = 0;
+  let lastFulltextLogAt = 0;
+
+  const processFulltextTarget = async (target: typeof targets[number]) => {
+    const result = await extractAndPersistFulltext(target);
+    if (result.extractionStatus === "success") fulltextResult.success++;
+    else if (result.extractionStatus === "skipped") fulltextResult.skipped++;
+    else fulltextResult.failed++;
+
+    const completed = fulltextResult.success + fulltextResult.skipped + fulltextResult.failed;
+    if (completed - lastFulltextLogAt >= 20 || completed === targets.length) {
+      lastFulltextLogAt = completed;
+      appendLog(jobId, `[fulltext ${completed}/${targets.length}] ${fulltextResult.success} ok, ${fulltextResult.skipped} skip, ${fulltextResult.failed} fail`);
+    }
+  };
+
+  const fulltextWorker = async () => {
+    while (!isJobCancelled(jobId)) {
+      const currentIndex = fulltextCursor;
+      fulltextCursor += 1;
+      if (currentIndex >= targets.length) return;
+      await processFulltextTarget(targets[currentIndex]);
+    }
+  };
+
+  appendLog(jobId, `[fulltext] concurrency=${workerCount}`);
+  await Promise.all(Array.from({ length: workerCount }, () => fulltextWorker()));
+  appendLog(jobId, `Full text during pull: ${fulltextResult.success} success, ${fulltextResult.skipped} skipped, ${fulltextResult.failed} failed`);
+  return fulltextResult;
+}
+
 // ── Preflight check for Recent Update ──
 app.get("/api/news/pull-finhub/preflight", async (req, res, next) => {
   try {
@@ -1056,6 +1101,7 @@ const pullFmpStockNewsSchema = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   tickerConcurrency: z.number().int().min(1).max(20).optional().default(10),
+  fulltextConcurrency: z.number().int().min(1).max(200).optional().default(DEFAULT_FMP_STOCK_FULLTEXT_CONCURRENCY),
   requestIntervalMs: z.number().int().min(0).max(5_000).optional().default(25),
   pageLimit: z.number().int().min(1).max(100).optional().default(100),
   maxPages: z.number().int().min(1).max(50).optional().default(12),
@@ -1538,38 +1584,12 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
           }
         }
 
-        let fulltextResult = { success: 0, skipped: 0, failed: 0 };
-        if (newFulltextTargets.length > 0 && !isJobCancelled(jobId)) {
-          appendLog(jobId, `Extracting full text for ${newFulltextTargets.length} new FMP PR items...`);
-          const workerCount = Math.max(1, Math.min(input.tickerConcurrency, newFulltextTargets.length));
-          let fulltextCursor = 0;
-          let lastFulltextLogAt = 0;
-
-          const processFulltextTarget = async (target: typeof newFulltextTargets[number]) => {
-            const result = await extractAndPersistFulltext(target);
-            if (result.extractionStatus === "success") fulltextResult.success++;
-            else if (result.extractionStatus === "skipped") fulltextResult.skipped++;
-            else fulltextResult.failed++;
-
-            const completed = fulltextResult.success + fulltextResult.skipped + fulltextResult.failed;
-            if (completed - lastFulltextLogAt >= 20 || completed === newFulltextTargets.length) {
-              lastFulltextLogAt = completed;
-              appendLog(jobId, `[fulltext ${completed}/${newFulltextTargets.length}] ${fulltextResult.success} ok, ${fulltextResult.skipped} skip, ${fulltextResult.failed} fail`);
-            }
-          };
-
-          const fulltextWorker = async () => {
-            while (!isJobCancelled(jobId)) {
-              const currentIndex = fulltextCursor;
-              fulltextCursor += 1;
-              if (currentIndex >= newFulltextTargets.length) return;
-              await processFulltextTarget(newFulltextTargets[currentIndex]);
-            }
-          };
-
-          await Promise.all(Array.from({ length: workerCount }, () => fulltextWorker()));
-          appendLog(jobId, `Full text during pull: ${fulltextResult.success} success, ${fulltextResult.skipped} skipped, ${fulltextResult.failed} failed`);
-        }
+        const fulltextResult = await runInlineFulltextExtraction(
+          jobId,
+          newFulltextTargets,
+          input.tickerConcurrency,
+          "FMP PR",
+        );
 
         await setLastSuccess("fmp_press_release", new Date().toISOString(), {
           mode: input.mode,
@@ -1648,7 +1668,7 @@ app.post("/api/news/pull-fmp-stock-news", async (req, res, next) => {
     });
     activePullJobs.set(jobKey, jobId);
     appendLog(jobId, `Starting FMP stock news ${input.mode} pull — ${tickerList.length} tickers`);
-    appendLog(jobId, `[batch] tickerConcurrency=${input.tickerConcurrency}, requestIntervalMs=${input.requestIntervalMs}, pageLimit=${input.pageLimit}, maxPages=${input.maxPages}`);
+    appendLog(jobId, `[batch] tickerConcurrency=${input.tickerConcurrency}, fulltextConcurrency=${input.fulltextConcurrency}, requestIntervalMs=${input.requestIntervalMs}, pageLimit=${input.pageLimit}, maxPages=${input.maxPages}`);
 
     let anchorMap: Map<string, string> | undefined;
     if (!isCustom) {
@@ -1829,43 +1849,18 @@ app.post("/api/news/pull-fmp-stock-news", async (req, res, next) => {
           }
         }
 
-        let fulltextResult = { success: 0, skipped: 0, failed: 0 };
-        if (newFulltextTargets.length > 0 && !isJobCancelled(jobId)) {
-          appendLog(jobId, `Extracting full text for ${newFulltextTargets.length} new FMP stock items...`);
-          const workerCount = Math.max(1, Math.min(input.tickerConcurrency, newFulltextTargets.length));
-          let fulltextCursor = 0;
-          let lastFulltextLogAt = 0;
-
-          const processFulltextTarget = async (target: typeof newFulltextTargets[number]) => {
-            const result = await extractAndPersistFulltext(target);
-            if (result.extractionStatus === "success") fulltextResult.success++;
-            else if (result.extractionStatus === "skipped") fulltextResult.skipped++;
-            else fulltextResult.failed++;
-
-            const completed = fulltextResult.success + fulltextResult.skipped + fulltextResult.failed;
-            if (completed - lastFulltextLogAt >= 20 || completed === newFulltextTargets.length) {
-              lastFulltextLogAt = completed;
-              appendLog(jobId, `[fulltext ${completed}/${newFulltextTargets.length}] ${fulltextResult.success} ok, ${fulltextResult.skipped} skip, ${fulltextResult.failed} fail`);
-            }
-          };
-
-          const fulltextWorker = async () => {
-            while (!isJobCancelled(jobId)) {
-              const currentIndex = fulltextCursor;
-              fulltextCursor += 1;
-              if (currentIndex >= newFulltextTargets.length) return;
-              await processFulltextTarget(newFulltextTargets[currentIndex]);
-            }
-          };
-
-          await Promise.all(Array.from({ length: workerCount }, () => fulltextWorker()));
-          appendLog(jobId, `Full text during pull: ${fulltextResult.success} success, ${fulltextResult.skipped} skipped, ${fulltextResult.failed} failed`);
-        }
+        const fulltextResult = await runInlineFulltextExtraction(
+          jobId,
+          newFulltextTargets,
+          input.fulltextConcurrency,
+          "FMP stock",
+        );
 
         await setLastSuccess("fmp_stock_news", new Date().toISOString(), {
           mode: input.mode,
           tickerCount: tickerList.length,
           tickerConcurrency: input.tickerConcurrency,
+          fulltextConcurrency: input.fulltextConcurrency,
           requestIntervalMs: input.requestIntervalMs,
           pageLimit: input.pageLimit,
           maxPages: input.maxPages,

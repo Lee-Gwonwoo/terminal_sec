@@ -518,6 +518,34 @@
   - backend `npm run test` 성공 (`13 files / 82 tests`)
 - 런타임 통합 확인:
   - `8080` 포트 listener 존재 확인 (`OwningProcess = 46984`)
+
+## 2026-03-27
+**업데이트 시각:** 22:03 (local)
+
+- plan 정리 반영:
+  - `ai_agent_plan/company_news_evidence_table/plan.md`
+    - 중간 이력 위주의 문서를 `taxonomy v4 현재 상태` 중심 문서로 재정리
+    - 최신 analysis run `36a99839-1570-4b08-a364-121c453d1b98`와 `scope=company_news_2025_plus_taxonomy_v4`를 기준 상태로 고정
+    - Step 구조를 `잔여 샘플링 -> 100개 taxonomy -> full run -> UI sync -> build/API 검증` 순서로 재작성
+    - 이번 tranche 핵심 수치 `meaningless_rows = 218,383`과 이전 run 대비 감소 내용을 상단에 반영
+- 최신 상태 재검증:
+  - active classifier `ai_research_tool/test_model2_company_news_analysis.py`에서 `CASE_META = 100` 확인
+  - frontend `npm.cmd run build` 재검증 성공
+  - backend `GET /api/model2/analyses`에서 최신 run 노출 확인
+- 현재 판단:
+  - 이번 tranche 구현/검증은 사실상 완료 상태
+  - 다만 사용자 확인이 아직 없으므로 plan Step 상태는 `⏳`로 유지
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | active classifier taxonomy count `100` 확인 |
+| 빌드 | ✅ | frontend `npm.cmd run build` 성공 |
+| 자동 테스트 | ✅ | full dataset classifier 재실행 결과와 active taxonomy count로 대체 검증 |
+| 런타임 통합 | ✅ | `GET /api/model2/analyses`에서 최신 run `36a99839-1570-4b08-a364-121c453d1b98` 확인 |
+
+- 상태:
+  - plan 문서 최신화 완료
+  - 사용자 확인 대기 (`awaiting user confirmation`)
   - `GET /api/model2/analyses` 직접 호출 시 최신 analysis 목록이 정상 JSON으로 반환됨 확인
   - 따라서 `Evidence Table`의 `Failed to load analyses`는 backend startup failure가 원인이었고, 현재 API 레벨에서는 복구된 상태임
 - 추가 메모:
