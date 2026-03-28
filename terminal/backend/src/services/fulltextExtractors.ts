@@ -1255,6 +1255,33 @@ export async function extractByDomain(
     case "SEC/EDGAR":
       return extractSecEdgar(effectiveUrl, body ?? null);
 
+    case "INVESTING":
+      return extractTextViaHttp(effectiveUrl, body ?? null, {
+        notePrefix: "investing",
+        selectors: [
+          '[data-test="article-body"]',
+          ".articlePage",
+          ".WYSIWYG.articlePage",
+          "article",
+          "#__next article",
+          "main",
+        ],
+        removeSelectors: [
+          "header", "footer", "nav", "aside",
+          '[class*="ad-"]', '[class*="Ad-"]',
+          '[class*="newsletter"]', '[class*="related"]',
+          '[class*="comment"]', '[class*="social"]',
+          ".relatedArticles", ".articleFooter",
+        ],
+        clipMarkers: [
+          "Related Articles",
+          "Continue Reading on",
+          "This article was written by",
+          "Sign up for our free newsletter",
+        ],
+        fallbackBody: false,
+      });
+
     default:
       return bodyFallback(body ?? null, `no-scraper: ${effectivePub || "(empty)"}`);
   }

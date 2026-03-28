@@ -132,7 +132,7 @@
 
 ### 단계별 계획(각 단계: 구현 → 검증)
 
-#### ⬜ Step 1 — Investing 저장 계약과 API contract 고정
+#### ⏳ Step 1 — Investing 저장 계약과 API contract 고정
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
 | 1-1 | Investing source/source_type/publisher/origin_url 저장 규칙을 확정 | `ai_agent_plan/investing_news_window/plan.md` | 문서 결정 섹션 확인 | ⬜ |
@@ -162,7 +162,7 @@
 ```
 사용자 확인 필요: **예**
 
-#### ⬜ Step 2 — backend Investing category 수집기와 pull endpoint 추가
+#### ⏳ Step 2 — backend Investing category 수집기와 pull endpoint 추가
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
 | 2-1 | category list HTML parser와 detail URL normalizer를 구현 | `terminal/backend/src/services/investingNewsProvider.ts` | 샘플 HTML에서 기사 목록 파싱 확인 | ⬜ |
@@ -199,7 +199,7 @@
 ```
 사용자 확인 필요: **예**
 
-#### ⬜ Step 3 — Investing 기사 full text 경로 추가
+#### ⏳ Step 3 — Investing 기사 full text 경로 추가
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
 | 3-1 | Investing article detail extractor를 `fulltextExtractors.ts`에 추가 | `terminal/backend/src/services/fulltextExtractors.ts` | 샘플 기사 본문 추출 확인 | ⬜ |
@@ -230,7 +230,7 @@
 ```
 사용자 확인 필요: **예**
 
-#### ⬜ Step 4 — Investing News Window 프론트 추가
+#### ⏳ Step 4 — Investing News Window 프론트 추가
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
 | 4-1 | `FinnhubNewsWindow`를 기준으로 `InvestingNewsWindow` 컴포넌트 초안을 만든다 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/InvestingNewsWindow.tsx` | 컴포넌트 렌더링 확인 | ⬜ |
@@ -268,7 +268,7 @@
 ```
 사용자 확인 필요: **예**
 
-#### ⬜ Step 5 — 탭 시스템 연결, 문서 동기화, 전체 검증
+#### ⏳ Step 5 — 탭 시스템 연결, 문서 동기화, 전체 검증
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
 | 5-1 | 새 `WindowType`와 Add Tab/App title/DraggableWindow lazy import를 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/types.ts`, `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/AddTabModal.tsx`, `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DraggableWindow.tsx`, `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/App.tsx` | 새 탭 생성 확인 | ⬜ |
@@ -319,31 +319,31 @@
 Legend: `✅ 사용자 확인 완료` / `⏳ 구현 완료, 사용자 확인 대기` / `⬜ 미착수` / `🚫 차단`
 
 Track A — 계약/설계
-- ⬜ 1-1 source/source_type 저장 규칙 고정
-- ⬜ 1-2 `GET /api/news` query 규칙 고정
-- ⬜ 1-3 category filter + update UX 고정
+- ⏳ 1-1 source/source_type 저장 규칙 고정
+- ⏳ 1-2 `GET /api/news` query 규칙 고정
+- ⏳ 1-3 category filter + update UX 고정
 
 Track B — backend 수집
-- ⬜ 2-1 category list parser + URL normalizer
-- ⬜ 2-2 `POST /api/news/pull-investing` route
-- ⬜ 2-3 paging/dedupe/retry/job 정책
-- ⬜ 2-4 `news_items` insert + Investing 조회 확인
+- ⏳ 2-1 category list parser + URL normalizer
+- ⏳ 2-2 `POST /api/news/pull-investing` route
+- ⏳ 2-3 paging/dedupe/retry/job 정책
+- ⏳ 2-4 `news_items` insert + Investing 조회 확인
 
 Track C — full text
-- ⬜ 3-1 Investing detail extractor
-- ⬜ 3-2 Investing fulltext payload 규칙
-- ⬜ 3-3 공용 fulltext route 재사용 확인
+- ⏳ 3-1 Investing detail extractor
+- ⏳ 3-2 Investing fulltext payload 규칙
+- ⏳ 3-3 공용 fulltext route 재사용 확인
 
 Track D — frontend window
-- ⬜ 4-1 `InvestingNewsWindow` 초안 생성
-- ⬜ 4-2 category filter 교체
-- ⬜ 4-3 update 메뉴 교체
-- ⬜ 4-4 목록/full text/job 연동
+- ⏳ 4-1 `InvestingNewsWindow` 초안 생성
+- ⏳ 4-2 category filter 교체
+- ⏳ 4-3 update 메뉴 교체
+- ⏳ 4-4 목록/full text/job 연동
 
 Track E — integration / docs
-- ⬜ 5-1 WindowType/AddTab/App/DraggableWindow 연결
-- ⬜ 5-2 prompt/spec 문서 동기화
-- ⬜ 5-3 정적 분석/build/test/runtime 검증
+- ⏳ 5-1 WindowType/AddTab/App/DraggableWindow 연결
+- ⏳ 5-2 prompt/spec 문서 동기화
+- ⏳ 5-3 정적 분석/build/test/runtime 검증
 
 ┌─ 차단 구간 ─┐
 운영 사용 허용 여부는 별도 확인이 필요하다. 다만 내부 prototype 구현 자체는 진행 가능하도록 설계한다.

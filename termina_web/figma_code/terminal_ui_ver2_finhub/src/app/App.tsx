@@ -203,6 +203,8 @@ export default function App() {
           title = 'Evidence Table';
         } else if (type === 'case-description') {
           title = 'Case Description';
+        } else if (type === 'investing-news') {
+          title = 'Investing News';
         } else {
           title = type.charAt(0).toUpperCase() + type.slice(1) + ' Window';
         }

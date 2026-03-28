@@ -591,7 +591,7 @@ export async function deleteBlockedFinnhubCompanyNews(): Promise<number> {
        AND source_type = 'company_news'
        AND (
          TRIM(COALESCE(url, '')) = ''
-         OR UPPER(REPLACE(TRIM(COALESCE(publisher, '')), ' ', '')) IN ('SEEKINGALPHA', 'MOTLEYFOOL')
+         OR UPPER(REPLACE(TRIM(COALESCE(publisher, '')), ' ', '')) IN ('SEEKINGALPHA')
        )`,
   );
   return result.changes ?? 0;

@@ -99,6 +99,7 @@ import { fetchFmpStockNewsByTicker } from "./services/fmpStockNewsProvider.js";
 import { fetchFmpSecFilings } from "./services/fmpSecFilingProvider.js";
 import { generateSecFilingSummary } from "./services/secFilingSummary.js";
 import { getEtDateString } from "./services/timeUtils.js";
+import { fetchInvestingCategory, fetchAllInvestingCategories, type InvestingCategory } from "./services/investingNewsProvider.js";
 import {
   clampFinnhubCompanyDataConcurrency,
   getFinnhubCompanyDataDefaults,
@@ -2088,6 +2089,125 @@ app.post("/api/news/pull-fmp-sec-filing", async (req, res, next) => {
 });
 
 // ── Active jobs (for auto-reconnect after page refresh) ──
+
+// ── Investing News pull ──
+const pullInvestingSchema = z.object({
+  mode: z.enum(["recent", "custom"]).optional().default("recent"),
+  category: z.enum(["all", "stock-market-news", "cryptocurrency-news"]).optional().default("all"),
+  maxPages: z.number().int().min(1).max(50).optional().default(5),
+  requestIntervalMs: z.number().int().min(0).max(10_000).optional().default(1000),
+  fulltextConcurrency: z.number().int().min(1).max(200).optional().default(10),
+});
+
+app.post("/api/news/pull-investing", async (req, res, next) => {
+  try {
+    const input = pullInvestingSchema.parse(req.body ?? {});
+
+    const jobKey = "investing_news";
+    const existingJobId = activePullJobs.get(jobKey);
+    if (existingJobId) {
+      const existingJob = getJob(existingJobId);
+      if (existingJob && existingJob.status === "running") {
+        res.status(409).json({
+          error: `An Investing news pull job is already running (jobId=${existingJobId}). Wait for it to finish or cancel it first.`,
+          existingJobId,
+        });
+        return;
+      }
+      activePullJobs.delete(jobKey);
+    }
+
+    const categories: InvestingCategory[] =
+      input.category === "all"
+        ? ["stock-market-news", "cryptocurrency-news"]
+        : [input.category];
+
+    const jobId = createJob(categories.length, {
+      category: "news-update",
+      label: `Investing Pull (${input.category})`,
+    });
+    activePullJobs.set(jobKey, jobId);
+    appendLog(jobId, `Starting Investing ${input.mode} pull — categories: ${categories.join(", ")}, maxPages=${input.maxPages}`);
+
+    res.json({ jobId });
+
+    (async () => {
+      const counters = { totalInserted: 0, totalSkipped: 0 };
+      const newFulltextTargets: Array<{ id: string; url: string; publisher: string | null; body: string | null; source_type: string }> = [];
+
+      try {
+        for (const category of categories) {
+          if (isJobCancelled(jobId)) break;
+
+          appendLog(jobId, `Fetching ${category}...`);
+          const items = await fetchInvestingCategory(category, {
+            maxPages: input.maxPages,
+            requestIntervalMs: input.requestIntervalMs,
+          });
+
+          appendLog(jobId, `  ${category}: ${items.length} articles found`);
+
+          for (const rawItem of items) {
+            const inserted = await insertNewsItem({
+              publishedAt: rawItem.publishedAt,
+              source: rawItem.source,
+              sourceType: rawItem.sourceType,
+              title: rawItem.title,
+              body: rawItem.body,
+              url: rawItem.url,
+              tickers: rawItem.providerTickers,
+              tags: rawItem.tags,
+              publisher: rawItem.publisher,
+            });
+            if (inserted) {
+              counters.totalInserted++;
+              newFulltextTargets.push({
+                id: inserted.id,
+                url: rawItem.url,
+                publisher: rawItem.publisher ?? null,
+                body: rawItem.body,
+                source_type: rawItem.sourceType,
+              });
+              streamHub.publishNews(inserted);
+            } else {
+              counters.totalSkipped++;
+            }
+          }
+
+          updateProgress(jobId, categories.indexOf(category) + 1);
+        }
+
+        appendLog(jobId, `Total: inserted=${counters.totalInserted}, skipped=${counters.totalSkipped}`);
+
+        const fulltextResult = await runInlineFulltextExtraction(
+          jobId,
+          newFulltextTargets,
+          input.fulltextConcurrency,
+          "Investing",
+        );
+
+        completeJob(jobId, {
+          source: "INVESTING",
+          mode: input.mode,
+          category: input.category,
+          inserted: counters.totalInserted,
+          skipped: counters.totalSkipped,
+          fulltextSuccess: fulltextResult.success,
+          fulltextSkipped: fulltextResult.skipped,
+          fulltextFailed: fulltextResult.failed,
+        });
+        activePullJobs.delete(jobKey);
+      } catch (err: any) {
+        console.error(`[pull-investing] job ${jobId} fatal error: ${err.message}`);
+        failJob(jobId, err.message || "Unknown error");
+        activePullJobs.delete(jobKey);
+      }
+    })();
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/jobs/active", (_req, res) => {
     const active = getActiveJobs().map((j) => ({
     id: j.id,

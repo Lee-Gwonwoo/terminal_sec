@@ -78,6 +78,16 @@ export function AddTabModal({ isOpen, onClose, onStart }: AddTabModalProps) {
             <label className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
               <input
                 type="checkbox"
+                checked={selectedWindows.includes('investing-news')}
+                onChange={() => toggleWindow('investing-news')}
+                className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span>Investing News</span>
+            </label>
+
+            <label className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
+              <input
+                type="checkbox"
                 checked={selectedWindows.includes('watchlist')}
                 onChange={() => toggleWindow('watchlist')}
                 className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"

@@ -69,7 +69,7 @@ export type FinnhubMappedItem = {
   bodyHtml?: string;
 };
 
-const COMPANY_NEWS_BLOCKED_PUBLISHERS = new Set(["SEEKINGALPHA", "MOTLEY FOOL"]);
+const COMPANY_NEWS_BLOCKED_PUBLISHERS = new Set(["SEEKINGALPHA"]);
 
 const PUBLISHER_CANONICAL_MAP: Record<string, string> = {
   "YAHOO FINANCE": "YAHOO",

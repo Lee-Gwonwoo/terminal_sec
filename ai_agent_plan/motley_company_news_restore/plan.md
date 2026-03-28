@@ -7,6 +7,14 @@
 - `Full Text > Company News Only`와 pull 후 자동 fulltext chaining이 `Motley Fool` 기사에도 의미 있게 동작하도록 정렬한다.
 - startup 시 blocked row/evidence 정리 로직 때문에 복구 데이터가 다시 삭제되지 않도록 영구 경로를 수정한다.
 
+### PLAN CHANGE (2026-03-28 13:15 local)
+
+- 사용자 결정 반영:
+  - D1 확정: `news_items + news_fulltext + news_change_metrics` 전부 복구
+  - D2 확정: `model2` related evidence도 같이 복구
+- 따라서 Step 2는 최소 복구안이 아니라 확장 복구안을 기준으로 구현한다.
+- 남은 주요 설계 결정은 D3(company_news Motley fulltext 연결 방식)와 D4(backlog reset 범위)다.
+
 ### 현재 레포 상태(중요, 확인됨)
 
 - 현재 runtime DB는 `terminal/backend/backend/data/app.db`다.
@@ -66,8 +74,8 @@
 
 | ID | 결정 | 선택지 | 권장 | 영향 |
 |----|------|--------|------|------|
-| D1 | 복구 범위 | A. `news_items` 507건만, B. `news_items + news_fulltext`, C. `news_items + news_fulltext + news_change_metrics` | C | Step 2 범위 결정 |
-| D2 | evidence 처리 | A. 기존 `model2` evidence는 복구 안 함, B. related evidence도 같이 복구, C. evidence는 삭제/재계산 전제 | C | Step 2, Step 4 |
+| D1 | 복구 범위 | A. `news_items` 507건만, B. `news_items + news_fulltext`, C. `news_items + news_fulltext + news_change_metrics` | **확정: C** | Step 2 범위 고정 |
+| D2 | evidence 처리 | A. 기존 `model2` evidence는 복구 안 함, B. related evidence도 같이 복구, C. evidence는 삭제/재계산 전제 | **확정: B** | Step 2, Step 4 |
 | D3 | Motley fulltext 정책 | A. insert만 허용, fulltext는 `unavailable`, B. 기존 Motley scraper를 company_news에도 연결, C. body fallback success 허용 | B | Step 3 |
 | D4 | reset 정책 | A. restore 직후 company_news fulltext reset 없이 선택 복구, B. company_news reset 후 Motley 포함 재추출, C. source filter reset 추가 구현 | A 또는 C | Step 2, Step 3 |
 
@@ -91,13 +99,13 @@
 
 ### 단계별 계획(각 단계: 구현 → 검증)
 
-#### ⬜ Step 1 — Backend 차단/재삭제 경로 해제
+#### ⏳ Step 1 — Backend 차단/재삭제 경로 해제
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 1-1 | `finnhubNewsProvider.ts`에서 `MOTLEY FOOL`을 `COMPANY_NEWS_BLOCKED_PUBLISHERS`에서 제거 | `terminal/backend/src/services/finnhubNewsProvider.ts` | `tests/finnhubNewsProvider.test.ts`에 Motley company_news fetch 허용 케이스 추가 후 pass | ⬜ |
-| 1-2 | startup 삭제 로직에서 Motley를 blocked 대상으로 삭제하지 않도록 수정 | `terminal/backend/src/services/newsRepository.ts`, `terminal/backend/src/server.ts` | 서버 재시작 후 Motley sample row 유지 SQL 확인 | ⬜ |
-| 1-3 | blocked evidence cleanup도 Motley를 삭제 대상에서 제거하거나 재정의 | `terminal/backend/src/services/model2AnalysisRepository.ts` | startup 후 related evidence row가 불필요 삭제되지 않는지 확인 | ⬜ |
+| 1-1 | `finnhubNewsProvider.ts`에서 `MOTLEY FOOL`을 `COMPANY_NEWS_BLOCKED_PUBLISHERS`에서 제거 | `terminal/backend/src/services/finnhubNewsProvider.ts` | `tests/finnhubNewsProvider.test.ts`에 Motley company_news fetch 허용 케이스 추가 후 pass | ⏳ |
+| 1-2 | startup 삭제 로직에서 Motley를 blocked 대상으로 삭제하지 않도록 수정 | `terminal/backend/src/services/newsRepository.ts`, `terminal/backend/src/server.ts` | 서버 재시작 후 Motley sample row 유지 SQL 확인 | ⏳ |
+| 1-3 | blocked evidence cleanup도 Motley를 삭제 대상에서 제거하거나 재정의 | `terminal/backend/src/services/model2AnalysisRepository.ts` | startup 후 related evidence row가 불필요 삭제되지 않는지 확인 | ⏳ |
 
 1-1 목적: 새 company_news pull에서 Motley가 들어오게 만들기.
 설명: 지금은 pull 단계에서 필터링되어 DB insert까지 가지 않으므로, 수집 차단을 먼저 없애야 한다.
@@ -133,9 +141,9 @@ powershell -NoProfile -Command "try { Invoke-RestMethod -Uri 'http://localhost:8
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
 | 2-1 | 삭제 전 DB와 현재 DB의 대상 row 수, 중복 수, companion row 수를 다시 고정 snapshot으로 기록 | `ai_agent_plan/motley_company_news_restore/plan.md`, `ai_agent_plan/motley_company_news_restore/agent_log.md` | SQL count 결과가 문서와 일치 | ⬜ |
-| 2-2 | 결정 D1에 따라 `news_items` 복구 SQL 작성 및 dry-run count 검증 | `terminal/backend/tmp_restore_motley_company_news.mjs` 또는 동등 스크립트 | insert 대상 count와 conflict count 출력 | 🚫 |
-| 2-3 | 결정 D1에 따라 `news_fulltext`, `news_change_metrics` 동반 복구 SQL 작성 | `terminal/backend/tmp_restore_motley_company_news.mjs` 또는 동등 스크립트 | restored news_id 기준 companion count 일치 | 🚫 |
-| 2-4 | 결정 D2에 따라 `model2` evidence는 재계산/재생성 정책으로 분리하거나 선택 복구 | `terminal/backend/tmp_restore_motley_company_news.mjs`, 관련 service/test 파일 | evidence row 정책이 문서와 실제 DB 상태에 일치 | 🚫 |
+| 2-2 | `news_items` 507건 복구 SQL 작성 및 dry-run count 검증 | `terminal/backend/tmp_restore_motley_company_news.mjs` 또는 동등 스크립트 | insert 대상 count와 conflict count 출력 | 🚫 |
+| 2-3 | `news_fulltext` 506개 기사 + `news_change_metrics` 동반 복구 SQL 작성 | `terminal/backend/tmp_restore_motley_company_news.mjs` 또는 동등 스크립트 | restored news_id 기준 companion count 일치 | 🚫 |
+| 2-4 | related `model2` evidence도 같이 복구하고 summary 일관성 재검증 | `terminal/backend/tmp_restore_motley_company_news.mjs`, 관련 service/test 파일 | evidence row 정책이 문서와 실제 DB 상태에 일치 | 🚫 |
 
 2-1 목적: 실행 전 복구 범위를 숫자로 잠그기.
 설명: 507건, fulltext 506개 기사, metrics 82개 기사라는 baseline을 다시 기록한다.
@@ -150,14 +158,14 @@ powershell -NoProfile -Command "try { Invoke-RestMethod -Uri 'http://localhost:8
 흔한 문제/주의: `id`만 보고 중복 판단하면 안 되고 `source,url` 기준도 함께 확인해야 한다.
 
 2-3 목적: 복구 데이터의 품질 열화 방지.
-설명: `news_items`만 옮기면 fulltext/change 보조 테이블이 빠져 화면 품질이 달라질 수 있으므로 D1 선택에 맞춰 동반 복구한다.
+설명: 이번 결정은 전부 복구이므로 `news_items`뿐 아니라 `news_fulltext`, `news_change_metrics`까지 같이 옮겨 현재 화면 품질 차이를 최소화한다.
 완료 조건(눈으로 확인): restored `news_id` 기준 companion count가 기대치와 맞다.
 사람 검증(비개발자): 복구 전후 count 표를 보면 된다.
 흔한 문제/주의: `news_change_metrics`는 기사당 여러 row라서 기사 수와 metric row 수를 혼동하면 안 된다.
 
-2-4 목적: 분석/evidence 레이어 정책 분리.
-설명: evidence는 orphan cleanup과 analysis summary 재생성이 얽혀 있으므로 일괄 복구보다 재생성 전략이 더 안전할 수 있다.
-완료 조건(눈으로 확인): D2 선택에 따라 복구 또는 재계산 정책이 문서/로그에 고정된다.
+2-4 목적: 분석/evidence 레이어까지 함께 복구.
+설명: 이번 결정은 related `model2` evidence도 같이 복구하는 것이므로, news row와 evidence row 및 summary 집계가 함께 맞물리도록 restore 순서와 후처리를 설계한다.
+완료 조건(눈으로 확인): related evidence row와 summary 집계가 복구 후 기대 수치와 일치한다.
 사람 검증(비개발자): `model2` 화면 숫자가 DB 정책과 맞는지 확인한다.
 흔한 문제/주의: news row만 복구하고 evidence를 그대로 두면 case summary 집계가 어긋날 수 있다.
 
@@ -266,8 +274,6 @@ powershell -NoProfile -Command "try { Invoke-RestMethod -Uri 'http://localhost:8
 
 | ID | 항목 | 선택지 | 차단 대상 Step |
 |----|------|--------|----------------|
-| D1 | 복구 범위를 어디까지 가져갈지 | `news_items`만 / `news_items+news_fulltext` / `news_items+news_fulltext+news_change_metrics` | Step 2 |
-| D2 | `model2` evidence를 복구할지 재생성으로 둘지 | 복구 / 재생성 / 제외 | Step 2 |
 | D3 | company_news Motley fulltext 정책 | unsupported 유지 / 기존 Motley scraper 재사용 / fallback body 허용 | Step 3 |
 | D4 | backlog 재처리 reset 범위 | 전체 company_news reset / Motley만 선택 reset / reset 없이 missing-only | Step 3 |
 
@@ -278,17 +284,17 @@ Legend: `✅` 구현+사용자확인 완료 / `⏳` 구현완료, 사용자확�
 트랙 A — 영속 정책 / 복구
 
 ```text
-⬜ Step 1 — Backend 차단/재삭제 경로 해제
-  ⬜ 1-1 pull 차단 해제
-  ⬜ 1-2 startup delete 정책 수정
-  ⬜ 1-3 evidence cleanup 정책 수정
+⏳ Step 1 — Backend 차단/재삭제 경로 해제
+  ⏳ 1-1 pull 차단 해제
+  ⏳ 1-2 startup delete 정책 수정
+  ⏳ 1-3 evidence cleanup 정책 수정
         |
         v
 🚫 Step 2 — 삭제 전 DB에서 Motley row 복구
   ⬜ 2-1 baseline 숫자 고정
-  🚫 2-2 news_items 복구 SQL (D1 필요)
-  🚫 2-3 companion table 복구 SQL (D1 필요)
-  🚫 2-4 evidence 복구/재생성 정책 (D2 필요)
+  🚫 2-2 news_items 복구 SQL
+  🚫 2-3 companion table 복구 SQL
+  🚫 2-4 evidence 동반 복구
 ```
 
 트랙 B — fulltext / UI / 문서
@@ -312,9 +318,9 @@ Legend: `✅` 구현+사용자확인 완료 / `⏳` 구현완료, 사용자확�
 
 ```text
 ┌──────────────────────────────────────────────────────────────┐
-│ BLOCKED: Step 2는 D1/D2가 확정되기 전 실행 범위를 고정할 수 없음 │
-│ 이유: news_items만 복구할지 companion/evidence까지 포함할지      │
-│ 실행 SQL과 검증 count가 달라짐                                  │
+│ BLOCKED: Step 2는 Step 1 완료 전 실행하면 startup 재삭제 위험이 있음 │
+│ 이유: pull 차단, startup delete, evidence cleanup 정책이 현재 남아 있음 │
+│ 즉 restore를 먼저 해도 서버 재시작 또는 maintenance 흐름에서 재삭제 가능 │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -328,8 +334,6 @@ Legend: `✅` 구현+사용자확인 완료 / `⏳` 구현완료, 사용자확�
 
 | 결정 | 차단 대상 | 선택지 |
 |------|-----------|--------|
-| D1 | 2-2, 2-3 | 최소 복구 / 표준 복구 / 확장 복구 |
-| D2 | 2-4 | evidence 복구 / 재생성 / 제외 |
 | D4 | 3-4 | 전체 reset / Motley 선택 reset / no reset |
 
 ### 결정 #1 — 복구 범위(상세)
@@ -344,7 +348,18 @@ Legend: `✅` 구현+사용자확인 완료 / `⏳` 구현완료, 사용자확�
   - 장점: 기존 UI 표시 품질을 가장 잘 복원한다.
   - 단점: metric row가 기사당 다수라 검증이 더 까다롭다.
 
-권장: 확장안(C). 이미 schema 호환성이 확인됐고, 중복 URL도 0건이었기 때문에 runtime 품질 일관성 면에서 가장 낫다.
+확정: 확장안(C). 이미 schema 호환성이 확인됐고, 중복 URL도 0건이었기 때문에 runtime 품질 일관성 면에서 가장 낫다.
+
+### 결정 #1-1 — Evidence 복구 범위(상세)
+
+- 확정: related `model2` evidence도 같이 복구
+- 이유:
+  - user decision이 이미 "2. 도 같이 복구"로 확정됨
+  - news row만 복구하면 evidence/summaries와 화면 숫자가 어긋날 수 있음
+  - startup cleanup 정책을 함께 수정하는 Step 1과 묶어서 가야 일관성이 생김
+- 주의:
+  - orphan evidence는 복구 대상이 아니므로 `news_id` 매칭 기준이 살아 있는 row만 옮긴다.
+  - evidence를 같이 복구하면 `model2_case_summaries` 재집계 또는 invalidate 후 재생성이 필요할 수 있다.
 
 ### 결정 #2 — Motley company_news fulltext 정책(상세)
 

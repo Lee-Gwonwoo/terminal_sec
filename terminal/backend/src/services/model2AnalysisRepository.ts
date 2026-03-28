@@ -94,7 +94,7 @@ const BLOCKED_FINNHUB_COMPANY_NEWS_EVIDENCE_WHERE = `NOT (
   AND er.source_type = 'company_news'
   AND (
     TRIM(COALESCE(er.url, '')) = ''
-    OR UPPER(REPLACE(TRIM(COALESCE(er.publisher, '')), ' ', '')) IN ('SEEKINGALPHA', 'MOTLEYFOOL')
+    OR UPPER(REPLACE(TRIM(COALESCE(er.publisher, '')), ' ', '')) IN ('SEEKINGALPHA')
     OR NOT EXISTS (SELECT 1 FROM news_items ni WHERE ni.id = er.news_id)
   )
 )`;
@@ -131,7 +131,7 @@ export async function cleanupBlockedFinnhubCompanyNewsEvidence(): Promise<Model2
     AND er.source_type = 'company_news'
     AND (
       TRIM(COALESCE(er.url, '')) = ''
-      OR UPPER(REPLACE(TRIM(COALESCE(er.publisher, '')), ' ', '')) IN ('SEEKINGALPHA', 'MOTLEYFOOL')
+      OR UPPER(REPLACE(TRIM(COALESCE(er.publisher, '')), ' ', '')) IN ('SEEKINGALPHA')
       OR NOT EXISTS (SELECT 1 FROM news_items ni WHERE ni.id = er.news_id)
     )`;
   const blockedWhereDelete = `
@@ -139,7 +139,7 @@ export async function cleanupBlockedFinnhubCompanyNewsEvidence(): Promise<Model2
     AND source_type = 'company_news'
     AND (
       TRIM(COALESCE(url, '')) = ''
-      OR UPPER(REPLACE(TRIM(COALESCE(publisher, '')), ' ', '')) IN ('SEEKINGALPHA', 'MOTLEYFOOL')
+      OR UPPER(REPLACE(TRIM(COALESCE(publisher, '')), ' ', '')) IN ('SEEKINGALPHA')
       OR NOT EXISTS (SELECT 1 FROM news_items ni WHERE ni.id = model2_evidence_rows.news_id)
     )`;
 

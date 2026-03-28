@@ -92,7 +92,8 @@ describe("finnhubNewsProvider mapping", () => {
       mockFetchOnce([
         {
           datetime: 1709683200,
-          // missing headline, summary, url, related, category
+          url: "https://example.com/missing-fields",
+          // missing headline, summary, related, category
         },
       ]);
 
@@ -100,7 +101,7 @@ describe("finnhubNewsProvider mapping", () => {
       const item = items[0];
       expect(item.title).toBe("(untitled)");
       expect(item.body).toBe("");
-      expect(item.url).toBe("");
+      expect(item.url).toBe("https://example.com/missing-fields");
       expect(item.providerTickers).toEqual(["AAPL"]);
       expect(item.tags).toEqual([]);
     });
@@ -120,19 +121,19 @@ describe("finnhubNewsProvider mapping", () => {
       expect(items[0].publisher).toBe("YAHOO");
     });
 
-    it("should infer publisher from content when Finnhub source stays FINNHUB", async () => {
+    it("should infer Motley Fool publisher from content when Finnhub source stays FINNHUB", async () => {
       mockFetchOnce([
         {
           datetime: 1709683200,
-          headline: "Stock Picks From Seeking Alpha's New Analysts",
-          summary: "Meet Seeking Alpha's newest analysts and their stock picks.",
+          headline: "Why Motley Fool likes this AI stock",
+          summary: "Motley Fool says the AI story is just getting started.",
           url: "https://finnhub.io/api/news?id=test",
           source: "Finnhub",
         },
       ]);
 
       const items = await fetchCompanyNewsRaw("AAPL", "2024-03-01", "2024-03-07");
-      expect(items[0].publisher).toBe("SEEKINGALPHA");
+      expect(items[0].publisher).toBe("MOTLEY FOOL");
     });
 
     it("should infer Yahoo publisher only for Yahoo-branded show or transcript patterns", async () => {
@@ -165,7 +166,7 @@ describe("finnhubNewsProvider mapping", () => {
       expect(items).toEqual([]);
     });
 
-    it("should skip blacklisted company news publishers", async () => {
+    it("should skip blocked company news publishers but keep Motley Fool", async () => {
       mockFetchOnce([
         {
           datetime: 1709683200,
@@ -184,7 +185,9 @@ describe("finnhubNewsProvider mapping", () => {
       ]);
 
       const items = await fetchCompanyNewsRaw("AAPL", "2024-03-01", "2024-03-07");
-      expect(items).toEqual([]);
+      expect(items).toHaveLength(1);
+      expect(items[0].publisher).toBe("MOTLEY FOOL");
+      expect(items[0].url).toBe("https://www.fool.com/investing/example");
     });
 
     it("should never expose API key in mapped output", async () => {
