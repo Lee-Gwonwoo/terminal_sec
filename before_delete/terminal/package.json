@@ -1,0 +1,13 @@
+{
+  "name": "terminal-benzinga-workflow-mvp",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "backend"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w backend",
+    "build": "npm run build -w backend",
+    "test": "npm run test -w backend"
+  }
+}

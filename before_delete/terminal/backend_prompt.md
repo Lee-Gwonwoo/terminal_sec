@@ -111,6 +111,7 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `[][][]change_30d_pct[][][]`
 - `[][][]change_computed_at[][][]`
 - `[][][]origin_url[][][]`
+- `[][][]origin_url[][][]`
 
 제약:
 
@@ -202,8 +203,8 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 | UI 작업 | backend endpoint 예시 | job category | 중복 차단 범위 | 동시에 가능한 작업 |
 |-----------|------|------|------|------|
-| 일반 Update / FMP PR Pull / FMP Stock Pull / FMP SEC Pull / RTPR Pull / Change Update | `/api/news/pull-finhub`, `/api/news/pull-fmp-press-release`, `/api/news/pull-fmp-stock-news`, `/api/news/pull-fmp-sec-filing`, `/api/news/pull-rtpr`, `/api/news/change/update-*` | `news-update` | 같은 pull 계열 UI만 차단 | `news-fulltext` 계열과 병행 가능 |
-| Full Text / FMP PR Only / FMP Stock Only / FMP SEC Only / RTPR Body Backfill | `/api/news/fulltext/update`, `/api/news/fulltext/backfill-rtpr` | `news-fulltext` | 같은 fulltext UI만 차단 | `news-update` 계열과 병행 가능 |
+| 일반 Update / FMP PR Pull / FMP SEC Pull / RTPR Pull / Change Update | `/api/news/pull-finhub`, `/api/news/pull-fmp-press-release`, `/api/news/pull-fmp-sec-filing`, `/api/news/pull-rtpr`, `/api/news/change/update-*` | `news-update` | 같은 pull 계열 UI만 차단 | `news-fulltext` 계열과 병행 가능 |
+| Full Text / FMP PR Only / FMP SEC Only / RTPR Body Backfill | `/api/news/fulltext/update`, `/api/news/fulltext/backfill-rtpr` | `news-fulltext` | 같은 fulltext UI만 차단 | `news-update` 계열과 병행 가능 |
 
 운영적 정의:
 
@@ -431,18 +432,11 @@ SEC filing companion table.
 - `GET /api/news/pull-finhub/preflight`
 - `POST /api/news/pull-finhub`
 - `POST /api/news/pull-eodhd`
-- `POST /api/news/pull-rtpr`
 - `POST /api/news/pull-fmp-press-release`
-- `POST /api/news/pull-fmp-stock-news`
 - `POST /api/news/pull-fmp-sec-filing`
 - `POST /api/news/fulltext/update`
 - `POST /api/news/fulltext/backfill-plaintext`
-- `POST /api/news/fulltext/backfill-rtpr`
-- `POST /api/news/fulltext/backfill-origin-url`
 - `POST /api/news/fulltext/reset-failed`
-- `POST /api/news/fulltext/reset-fmp-pr-fallback`
-- `POST /api/news/fulltext/reset-fmp-stock-fallback`
-- `POST /api/news/fulltext/reset-company-news`
 - `POST /api/news/change/update-recent`
 - `POST /api/news/change/update-custom`
 - `POST /api/news/sentiment/update`
@@ -619,7 +613,6 @@ FMP press release를 수집한다.
   "from": "2026-03-01",
   "to": "2026-03-20",
   "tickerConcurrency": 10,
-  "fulltextConcurrency": 25,
   "requestIntervalMs": 25,
   "pageLimit": 100,
   "maxPages": 12
@@ -636,63 +629,6 @@ FMP press release를 수집한다.
 - job key: `fmp_press_release`
 - 동작: 새 `news_items` row를 insert한 뒤, 같은 job 안에서 원문 URL을 다시 추출해 `news_fulltext.full_text`도 함께 채운다.
 - 중요한 점: full text 추출은 기존 `extractByDomain` 경로를 재사용하므로, publisher scraper가 없는 경우에는 body fallback 또는 `unavailable/failed` status가 저장될 수 있다.
-
-응답 컬럼:
-
-- `[][][]jobId[][][]`
-
-### `POST /api/news/pull-fmp-stock-news`
-
-FMP stock news를 수집한다. primary endpoint는 `stable/news/stock?symbols=TICKER` 이다.
-
-요청 body:
-
-```json
-{
-  "mode": "recent",
-  "from": "2026-03-01",
-  "to": "2026-03-20",
-  "tickerConcurrency": 10,
-  "requestIntervalMs": 25,
-  "pageLimit": 100,
-  "maxPages": 12
-}
-```
-
-- `mode`: `recent | custom`
-- `recent`: DB의 마지막 `fmp_stock_news` anchor 이후부터 ticker별 incremental pull을 시도한다. anchor가 없는 ticker는 7일 fallback 구간으로 시작한다.
-- `custom`: `from/to` 범위로 수집
-- `tickerConcurrency`: ticker worker 수 (기본 10)
-- `fulltextConcurrency`: pull 마지막에 새 row 대상으로 바로 도는 inline fulltext worker 수 (기본 25)
-- `requestIntervalMs`: FMP API 호출 간격 (기본 25ms)
-- `pageLimit`: ticker별 page당 최대 row 수 (기본 100)
-- `maxPages`: ticker별 최대 page 수 (기본 12)
-- job key: `fmp_stock_news`
-
-동작 구조:
-
-1. default universe ticker를 읽는다.
-2. `recent` 모드면 `getTickerAnchorMap("fmp_stock_news", "FMP")`로 ticker별 마지막 anchor를 구한다.
-3. anchor가 없는 ticker는 최근 7일 fallback으로 돌고, `confirmed_empty_ranges`가 있으면 건너뛸 수 있다.
-4. ticker worker pool이 `fetchFmpStockNewsByTicker()`를 호출해 page를 순회한다.
-5. 수집된 row는 `insertNewsItem()`으로 `news_items`에 저장된다. dedupe 기준은 기존과 동일하게 `UNIQUE (source, url)`이다.
-6. 새 row가 있으면 같은 pull job 안에서 `mergeChangeForNewItems()`를 바로 호출해 `news_change_metrics`를 채운다.
-7. 새 row가 있으면 같은 pull job 안에서 full text 추출도 이어서 수행한다.
-
-FMP PR / SEC와의 차이:
-
-- `source='FMP'`, `source_type='fmp_stock_news'`로 저장된다.
-- SEC처럼 `sec_filings` companion row를 만들지 않는다.
-- SEC처럼 `news_items.body` summary를 새로 생성하지 않는다.
-- FMP PR와 같이 auto fulltext를 수행하지만, FMP stock은 여기서 `[][][]fulltextConcurrency[][][]`를 별도로 받아 ticker pull 동시성과 분리한다.
-- frontend Control/Data Control의 `fmp-pr-page-limit`, `fmp-pr-max-pages` 키를 FMP PR와 공유한다.
-
-full text 안전장치:
-
-- manual fulltext가 아니라 pull 중 auto fulltext일 때도 최종 추출기는 `extractByDomain()` 경로를 사용한다.
-- `fmp_stock_news`는 아무 publisher나 추출하지 않고, `FMP_STOCK_NEWS_SCRAPE_PUBLISHERS` allowlist에 있는 publisher만 실제 scraper를 시도한다.
-- allowlist 밖 publisher는 현재 `unavailable (fmp-stock-no-scraper: PUBLISHER)`로 남는다.
-- 과거 body-fallback/no-scraper 방식으로 잘못 success 처리된 row를 다시 돌리려면 `POST /api/news/fulltext/reset-fmp-stock-fallback` 후 manual fulltext를 실행해야 한다.
 
 응답 컬럼:
 
@@ -891,8 +827,6 @@ Control Window / localStorage 공통 설정:
 - `DefaultTickerWindow`는 `GET /api/tickers`, `POST /api/tickers/import-default`, `POST /api/tickers/add`, `DELETE /api/tickers/remove`, `POST /api/company-profiles/pull-market-cap`, `POST /api/company-profiles/pull-float`, `POST /api/company-profiles/pull-institutional`, `GET /api/jobs/:jobId`를 사용한다.
 - `DataControlWindow`는 updates status, jobs, OHLC status/update, IBKR calendar update/update-custom, company profile pull, change update, DB inspect를 사용한다.
 - `CaseResearchWindow`는 `/api/research/*` 전체를 사용해 섹션/페이지 CRUD, reorder, 검색, 자동 저장을 수행한다.
-- `EvidenceTableWindow`는 `GET /api/model2/analyses`, `GET /api/model2/analyses/:analysisId/cases`, `GET /api/model2/analyses/:analysisId/evidence`를 사용한다.
-- `CaseDescriptionWindow`는 backend 호출 없이 `EvidenceTableWindow`가 보낸 case metadata를 같은 탭 안의 보조 창으로 렌더링한다.
 - 현재 `WatchlistWindow`, `CalendarWindow`는 백엔드 API를 직접 사용하지 않는다.
 
 ## Case Research API
@@ -928,45 +862,6 @@ Control Window / localStorage 공통 설정:
 - `GET /api/research/trash`는 아직 24시간이 지나지 않은 deleted tab/page 목록을 반환한다.
 - `POST /api/research/tabs/:id/restore`는 deleted tab과 그 하위 deleted page를 함께 복구한다.
 - `POST /api/research/pages/:id/restore`는 부모 tab이 살아 있을 때만 page를 복구한다. 부모 tab도 deleted 상태면 409를 반환한다.
-
-## Model 1 / Model 2 API
-
-현재 endpoint:
-
-- `GET /api/model1/news`
-- `GET /api/model1/news/:id`
-- `GET /api/model2/analyses`
-- `GET /api/model2/analyses/:analysisId`
-- `GET /api/model2/analyses/:analysisId/cases`
-- `GET /api/model2/analyses/:analysisId/evidence`
-
-동작 규칙:
-
-- `GET /api/model1/news`는 `GET /api/news`와 비슷한 query parsing 경로를 공유하지만, Model_1 shadow/safe view 전용 repository 응답을 반환한다.
-- `GET /api/model1/news/:id`는 단건 shadow view 조회이며, row가 없으면 404를 반환한다.
-- `GET /api/model2/analyses*` 계열은 호출 전에 `runResearchMaintenance()`를 수행해 soft delete 정리와 research maintenance를 먼저 반영한다.
-- `GET /api/model2/analyses`는 선택적 `[][][]pageId[][][]` query를 받을 수 있고, 분석 실행 목록을 최신순으로 반환한다.
-- `GET /api/model2/analyses/:analysisId/cases`는 해당 분석의 case summary 목록을 반환한다.
-- `GET /api/model2/analyses/:analysisId/evidence`는 `[][][]caseType[][][]`, `[][][]keyword[][][]`, `[][][]ticker[][][]`, `[][][]sortBy[][][]`, `[][][]sortDir[][][]`, `[][][]limit[][][]` query를 받아 evidence row를 필터링한다.
-
-Model 2 evidence 저장 구조:
-
-- source table은 `model2_analysis_runs`, `model2_case_summaries`, `model2_evidence_rows`다.
-- evidence row는 단순 기사 원문 복사가 아니라 다음 보강 필드를 함께 가진다.
-  - 분류: `[][][]caseType[][][]`, `[][][]caseLabelKo[][][]`, `[][][]topLevel[][][]`, `[][][]reactionTag[][][]`, `[][][]isImpacted[][][]`
-  - 종목/기업: `[][][]ticker[][][]`, `[][][]marketCap[][][]`, `[][][]marketCapBucket[][][]`, `[][][]industry[][][]`, `[][][]ipoDate[][][]`
-  - 가격반응: `[][][]changePct[][][]`, `[][][]changeFromOpenPct[][][]`, `[][][]changeOpenToHighPct[][][]`, `[][][]change1dPct[][][]`, `[][][]change3dPct[][][]`, `[][][]change7dPct[][][]`, `[][][]change14dPct[][][]`, `[][][]change30dPct[][][]`
-  - 점수: `[][][]immediateReactionScore[][][]`, `[][][]shortFollowthroughScore[][][]`, `[][][]mediumPersistenceScore[][][]`, `[][][]overallImpactScore[][][]`
-  - 기사 메타: `[][][]summary[][][]`, `[][][]publishedAt[][][]`, `[][][]source[][][]`, `[][][]publisher[][][]`, `[][][]sourceType[][][]`, `[][][]title[][][]`, `[][][]body[][][]`, `[][][]url[][][]`
-
-blocked evidence 정리 규칙:
-
-- backend는 startup/maintenance 경로에서 `cleanupBlockedFinnhubCompanyNewsEvidence()`를 수행할 수 있다.
-- 현재 정리 대상은 `source='FINNHUB'` + `source_type='company_news'` 이면서 아래 조건 중 하나를 만족하는 evidence row다.
-  - `url`이 비어 있음
-  - publisher 정규화 결과가 `SEEKINGALPHA`, `MOTLEYFOOL`
-  - 참조하는 `news_items` row가 더 이상 존재하지 않음
-- 삭제 후에는 영향받은 `analysis_id`에 대해 case summary와 aggregate count를 다시 계산한다.
 
 ## 제약과 주의사항
 
@@ -1581,18 +1476,9 @@ query:
 - 생략 또는 `all`: 전체 미추출 뉴스
 - `company_news`, `press_release`, `market_news`: 해당 `news_items.source_type`만 대상
 - `fmp_press_release`: `news_fulltext` row가 없는 FMP PR 뉴스만 대상이다. 기존 잘못된 fallback success row는 reset endpoint로 먼저 삭제한 뒤 다시 update 해야 한다.
-- `fmp_stock_news`: `news_fulltext` row가 없는 FMP stock news만 대상이다. 지원 publisher allowlist 밖 row는 `unavailable (fmp-stock-no-scraper: ...)`로 남고, 과거 fallback success row는 stock reset endpoint로 먼저 정리해야 한다.
 - `fmp_sec_filing`: 기본 미추출 row + metadata fallback body를 가진 SEC filing row를 포함할 수 있으며, 성공 시 `news_fulltext.full_text`와 `news_items.body` summary를 함께 갱신한다.
 - `company_news`는 wrapper URL이면 먼저 redirect origin을 해석한다. 현재 원문 추출 지원 publisher는 `YAHOO`, `BENZINGA`이며, 이외 publisher는 body fallback 대신 `unavailable`로 저장된다.
 - `POST /api/news/pull-finhub`의 `Recent Update (company_news)` / `Custom Update (company_news)`는 pull 완료 후 새로 insert된 company news id만 대상으로 별도 `news-fulltext` job을 자동 시작한다. 과거 전체 backlog를 자동으로 다시 돌리지는 않는다.
-
-FMP stock / FMP PR fulltext 구조 차이:
-
-- manual `fmp_press_release` fulltext는 frontend에서 전용 `fmp-pr-fulltext-concurrency` 값을 우선 사용한다.
-- manual `fmp_stock_news` fulltext는 frontend에서 전용 `fmp-stock-fulltext-concurrency` 값을 우선 사용하고, 값이 없으면 `ft-concurrency`를 fallback으로 사용한다.
-- `POST /api/news/pull-fmp-press-release` 안에서 새 row에 대해 즉시 실행하는 auto fulltext는 여전히 pull payload의 `tickerConcurrency` worker 수를 사용한다.
-- `POST /api/news/pull-fmp-stock-news` 안에서 새 row에 대해 즉시 실행하는 auto fulltext는 pull payload의 `[][][]fulltextConcurrency[][][]`를 사용한다.
-- 즉 FMP stock만 manual fulltext와 pull 중 auto fulltext가 같은 전용 concurrency 키를 공유하도록 맞춰졌다.
 
 사전 동작:
 
@@ -1623,20 +1509,6 @@ publisher 동작 주의:
 - 응답 컬럼:
   - `[][][]deleted[][][]`
 
-### `POST /api/news/fulltext/reset-fmp-stock-fallback`
-
-- 목적: 과거 `fmp_stock_news` row 중 scraper 부재 때문에 body fallback 또는 no-scraper note로 남았던 false-success row를 삭제해, 현재 allowlist/scraper 기준으로 다시 추출할 수 있게 만든다.
-- 현재 삭제 대상:
-  - `source_type='fmp_stock_news'`
-  - `extraction_note LIKE 'body-fallback (no-scraper:%'`
-  - 또는 `extraction_note LIKE 'body-fallback (accesswire-%'`
-  - 또는 `extraction_note LIKE 'fmp-stock-no-scraper:%'`
-- 의미:
-  - 예전에는 일부 publisher가 body snippet fallback으로 success처럼 남았던 구간이 있었고,
-  - 지금은 unsupported publisher를 `unavailable`로 남기므로 old row를 지우고 다시 분류해야 한다.
-- 응답 컬럼:
-  - `[][][]deleted[][][]`
-
 ### `POST /api/news/fulltext/reset-company-news`
 
 - 목적: 기존 `company_news` fulltext가 summary/body fallback semantics로 저장돼 있던 상태를 비우고, 새 redirect-origin 기준으로 다시 채울 준비를 한다.
@@ -1655,7 +1527,7 @@ publisher 동작 주의:
 - fulltext update는 background job으로 실행되고 `jobId`를 반환한다.
 - 하지만 현재 backend에는 `pull-finhub`/`pull-rtpr`처럼 endpoint 전용 duplicate guard가 없다.
 - 따라서 API만 보면 같은 fulltext 계열 job을 연속 호출해 여러 job을 만들 수 있다.
-- 다만 현재 프론트 `FinnhubNewsWindow`는 fulltext 메뉴에 `ftUpdating` lock만 적용한다.
+- 다만 현재 프론트 `FinnhubNewsWindow`는 fulltext 메뉴에만 `updating || ftUpdating` lock을 적용한다.
 - 일반 update 메뉴는 `updating`만 보므로, backend contract 기준으로는 fulltext job과 일반 pull/change job이 동시에 존재할 수 있다.
 - 즉 fulltext와 다른 update 간 병렬 가능 여부는 backend보다 프론트 버튼 disable/handler guard 조합의 영향을 더 크게 받는다.
 - 이 제약은 frontend UX 제약이지 backend contract 보장은 아니다.

@@ -1,0 +1,11 @@
+import { open } from "sqlite";
+import sqlite3 from "sqlite3";
+const db = await open({ filename: './backend/data/app.db', driver: sqlite3.Database });
+const total = await db.get("select count(*) as cnt from news_items where source='FINNHUB' and source_type='company_news' and publisher='FINNHUB'");
+const withOrigin = await db.get("select count(*) as cnt from news_items where source='FINNHUB' and source_type='company_news' and publisher='FINNHUB' and origin_url is not null and trim(origin_url)<>''");
+const yahooCitation = await db.get("select count(*) as cnt from news_items where source='FINNHUB' and source_type='company_news' and publisher='FINNHUB' and (title like '%Yahoo%' or body like '%Yahoo%')");
+const reuters = await db.get("select count(*) as cnt from news_items where source='FINNHUB' and source_type='company_news' and publisher='FINNHUB' and (body like '%(Reuters)%' or body like '%Reuters%' or title like '%Reuters%')");
+const benzinga = await db.get("select count(*) as cnt from news_items where source='FINNHUB' and source_type='company_news' and publisher='FINNHUB' and (body like '%Benzinga%' or title like '%Benzinga%')");
+const samples = await db.all(`select id,title,substr(body,1,260) as body from news_items where source='FINNHUB' and source_type='company_news' and publisher='FINNHUB' order by published_at desc limit 25`);
+console.log(JSON.stringify({ total, withOrigin, yahooCitation, reuters, benzinga, samples }, null, 2));
+await db.close();

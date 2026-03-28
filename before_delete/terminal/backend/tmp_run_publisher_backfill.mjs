@@ -1,0 +1,12 @@
+import { initDb, getDb } from './dist/db.js';
+import { backfillPublisher } from './dist/services/finnhubNewsProvider.js';
+await initDb();
+const db = getDb();
+const before = await db.get("select count(*) as cnt from news_items where source='FINNHUB' and source_type='company_news' and publisher='FINNHUB'");
+const sampleBefore = await db.get("select id, title, publisher from news_items where id='4d57f8cf-de14-47ed-b3d3-02e3c0a87a9b'");
+const updated = await backfillPublisher();
+const after = await db.get("select count(*) as cnt from news_items where source='FINNHUB' and source_type='company_news' and publisher='FINNHUB'");
+const sampleAfter = await db.get("select id, title, publisher from news_items where id='4d57f8cf-de14-47ed-b3d3-02e3c0a87a9b'");
+const reutersAfter = await db.get("select id, title, publisher from news_items where id='f77c2765-df46-4155-bef9-be32ccb523c8'");
+const benzingaAfter = await db.get("select id, title, publisher from news_items where id='d4ac22ec-0a36-4652-91a3-1791ee6fd65c'");
+console.log(JSON.stringify({ before, updated, after, sampleBefore, sampleAfter, reutersAfter, benzingaAfter }, null, 2));

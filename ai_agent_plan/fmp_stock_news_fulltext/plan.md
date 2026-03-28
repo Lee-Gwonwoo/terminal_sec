@@ -7,6 +7,22 @@ FMP stock news 각 publisher의 URL을 따라가서 기사 본문(fulltext)을 �
 
 ## 최종 상태 (2026-03-27 구현 완료)
 
+### PLAN CHANGE (2026-03-27 22:11 local)
+
+- 목적 확장: publisher scraper 구현 자체는 완료됐지만, 실제 운영 속도는 `FMP Stock Pull` 내부에서 ticker fetch와 inline fulltext가 같은 `tickerConcurrency`를 공유하는 구조 때문에 불필요하게 제한되고 있었다.
+- 이번 변경 범위:
+  - backend `POST /api/news/pull-fmp-stock-news`에 `[][][]fulltextConcurrency[][][]` 필드 추가
+  - `Recent/Custom FMP Stock` pull의 inline fulltext worker 수를 ticker pull worker 수와 분리
+  - frontend `Control` modal + `Data Control` Settings 탭에서 같은 localStorage 키로 `FMP Stock Full Text Concurrency` 조정 가능하게 연결
+  - manual `FMP Stock Only` fulltext도 같은 설정값을 재사용하도록 정렬
+- 기대 효과: FMP API 호출 동시성은 보수적으로 유지하면서, 원문 스크래핑 단계만 별도로 더 높여 전체 완료 시간을 단축할 수 있다.
+- 영향 파일:
+  - `terminal/backend/src/server.ts`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx`
+  - 관련 spec 문서 2종
+- 상태: 구현 완료, 검증 진행 중
+
 ### 구현 완료 — 원문 추출 검증됨
 
 | Publisher | 검증 word count | extraction_note | 방식 |

@@ -157,6 +157,7 @@ function getCompanyNewsRequestIntervalMs(): number {
 
 const DEFAULT_FT_CONCURRENCY = 200;
 const DEFAULT_FMP_PR_FULLTEXT_CONCURRENCY = 10;
+const DEFAULT_FMP_STOCK_FULLTEXT_CONCURRENCY = 25;
 
 function getFulltextConcurrency(): number {
   try {
@@ -174,6 +175,16 @@ function getFmpPrFulltextConcurrency(): number {
     return Number.isFinite(value) && value >= 1 && value <= 50 ? value : DEFAULT_FMP_PR_FULLTEXT_CONCURRENCY;
   } catch {
     return DEFAULT_FMP_PR_FULLTEXT_CONCURRENCY;
+  }
+}
+
+function getFmpStockFulltextConcurrency(): number {
+  try {
+    const raw = localStorage.getItem('fmp-stock-fulltext-concurrency') ?? localStorage.getItem('ft-concurrency') ?? '';
+    const value = parseInt(raw, 10);
+    return Number.isFinite(value) && value >= 1 && value <= 200 ? value : DEFAULT_FMP_STOCK_FULLTEXT_CONCURRENCY;
+  } catch {
+    return DEFAULT_FMP_STOCK_FULLTEXT_CONCURRENCY;
   }
 }
 
@@ -655,6 +666,7 @@ export function FinnhubNewsWindow({
   const [companyNewsTickerConcurrencyInput, setCompanyNewsTickerConcurrencyInput] = useState(() => String(getCompanyNewsTickerConcurrency()));
   const [companyNewsRequestIntervalSecInput, setCompanyNewsRequestIntervalSecInput] = useState(() => String(getCompanyNewsRequestIntervalMs() / 1000));
   const [fmpTickerConcurrencyInput, setFmpTickerConcurrencyInput] = useState(() => String(getFmpTickerConcurrency()));
+  const [fmpStockFulltextConcurrencyInput, setFmpStockFulltextConcurrencyInput] = useState(() => String(getFmpStockFulltextConcurrency()));
   const [fmpRequestIntervalMsInput, setFmpRequestIntervalMsInput] = useState(() => String(getFmpRequestIntervalMs()));
   const [fmpPrPageLimitInput, setFmpPrPageLimitInput] = useState(() => String(getFmpPrPageLimit()));
   const [fmpPrMaxPagesInput, setFmpPrMaxPagesInput] = useState(() => String(getFmpPrMaxPages()));
@@ -1027,6 +1039,7 @@ export function FinnhubNewsWindow({
         const body: Record<string, unknown> = {
           mode,
           tickerConcurrency: getFmpTickerConcurrency(),
+          fulltextConcurrency: getFmpStockFulltextConcurrency(),
           requestIntervalMs: getFmpRequestIntervalMs(),
           pageLimit: getFmpPrPageLimit(),
           maxPages: getFmpPrMaxPages(),
@@ -1194,6 +1207,7 @@ export function FinnhubNewsWindow({
     const companyNewsTickerConcurrency = Math.max(1, Math.min(20, parseInt(companyNewsTickerConcurrencyInput, 10) || finnhubTickerConcurrency));
     const companyNewsRequestIntervalSec = Math.max(0, Math.min(10, parseFloat(companyNewsRequestIntervalSecInput) || finnhubRequestIntervalSec));
     const fmpTickerConcurrency = Math.max(1, Math.min(20, parseInt(fmpTickerConcurrencyInput, 10) || DEFAULT_FMP_TICKER_CONCURRENCY));
+    const fmpStockFulltextConcurrency = Math.max(1, Math.min(200, parseInt(fmpStockFulltextConcurrencyInput, 10) || DEFAULT_FMP_STOCK_FULLTEXT_CONCURRENCY));
     const fmpRequestIntervalMs = Math.max(0, Math.min(5000, parseInt(fmpRequestIntervalMsInput, 10) || DEFAULT_FMP_REQUEST_INTERVAL_MS));
     const fmpPrPageLimit = Math.max(1, Math.min(100, parseInt(fmpPrPageLimitInput, 10) || DEFAULT_FMP_PR_PAGE_LIMIT));
     const fmpPrMaxPages = Math.max(1, Math.min(50, parseInt(fmpPrMaxPagesInput, 10) || DEFAULT_FMP_PR_MAX_PAGES));
@@ -1206,6 +1220,7 @@ export function FinnhubNewsWindow({
       localStorage.setItem('finnhub-company-news-ticker-concurrency', String(companyNewsTickerConcurrency));
       localStorage.setItem('finnhub-company-news-request-interval-sec', String(companyNewsRequestIntervalSec));
       localStorage.setItem('fmp-concurrency', String(fmpTickerConcurrency));
+      localStorage.setItem('fmp-stock-fulltext-concurrency', String(fmpStockFulltextConcurrency));
       localStorage.setItem('fmp-request-interval-ms', String(fmpRequestIntervalMs));
       localStorage.setItem('fmp-pr-page-limit', String(fmpPrPageLimit));
       localStorage.setItem('fmp-pr-max-pages', String(fmpPrMaxPages));
@@ -1220,6 +1235,7 @@ export function FinnhubNewsWindow({
   setCompanyNewsTickerConcurrencyInput(String(companyNewsTickerConcurrency));
   setCompanyNewsRequestIntervalSecInput(String(companyNewsRequestIntervalSec));
     setFmpTickerConcurrencyInput(String(fmpTickerConcurrency));
+    setFmpStockFulltextConcurrencyInput(String(fmpStockFulltextConcurrency));
     setFmpRequestIntervalMsInput(String(fmpRequestIntervalMs));
     setFmpPrPageLimitInput(String(fmpPrPageLimit));
     setFmpPrMaxPagesInput(String(fmpPrMaxPages));
@@ -1387,6 +1403,8 @@ export function FinnhubNewsWindow({
     try {
       const concurrency = sourceType === 'fmp_press_release'
         ? getFmpPrFulltextConcurrency()
+        : sourceType === 'fmp_stock_news'
+          ? getFmpStockFulltextConcurrency()
         : getFulltextConcurrency();
       const endpoint = sourceType === 'rtpr'
         ? `${API_BASE}/api/news/fulltext/backfill-rtpr`
@@ -3138,6 +3156,17 @@ export function FinnhubNewsWindow({
                   />
                 </div>
                 <div>
+                  <label className="block text-xs text-gray-500 mb-1">Stock Full Text Concurrency</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={200}
+                    value={fmpStockFulltextConcurrencyInput}
+                    onChange={(e) => setFmpStockFulltextConcurrencyInput(e.target.value)}
+                    className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
                   <label className="block text-xs text-gray-500 mb-1">Request Interval (ms)</label>
                   <input
                     type="number"
@@ -3187,7 +3216,7 @@ export function FinnhubNewsWindow({
                     className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
                 </div>
-                <p className="text-[10px] text-gray-400">Applies to FMP company profile, FMP PR, FMP Stock, and FMP SEC pulls. Aggressive defaults: concurrency 10, interval 25ms, PR/Stock 100 x 12 pages, SEC 40 pages.</p>
+                <p className="text-[10px] text-gray-400">Ticker Concurrency/Interval/Pageing apply to FMP company profile, FMP PR, FMP Stock, and FMP SEC pulls. Stock Full Text Concurrency applies to inline fulltext during FMP Stock pull and to manual `FMP Stock Only` fulltext reruns.</p>
               </div>
             </div>
             <div className="flex justify-end gap-2 mt-4">
