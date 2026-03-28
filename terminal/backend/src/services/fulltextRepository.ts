@@ -277,8 +277,9 @@ export async function deleteFmpPressReleaseFallbackRows(): Promise<number> {
 }
 
 /**
- * Delete FMP stock_news body-fallback rows (no-scraper false "success") so they can be re-extracted
- * with the new gate that properly marks them as unavailable.
+ * Delete FMP stock_news body-fallback rows (no-scraper false "success") and
+ * unavailable rows for publishers that now have scrapers,
+ * so they can be re-extracted with the new gate logic.
  */
 export async function deleteFmpStockNewsFallbackRows(): Promise<number> {
   const result = await getDb().run(
@@ -291,6 +292,7 @@ export async function deleteFmpStockNewsFallbackRows(): Promise<number> {
          AND (
            nf.extraction_note LIKE 'body-fallback (no-scraper:%'
            OR nf.extraction_note LIKE 'body-fallback (accesswire-%'
+           OR nf.extraction_note LIKE 'fmp-stock-no-scraper:%'
          )
      )`,
   );

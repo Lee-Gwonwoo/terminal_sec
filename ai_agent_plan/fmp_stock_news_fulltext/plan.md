@@ -24,112 +24,65 @@ FMP stock news 각 publisher의 URL을 따라가서 기사 본문(fulltext)을 �
 | PYMNTS | 535 | `pymnts-scrape` | HTTP+cheerio (신규) |
 | TechCrunch | 177 | `techcrunch-scrape` | HTTP+cheerio (신규) |
 | Schaeffers Research | 664 | `schaeffers-scrape` | HTTP+cheerio (신규) |
+| The Motley Fool / Fool - Investing News | 490~696 | `motleyfool-scrape` | HTTP+cheerio (신규, 페이월 없음 확인) |
+| Seeking Alpha | 109 | `seekingalpha-scrape` | HTTP+cheerio (recheck — 실제 추출 가능) |
+| InvestorPlace / Investor Place | 1,690~1,693 | `investorplace-scrape` | HTTP+cheerio (recheck — 페이월 아님) |
+| Deadline | 394 | `deadline-scrape` | HTTP+cheerio (recheck — 소프트 페이월 아님) |
+| CNET | 395 | `cnet-scrape` | HTTP+cheerio (recheck — 추출 가능) |
+| The Guardian | 979 | `guardian-scrape` | HTTP+cheerio (recheck — 완전 오픈) |
+| Finbold | 342 | `finbold-scrape` | HTTP+cheerio (recheck — 오픈) |
+| Fox Business | 439 | `foxbusiness-scrape` | HTTP+cheerio (recheck — 오픈, 일부 YouTube URL 제외) |
+| New York Post | 160 | `nypost-scrape` | HTTP+cheerio (recheck — 오픈) |
+| ETF Trends | 724 | `etftrends-scrape` | HTTP+cheerio (recheck — 오픈) |
+| Kitco | 190 | `kitco-scrape` | HTTP+cheerio (recheck — 오픈) |
+| NYTimes | 383~498 (불안정) | `nytimes-scrape` | HTTP+cheerio (recheck — 간헐적 403, 일부만 성공) |
 | Nasdaq / TMX | 가변 | 기존 scraper | (기존) |
 | SEC/EDGAR | 가변 | `sec-edgar-fetch` | (기존) |
 | MCAP MediaWire / Accesswire | 가변 | 기존 scraper | (기존, Accesswire는 403 빈발) |
 
-### 차단됨 — scraper 구현 불가
+> **recheck 결과 요약 (2026-03-27):** 이전 plan에서 "차단됨/페이월"로 분류했던 publisher 중 Seeking Alpha, InvestorPlace, Deadline, CNET, The Guardian, NYTimes, Finbold, Fox Business, New York Post, ETF Trends, Kitco, Motley Fool이 실제로는 추출 가능하여 구현 완료함.
+
+### 차단됨 — scraper 구현 불가 (recheck 확인, 2026-03-27)
 
 | Publisher | 사유 | HTTP status | 비고 |
 |-----------|------|-------------|------|
+| Zacks | 본문 0c/빈 응답 | 200 | selector로 추출 불가 |
+| WSJ | 401 인증 필요 | 401 | 강력한 페이월 |
+| Barrons | 구독 벽 | 200 | 95~117wc만 추출, "Subscriber Agreement" 표시 |
 | GuruFocus | 403 차단 | 403 | Cloudflare 방어 |
 | MarketBeat | 403 차단 | 403 | |
 | Reuters | 401 인증 필요 | 401 | |
 | Invezz | 403 차단 | 403 | Cloudflare |
 | Investopedia | 402 유료 | 402 | |
-| Seeking Alpha | 페이월 | — | 로그인 필수 |
-| Zacks | 대부분 유료 | 200 | article 1047c뿐, snippet 수준 |
-| WSJ / Barrons | 페이월 | — | 강력한 구독 벽 |
-| YouTube 계열 (CNBC Television 등) | 동영상 | — | 텍스트 추출 불가 |
+| Forbes | 403 차단 | 403 | |
+| Market Watch | 페이월 | 200 | 24c만 추출, 실질적 유료 |
+| Business Insider | 페이월 | 200 | 92c만 추출, 실질적 유료 |
+| Investors Business Daily | 403 차단 | 403 | |
+| FXEmpire | 빈 응답 | 200 | 0c, 페이월 감지 |
+| GeekWire | 403 차단 | 403 | |
+| Fast Company | 403 차단 | 403 | |
+
+### YouTube (텍스트 추출 불가)
+
+| Publisher | DB 건수 |
+|-----------|---------|
+| Schwab Network | 261 |
+| CNBC Television | 230 |
+| Bloomberg Markets and Finance | 75 |
+| Bloomberg Technology | 51 |
+| Yahoo Finance | 41 |
+| Morningstar | 10 |
+| Wall Street Journal | 3 |
+| After Earnings | 3 |
+| The Street | 8 |
 
 ---
 
-### 스크래퍼 있으나 실패/미연결
+## Publisher별 링크 스크래핑 가능성 분류 (참고용, 초기 분석)
 
-| Publisher | DB 건수 | 실패 사유 | 상태 |
-|-----------|---------|-----------|------|
-| Accesswire | 232 | `body-fallback (accesswire-http-403)` | ⚠️ HTTP 403 — URL이 accessnewswire.com인데 accesswire.com 패턴으로 호출 중일 가능성 |
-| TheNewswire | 61 | `body-fallback (no-scraper: THENEWSWIRE)` | ⚠️ `FMP_STOCK_NEWS_SCRAPE_PUBLISHERS`에 포함됐으나 `extractByDomain` switch case 누락 |
-| MCAP MediaWire | 5 | body-fallback | ⚠️ 실제 URL이 prismmediawire.com, 스크래퍼 동작 여부 불확실 |
-| Benzinga | 1,873 | `body-fallback (no-scraper: BENZINGA)` | ⚠️ 스크래퍼 코드는 존재하나 `FMP_STOCK_NEWS_SCRAPE_PUBLISHERS` 미등록 |
-
----
-
-## Publisher별 링크 스크래핑 가능성 분류
-
-### Group A — 오픈 웹, 스크래핑 가능성 높음
-
-이 그룹은 URL을 따라 HTTP GET 또는 Playwright로 본문을 추출할 수 있을 가능성이 높다.
-
-| Publisher | DB 건수 | 도메인 | body-fallback 평균 단어수 | 비고 |
-|-----------|---------|--------|--------------------------|------|
-| Defense World | 15,433 | defenseworld.net | ~54단어 | 기관 투자 포지션 변동 기사, 전형적 오픈 사이트 |
-| 24/7 Wall Street | 1,042 | 247wallst.com | ~68단어 | 열린 사이트 |
-| 247 Wallst | 282 | 247wallst.com | ~68단어 | 동일 도메인, publisher명만 다름 |
-| MarketBeat | 374 | marketbeat.com | ~41단어 | 오픈 — 회원제이나 기사 본문은 대체로 접근 가능 |
-| CNBC | 360 | cnbc.com | ~41단어 (snippet) | 기사 본문 오픈, JS 렌더링 필요할 수 있음 |
-| Proactive Investors | 384 | proactiveinvestors.com | ~59단어 | 캐나다/글로벌 소형주 IR 뉴스, 오픈 |
-| Proactive Investors - Finance | 380 | proactiveinvestors.com | ~59단어 | 동일 도메인 |
-| Schaeffers Research | 216 | schaeffersresearch.com | ~41단어 | 오픈 |
-| Invezz | 210 | invezz.com | ~46단어 | 오픈 |
-| Investopedia | 220 | investopedia.com | ~41단어 | 오픈 |
-| FXEmpire | 167 | fxempire.com | ~40단어 | 오픈 |
-| GuruFocus | 1,204 | gurufocus.com | ~41단어 | 대부분 오픈, 일부 premium |
-| InvestorPlace | 76 | investorplace.com | — | 오픈 |
-| Finbold | 89 | finbold.com | — | 오픈 |
-| TechCrunch | 95 | techcrunch.com | ~37단어 | 오픈 |
-| PYMNTS | 134 | pymnts.com | ~39단어 | 오픈 |
-| Fox Business | 61 | foxbusiness.com | — | 오픈 (일부 광고 heavy) |
-| New York Post | 59 | nypost.com | — | 오픈 |
-| GeekWire | 20 | geekwire.com | — | 오픈 |
-| ETF Trends | 41 | etftrends.com | — | 오픈 |
-| Fast Company | 39 | fastcompany.com | — | 오픈 |
-| Kitco | 12 | kitco.com | — | 오픈 |
-| MarijuanaStocks | 6 | marijuanastocks.com | — | 오픈 |
-
-### Group B — 소프트 페이월 / JS 렌더링 필요 (조건부 가능)
-
-| Publisher | DB 건수 | 도메인 | 상태 | 이슈 |
-|-----------|---------|--------|------|------|
-| The Motley Fool | 4,585 | fool.com | ⚠️ 일부 무료 | 프리미엄 기사 paywall, 무료 기사는 JS 렌더링으로 추출 가능 |
-| Fool - Investing News | 553 | fool.com | ⚠️ 동일 | 동일 도메인 |
-| Reuters | 925 | reuters.com | ⚠️ 일부 무료 | 대부분 무료 기사, JS-heavy, Playwright 필요 |
-| Benzinga | 1,873 | benzinga.com | ⚠️ 스크래퍼 있음 | `extractBenzinga()` 구현 있음, FMP_STOCK_NEWS_SCRAPE_PUBLISHERS에만 추가하면 됨 |
-| Forbes | 398 | forbes.com | ⚠️ 소프트 페이월 | 메터 페이월 우회 가능성 있음 |
-| Market Watch | 271 | marketwatch.com | ⚠️ 제한적 | 일부 기사 오픈, 일부 구독 필요 |
-| Business Insider | 71 | businessinsider.com | ⚠️ 소프트 | 일부 오픈 |
-| CNET | 21 | cnet.com | ⚠️ 일부 무료 | 오픈 기사 위주 |
-| The Guardian | 8 | theguardian.com | ✅ 오픈 | 전체 무료 |
-| NYTimes | 23 | nytimes.com | ⚠️ 소프트 페이월 | 쿠키 기반 월 제한 |
-| Deadline | 27 | deadline.com | ⚠️ 소프트 | 일부 무료 |
-| Investors Business Daily | 226 | investors.com | ⚠️ 대부분 유료 | 일부 짧은 기사 오픈 |
-
-### Group C — 하드 페이월 (스크래핑 불가)
-
-| Publisher | DB 건수 | 도메인 | 이슈 |
-|-----------|---------|--------|------|
-| Seeking Alpha | 5,743 | seekingalpha.com | 로그인 필수, 페이월 강함 |
-| Zacks Investment Research | 12,633 | zacks.com | 프리미엄 기사 대다수, 공개 부분은 snippet 수준 |
-| WSJ | 352 | wsj.com | 강력한 페이월 |
-| Barrons | 389 | barrons.com | WSJ와 동일 구독 구조 |
-
-> **참고**: Zacks는 일부 무료 콘텐츠(stock rank 설명 등)가 있지만 실제 애널리시스 기사는 거의 유료다.
-
-### Group D — YouTube 동영상 (텍스트 추출 불가)
-
-| Publisher | DB 건수 | 비고 |
-|-----------|---------|------|
-| Schwab Network | 261 | YouTube |
-| CNBC Television | 230 | YouTube Shorts |
-| Bloomberg Markets and Finance | 75 | YouTube Shorts |
-| Bloomberg Technology | 51 | YouTube Shorts |
-| Yahoo Finance | 41 | YouTube Shorts |
-| Morningstar | 10 | YouTube |
-| Wall Street Journal | 3 | YouTube Shorts |
-| After Earnings | 3 | YouTube |
-| The Street | 8 | YouTube Shorts |
-
-> 이 그룹은 텍스트 전문 추출이 구조적으로 불가능하다. body-fallback(제목+snippet) 유지.
+> 아래 분류는 초기 분석 시점의 가정이며, 2026-03-27 recheck로 대거 수정되었다.  
+> 실제 최종 상태는 위 "최종 상태" 섹션을 참고할 것.  
+> **주요 recheck 결과:** Seeking Alpha, InvestorPlace, Motley Fool, Deadline, CNET, The Guardian, Finbold, Fox Business, New York Post, ETF Trends, Kitco는 이전에 "차단/페이월"로 잘못 분류되었으나 실제 HTTP 프로브 결과 추출 가능함이 확인되어 scraper 구현 완료.
 
 ---
 

@@ -41,6 +41,19 @@ const FMP_STOCK_NEWS_SCRAPE_PUBLISHERS = new Set([
   "PYMNTS",
   "TECHCRUNCH",
   "SCHAEFFERS RESEARCH",
+  "THE MOTLEY FOOL", "FOOL - INVESTING NEWS",
+  // --- recheck batch 2026-03-27 ---
+  "SEEKING ALPHA",
+  "INVESTORPLACE", "INVESTOR PLACE",
+  "DEADLINE",
+  "CNET",
+  "THE GUARDIAN",
+  "NYTIMES",
+  "FINBOLD",
+  "FOX BUSINESS",
+  "NEW YORK POST",
+  "ETF TRENDS",
+  "KITCO",
 ]);
 
 // ─── Types ───
@@ -1006,6 +1019,233 @@ export async function extractByDomain(
           ".sidebar", '[class*="ad"]',
         ],
         clipMarkers: ["More From Schaeffers"],
+        fallbackBody: false,
+      });
+
+    case "THE MOTLEY FOOL":
+    case "FOOL - INVESTING NEWS":
+      return extractTextViaHttp(effectiveUrl, body ?? null, {
+        notePrefix: "motleyfool",
+        selectors: [
+          ".article-body",
+          '[class*="article-body"]',
+          "article",
+          "main",
+        ],
+        removeSelectors: [
+          "header", "footer", "nav", "aside",
+          '[class*="ad-"]', '[class*="pitch"]',
+          '[class*="newsletter"]', '[class*="promo"]',
+        ],
+        clipMarkers: [
+          "The Motley Fool has a",
+          "Suzanne Frey",
+          "John Mackey",
+          "*Stock Advisor",
+        ],
+        fallbackBody: false,
+      });
+
+    case "SEEKING ALPHA":
+      return extractTextViaHttp(effectiveUrl, body ?? null, {
+        notePrefix: "seekingalpha",
+        selectors: [
+          '[class*="body"]',
+          "article",
+          "main",
+        ],
+        removeSelectors: [
+          "header", "footer", "nav", "aside",
+          '[class*="ad-"]', '[class*="paywall"]',
+          '[class*="comment"]',
+        ],
+        clipMarkers: [
+          "This article was written by",
+          "Analyst's Disclosure",
+          "Seeking Alpha's Disclosure",
+          "Editor's Note",
+        ],
+        fallbackBody: false,
+      });
+
+    case "INVESTORPLACE":
+    case "INVESTOR PLACE":
+      return extractTextViaHttp(effectiveUrl, body ?? null, {
+        notePrefix: "investorplace",
+        selectors: [
+          "article",
+          ".entry-content",
+          "main",
+        ],
+        removeSelectors: [
+          "header", "footer", "nav", "aside",
+          '[class*="ad-"]', '[class*="newsletter"]',
+          '[class*="sidebar"]',
+        ],
+        clipMarkers: [
+          "On the date of publication",
+          "More From InvestorPlace",
+        ],
+        fallbackBody: false,
+      });
+
+    case "DEADLINE":
+      return extractTextViaHttp(effectiveUrl, body ?? null, {
+        notePrefix: "deadline",
+        selectors: [
+          ".entry-content",
+          "article",
+          "main",
+        ],
+        removeSelectors: [
+          "header", "footer", "nav", "aside",
+          '[class*="ad-"]', '[class*="related"]',
+        ],
+        clipMarkers: [
+          "Best of Deadline",
+          "Must Read Stories",
+        ],
+        fallbackBody: false,
+      });
+
+    case "CNET":
+      return extractTextViaHttp(effectiveUrl, body ?? null, {
+        notePrefix: "cnet",
+        selectors: [
+          "article",
+          "main",
+          '[class*="article-body"]',
+        ],
+        removeSelectors: [
+          "header", "footer", "nav", "aside",
+          '[class*="ad-"]', '[class*="newsletter"]',
+        ],
+        clipMarkers: ["Editors' note", "More stories"],
+        fallbackBody: false,
+      });
+
+    case "THE GUARDIAN":
+      return extractTextViaHttp(effectiveUrl, body ?? null, {
+        notePrefix: "guardian",
+        selectors: [
+          '[itemprop="articleBody"]',
+          "article",
+          "main",
+        ],
+        removeSelectors: [
+          "header", "footer", "nav", "aside",
+          '[class*="ad-"]', '[class*="newsletter"]',
+        ],
+        clipMarkers: [
+          "Explore more on these topics",
+          "Most viewed",
+        ],
+        fallbackBody: false,
+      });
+
+    case "NYTIMES":
+      return extractTextViaHttp(effectiveUrl, body ?? null, {
+        notePrefix: "nytimes",
+        selectors: [
+          "article",
+          "main",
+          '[class*="body"]',
+        ],
+        removeSelectors: [
+          "header", "footer", "nav", "aside",
+          '[class*="ad"]', '[class*="newsletter"]',
+        ],
+        clipMarkers: [
+          "A version of this article appears in print",
+          "More on",
+        ],
+        fallbackBody: false,
+      });
+
+    case "FINBOLD":
+      return extractTextViaHttp(effectiveUrl, body ?? null, {
+        notePrefix: "finbold",
+        selectors: [
+          "article",
+          ".entry-content",
+          "main",
+        ],
+        removeSelectors: [
+          "header", "footer", "nav", "aside",
+          '[class*="ad-"]', '[class*="newsletter"]',
+        ],
+        clipMarkers: ["Disclaimer:"],
+        fallbackBody: false,
+      });
+
+    case "FOX BUSINESS":
+      return extractTextViaHttp(effectiveUrl, body ?? null, {
+        notePrefix: "foxbusiness",
+        selectors: [
+          "article",
+          "main",
+          '[class*="article-body"]',
+        ],
+        removeSelectors: [
+          "header", "footer", "nav", "aside",
+          '[class*="ad-"]', '[class*="video"]',
+        ],
+        clipMarkers: [
+          "GET FOX BUSINESS",
+          "CLICK HERE",
+        ],
+        fallbackBody: false,
+      });
+
+    case "NEW YORK POST":
+      return extractTextViaHttp(effectiveUrl, body ?? null, {
+        notePrefix: "nypost",
+        selectors: [
+          "article",
+          ".entry-content",
+          "main",
+        ],
+        removeSelectors: [
+          "header", "footer", "nav", "aside",
+          '[class*="ad-"]', '[class*="newsletter"]',
+          '[class*="related"]',
+        ],
+        clipMarkers: ["Filed under"],
+        fallbackBody: false,
+      });
+
+    case "ETF TRENDS":
+      return extractTextViaHttp(effectiveUrl, body ?? null, {
+        notePrefix: "etftrends",
+        selectors: [
+          ".post-content",
+          ".entry-content",
+          "article",
+          "main",
+        ],
+        removeSelectors: [
+          "header", "footer", "nav", "aside",
+        ],
+        clipMarkers: [
+          "For more news",
+          "POPULAR ARTICLES",
+        ],
+        fallbackBody: false,
+      });
+
+    case "KITCO":
+      return extractTextViaHttp(effectiveUrl, body ?? null, {
+        notePrefix: "kitco",
+        selectors: [
+          "article",
+          "main",
+          '[class*="article"]',
+        ],
+        removeSelectors: [
+          "header", "footer", "nav", "aside",
+          '[class*="ad-"]',
+        ],
+        clipMarkers: ["Disclaimer:"],
         fallbackBody: false,
       });
 

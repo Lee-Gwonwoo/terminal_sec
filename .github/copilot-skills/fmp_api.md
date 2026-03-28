@@ -122,14 +122,33 @@
 | | **PYMNTS** | **535** | `pymnts-scrape` | **신규** |
 | | **TechCrunch** | **177** | `techcrunch-scrape` | **신규** |
 | | **Schaeffers Research** | **664** | `schaeffers-scrape` | **신규** |
-| **차단/페이월** | Seeking Alpha | — | `unavailable` | 페이월 강함 |
-| | Zacks | snippet뿐 | `unavailable` | 대부분 프리미엄 |
-| | WSJ / Barrons | — | `unavailable` | 구독 필수 |
+| | **The Motley Fool / Fool - Investing News** | **490~696** | `motleyfool-scrape` | **신규** (페이월 아님) |
+| | **Seeking Alpha** | **109** | `seekingalpha-scrape` | **recheck — 실제 추출 가능** |
+| | **InvestorPlace / Investor Place** | **1,690~1,693** | `investorplace-scrape` | **recheck — 페이월 아님** |
+| | **Deadline** | **394** | `deadline-scrape` | **recheck — 오픈** |
+| | **CNET** | **395** | `cnet-scrape` | **recheck — 오픈** |
+| | **The Guardian** | **979** | `guardian-scrape` | **recheck — 완전 오픈** |
+| | **Finbold** | **342** | `finbold-scrape` | **recheck — 오픈** |
+| | **Fox Business** | **439** | `foxbusiness-scrape` | **recheck — 오픈** (일부 YouTube 제외) |
+| | **New York Post** | **160** | `nypost-scrape` | **recheck — 오픈** |
+| | **ETF Trends** | **724** | `etftrends-scrape` | **recheck — 오픈** |
+| | **Kitco** | **190** | `kitco-scrape` | **recheck — 오픈** |
+| | **NYTimes** | **383~498 (불안정)** | `nytimes-scrape` | **recheck — 간헐적 403** |
+| **차단/페이월** | Zacks | 빈 응답 | `unavailable` | 0c 추출 |
+| | WSJ | — | `unavailable` | 401 인증 |
+| | Barrons | 95wc 구독 벽 | `unavailable` | Subscriber Agreement |
 | | GuruFocus | — | `unavailable` | 403 차단 |
 | | MarketBeat | — | `unavailable` | 403 차단 |
 | | Reuters | — | `unavailable` | 401 인증 |
-| | Invezz / Investopedia | — | `unavailable` | 403/402 |
-| | Motley Fool / Forbes | — | `unavailable` | 소프트 페이월 |
+| | Invezz | — | `unavailable` | 403 차단 |
+| | Investopedia | — | `unavailable` | 402 유료 |
+| | Forbes | — | `unavailable` | 403 차단 |
+| | Market Watch | 24c | `unavailable` | 실질적 페이월 |
+| | Business Insider | 92c | `unavailable` | 실질적 페이월 |
+| | Investors Business Daily | — | `unavailable` | 403 차단 |
+| | FXEmpire | 0c | `unavailable` | 빈 응답 |
+| | GeekWire | — | `unavailable` | 403 차단 |
+| | Fast Company | — | `unavailable` | 403 차단 |
 | **YouTube (텍스트 불가)** | CNBC Television, Bloomberg 등 | — | `unavailable` | 동영상 |
 
 ##### 구현된 수정 사항 (파일별)
@@ -143,12 +162,17 @@
   BENZINGA, CNBC, DEFENSE WORLD,
   24/7 WALL STREET, 247 WALLST,
   PROACTIVE INVESTORS, PROACTIVE INVESTORS - FINANCE,
-  PYMNTS, TECHCRUNCH, SCHAEFFERS RESEARCH
+  PYMNTS, TECHCRUNCH, SCHAEFFERS RESEARCH,
+  THE MOTLEY FOOL, FOOL - INVESTING NEWS,
+  SEEKING ALPHA, INVESTORPLACE, INVESTOR PLACE,
+  DEADLINE, CNET, THE GUARDIAN, NYTIMES,
+  FINBOLD, FOX BUSINESS, NEW YORK POST,
+  ETF TRENDS, KITCO
   ```
 - `extractByDomain()` 진입부에 gate 로직:
   - `sourceType === "fmp_stock_news"` AND publisher가 화이트리스트에 없으면 → `unavailableResult("fmp-stock-no-scraper: {publisher}")` 반환
   - 화이트리스트에 있는 publisher만 switch/scraper 로직으로 진입
-- switch문에 신규 case 9개 추가 (BENZINGA, CNBC, DEFENSE WORLD, 24/7 WALL STREET, 247 WALLST, PROACTIVE INVESTORS, PYMNTS, TECHCRUNCH, THENEWSWIRE, SCHAEFFERS RESEARCH)
+- switch문에 신규 case 22개 추가 (BENZINGA, CNBC, DEFENSE WORLD, 24/7 WALL STREET, 247 WALLST, PROACTIVE INVESTORS, PROACTIVE INVESTORS - FINANCE, PYMNTS, TECHCRUNCH, THENEWSWIRE, SCHAEFFERS RESEARCH, THE MOTLEY FOOL, FOOL - INVESTING NEWS, SEEKING ALPHA, INVESTORPLACE, INVESTOR PLACE, DEADLINE, CNET, THE GUARDIAN, NYTIMES, FINBOLD, FOX BUSINESS, NEW YORK POST, ETF TRENDS, KITCO)
 
 **2. `fulltextRepository.ts`**
 - `deleteFmpStockNewsFallbackRows()` 함수 추가
