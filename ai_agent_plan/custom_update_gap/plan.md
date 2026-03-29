@@ -267,9 +267,9 @@ Other Custom Button Preflight
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 4-1 | `pull-investing` custom에 preflight summary 추가 | `terminal/backend/src/server.ts` | HTTP 응답 확인 | ⏳ |
+| 4-1 | `pull-investing` custom에 preflight summary 추가 | `terminal/backend/src/server.ts`, `InvestingNewsWindow.tsx` | HTTP 응답 확인 | ⏳ |
 | 4-2 | `news/change/update-custom`, `ibkr/calendar/update-custom`에 preflight summary 추가 | `terminal/backend/src/server.ts`, `DataControlWindow.tsx` | HTTP 응답 확인 | ⏳ |
-| 4-3 | 본실행 result summary가 preflight와 비교 가능한 수치를 돌려주도록 정리 | `terminal/backend/src/server.ts` | job result 확인 | ⬜ |
+| 4-3 | 본실행 result summary가 preflight와 비교 가능한 수치를 돌려주도록 정리 | `terminal/backend/src/server.ts`, `DataControlWindow.tsx` | job result 확인 | ⏳ |
 
 4-1 목적: ticker gap 계산이 어려운 category 기반 버튼도 실행 전 범위를 알게 하기 위함.
 설명: Investing custom은 category별 예상 article 수, 기존 범위, 요청 범위를 먼저 보여준다.
@@ -359,7 +359,7 @@ Track B — ticker-news preflight / execution
 Track C — non-ticker custom preflight
 - ⏳ 4-1 investing custom preflight summary
 - ⏳ 4-2 change/calendar custom preflight summary
-- ⬜ 4-3 result summary vocabulary 정리
+- ⏳ 4-3 result summary vocabulary 정리
 
 ┌──────────────────────────────────────────────┐
 │ 사용자 결정 필요                              │
@@ -392,3 +392,11 @@ Track C — non-ticker custom preflight
   - `collapseIsoDateRanges` helper는 server.ts에서 더 이상 사용되지 않아 제거됨.
   - preflight/실행 로직은 동일한 helper를 공유하므로 자동으로 반영됨.
 - **검증:** backend/frontend build 성공, test 84/84, runtime preflight 호출에서 envelope 기반 결과 확인 완료.
+
+### PLAN CHANGE — 2026-03-29 (non-ticker custom 마감 반영)
+
+- `InvestingNewsWindow.tsx` custom 실행도 이제 preflight 모달을 먼저 거친 뒤 Continue에서 실제 pull을 시작하도록 연결했다.
+- `pull-investing` custom job result는 이제 preflight와 같은 `requestedRange`, `executionMode`, `categories[].existingItemsInRange` vocabulary를 유지하면서 `fetchedItems / inserted / skipped`를 함께 반환한다.
+- `news/change/update-custom` job result는 preflight와 같은 `totalRowsInRange / rowsWithChangePct / rowsExpectedToUpdate` 기준을 유지하면서 `rowsUpdated / rowsSkipped`를 함께 반환한다.
+- `ibkr/calendar/update-custom`은 sync 응답이 아니라 job 기반으로 바꿔 `DataControlWindow` custom flow와 맞췄고, result에 `totalTickers / existingEventsInRange / existingEventDays / fetchedEvents / upserted`를 남기도록 정리했다.
+- `DataControlWindow.tsx`의 done summary 영역도 custom change / custom calendar result vocabulary를 바로 읽을 수 있도록 보강했다.

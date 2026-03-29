@@ -110,13 +110,13 @@ Data Control 창의 각 update 버튼을 우클릭했을 때 `how to use` 메뉴
 ```
 사용자 확인 필요: **예**
 
-#### ⬜ Step 1 — Data Control 버튼 우클릭 메뉴 추가
+#### ⏳ Step 1 — Data Control 버튼 우클릭 메뉴 추가
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 1-1 | update 버튼별 context menu state와 anchor 좌표 추가 | `DataControlWindow.tsx` | 정적 분석 0건 | ⬜ |
-| 1-2 | 버튼 우클릭 시 `how to use` menu 표시 | `DataControlWindow.tsx` | UI 확인 | ⬜ |
-| 1-3 | outside click / escape 시 메뉴 닫힘 처리 | `DataControlWindow.tsx` | UI 확인 | ⬜ |
+| 1-1 | update 버튼별 context menu state와 anchor 좌표 추가 | `DataControlWindow.tsx` | 정적 분석 0건 | ⏳ |
+| 1-2 | 버튼 우클릭 시 `how to use` menu 표시 | `DataControlWindow.tsx` | UI 확인 | ⏳ |
+| 1-3 | outside click / escape 시 메뉴 닫힘 처리 | `DataControlWindow.tsx` | UI 확인 | ⏳ |
 
 1-1 목적: 버튼 단위 메뉴 상태를 관리하기 위함.
 설명: 어떤 버튼을 우클릭했는지와 메뉴 좌표를 저장하는 state를 추가한다.
@@ -144,13 +144,13 @@ outside click / ESC로 메뉴 닫힘 확인
 ```
 사용자 확인 필요: **예**
 
-#### ⬜ Step 2 — How To Use 설명 창 타입 추가
+#### ⏳ Step 2 — How To Use 설명 창 타입 추가
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 2-1 | Data Control용 how-to data type 정의 | `src/app/types.ts` | 타입 에러 0건 | ⬜ |
-| 2-2 | 설명 창 컴포넌트 추가 또는 기존 창 재사용 분기 연결 | `src/app/components/DataControlHowToUseWindow.tsx`, `DraggableWindow.tsx` 등 | build 확인 | ⬜ |
-| 2-3 | custom event로 창 열기 흐름 연결 | `App.tsx`, `DataControlWindow.tsx` | runtime 확인 | ⬜ |
+| 2-1 | Data Control용 how-to data type 정의 | `src/app/types.ts` | 타입 에러 0건 | ⏳ |
+| 2-2 | 설명 창 컴포넌트 추가 또는 기존 창 재사용 분기 연결 | `src/app/components/DataControlHowToUseWindow.tsx`, `DraggableWindow.tsx` 등 | build 확인 | ⏳ |
+| 2-3 | custom event로 창 열기 흐름 연결 | `App.tsx`, `DataControlWindow.tsx` | runtime 확인 | ⏳ |
 
 2-1 목적: 버튼별 설명 내용을 구조화하기 위함.
 설명: title, 목적, 언제 실행하는지, 입력값, 주의사항, 결과 확인법 같은 필드를 정의한다.
@@ -177,13 +177,13 @@ frontend build
 ```
 사용자 확인 필요: **예**
 
-#### ⬜ Step 3 — 버튼별 How To Use 설명 데이터 작성
+#### ⏳ Step 3 — 버튼별 How To Use 설명 데이터 작성
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 3-1 | update 버튼 설명 registry 파일 추가 | `src/app/dataControlHowToUse.ts` 등 | 정적 분석 0건 | ⬜ |
-| 3-2 | 각 update 버튼에 대응하는 설명 문구 작성 | 같은 파일 | 내용 검토 | ⬜ |
-| 3-3 | 버튼 key와 how-to registry 매핑 연결 | `DataControlWindow.tsx` | runtime 확인 | ⬜ |
+| 3-1 | update 버튼 설명 registry 파일 추가 | `src/app/dataControlHowToUse.ts` 등 | 정적 분석 0건 | ⏳ |
+| 3-2 | 각 update 버튼에 대응하는 설명 문구 작성 | 같은 파일 | 내용 검토 | ⏳ |
+| 3-3 | 버튼 key와 how-to registry 매핑 연결 | `DataControlWindow.tsx` | runtime 확인 | ⏳ |
 
 3-1 목적: 설명 문구를 인라인 JSX에서 분리해 유지보수성을 높이기 위함.
 설명: 버튼 key 기준으로 설명 데이터를 관리하는 registry를 만든다.
@@ -251,17 +251,17 @@ Track A — 패턴/타입 정리
 - ⏳ 0-1 EvidenceTable 우클릭 description 패턴 확인
 - ⏳ 0-2 App/DraggableWindow 오픈 구조 확인
 - ⏳ 0-3 DataControl 버튼 inventory 정리
-- ⬜ 2-1 how-to data type 정의
-- ⬜ 2-2 설명 창 컴포넌트/분기 추가
-- ⬜ 2-3 custom event 오픈 연결
+- ⏳ 2-1 how-to data type 정의
+- ⏳ 2-2 설명 창 컴포넌트/분기 추가
+- ⏳ 2-3 custom event 오픈 연결
 
 Track B — 버튼 UX 연결
-- ⬜ 1-1 context menu state 추가
-- ⬜ 1-2 우클릭 how to use menu 표시
-- ⬜ 1-3 outside click / ESC 닫힘 처리
-- ⬜ 3-1 how-to registry 파일 추가
-- ⬜ 3-2 버튼별 설명 문구 작성
-- ⬜ 3-3 버튼 key와 registry 연결
+- ⏳ 1-1 context menu state 추가
+- ⏳ 1-2 우클릭 how to use menu 표시
+- ⏳ 1-3 outside click / ESC 닫힘 처리
+- ⏳ 3-1 how-to registry 파일 추가
+- ⏳ 3-2 버튼별 설명 문구 작성
+- ⏳ 3-3 버튼 key와 registry 연결
 
 ┌──────────────────────────────────────────────┐
 │ 사용자 결정 필요                              │
@@ -280,3 +280,12 @@ Track B — 버튼 UX 연결
 |------|-----------|--------|
 | D1 | Step 2 | 별도 창 / 기존 창 재사용 |
 | D3 | Step 4 | 우클릭만 / help 아이콘 병행 |
+
+### PLAN CHANGE — 2026-03-29 (실구현 반영)
+
+- D1은 실제 구현에서 **별도 창**으로 확정했다. `CaseDescriptionWindow`를 억지로 재사용하지 않고 `DataControlHowToUseWindow.tsx`를 추가했다.
+- `types.ts`에 Data Control how-to payload 타입과 새 window type을 추가했다.
+- `dataControlHowToUse.ts` registry 파일에서 update 버튼별 설명 데이터를 분리 관리하도록 구현했다.
+- `DataControlWindow.tsx`에는 update 버튼 우클릭 context menu + `How To Use` 항목 + outside click / ESC 닫힘 처리를 붙였다.
+- `App.tsx` / `DraggableWindow.tsx`에는 `open-data-control-how-to-use` custom event와 draggable window 렌더 분기를 연결했다.
+- 현재 남은 것은 사용자 시각 확인 후 상태를 `✅`로 올리는 일과, Step 4의 선택 UX 여부 결정이다.

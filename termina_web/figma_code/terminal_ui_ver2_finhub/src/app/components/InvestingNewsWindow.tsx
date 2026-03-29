@@ -253,6 +253,10 @@ export function InvestingNewsWindow({
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [pendingUpdateCategory, setPendingUpdateCategory] = useState<UpdateCategory>('stock-market-news');
+  const [showCustomPreflightModal, setShowCustomPreflightModal] = useState(false);
+  const [customPreflightData, setCustomPreflightData] = useState<any | null>(null);
+  const [customPreflightTitle, setCustomPreflightTitle] = useState('Investing Custom Preflight');
+  const [pendingCustomExecute, setPendingCustomExecute] = useState<(() => void) | null>(null);
 
   // Background job tracking
   const [pullJobId, setPullJobId] = useState<string | null>(null);
@@ -503,6 +507,37 @@ export function InvestingNewsWindow({
   }, [selectedJobId, syncJobState]);
 
   // ─── Update (pull from Investing) ───
+  const startUpdateRequest = useCallback(async (
+    mode: 'recent' | 'custom' = 'recent',
+    category: UpdateCategory = 'stock-market-news',
+    from?: string,
+    to?: string,
+  ) => {
+    const body: Record<string, unknown> = {
+      mode,
+      category,
+      maxPages: mode === 'custom' ? 50 : 5,
+      requestIntervalMs: 1000,
+      fulltextConcurrency: 10,
+    };
+    if (from) body.from = from;
+    if (to) body.to = to;
+    const res = await fetch(`${API_BASE}/api/news/pull-investing`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await readJsonResponse(res);
+    if (!res.ok) {
+      if (res.status === 409 && data.existingJobId) {
+        registerJob(data.existingJobId, 'news-update');
+        setShowLogPanel(true);
+      }
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+    registerJob(data.jobId, 'news-update');
+  }, [registerJob]);
+
   const handleUpdate = async (
     mode: 'recent' | 'custom' = 'recent',
     category: UpdateCategory = 'stock-market-news',
@@ -513,33 +548,42 @@ export function InvestingNewsWindow({
     setUpdating(true);
     setError(null);
     try {
-      const body: Record<string, unknown> = {
-        mode,
-        category,
-        maxPages: mode === 'custom' ? 50 : 5,
-        requestIntervalMs: 1000,
-        fulltextConcurrency: 10,
-      };
-      if (from) body.from = from;
-      if (to) body.to = to;
-      const res = await fetch(`${API_BASE}/api/news/pull-investing`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await readJsonResponse(res);
-      if (!res.ok) {
-        if (res.status === 409 && data.existingJobId) {
-          registerJob(data.existingJobId, 'news-update');
-          setShowLogPanel(true);
-          setError(data.error || 'Investing pull job is already running');
-          return;
+      if (mode === 'custom' && from && to) {
+        const preflightBody: Record<string, unknown> = {
+          mode,
+          category,
+          maxPages: 50,
+          requestIntervalMs: 1000,
+          fulltextConcurrency: 10,
+          from,
+          to,
+        };
+        const preflightRes = await fetch(`${API_BASE}/api/news/pull-investing/preflight-custom`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(preflightBody),
+        });
+        const preflightData = await readJsonResponse(preflightRes);
+        if (!preflightRes.ok) {
+          throw new Error(preflightData.error || `HTTP ${preflightRes.status}`);
         }
-        setError(data.error || `HTTP ${res.status}`);
+        setCustomPreflightTitle(`Investing Custom Preflight: ${category === 'stock-market-news' ? 'Stock Market' : 'Crypto'}`);
+        setCustomPreflightData(preflightData);
+        setPendingCustomExecute(() => () => {
+          setLastUpdateCategory(category);
+          setUpdating(true);
+          setError(null);
+          void startUpdateRequest('custom', category, from, to).catch((err: unknown) => {
+            setError(err instanceof Error ? err.message : 'Failed to start update');
+            setUpdating(false);
+          });
+        });
+        setShowCustomPreflightModal(true);
         setUpdating(false);
         return;
       }
-      registerJob(data.jobId, 'news-update');
+
+      await startUpdateRequest(mode, category, from, to);
     } catch (err: any) {
       setError(err.message || 'Failed to start update');
       setUpdating(false);
@@ -1385,6 +1429,36 @@ export function InvestingNewsWindow({
           folders={bookmarkFolders}
           onFoldersChanged={fetchBookmarkFolders}
         />
+      )}
+
+      {showCustomPreflightModal && customPreflightData && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowCustomPreflightModal(false)}>
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-4 w-[42rem] max-w-[92vw] border border-gray-200 dark:border-gray-700" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-medium mb-2 flex items-center gap-2"><RotateCw className="w-4 h-4 text-blue-500" />{customPreflightTitle}</h3>
+            <p className="text-xs text-gray-600 dark:text-gray-300 mb-3">실행 전에 category별 기존 coverage와 예상 처리 범위를 보여줍니다.</p>
+            <pre className="max-h-[24rem] overflow-auto rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-3 text-[11px] leading-5 text-gray-700 dark:text-gray-200 whitespace-pre-wrap break-all">{JSON.stringify(customPreflightData, null, 2)}</pre>
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={() => {
+                  setShowCustomPreflightModal(false);
+                  setCustomPreflightData(null);
+                  setPendingCustomExecute(null);
+                }}
+                className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700"
+              >Cancel</button>
+              <button
+                onClick={() => {
+                  const execute = pendingCustomExecute;
+                  setShowCustomPreflightModal(false);
+                  setCustomPreflightData(null);
+                  setPendingCustomExecute(null);
+                  execute?.();
+                }}
+                className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+              >Continue</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

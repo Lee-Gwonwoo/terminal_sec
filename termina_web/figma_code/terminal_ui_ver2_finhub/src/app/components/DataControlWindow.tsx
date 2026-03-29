@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { RefreshCw, Eye, X, Square } from 'lucide-react';
+import { dataControlHowToUseRegistry, type DataControlHowToUseKey } from '../dataControlHowToUse';
 
 const API_BASE = "";
 
@@ -22,7 +23,7 @@ interface JobStatus {
   result?: Record<string, unknown>;
 }
 
-type SectionKey = 'price' | 'calendarBackfill' | 'calendarRefresh' | 'calendarCustom' | 'companyDesc' | 'yahooDesc' | 'peersPull' | 'ipoDate' | 'recent' | 'custom';
+type SectionKey = DataControlHowToUseKey;
 
 interface DataControlWindowProps {
   fontScale?: number;
@@ -71,7 +72,9 @@ export function DataControlWindow({
   const [customPreflightTitle, setCustomPreflightTitle] = useState('Custom Update Preflight');
   const [customPreflightData, setCustomPreflightData] = useState<any | null>(null);
   const [pendingCustomExecute, setPendingCustomExecute] = useState<(() => void) | null>(null);
+  const [howToContextMenu, setHowToContextMenu] = useState<{ x: number; y: number; key: SectionKey } | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
+  const howToContextMenuRef = useRef<HTMLDivElement>(null);
 
   // ─── App DB inspection state ───
   const [dbTables, setDbTables] = useState<DbTableInfo[]>([]);
@@ -436,6 +439,34 @@ export function DataControlWindow({
     try { localStorage.setItem('data-control-active-tab', activeDataTab); } catch { /* quota */ }
   }, [activeDataTab]);
 
+  useEffect(() => {
+    if (!howToContextMenu) {
+      return;
+    }
+
+    const handleMouseDown = (event: MouseEvent) => {
+      if (howToContextMenuRef.current?.contains(event.target as Node)) {
+        return;
+      }
+      setHowToContextMenu(null);
+    };
+    const handleContextMenu = () => setHowToContextMenu(null);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setHowToContextMenu(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handleMouseDown);
+    window.addEventListener('contextmenu', handleContextMenu);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown);
+      window.removeEventListener('contextmenu', handleContextMenu);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [howToContextMenu]);
+
   // ─── Start update handlers ───
   const startUpdate = async (key: SectionKey) => {
     setUpdating(prev => ({ ...prev, [key]: true }));
@@ -564,6 +595,12 @@ export function DataControlWindow({
     } catch {
       return iso;
     }
+  };
+
+  const openHowToUseWindow = (key: SectionKey) => {
+    const payload = dataControlHowToUseRegistry[key];
+    window.dispatchEvent(new CustomEvent('open-data-control-how-to-use', { detail: payload }));
+    setHowToContextMenu(null);
   };
 
   // ─── Get last success for a status key ───
@@ -1551,9 +1588,13 @@ export function DataControlWindow({
                   {/* Update button */}
                   <button
                     onClick={() => startUpdate(key)}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      setHowToContextMenu({ x: event.clientX, y: event.clientY, key });
+                    }}
                     disabled={isRunning}
                     className="px-3 py-1 border border-gray-300 dark:border-gray-600 rounded text-xs hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                    title={isRunning ? 'Update in progress...' : `Start ${label} update`}
+                    title={isRunning ? 'Update in progress...' : `Start ${label} update. Right click for how to use.`}
                   >
                     <RefreshCw className={`w-3 h-3 ${isRunning ? 'animate-spin' : ''}`} />
                     <span>{isRunning ? 'Running...' : 'Update'}</span>
@@ -1682,8 +1723,38 @@ export function DataControlWindow({
               {activeLog.result.merged !== undefined && (
                 <span> — {String(activeLog.result.merged)} merged, {String(activeLog.result.skipped)} skipped</span>
               )}
+              {activeLog.result.route === '/api/news/change/update-custom' && (
+                <span>
+                  {' '}— range {String((activeLog.result.requestedRange as Record<string, unknown> | undefined)?.from ?? '?')} ~ {String((activeLog.result.requestedRange as Record<string, unknown> | undefined)?.to ?? '?')},
+                  rows {String(activeLog.result.totalRowsInRange ?? 0)}, expected {String(activeLog.result.rowsExpectedToUpdate ?? 0)},
+                  updated {String(activeLog.result.rowsUpdated ?? 0)}, skipped {String(activeLog.result.rowsSkipped ?? 0)}
+                </span>
+              )}
+              {activeLog.result.route === '/api/ibkr/calendar/update-custom' && (
+                <span>
+                  {' '}— range {String((activeLog.result.requestedRange as Record<string, unknown> | undefined)?.from ?? '?')} ~ {String((activeLog.result.requestedRange as Record<string, unknown> | undefined)?.to ?? '?')},
+                  tickers {String(activeLog.result.totalTickers ?? 0)}, existing events {String(activeLog.result.existingEventsInRange ?? 0)},
+                  fetched {String(activeLog.result.fetchedEvents ?? 0)}, upserted {String(activeLog.result.upserted ?? 0)}
+                </span>
+              )}
             </div>
           )}
+        </div>
+      )}
+
+      {howToContextMenu && (
+        <div
+          ref={howToContextMenuRef}
+          className="absolute z-50 min-w-[240px] rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-xl p-1.5"
+          style={{ top: howToContextMenu.y, left: howToContextMenu.x }}
+        >
+          <button
+            onClick={() => openHowToUseWindow(howToContextMenu.key)}
+            className="w-full rounded px-3 py-2 text-left text-xs hover:bg-gray-100 dark:hover:bg-gray-700"
+          >
+            <div className="font-medium text-gray-800 dark:text-gray-100">How To Use</div>
+            <div className="mt-0.5 text-[10px] text-gray-500 dark:text-gray-400">{dataControlHowToUseRegistry[howToContextMenu.key].title}</div>
+          </button>
         </div>
       )}
 

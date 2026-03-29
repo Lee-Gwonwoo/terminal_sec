@@ -3,7 +3,7 @@ import { Plus, Edit2, Moon, Sun } from "lucide-react";
 import { TabData, WindowInstance, WindowType } from "./types";
 import { AddTabModal } from "./components/AddTabModal";
 import { DraggableWindow } from "./components/DraggableWindow";
-import type { CaseDescriptionWindowData } from "./types";
+import type { CaseDescriptionWindowData, DataControlHowToUseWindowData } from "./types";
 
 function clampNumber(value: unknown, fallback: number, min: number, max: number) {
   if (typeof value !== "number" || Number.isNaN(value)) return fallback;
@@ -81,9 +81,62 @@ export default function App() {
       }));
     };
 
+    const handleOpenDataControlHowToUse = (event: Event) => {
+      const customEvent = event as CustomEvent<DataControlHowToUseWindowData>;
+      const payload = customEvent.detail;
+      if (!payload) {
+        return;
+      }
+
+      setTabs(prevTabs => prevTabs.map(tab => {
+        if (tab.id !== activeTabId) {
+          return tab;
+        }
+
+        const existing = tab.windows.find((window) => {
+          if (window.type !== 'data-control-how-to-use' || !window.data) {
+            return false;
+          }
+          return 'key' in window.data && window.data.key === payload.key;
+        });
+
+        if (existing) {
+          return {
+            ...tab,
+            windows: tab.windows.map(window => window.id === existing.id ? {
+              ...window,
+              title: `How To Use: ${payload.title}`,
+              data: payload,
+            } : window),
+          };
+        }
+
+        const nextIndex = tab.windows.length;
+        const newWindow: WindowInstance = {
+          id: `${Date.now()}-data-control-how-to-use-${payload.key}`,
+          type: 'data-control-how-to-use',
+          title: `How To Use: ${payload.title}`,
+          data: payload,
+          position: {
+            top: 72 + nextIndex * 18,
+            left: 96 + nextIndex * 18,
+            width: 560,
+            height: 520,
+          },
+        };
+
+        return {
+          ...tab,
+          windows: [...tab.windows, newWindow],
+        };
+      }));
+    };
+
     window.addEventListener('open-case-description', handleOpenCaseDescription as EventListener);
+    window.addEventListener('open-data-control-how-to-use', handleOpenDataControlHowToUse as EventListener);
     return () => {
       window.removeEventListener('open-case-description', handleOpenCaseDescription as EventListener);
+      window.removeEventListener('open-data-control-how-to-use', handleOpenDataControlHowToUse as EventListener);
     };
   }, [activeTabId]);
 
@@ -203,6 +256,8 @@ export default function App() {
           title = 'Evidence Table';
         } else if (type === 'case-description') {
           title = 'Case Description';
+        } else if (type === 'data-control-how-to-use') {
+          title = 'Data Control How To Use';
         } else if (type === 'investing-news') {
           title = 'Investing News';
         } else {

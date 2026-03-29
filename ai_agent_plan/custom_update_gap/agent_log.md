@@ -96,3 +96,32 @@
 - 상태:
   - plan에 PLAN CHANGE 기록 추가 완료.
   - coverage 핵심 로직 수정 완료, 사용자 확인 대기.
+
+**작성 시각:** 2026-03-29 13:20 (local)
+
+### non-ticker custom preflight/result summary 마감
+
+- 생성/수정 파일:
+  - `terminal/backend/src/server.ts`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/InvestingNewsWindow.tsx`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx`
+  - `ai_agent_plan/custom_update_gap/plan.md`
+  - `ai_agent_plan/custom_update_gap/agent_log.md`
+- 수행 내용:
+  - `InvestingNewsWindow.tsx` custom 업데이트도 preflight 모달을 먼저 보여준 뒤 Continue에서 실제 job을 시작하도록 연결했다.
+  - `pull-investing` custom job result는 preflight vocabulary를 유지한 채 `categories[].existingItemsInRange / fetchedItems / inserted / skipped`를 함께 반환하도록 정리했다.
+  - `news/change/update-custom` job result는 `totalRowsInRange / rowsWithChangePct / rowsExpectedToUpdate`를 유지하면서 `rowsUpdated / rowsSkipped`를 함께 남기도록 정리했다.
+  - `ibkr/calendar/update-custom`은 job 기반 응답으로 바꾸고 result에 `totalTickers / existingEventsInRange / existingEventDays / fetchedEvents / upserted`를 남기도록 변경했다.
+  - `DataControlWindow.tsx` done summary 영역은 custom change / custom calendar result vocabulary를 읽어 비교 가능한 문구를 보여주도록 보강했다.
+- 검증 표:
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `server.ts`, `InvestingNewsWindow.tsx`, `DataControlWindow.tsx` 0 errors |
+| 빌드 | ✅ | backend `npm.cmd run build`, frontend `npm.cmd run build` 모두 성공 |
+| 자동 테스트 | ✅ | backend `84/84` pass |
+| 런타임 통합 | ✅ | `POST /api/news/pull-investing/preflight-custom` + 실제 custom job done/result 확인, `POST /api/news/change/update-custom/preflight` + 실제 custom job done/result 확인, `POST /api/ibkr/calendar/update-custom/preflight` + 실제 custom jobId 반환/실패 상태 기록 확인(현재 환경은 IBKR 미연결) |
+
+- 상태:
+  - Step 4-1 ~ 4-3 구현 완료 후 사용자 확인 대기.
+  - `calendar custom` actual fetch는 현재 환경에서 IBKR 연결이 없어 failed로 끝났지만, preflight/result/job contract 자체는 정상 동작 확인.

@@ -2732,6 +2732,37 @@ app.post("/api/news/pull-investing", async (req, res, next) => {
     const fallback7d = getEtDateString(new Date(Date.now() - 7 * 86_400_000));
     const effectiveFrom = isCustom ? input.from! : fallback7d;
     const effectiveTo = input.to ?? todayEt;
+    let customSummary:
+      | {
+          route: string;
+          requestedRange: { from: string; to: string };
+          executionMode: string;
+          categories: Array<{ category: InvestingCategory; existingItemsInRange: number }>;
+        }
+      | undefined;
+
+    if (isCustom) {
+      const placeholders = categories.map(() => "?").join(",");
+      const rows = await getDb().all<{ source_type: string; item_count: number }[]>(
+        `SELECT source_type, COUNT(*) AS item_count
+         FROM news_items
+         WHERE source = 'INVESTING'
+           AND source_type IN (${placeholders})
+           AND published_at >= ?
+           AND published_at <= ?
+         GROUP BY source_type`,
+        [...categories, effectiveFrom, `${effectiveTo}T23:59:59.999Z`],
+      );
+      customSummary = {
+        route: "/api/news/pull-investing",
+        requestedRange: { from: effectiveFrom, to: effectiveTo },
+        executionMode: "summary-only",
+        categories: categories.map((category) => ({
+          category,
+          existingItemsInRange: rows.find((row) => row.source_type === category)?.item_count ?? 0,
+        })),
+      };
+    }
 
     const jobId = createJob(categories.length, {
       category: "news-update",
@@ -2745,6 +2776,17 @@ app.post("/api/news/pull-investing", async (req, res, next) => {
     (async () => {
       const counters = { totalInserted: 0, totalSkipped: 0 };
       const newFulltextTargets: Array<{ id: string; url: string; publisher: string | null; body: string | null; source_type: string }> = [];
+      const perCategory = new Map<InvestingCategory, { existingItemsInRange: number; fetchedItems: number; inserted: number; skipped: number }>(
+        categories.map((category) => [
+          category,
+          {
+            existingItemsInRange: customSummary?.categories.find((item) => item.category === category)?.existingItemsInRange ?? 0,
+            fetchedItems: 0,
+            inserted: 0,
+            skipped: 0,
+          },
+        ]),
+      );
 
       try {
         for (const category of categories) {
@@ -2759,6 +2801,10 @@ app.post("/api/news/pull-investing", async (req, res, next) => {
           });
 
           appendLog(jobId, `  ${category}: ${items.length} articles found`);
+          const categoryCounters = perCategory.get(category);
+          if (categoryCounters) {
+            categoryCounters.fetchedItems = items.length;
+          }
 
           for (const rawItem of items) {
             const inserted = await insertNewsItem({
@@ -2774,6 +2820,9 @@ app.post("/api/news/pull-investing", async (req, res, next) => {
             });
             if (inserted) {
               counters.totalInserted++;
+              if (categoryCounters) {
+                categoryCounters.inserted++;
+              }
               newFulltextTargets.push({
                 id: inserted.id,
                 url: rawItem.url,
@@ -2784,6 +2833,9 @@ app.post("/api/news/pull-investing", async (req, res, next) => {
               streamHub.publishNews(inserted);
             } else {
               counters.totalSkipped++;
+              if (categoryCounters) {
+                categoryCounters.skipped++;
+              }
             }
           }
 
@@ -2801,10 +2853,14 @@ app.post("/api/news/pull-investing", async (req, res, next) => {
 
         completeJob(jobId, {
           source: "INVESTING",
+          route: customSummary?.route,
           mode: input.mode,
           category: input.category,
-          from: effectiveFrom,
-          to: effectiveTo,
+          requestedRange: customSummary?.requestedRange ?? { from: effectiveFrom, to: effectiveTo },
+          executionMode: customSummary?.executionMode,
+          categories: customSummary
+            ? categories.map((category) => ({ category, ...perCategory.get(category)! }))
+            : undefined,
           inserted: counters.totalInserted,
           skipped: counters.totalSkipped,
           fulltextSuccess: fulltextResult.success,
@@ -3116,6 +3172,27 @@ app.post("/api/news/change/update-custom/preflight", async (req, res, next) => {
 app.post("/api/news/change/update-custom", async (req, res, next) => {
   try {
     const { from, to, fmpConcurrency, fmpRequestIntervalMs, ibkrConcurrency } = customChangeSchema.parse(req.body);
+    const counts = await getDb().get<{
+      totalRowsInRange: number;
+      rowsWithChangePct: number;
+    }>(
+      `SELECT COUNT(*) AS totalRowsInRange,
+              SUM(CASE WHEN ncm.news_id IS NOT NULL THEN 1 ELSE 0 END) AS rowsWithChangePct
+       FROM news_items ni
+       LEFT JOIN news_change_metrics ncm
+         ON ncm.news_id = ni.id AND ncm.metric_key = 'change_pct'
+       WHERE ni.published_at >= ?
+         AND ni.published_at <= ?`,
+      [from, `${to}T23:59:59.999Z`],
+    );
+    const preflightSummary = {
+      route: "/api/news/change/update-custom",
+      requestedRange: { from, to },
+      executionMode: "summary-only",
+      totalRowsInRange: counts?.totalRowsInRange ?? 0,
+      rowsWithChangePct: counts?.rowsWithChangePct ?? 0,
+      rowsExpectedToUpdate: Math.max(0, (counts?.totalRowsInRange ?? 0) - (counts?.rowsWithChangePct ?? 0)),
+    };
     const fmpFallback: FmpFallbackOptions = {
       enabled: true,
       concurrency: clampFmpConcurrency(fmpConcurrency ?? ibkrConcurrency ?? 5),
@@ -3127,12 +3204,17 @@ app.post("/api/news/change/update-custom", async (req, res, next) => {
     });
     (async () => {
       try {
-        await bulkUpdateCustomChange(from, to, (done, total) => {
+        const result = await bulkUpdateCustomChange(from, to, (done, total) => {
           updateProgress(jobId, done, total);
         }, undefined, () => isJobCancelled(jobId), fmpFallback, (msg) => appendLog(jobId, msg));
         if (isJobCancelled(jobId)) return;
         await setLastSuccess("news_change_custom", new Date().toISOString(), { from, to });
-        completeJob(jobId);
+        completeJob(jobId, {
+          ...preflightSummary,
+          rowsUpdated: result.updated,
+          rowsSkipped: result.skipped,
+          fmpConcurrencyUsed: fmpFallback.concurrency,
+        });
       } catch (err: any) {
         failJob(jobId, err?.message ?? String(err));
       }
@@ -3517,35 +3599,71 @@ app.post("/api/ibkr/calendar/update-custom", async (req, res, next) => {
       return;
     }
     const tickers = await getDefaultUniverseTickers();
-    const result = await pullIbkrCalendarCustom(tickers, from, to);
+    const summary = await getDb().get<{ existingEventsInRange: number; existingEventDays: number }>(
+      `SELECT COUNT(*) AS existingEventsInRange,
+              COUNT(DISTINCT substr(event_at, 1, 10)) AS existingEventDays
+       FROM calendar_events
+       WHERE event_at >= ?
+         AND event_at <= ?`,
+      [from, `${to}T23:59:59.999Z`],
+    );
+    const preflightSummary = {
+      route: "/api/ibkr/calendar/update-custom",
+      requestedRange: { from, to },
+      executionMode: "summary-only",
+      totalTickers: tickers.length,
+      existingEventsInRange: summary?.existingEventsInRange ?? 0,
+      existingEventDays: summary?.existingEventDays ?? 0,
+    };
 
-    let upserted = 0;
-    for (const ev of result.events) {
-      await upsertCalendarEvent({
-        type: ev.type,
-        eventTime: ev.eventTime,
-        ticker: ev.ticker,
-        title: ev.title,
-        fieldsJson: ev.fieldsJson,
-        source: "IBKR",
-        uniqueKey: ev.uniqueKey,
-      });
-      upserted++;
-    }
-
-    const deletedMockRows = await deleteMockCalendarRows();
-    if (deletedMockRows > 0) {
-      console.log(`[ibkr-calendar-custom] mock_provider rows 삭제: ${deletedMockRows}건`);
-    }
-
-    await setLastSuccess("ibkr_calendar", new Date().toISOString(), {
-      mode: "custom",
-      dateRange: { from, to },
-      upserted,
-      deletedMockRows,
+    const jobId = createJob(0, {
+      category: "news-update",
+      label: "Calendar Update (Custom)",
     });
 
-    res.json({ mode: "custom", dateRange: { from, to }, upserted, deletedMockRows, source: "IBKR" });
+    res.json({ jobId });
+
+    (async () => {
+      try {
+        const result = await pullIbkrCalendarCustom(tickers, from, to);
+
+        let upserted = 0;
+        for (const ev of result.events) {
+          await upsertCalendarEvent({
+            type: ev.type,
+            eventTime: ev.eventTime,
+            ticker: ev.ticker,
+            title: ev.title,
+            fieldsJson: ev.fieldsJson,
+            source: "IBKR",
+            uniqueKey: ev.uniqueKey,
+          });
+          upserted++;
+        }
+
+        const deletedMockRows = await deleteMockCalendarRows();
+        if (deletedMockRows > 0) {
+          console.log(`[ibkr-calendar-custom] mock_provider rows 삭제: ${deletedMockRows}건`);
+        }
+
+        await setLastSuccess("ibkr_calendar", new Date().toISOString(), {
+          mode: "custom",
+          dateRange: { from, to },
+          upserted,
+          deletedMockRows,
+        });
+
+        completeJob(jobId, {
+          ...preflightSummary,
+          source: "IBKR",
+          fetchedEvents: result.events.length,
+          upserted,
+          deletedMockRows,
+        });
+      } catch (err: any) {
+        failJob(jobId, err?.message ?? String(err));
+      }
+    })();
   } catch (error) {
     next(error);
   }

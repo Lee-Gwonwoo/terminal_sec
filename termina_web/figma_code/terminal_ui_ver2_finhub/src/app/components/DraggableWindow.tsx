@@ -12,6 +12,7 @@ const DataControlWindow = lazy(async () => ({ default: (await import('./DataCont
 const CaseResearchWindow = lazy(async () => ({ default: (await import('./CaseResearchWindow')).CaseResearchWindow }));
 const EvidenceTableWindow = lazy(async () => ({ default: (await import('./EvidenceTableWindow')).EvidenceTableWindow }));
 const CaseDescriptionWindow = lazy(async () => ({ default: (await import('./CaseDescriptionWindow')).CaseDescriptionWindow }));
+const DataControlHowToUseWindow = lazy(async () => ({ default: (await import('./DataControlHowToUseWindow')).DataControlHowToUseWindow }));
 const InvestingNewsWindow = lazy(async () => ({ default: (await import('./InvestingNewsWindow')).InvestingNewsWindow }));
 
 interface DraggableWindowProps {
@@ -146,7 +147,9 @@ export function DraggableWindow({
       case 'evidence-table':
         return <EvidenceTableWindow />;
       case 'case-description':
-        return <CaseDescriptionWindow data={window.data} />;
+        return <CaseDescriptionWindow data={window.data as import('../types').CaseDescriptionWindowData | undefined} />;
+      case 'data-control-how-to-use':
+        return <DataControlHowToUseWindow data={window.data as import('../types').DataControlHowToUseWindowData | undefined} />;
       case 'investing-news':
         return (
           <InvestingNewsWindow
