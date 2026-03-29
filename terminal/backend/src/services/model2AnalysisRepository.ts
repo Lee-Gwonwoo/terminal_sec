@@ -76,6 +76,12 @@ export interface ListModel2EvidenceOptions {
   offset?: number;
 }
 
+export interface ListModel2EvidenceResult {
+  total: number | null;
+  totalMode: "cached" | "deferred";
+  items: Model2EvidenceRow[];
+}
+
 export interface Model2BlockedEvidenceCleanupResult {
   deletedEvidenceRows: number;
   affectedAnalysisIds: string[];
@@ -303,22 +309,20 @@ export async function listModel2CaseSummaries(analysisId: string): Promise<Model
   const db = getDb();
   return db.all<Model2CaseSummary[]>(
     `SELECT
-       er.case_type AS caseType,
-       MAX(er.case_label_ko) AS caseLabelKo,
-       MAX(er.top_level) AS topLevel,
-       COUNT(*) AS totalCount,
-       SUM(CASE WHEN er.is_impacted = 1 THEN 1 ELSE 0 END) AS impactedCount,
-       MAX(er.published_at) AS latestPublishedAt
-     FROM model2_evidence_rows er
-     WHERE er.analysis_id = ?
-       AND ${BLOCKED_FINNHUB_COMPANY_NEWS_EVIDENCE_WHERE}
-     GROUP BY er.case_type
-     ORDER BY totalCount DESC, impactedCount DESC, er.case_type ASC`,
+       cs.case_type AS caseType,
+       cs.case_label_ko AS caseLabelKo,
+       cs.top_level AS topLevel,
+       cs.total_count AS totalCount,
+       cs.impacted_count AS impactedCount,
+       cs.latest_published_at AS latestPublishedAt
+     FROM model2_case_summaries cs
+     WHERE cs.analysis_id = ?
+     ORDER BY cs.total_count DESC, cs.impacted_count DESC, cs.case_type ASC`,
     analysisId,
   );
 }
 
-export async function listModel2EvidenceRows(options: ListModel2EvidenceOptions): Promise<{ total: number; items: Model2EvidenceRow[] }> {
+export async function listModel2EvidenceRows(options: ListModel2EvidenceOptions): Promise<ListModel2EvidenceResult> {
   const db = getDb();
   const where: string[] = ["er.analysis_id = ?", BLOCKED_FINNHUB_COMPANY_NEWS_EVIDENCE_WHERE];
   const values: unknown[] = [options.analysisId];
@@ -354,13 +358,31 @@ export async function listModel2EvidenceRows(options: ListModel2EvidenceOptions)
   }
 
   const whereSql = `WHERE ${where.join(" AND ")}`;
-  const totalRow = await db.get<{ total: number }>(
-    `SELECT COUNT(*) AS total
-     FROM model2_evidence_rows er
-     ${whereSql}`,
-    ...values,
-  );
-  const total = totalRow?.total ?? 0;
+  const canUseCachedTotal = !normalizedTicker && !normalizedKeyword && !normalizedFromDate && !normalizedToDate;
+  let total: number | null = null;
+  let totalMode: "cached" | "deferred" = "deferred";
+
+  if (canUseCachedTotal) {
+    if (normalizedCaseType) {
+      const cachedCaseTotal = await db.get<{ total: number }>(
+        `SELECT total_count AS total
+         FROM model2_case_summaries
+         WHERE analysis_id = ? AND case_type = ?`,
+        options.analysisId,
+        normalizedCaseType,
+      );
+      total = cachedCaseTotal?.total ?? 0;
+    } else {
+      const cachedAnalysisTotal = await db.get<{ total: number }>(
+        `SELECT COALESCE(SUM(total_count), 0) AS total
+         FROM model2_case_summaries
+         WHERE analysis_id = ?`,
+        options.analysisId,
+      );
+      total = cachedAnalysisTotal?.total ?? 0;
+    }
+    totalMode = "cached";
+  }
 
   const sortBy = normalizeSortBy(options.sortBy);
   const sortDir = normalizeSortDir(options.sortDir);
@@ -414,6 +436,7 @@ export async function listModel2EvidenceRows(options: ListModel2EvidenceOptions)
 
   return {
     total,
+    totalMode,
     items: items.map(row => ({
       ...row,
       isImpacted: Boolean(row.isImpacted),

@@ -28,6 +28,56 @@
 - frontend production build는 2026-03-27 로컬 검증에서 성공했다.
 - backend `/api/model2/analyses` 응답은 2026-03-28 로컬 검증에서 최신 v6 run 노출이 확인되었다.
 
+### taxonomy v6 정리
+- 현재 활성 taxonomy는 `101`개 `case_type`으로 구성되며, 상위 해석 축은 `long / short / residual`이다.
+- `long`은 기사 언어가 기업가치 상승 경로를 직접 또는 간접적으로 시사하는 경우다.
+- `short`는 기사 언어가 희석, 규제 실패, 법률 리스크, 수요 악화, 경쟁 심화처럼 하방 경로를 시사하는 경우다.
+- `residual`은 방향성이 약하거나, 정보 전달형 기사이거나, 아직 rule이 충분히 구체화되지 않은 경우를 담는다.
+
+#### ver6 유형군(큰 묶음)
+- `실적 / 가이던스`: beat·raise, miss·cut, mixed, guidance update, preview, transcript, estimate comparison
+- `애널리스트 / 컨센서스`: upgrade, downgrade, reiteration, bullish/bearish note amplification, forecast revision, consensus overview
+- `임상 / 규제 / 바이오`: FDA approval, CRL, trial initiation, interim data, designation, procedural action, ex-US marketing authorization
+- `계약 / 제휴 / 상업화`: government contract, partnership, launch/expansion, demand/backlog, customer adoption, technology integration
+- `M&A / 자산 거래`: acquisition, premium takeout, billion-scale deal, distribution agreement, divestiture
+- `재무 / 자본구조 / 수급`: buyback, dividend, dilution financing, reverse split·halt stress, insider buy/sell, institutional stake, credit facility
+- `법률 / 거버넌스 / 구조조정`: lawsuit·investigation, settlement, bankruptcy·layoff, management upgrade/deterioration
+- `정책 / 거시 / 지정학`: policy tailwind, policy headwind, tariff, geopolitical impact, macro commentary, commodity/oil impact
+- `peer / 경쟁 / 공급망 / 밸류에이션`: peer read-through, competition pressure, supply chain tailwind/headwind, valuation narrative
+- `포지셔닝 / 옵션 / 공매도`: short squeeze, de-grossing, unusual options, short interest update
+- `주가 움직임 해설 / 미디어 증폭`: surge explanation, crash explanation, why-moving article, media amplification, premarket/afterhours movers, gapping analysis
+- `시장 요약 / 멀티종목 roundup`: market movers roundup, sector movers, daily index summary, digest, trending tickers, sector update
+- `섹터 특화 이벤트`: mining/resource, crypto/digital asset, renewable energy milestone, biotech presentation
+- `기타 구조화 가능 유형`: patent/IP, activist investor, institutional portfolio shift, stock comparison, debt refinancing, IPO/listing
+- `잔여 / 노이즈 / 미분류`: `잡것들_*`, `unknown`, 그리고 legacy 호환용 `meaningless_others`
+
+### 유형 분류 방식(ver6)
+- 분류의 1차 기준은 **주가 결과가 아니라 기사 언어와 사건 성격**이다. 먼저 `무슨 사건이 발생했는가`를 읽고, 그 다음 가격 반응을 본다.
+- 실제 rule 적용 순서는 아래와 같다.
+  1. `direct_short`: 희석 조달, 거래정지/역분할, 파산/구조조정, 소송·조사, 임상 실패, miss·cut, downgrade 같은 명확한 직접 악재를 먼저 잡는다.
+  2. `indirect_short`: 경쟁 심화, 정책 역풍, 공급망 압박, bearish note, positioning unwind 같은 간접 악재를 다음으로 본다.
+  3. `direct_long`: 승인, 수주, 제휴, launch, buyback, dividend, strong demand, beat·raise 같은 직접 호재를 분류한다.
+  4. `indirect_long`: peer read-through, valuation rerating, policy tailwind, analyst note amplification, technology integration 같은 간접 호재를 분류한다.
+  5. `information_flow`: 이미 움직인 주가를 설명하는 해설 기사, analyst consensus 기사, market digest, movers roundup, comparison article, technical article 같은 정보 전달형 기사를 분류한다.
+  6. `true_residual`: 위 어디에도 안정적으로 들어가지 않으면 `잡것들_*` 또는 `unknown`으로 보낸다.
+- 핵심은 `broad한 비교/roundup 기사`가 먼저 잡혀서 실적·가이던스·임상 같은 더 의미 있는 사건을 덮어쓰지 않게 하는 것이다.
+- 따라서 `stock_comparison_article`, `market_movers_roundup`, `stock_why_moving_explanation` 같은 넓은 rule은 뒤쪽에 두고, `guidance sees`, `beats estimate`, `FDA accepts`, `public offering` 같은 사건성 rule을 앞에 둔다.
+- `change_pct` 계열은 유형을 만드는 기준이 아니다. 유형이 정해진 뒤에만 `overall_impact_score`와 market cap bucket 기준 `p80`을 써서 영향 여부를 본다.
+
+### 잡것들_*는 무엇인가
+- `잡것들_*`는 **의미가 전혀 없다는 뜻이 아니라**, `company_news` 기사 중에서 반복되지만 독립 투자 case로 승격시키기에는 정보량이 낮거나 가격 설명력이 약한 노이즈 묶음이다.
+- 현재 ver6에서 `잡것들_*`는 아래 4개다.
+  - `잡것들_promotional_appearance_noise`: conference 참가, fireside chat, 인터뷰 출연, IR 노출성 기사
+  - `잡것들_screener_listicle_noise`: meme stocks, penny stocks, 추천 리스트, 트래픽 유도형 listicle
+  - `잡것들_company_event_schedule_noise`: webcast schedule, 행사 일정 공지, 발표 예정 알림
+  - `잡것들_company_award_recognition`: award, ranked, named one of 같은 수상·인증·랭킹 기사
+- 공통점은 `기사 텍스트만으로는 독립적인 가치 경로가 약하고`, 실제로는 정보 전달/홍보/큐레이션 성격이 강하다는 점이다.
+- 반대로 `unknown`은 노이즈로 보인다고 확정한 것이 아니라, **사건성은 있을 수 있지만 현재 rule 세트로는 안정적으로 어느 유형에도 넣지 못한 미분류 기사**다.
+- 즉 `잡것들_*`와 `unknown`의 차이는 아래처럼 본다.
+  - `잡것들_*`: 무엇인지 대략 안다. 다만 투자 case로서 약한 노이즈 묶음이다.
+  - `unknown`: 노이즈인지도 아직 확정 못 했다. 후속 샘플링을 통해 새 case로 승격될 수 있는 미분류 집합이다.
+- `meaningless_rows` 집계는 현재 `잡것들_% + unknown + legacy meaningless_others`를 함께 묶어 보지만, 내부 의미는 ver6에서 분리되어 있다.
+
 ### 제약 / 비범위
 - 이번 문서는 `plan 정리`가 목적이므로, 새 taxonomy 확장 자체를 추가 구현하지는 않는다.
 - `unknown`을 더 줄이는 다음 tranche는 별도 작업으로 둔다.
@@ -35,10 +85,13 @@
 - mock 데이터는 사용하지 않는다.
 
 ### 읽는 방법(비개발자/일반인 기준)
-- `Step 1`은 왜 기존 분류가 부족했는지와 어떤 샘플링 근거로 taxonomy를 늘렸는지 정리한 단계다.
-- `Step 2`는 100개 taxonomy 설계와 classifier 재작성 상태를 본다.
-- `Step 3`은 DB 재실행 결과와 `meaningless_others` 감소 수치를 본다.
-- `Step 4`는 UI description 동기화 상태를 본다.
+- `taxonomy v6 정리`를 먼저 읽으면 현재 유형군이 어떤 식으로 묶였는지 바로 볼 수 있다.
+- `유형 분류 방식(ver6)`은 분류기가 어떤 순서로 rule을 적용하는지 설명한다.
+- `잡것들_*는 무엇인가`는 residual 내부에서 노이즈와 미분류를 어떻게 구분하는지 설명한다.
+- `Step 1`은 왜 기존 broad fallback이 부족했는지와 어떤 샘플링 근거로 taxonomy를 늘렸는지 정리한 단계다.
+- `Step 2`는 `101`개 taxonomy와 classifier 재작성 상태를 본다.
+- `Step 3`은 DB 재실행 결과와 `meaningless_rows` 감소 수치를 본다.
+- `Step 4`는 UI description 동기화와 analysis version delete 상태를 본다.
 - `Step 5`는 frontend build / API 검증 같은 마감 검증 상태를 본다.
 
 ### 프로세스 템플릿(plan 변경 + 단계 완료 확인)
@@ -65,7 +118,7 @@
   - `model2CaseDescriptions.ts`
 
 ### 결정/선행조건(초기에 확정 필요)
-- 결정 1: 이번 tranche의 목표는 `company_news residual 축소 + 100개 taxonomy 설계`로 고정한다.
+- 결정 1: 이번 tranche의 목표는 `company_news residual 축소 + 101개 taxonomy 정리`로 고정한다.
 - 결정 2: taxonomy 정의는 실증 샘플 기반으로 설계하고, classifier는 그 taxonomy를 재현하는 도구로 둔다.
 - 결정 3: UI description은 classifier key와 동일 key를 사용한다.
 - 결정 4: 현재 tranche는 완료 상태를 정리하고, 다음 tranche는 `remaining unknown`의 재샘플링으로 둔다.
@@ -76,6 +129,7 @@
 - `stock_comparison_article`처럼 broad rule이 가이던스/estimate 기사보다 먼저 잡히는 순서 문제를 피해야 한다.
 - `BENZINGA EPS`, `guidance sees`, `Chartmill movers`, `rallies/surges`, `reiterates`, `analysts boost` 같은 패턴이 독립 유형 또는 정확한 기존 유형으로 흡수됐는지 확인해야 한다.
 - UI description registry가 classifier key와 drift 나지 않아야 한다.
+- `잡것들_*`로 보낸 row가 사실은 새 독립 case 후보인지, 아니면 진짜 노이즈인지 계속 구분해서 봐야 한다.
 
 ### 제안하는 구현 순서(이유)
 1. `unknown` 고영향 기사 대량 샘플링
@@ -125,8 +179,8 @@
 | 2-3 | ordering bug와 broad match 충돌 수정 | `ai_research_tool/test_model2_company_news_analysis.py` | 대표 edge case 재분류 확인 | ⏳ |
 
 - `2-1` 목적: 사용자 요구인 `100개 이상` 세부 taxonomy를 만족시키기 위함.
-  설명: 기존 42개 수준 taxonomy를 100개 case로 확장했다.
-  완료 조건(눈으로 확인): active classifier의 `CASE_META` count가 100이다.
+  설명: 기존 broad taxonomy를 `101`개 case와 `잡것들_* / unknown` 구조로 확장했다.
+  완료 조건(눈으로 확인): active classifier의 `CASE_META` count가 `101`이다.
   사람 검증(비개발자): case 수가 100개로 늘었다는 수치를 확인할 수 있다.
   흔한 문제/주의: case 수만 늘고 rule이 비어 있으면 실질 확장이 아니다.
 - `2-2` 목적: 직접 이벤트와 간접 read-through를 같은 residual로 버리지 않기 위함.
@@ -160,34 +214,34 @@
   사람 검증(비개발자): 새 analysis title과 날짜가 API에서 보인다.
   흔한 문제/주의: 코드만 바꾸고 재실행하지 않으면 UI와 note가 stale 상태로 남는다.
 - `3-2` 목적: classifier 변경이 note/page 산출물까지 이어졌는지 확인하기 위함.
-  설명: target page와 scope를 taxonomy v4 기준으로 갱신했다.
-  완료 조건(눈으로 확인): `scope = company_news_2025_plus_taxonomy_v4`가 확인된다.
-  사람 검증(비개발자): 최신 analysis title이 `taxonomy v4`로 보인다.
+  설명: target page와 scope를 taxonomy v6 기준으로 갱신했다.
+  완료 조건(눈으로 확인): `scope = company_news_2025_plus_taxonomy_v6`가 확인된다.
+  사람 검증(비개발자): 최신 analysis title이 `taxonomy v6`로 보인다.
   흔한 문제/주의: run만 새로 만들고 page body를 안 갱신하면 연구 산출물이 분리된다.
 - `3-3` 목적: 실제 residual 축소 효과를 정량으로 확인하기 위함.
-  설명: 초기 broad run과 최신 v4 run의 `meaningless_rows`를 비교했다.
+  설명: 초기 broad run과 최신 v6 run의 `meaningless_rows`를 비교했다.
   완료 조건(눈으로 확인): 감소 수치가 표로 있다.
   사람 검증(비개발자): 잡것들 비율이 눈에 띄게 줄었다는 것을 숫자로 확인할 수 있다.
   흔한 문제/주의: run별 total_rows 기준이 다르면 단순 비교가 왜곡될 수 있다.
 
 검증 훅:
 ```text
-- /api/model2/analyses에서 최신 run 36a99839-1570-4b08-a364-121c453d1b98 확인
-- scope가 company_news_2025_plus_taxonomy_v4인지 확인
-- meaningless_rows가 218,383인지 확인
+- /api/model2/analyses에서 최신 run d11b094f-b6db-4be3-a754-0354da385101 확인
+- scope가 company_news_2025_plus_taxonomy_v6인지 확인
+- meaningless_rows가 225,889인지 확인
 ```
 사용자 확인 필요: **예**
 
 #### ⏳ Step 4 — UI description 동기화 + analysis version delete
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 4-1 | case description registry를 v4 key에 맞게 동기화 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/model2CaseDescriptions.ts` | registry compile 확인 | ⏳ |
+| 4-1 | case description registry를 v6 key에 맞게 동기화 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/model2CaseDescriptions.ts` | registry compile 확인 | ⏳ |
 | 4-2 | Evidence Table / Case Description 창이 새 key를 읽도록 유지 | frontend code | build 확인 | ⏳ |
 | 4-3 | Evidence Table에 날짜 range filter 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/EvidenceTableWindow.tsx`, `terminal/backend/src/services/model2AnalysisRepository.ts` | build + filtered API 응답 확인 | ⏳ |
 | 4-4 | Evidence version 우클릭 `delete`와 backend cascade delete 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/EvidenceTableWindow.tsx`, `terminal/backend/src/server.ts`, `terminal/backend/src/services/model2AnalysisRepository.ts` | temp analysis 생성 후 `DELETE /api/model2/analyses/:id` 검증 | ⏳ |
 
 - `4-1` 목적: classifier key와 UI key drift를 막기 위함.
-  설명: UI description registry가 taxonomy v4 key를 읽도록 맞췄다.
+  설명: UI description registry가 taxonomy v6 key와 `잡것들_* / unknown` 설명을 읽도록 맞췄다.
   완료 조건(눈으로 확인): description file이 현재 taxonomy key를 포함한다.
   사람 검증(비개발자): Evidence Table description 창에서 새 유형 설명을 읽을 수 있어야 한다.
   흔한 문제/주의: 분류기 key가 바뀌고 UI alias가 stale이면 description 창이 틀린 내용을 보여준다.
@@ -205,7 +259,7 @@
 검증 훅:
 ```text
 - model2CaseDescriptions.ts가 frontend build를 통과하는지 확인
-- description registry가 현재 taxonomy v4와 mismatch 없는지 코드 리뷰 확인
+- description registry가 현재 taxonomy v6와 mismatch 없는지 코드 리뷰 확인
 - /api/model2/analyses/:analysisId/evidence?fromDate=2026-03-20&toDate=2026-03-21&limit=5 응답의 total이 전체보다 작아지는지 확인
 ```
 사용자 확인 필요: **예**
@@ -246,8 +300,8 @@ backend runtime
 ### 미확정 사항(명시 결정 필요)
 | ID | 항목 | 선택지 | 차단 대상 Step |
 |----|------|--------|----------------|
-| D1 | 다음 tranche에서 residual을 더 줄일지 | 추가 샘플링 후 120+ taxonomy로 확장 / 현재 100개 유지 | 후속 Step 전체 |
-| D2 | UI description 100개 전수 수동 검수를 할지 | 필요한 case만 spot-check / 전수 검토 | 후속 UI 품질 단계 |
+| D1 | 다음 tranche에서 residual을 더 줄일지 | 추가 샘플링 후 120+ taxonomy로 확장 / 현재 101개 유지 | 후속 Step 전체 |
+| D2 | UI description 101개 전수 수동 검수를 할지 | 필요한 case만 spot-check / 전수 검토 | 후속 UI 품질 단계 |
 
 ### 실행 의존성 그래프
 Legend: `✅ 사용자 확인 완료` / `⏳ 구현완료, 사용자확인 대기` / `⬜ 미착수` / `🚫 차단`
@@ -256,7 +310,7 @@ Track A — 분류 로직 / DB run
 - ⏳ 1-1 고영향 residual 샘플링
 - ⏳ 1-2 반복 패턴 도출
 - ⏳ 1-3 기존 rule gap 정리
-- ⏳ 2-1 CASE_META 100개 확장
+- ⏳ 2-1 CASE_META 101개 확장
 - ⏳ 2-2 rule group 재정렬
 - ⏳ 2-3 ordering bug 수정
 - ⏳ 3-1 full dataset 재실행
@@ -290,6 +344,42 @@ Track B — UI / 검증
 
 ### 현재 tranche 최종 요약
 - `meaningless_others` 축소라는 이번 tranche의 핵심 목표는 달성됐다.
-- taxonomy는 `100`개로 확장됐고, active run은 `company_news_2025_plus_taxonomy_v4`로 저장됐다.
+- taxonomy는 `101`개로 확장됐고, active run은 `company_news_2025_plus_taxonomy_v6`로 저장됐다.
+- residual 내부는 ver6에서 `잡것들_*`와 `unknown`으로 의미 분리됐다.
 - frontend build와 analyses API 응답도 확인됐다.
-- 다음 tranche의 본질적 과제는 `218,383`건으로 남아 있는 residual에서 반복 패턴을 더 꺼내느냐 여부다.
+- 다음 tranche의 본질적 과제는 `225,889`건으로 집계되는 fallback 묶음에서 `unknown`을 추가 taxonomy로 더 줄일지 여부다.
+
+### ⏳ Step 6 — Evidence Table 로딩 병목 제거
+| 세부 단계 | 작업 | 파일 | 검증 | 상태 |
+|-----------|------|------|------|------|
+| 6-1 | `cases` 조회를 raw evidence 재집계 대신 `model2_case_summaries` 캐시 조회로 전환 | `terminal/backend/src/services/model2AnalysisRepository.ts` | `/api/model2/analyses/:id/cases` 응답 시간 확인 | ⏳ |
+| 6-2 | `evidence` 초기 로딩에서 exact `COUNT(*)`를 제거하고 cached/deferred total만 반환 | `terminal/backend/src/services/model2AnalysisRepository.ts` | `/api/model2/analyses/:id/evidence` 첫 응답 확인 | ⏳ |
+| 6-3 | frontend가 `total` 부재/지연 상태를 허용하도록 UI 문구와 상태 처리 수정 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/EvidenceTableWindow.tsx` | 화면에서 rows 선노출 확인 | ⏳ |
+
+- `6-1` 목적: 대용량 `model2_evidence_rows` 전체를 매번 다시 `GROUP BY` 하지 않도록 하기 위함.
+  설명: 이미 적재된 `model2_case_summaries`를 읽어서 case dropdown을 즉시 열 수 있게 한다.
+  완료 조건(눈으로 확인): cases API가 raw evidence scan 없이 cache table만 읽는다.
+  사람 검증(비개발자): analysis를 바꿔도 case 목록이 바로 뜬다.
+  흔한 문제/주의: cache가 stale이면 case count가 실제 row와 잠시 어긋날 수 있다.
+- `6-2` 목적: evidence 첫 화면을 exact total 계산 때문에 9초 이상 막지 않기 위함.
+  설명: 필터가 없거나 case만 선택된 상태는 cache total을 쓰고, keyword/ticker/date 필터가 있으면 total은 생략하고 rows를 먼저 보여준다.
+  완료 조건(눈으로 확인): evidence 응답이 exact count 없이도 즉시 rows를 반환한다.
+  사람 검증(비개발자): 검색/날짜 필터를 넣어도 목록이 먼저 뜨고, 전체 개수는 나중에 굳이 기다리지 않는다.
+  흔한 문제/주의: filtered exact total이 필요하면 별도 on-demand endpoint나 background count가 추가로 필요할 수 있다.
+- `6-3` 목적: backend 응답 shape 변경이 UI 로딩 오류로 이어지지 않게 하기 위함.
+  설명: `Rows X/Y` 대신 `Rows X` 또는 cache count 문구를 상황별로 표시한다.
+  완료 조건(눈으로 확인): `total = null`이어도 Evidence Table이 정상 렌더링된다.
+  사람 검증(비개발자): 숫자 표시는 조금 달라도 뉴스 행 목록과 필터 동작은 그대로 유지된다.
+  흔한 문제/주의: dropdown의 전체 건수와 filtered rows 표시는 의미가 다르므로 혼동하지 않도록 문구를 분리해야 한다.
+
+검증 훅:
+```text
+backend
+  GET http://localhost:8080/api/model2/analyses/d11b094f-b6db-4be3-a754-0354da385101/cases
+  GET http://localhost:8080/api/model2/analyses/d11b094f-b6db-4be3-a754-0354da385101/evidence?limit=100
+  GET http://localhost:8080/api/model2/analyses/d11b094f-b6db-4be3-a754-0354da385101/evidence?keyword=guidance&limit=100
+
+frontend
+  Evidence Table에서 analysis 선택 직후 rows가 먼저 뜨는지 확인
+```
+사용자 확인 필요: **예**

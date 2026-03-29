@@ -7,12 +7,13 @@
 
 - 앱은 React + TypeScript + Vite 기반이다.
 - 창(window) 기반 데스크톱 스타일 UI이며, 각 창은 드래그/리사이즈/최대화/닫기를 지원한다.
-- 실제 API 연동이 살아 있는 주요 창은 `Finnhub News`, `Default Ticker`, `Data Control`, `AI Research Window`, `Evidence Table` 이다.
+- 실제 API 연동이 살아 있는 주요 창은 `Finnhub News`, `Investing News`, `Default Ticker`, `Data Control`, `AI Research Window`, `Evidence Table`, `Watchlist` 이다.
 - `News` 창도 `GET /api/news`, `POST /api/news/pull-eodhd`를 실제로 호출하지만, 현재 운영 기준의 주력 뉴스 창은 아니다.
-- `Watchlist`, `Calendar` 창은 현재 mock data 기반이다.
+- `Watchlist` 창은 backend `watchlists` API와 연결되어 있고, 종목 이름/가격 일부는 프론트의 fallback lookup을 함께 사용한다.
+- `Calendar` 창은 현재 mock data 기반이다.
 - `BraveNewsWindow.tsx` 파일은 남아 있지만 현재 `WindowType`에 연결되어 있지 않아 UI에서 열 수 없다.
 - 탭/창 레이아웃, 다크 모드, 전역 글자 크기, 뉴스 제목/요약 글자 크기, linked ticker는 `terminal-workspace-v1`로 localStorage에 저장된다.
-- 추가 UI 상태로 `finhub-news-ui-state`, `finnhub-last-update-config`, `data-control-active-tab`, `ft-concurrency`, `fmp-pr-fulltext-concurrency`, `fmp-stock-fulltext-concurrency`, `change-fmp-concurrency`, `finnhub-ticker-concurrency`, `finnhub-request-interval-sec`, `finnhub-company-news-ticker-concurrency`, `finnhub-company-news-request-interval-sec`, `rtpr-ticker-concurrency`, `fmp-concurrency`, `fmp-request-interval-ms`, `fmp-pr-page-limit`, `fmp-pr-max-pages`, `fmp-sec-max-pages`, `fmp-skip-existing`, `peers-skip-existing`, `ipo-skip-existing`, `yahoo-concurrency`, `yahoo-request-interval-ms`, `yahoo-skip-existing`를 사용한다.
+- 추가 UI 상태로 `finhub-news-ui-state`, `investing-news-ui-state`, `finnhub-last-update-config`, `data-control-active-tab`, `ft-concurrency`, `fmp-pr-fulltext-concurrency`, `fmp-stock-fulltext-concurrency`, `change-fmp-concurrency`, `finnhub-ticker-concurrency`, `finnhub-request-interval-sec`, `finnhub-company-news-ticker-concurrency`, `finnhub-company-news-request-interval-sec`, `rtpr-ticker-concurrency`, `fmp-concurrency`, `fmp-request-interval-ms`, `fmp-pr-page-limit`, `fmp-pr-max-pages`, `fmp-sec-max-pages`, `fmp-skip-existing`, `peers-skip-existing`, `ipo-skip-existing`, `yahoo-concurrency`, `yahoo-request-interval-ms`, `yahoo-skip-existing`를 사용한다.
 - `FinnhubNewsWindow`의 `Control` modal과 `DataControlWindow` Settings 탭은 `fmp-concurrency`, `fmp-request-interval-ms`를 공유한다. 즉 FMP press release / FMP stock news / FMP SEC filing pull 속도 설정은 두 화면에서 같은 값을 편집한다.
 - 같은 두 화면은 `fmp-pr-page-limit`, `fmp-pr-max-pages`, `fmp-sec-max-pages`도 공유한다. 즉 FMP press release / FMP stock news / FMP SEC filing의 페이지 단위 수집 제한도 같은 저장 키를 본다.
 - `FinnhubNewsWindow`의 `Control` modal과 `DataControlWindow` Settings 탭은 `finnhub-company-news-ticker-concurrency`, `finnhub-company-news-request-interval-sec`도 공유한다. 즉 `Company News` pull 전용 속도 설정은 두 화면에서 같은 값을 편집한다.
@@ -87,6 +88,7 @@ Vite dev proxy:
 - `watchlist`
 - `calendar`
 - `finhub-news`
+- `investing-news`
 - `default-ticker`
 - `data-control`
 - `case-research`
@@ -106,6 +108,7 @@ Vite dev proxy:
 - Calendar
 - News
 - News Feed: Finnhub API
+- Investing News
 - Watch List
 - Default Ticker
 - Data Control
@@ -260,8 +263,8 @@ score/scoreEvidence/sentiment 컬럼 규칙:
 
 행 높이:
 
-- title only: 88px
-- title + abstract: 140px
+- title only: 96px
+- title + abstract: 148px
 
 ### 소스 필터
 
@@ -800,6 +803,33 @@ API:
 - 헤더는 고정하고, body row만 virtualization 대상으로 유지한다.
 - 데이터/API/job polling semantics는 그대로고, 화면에 동시에 그리는 row 수만 줄인다.
 
+## Investing News Window
+
+파일: `src/app/components/InvestingNewsWindow.tsx`
+
+현재 상태:
+
+- 실제 backend API 연동이 있는 정식 창이다.
+- Add Tab Modal에서 직접 선택 가능하고, `WindowType`에도 `investing-news`로 등록돼 있다.
+- 기본 조회는 `GET /api/news`를 사용하되 `[][][]source_type[][][]`를 `investing_stock_market_news`, `investing_cryptocurrency_news`로 제한한다.
+- 업데이트는 `POST /api/news/pull-investing`를 호출하며, `stock-market-news` / `cryptocurrency-news` category와 recent/custom date range를 payload로 넘긴다.
+- 별도 full text popup이 있고 `GET /api/news/:id/fulltext` 계열 응답을 사용한다.
+- 북마크 폴더 필터와 `BookmarkManager`가 연결되어 있다.
+- display mode, category filter, 날짜 범위, 정렬 상태 등은 `investing-news-ui-state`에 저장된다.
+
+표 컬럼:
+
+- `[][][]date[][][]`
+- `[][][]time[][][]`
+- `[][][]title[][][]`
+- `[][][]category[][][]`
+- `[][][]fulltext[][][]`
+
+행 높이:
+
+- title only: 96px
+- title + abstract: 148px
+
 ## News Window
 
 파일: `src/app/components/NewsWindow.tsx`
@@ -835,6 +865,8 @@ API:
 - watchlist table row의 `[][][]name[][][]`, `[][][]industry[][][]`, `[][][]marketCap[][][]`는 `GET /api/watchlists`의 `[][][]items[][][]` payload를 우선 사용한다.
 - `[][][]marketCap[][][]`는 backend가 내려주는 숫자 값을 프론트에서 `$1.2B`, `$850.0M` 같은 문자열로 포맷해 표시한다.
 - `[][][]industry[][][]`가 DB `securities.industry`에 없을 때는 backend의 CSV fallback 결과가 그대로 내려올 수 있다.
+- 다만 `[][][]price[][][]`, `[][][]change[][][]`, `[][][]changePercent[][][]`는 backend 실시간 시세가 아니라 프론트 `TICKER_DB` fallback 값이 채워질 수 있다.
+- 즉 리스트 membership/source of truth는 backend DB지만, 일부 표시용 quote/name 데이터는 프론트 보조 lookup과 섞여 있는 hybrid 상태다.
 
 ## Calendar Window
 
@@ -847,6 +879,17 @@ API:
 - earnings / conference / dividend / analyst_rating 탭 UI는 존재
 
 즉 backend의 `calendar_events` API와 아직 연결된 화면이 아니다.
+
+## Case Description Window
+
+파일: `src/app/components/CaseDescriptionWindow.tsx`
+
+현재 상태:
+
+- Add Tab Modal에서 직접 고르는 창은 아니다.
+- `EvidenceTableWindow`가 row 클릭 시 `open-case-description` custom event를 dispatch하면 같은 탭 안에서 동적으로 열린다.
+- payload는 `caseType`, `caseLabelKo`, `description`, `classificationBasis`, `keywordSignals`, `boundaryCase`, `quickQuestions` 등을 포함한다.
+- source of truth는 localStorage가 아니라 `EvidenceTableWindow`가 들고 있는 case metadata다.
 
 ## Case Research Window
 
@@ -998,6 +1041,7 @@ API:
 
 - `GET /api/news`
 - `POST /api/news/pull-finhub`
+- `POST /api/news/pull-investing`
 - `GET /api/news/pull-finhub/preflight`
 - `POST /api/news/change/update-recent`
 - `POST /api/news/change/update-custom`
@@ -1016,6 +1060,10 @@ API:
 - `POST /api/tickers/import-default`
 - `POST /api/tickers/add`
 - `DELETE /api/tickers/remove`
+- `GET /api/watchlists`
+- `POST /api/watchlists`
+- `PUT /api/watchlists/:id`
+- `DELETE /api/watchlists/:id`
 - `POST /api/company-profiles/pull-market-cap`
 - `POST /api/company-profiles/pull-float`
 - `POST /api/company-profiles/pull-institutional`
@@ -1034,8 +1082,10 @@ API:
 - `DELETE /api/research/pages/:id`
 - `GET /api/research/search`
 - `GET /api/model2/analyses`
+- `GET /api/model2/analyses/:analysisId`
 - `GET /api/model2/analyses/:analysisId/cases`
 - `GET /api/model2/analyses/:analysisId/evidence`
+- `DELETE /api/model2/analyses/:analysisId`
 - `GET /api/bookmarks/folders`
 - `POST /api/bookmarks/folders`
 - `PUT /api/bookmarks/folders/:id`

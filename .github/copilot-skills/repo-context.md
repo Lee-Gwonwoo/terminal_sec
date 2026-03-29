@@ -25,12 +25,13 @@
 작업 대상/디렉토리(Node 앱 vs Python 스크립트)에 따라 적용할 관례를 선택하세요.
 
 #### 백엔드 서비스 구조 (`terminal/backend/src/services/`)
-- **뉴스 수집**: `finnhubNewsProvider.ts`, `eodhdNewsProvider.ts`
+- **뉴스 수집**: `finnhubNewsProvider.ts`, `eodhdNewsProvider.ts`, `ptprNewsProvider.ts`, `investingNewsProvider.ts`, `fmpPressReleaseProvider.ts`, `fmpStockNewsProvider.ts`, `fmpSecFilingProvider.ts`
 - **뉴스 조회/저장**: `newsRepository.ts` (GET /api/news — 여러 테이블 LEFT JOIN)
 - **Change % 계산**: `newsChangeMerger.ts` (OHLC DB → `news_change_metrics` UPSERT)
 - **OHLC 데이터 소스**: `ohlcWatchlistRepository.ts` (로컬 OHLC SQLite), `ibkrOhlcBatchProvider.ts` (IBKR TWS fallback), `ibkrOhlc1dProvider.ts` (단건 IBKR), `finnhubOhlcProvider.ts` (Finnhub candle)
 - **full text 추출**: `fulltextExtractors.ts` + `fulltextUpdateService.ts` + `fulltextRepository.ts`
 - **AI 분석**: `aiAnalysisRepository.ts` (`news_ai_analysis` 테이블)
+- **Model 2 evidence**: `model2AnalysisRepository.ts` (`model2_analysis_runs`, `model2_case_summaries`, `model2_evidence_rows`)
 - **기업 프로필**: `companyProfileRepository.ts`, `finnhubProfile2Provider.ts`, `fmpCompanyProfileProvider.ts`
 - **기타**: `industryLookup.ts`, `tickerCsvService.ts`, `tickerUniverseRepository.ts`, `calendarIngestion.ts`, `researchRepository.ts`, `jobManager.ts`
 
@@ -65,6 +66,9 @@
 		| `update_status` | 업데이트 상태 추적 (14 rows) | PK: `source_key`. live columns는 `source_key`, `last_success_at`, `details_json`, `updated_at` |
 		| `research_tabs` | Case Research 탭 (3 rows) | `deleted_at` soft delete 포함 |
 		| `research_pages` | Case Research 페이지 (28 rows) | `deleted_at` soft delete 포함 |
+		| `model2_analysis_runs` | Model 2 분석 실행 메타 | page 단위 분석 run 헤더 |
+		| `model2_case_summaries` | Model 2 case 요약 캐시 | PK: `(analysis_id, case_type)` |
+		| `model2_evidence_rows` | Model 2 evidence row | UNIQUE: `(analysis_id, news_id)` |
 		| `sec_filings` | SEC filing companion (582 rows) | `news_items`와 1:N로 연결되는 filing 메타데이터 |
 		| `users` | 사용자 (1 row) | |
 		| `watchlists` / `watchlist_items` | 관심종목 (0 rows) | `watchlist_items.security_id` FK 컬럼 포함 |
@@ -83,6 +87,10 @@
 		- `pull-market-cap`은 더 이상 Finnhub profile2가 아니라 FMP profile batch 경로를 사용한다. 현재 기본 concurrency는 `5`, clamp 범위는 `1..20`이다.
 		- `update_status` live source_key 전체 집합은 `company_profiles`, `company_profiles_ipo_date`, `company_profiles_market_cap`, `company_profiles_yahoo`, `finhub_news`, `fmp_press_release`, `fmp_sec_filing`, `ibkr_calendar`, `ibkr_ohlc_1d`, `news_change_7d`, `news_change_custom`, `news_change_recent`, `rtpr_press_release`, `tickers_csv`다.
 		- `news_items.source_type` live 분포는 `press_release=192,899`, `news=18,321`, `company_news=14,354`, `market_news=440`, `IBKR=25`다.
+		- 현재 코드 기준 `news_items.source_type`는 위 live 분포 외에도 `fmp_press_release`, `fmp_stock_news`, `fmp_sec_filing`, `investing_stock_market_news`, `investing_cryptocurrency_news`를 사용할 수 있다.
+		- `model2_analysis_runs`는 research page와 연결될 수 있고, `since/until/scope/source_type/source_name` + aggregate count를 저장한다.
+		- `model2_evidence_rows`는 기사 원문 복사본이 아니라 가격반응 점수, 기업 메타, reaction tag, body preview를 함께 저장하는 denormalized evidence cache다.
+		- `model2_case_summaries`는 analysis별 case count cache이며 maintenance/cleanup 후 재계산될 수 있다.
 		- `/api/news` change 날짜 필드는 분리되어 있다.
 		  - `[][][]ohlc_date[][][]` / `[][][]change_pct_ohlc_date[][][]` = `change_pct.target_date`
 		  - `[][][]change_1d_target_date[][][]` = `change_1d_pct.target_date`
@@ -122,18 +130,27 @@
 	- 주의: 테스트/실험 산출물(JSONL/CSV)은 canonical 저장소로 간주하지 않음
 
 - **프론트엔드 런타임 상태 저장**
-	- 현재 상태: `termina_web/figma_code/terminal_ui_ver2_finhub` 프론트는 앱 전체 workspace/tabs/theme를 영속 저장하지 않는다.
+	- 현재 상태: `termina_web/figma_code/terminal_ui_ver2_finhub` 프론트는 앱 전체 workspace/tabs/theme를 `localStorage`에 영속 저장한다.
 	- localStorage 사용 항목:
 		- `terminal-workspace-v1`: 탭/창 레이아웃, dark mode, global font scale, linked ticker, 뉴스 폰트 크기
 		- `finhub-news-ui-state`: News Feed 컬럼 표시, display mode, 검색어, 날짜 범위, 북마크 선택, market cap filter 등
+		- `investing-news-ui-state`: Investing News display mode, category filter, 날짜 범위, 정렬/컬럼 상태
 		- `finnhub-last-update-config`: FinnhubNews 마지막 업데이트 설정
 		- `data-control-active-tab`: Data Control 현재 탭
 		- `ft-concurrency`: full text concurrency
+		- `fmp-pr-fulltext-concurrency`: FMP PR fulltext concurrency
+		- `fmp-stock-fulltext-concurrency`: FMP Stock fulltext concurrency
+		- `change-fmp-concurrency`: change/update용 FMP/IBKR concurrency
 		- `ibkr-concurrency`: IBKR Fetch Concurrency 설정 (기본값 30, 범위 1~100)
 		- `finnhub-ticker-concurrency`: Finnhub ticker pull concurrency
 		- `finnhub-request-interval-sec`: Finnhub request interval
+		- `finnhub-company-news-ticker-concurrency`: Company News 전용 concurrency
+		- `finnhub-company-news-request-interval-sec`: Company News 전용 request interval
 		- `rtpr-ticker-concurrency`: RTPR ticker pull concurrency
-	- 의미: “앱을 껐다 켜도 마지막 상태 유지”, “탭 상태 유지”, “전역 글자 크기 유지” 같은 기능은 아직 canonical 저장 구조가 구현되지 않은 상태다.
+		- `fmp-concurrency`, `fmp-request-interval-ms`, `fmp-pr-page-limit`, `fmp-pr-max-pages`, `fmp-sec-max-pages`
+		- `fmp-skip-existing`, `peers-skip-existing`, `ipo-skip-existing`, `yahoo-concurrency`, `yahoo-request-interval-ms`, `yahoo-skip-existing`
+	- 의미: “앱을 껐다 켜도 마지막 상태 유지”, “탭 상태 유지”, “전역 글자 크기 유지” 같은 workspace/UI 복원 기능은 이미 `localStorage` 기준으로 동작한다. 다만 운영 데이터의 canonical source는 여전히 backend `app.db`다.
+	- 실제 창 상태: `Finnhub News`, `Investing News`, `Default Ticker`, `Data Control`, `Case Research`, `Evidence Table`, `Watchlist`는 backend API와 연결되어 있다. `Calendar`는 아직 mock data 기반이다.
 	- 향후 원칙: 프론트 전용 UI state는 1차로 `localStorage`를 사용하고, runtime 데이터 source of truth(`app.db`)와 혼동하지 않는다.
 
 - **뉴스 실험 산출물 / 외부 export / 임시 정리본**
@@ -153,10 +170,11 @@
 
 - **PTPR API 조사 상태 (2026-03-10)**
 	- 시크릿 파일은 `ai_agent_plan/ptpr_api_key/ptpr_api_key`에 존재함을 확인했다. 값 자체는 문서/로그에 노출하지 않는다.
-	- 현재 레포에는 `PTPR` 또는 `ptpr` 명시 연동 코드가 없다. 즉, provider별 base URL, auth 방식, endpoint 매핑은 아직 구현 source of truth가 없다.
+	- 현재 레포에는 `terminal/backend/src/services/ptprNewsProvider.ts`와 `POST /api/news/pull-rtpr` 구현이 존재한다. 즉 provider별 base URL, auth 방식, endpoint 매핑의 source of truth는 이제 backend 코드다.
 	- 공식 문서는 `https://www.rtpr.io/docs`로 확인됐다. 실제 API base URL은 `https://api.rtpr.io`, WebSocket URL은 `wss://ws.rtpr.io`다.
 	- 인증 방식은 REST는 `Authorization: Bearer <API_KEY>`, WebSocket은 `wss://ws.rtpr.io?apiKey=<API_KEY>` query parameter다.
 	- REST rate limit은 분당 60 requests, WebSocket은 API key당 동시 1 connection이다.
+	- backend config는 `RTPR_API_KEY` 환경 변수 또는 `ai_agent_plan/ptpr_api_key/ptpr_api_key` 첫 줄을 읽는다.
 	- 2026-03-10 실제 probe 결과:
 		- `GET /articles?limit=100` 성공, 최근 100건 모두 `2026-03-10` UTC 기사였다.
 		- `GET /articles/AAPL?limit=5`는 당시 시점 기준 `count=0`이었다.

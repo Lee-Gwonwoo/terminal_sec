@@ -58,6 +58,12 @@ interface EvidenceRow {
   url: string;
 }
 
+interface EvidenceResponse {
+  total: number | null;
+  totalMode?: 'cached' | 'deferred';
+  items: EvidenceRow[];
+}
+
 function formatPublishedAtParts(value: string): { date: string; time: string } {
   if (!value) {
     return { date: '-', time: '-' };
@@ -104,7 +110,8 @@ export function EvidenceTableWindow() {
   const [debouncedFromDate, setDebouncedFromDate] = useState('');
   const [debouncedToDate, setDebouncedToDate] = useState('');
   const [rows, setRows] = useState<EvidenceRow[]>([]);
-  const [total, setTotal] = useState(0);
+  const [total, setTotal] = useState<number | null>(null);
+  const [totalMode, setTotalMode] = useState<'cached' | 'deferred'>('cached');
   const [limit, setLimit] = useState(100);
   const [sortBy, setSortBy] = useState<SortBy>('published_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
@@ -143,8 +150,13 @@ export function EvidenceTableWindow() {
     }
     return `${debouncedFromDate || '...'} -> ${debouncedToDate || '...'}`;
   }, [debouncedFromDate, debouncedToDate]);
+  const allCasesTotal = useMemo(() => cases.reduce((sum, item) => sum + item.totalCount, 0), [cases]);
+  const hasActiveEvidenceFilters = useMemo(
+    () => Boolean(selectedCaseType !== 'all' || debouncedKeyword || debouncedTicker || debouncedFromDate || debouncedToDate),
+    [selectedCaseType, debouncedFromDate, debouncedKeyword, debouncedTicker, debouncedToDate],
+  );
 
-  const fetchAnalyses = useCallback(async () => {
+  const fetchAnalyses = useCallback(async (): Promise<AnalysisRun[]> => {
     const res = await fetch(`${API_BASE}/api/model2/analyses`);
     if (!res.ok) {
       throw new Error(`Failed to load analyses (HTTP ${res.status})`);
@@ -159,6 +171,7 @@ export function EvidenceTableWindow() {
     if (data.length === 0) {
       setSelectedAnalysisId('');
     }
+    return data;
   }, [selectedAnalysisId]);
 
   const fetchCases = useCallback(async (analysisId: string, signal?: AbortSignal) => {
@@ -195,9 +208,10 @@ export function EvidenceTableWindow() {
     if (!res.ok) {
       throw new Error(`Failed to load evidence rows (HTTP ${res.status})`);
     }
-    const data: { total: number; items: EvidenceRow[] } = await res.json();
+    const data: EvidenceResponse = await res.json();
     setRows(data.items);
-    setTotal(data.total);
+    setTotal(typeof data.total === 'number' ? data.total : null);
+    setTotalMode(data.totalMode === 'deferred' ? 'deferred' : 'cached');
   }, []);
 
   useEffect(() => {
@@ -261,7 +275,8 @@ export function EvidenceTableWindow() {
   useEffect(() => {
     if (!effectiveAnalysisId) {
       setRows([]);
-      setTotal(0);
+      setTotal(null);
+      setTotalMode('cached');
       return;
     }
     setError(null);
@@ -337,13 +352,44 @@ export function EvidenceTableWindow() {
       }
       setIsAnalysisMenuOpen(false);
       setAnalysisContextMenu(null);
-      await fetchAnalyses();
+      const refreshedAnalyses = await fetchAnalyses();
+      const nextAnalysisId = refreshedAnalyses.find(item => item.id === selectedAnalysisId)?.id
+        ?? refreshedAnalyses[0]?.id
+        ?? '';
+
+      if (!nextAnalysisId) {
+        setCases([]);
+        setRows([]);
+        setTotal(null);
+        setTotalMode('cached');
+        return;
+      }
+
+      setSelectedAnalysisId(nextAnalysisId);
+      setSelectedCaseType('all');
+      await Promise.all([
+        fetchCases(nextAnalysisId),
+        fetchEvidence(nextAnalysisId, 'all', debouncedKeyword, debouncedTicker, debouncedFromDate, debouncedToDate, sortBy, sortDir, limit),
+      ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete analysis');
     } finally {
       setLoading(false);
     }
-  }, [effectiveAnalysisId, fetchAnalyses]);
+  }, [
+    debouncedFromDate,
+    debouncedKeyword,
+    debouncedTicker,
+    debouncedToDate,
+    effectiveAnalysisId,
+    fetchAnalyses,
+    fetchCases,
+    fetchEvidence,
+    limit,
+    selectedAnalysisId,
+    sortBy,
+    sortDir,
+  ]);
 
   const handleRefresh = useCallback(() => {
     if (!effectiveAnalysisId) {
@@ -390,7 +436,10 @@ export function EvidenceTableWindow() {
     setIsCaseMenuOpen(false);
   }, []);
 
-  const selectedCaseLabel = selectedCase ? `${selectedCase.caseLabelKo} (${selectedCase.totalCount})` : 'All cases';
+  const selectedCaseLabel = selectedCase
+    ? `${selectedCase.caseLabelKo} (${selectedCase.totalCount.toLocaleString()})`
+    : `All cases (${allCasesTotal.toLocaleString()})`;
+  const rowsStatusLabel = total === null ? `Rows ${rows.length}` : `Rows ${rows.length}/${total.toLocaleString()}`;
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100">
@@ -466,7 +515,7 @@ export function EvidenceTableWindow() {
                   }}
                 >
                   <span>All cases</span>
-                  <span className="text-slate-400">{total.toLocaleString()}</span>
+                  <span className="text-slate-400">{allCasesTotal.toLocaleString()}</span>
                 </button>
                 {cases.map(item => (
                   <button
@@ -544,7 +593,9 @@ export function EvidenceTableWindow() {
 
         <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400">
           <span>{selectedAnalysis ? `${selectedAnalysis.since} → ${selectedAnalysis.until}` : 'No analysis selected'}</span>
-          <span>{`Rows ${rows.length}/${total}`}</span>
+          <span>{rowsStatusLabel}</span>
+          {total === null && hasActiveEvidenceFilters && <span>Filtered total is deferred for faster loading.</span>}
+          {total !== null && totalMode === 'cached' && <span>Count shown from cached summaries.</span>}
           {activeDateRangeLabel && <span>{`Date filter ${activeDateRangeLabel}`}</span>}
           {selectedAnalysis && <span>{`Analyzable ${selectedAnalysis.analyzable_rows.toLocaleString()} / Impacted ${selectedAnalysis.impacted_rows.toLocaleString()} / 잡것들 ${selectedAnalysis.meaningless_rows.toLocaleString()}`}</span>}
           <span>Case menu item 우클릭 후 description 버튼으로 분류 기준 설명 창을 열 수 있습니다.</span>

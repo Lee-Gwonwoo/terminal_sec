@@ -218,6 +218,34 @@
 **업데이트 시각:** 16:37 (local)
 
 - taxonomy v3 코드 반영:
+
+## 2026-03-28
+**업데이트 시각:** 20:36 (local)
+
+- 성능 원인 재측정:
+  - `model2_analysis_runs` 직접 조회는 수 ms 수준으로 빠름
+  - `model2_case_summaries` cache 조회는 약 `5 ms`
+  - raw `model2_evidence_rows GROUP BY case_type`는 약 `16.4 s`
+  - evidence 첫 페이지 row fetch는 약 `3 ms`지만 exact `COUNT(*)`는 약 `9.1 s`
+  - 결론: frontend 체감 지연의 주원인은 렌더링이 아니라 backend의 raw regroup/count 쿼리
+- 구현 변경:
+  - `terminal/backend/src/services/model2AnalysisRepository.ts`
+    - `listModel2CaseSummaries()`를 `model2_case_summaries` cache table direct read로 전환
+    - `listModel2EvidenceRows()`에서 keyword/ticker/date 필터가 없으면 cached total만 사용
+    - keyword/ticker/date 필터가 있으면 exact total 없이 rows만 먼저 반환하고 `totalMode = deferred`로 표시
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/EvidenceTableWindow.tsx`
+    - `total: null` 응답을 허용
+    - 전체 case count는 analysis-wide cache count를 사용
+    - rows 상태 문구를 `Rows X` 또는 `Rows X/Y`로 분기
+    - filtered count deferred / cached count 표시 문구 추가
+- 기대 효과:
+  - analysis 진입 시 case dropdown 로딩 대기 제거
+  - evidence 첫 렌더가 exact count에 묶이지 않고 즉시 표시
+  - 검색/날짜 필터 사용 시에도 row 결과를 먼저 검토 가능
+- 상태:
+  - 코드 수정 완료
+  - build / runtime 검증 진행 예정
+  - 사용자 확인 대기
   - `ai_research_tool/test_model2_company_news_analysis.py`
     - company_news classifier를 taxonomy v3 기준으로 교체
     - `macro_sector_readthrough` broad bucket을 유지하지 않고 policy / peer / supply-chain / valuation / flow / media / transcript / feature 계열로 세분화
@@ -458,6 +486,22 @@
     - `impacted_rows = 96153`
     - `meaningless_rows = 225889`
     - `case_type_count = 101`
+
+## 2026-03-28
+**업데이트 시각:** 20:41 (local)
+
+- 사용자 요청 반영:
+  - `plan.md`에 taxonomy v6 유형군, 실제 유형 분류 방식, `잡것들_*`와 `unknown`의 차이를 한 번에 읽히도록 정리해 달라는 요청 반영
+- 문서 수정 내용:
+  - `ai_agent_plan/company_news_evidence_table/plan.md`
+    - `taxonomy v6 정리` 섹션 추가
+    - `유형 분류 방식(ver6)` 섹션 추가
+    - `잡것들_*는 무엇인가` 섹션 추가
+    - 남아 있던 `taxonomy v4` / `100개` / 옛 run id 기준 문구를 `v6` / `101개` / 최신 run 기준으로 정정
+    - residual 설명을 `잡것들_* = 저정보 노이즈`, `unknown = 아직 rule 미정 미분류`로 분리 명시
+- 검증:
+  - 문서 변경만 수행했으며 코드/DB 동작 변경은 없음
+  - plan 본문에서 `v6`, `101`, `잡것들_*`, `unknown`이 현재 구현 상태와 일치하도록 동기화 완료
   - DB 확인:
     - 새 v6 run에서 fallback bucket 조회 시 `unknown = 218798` 확인
   - delete API 런타임 확인:

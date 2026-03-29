@@ -16,13 +16,16 @@
 - 런타임 뉴스 DB는 `terminal/backend/backend/data/app.db` 이다.
 - Finnhub API 키는 서버 시작 시 필수다. 없으면 서버가 시작되지 않는다.
 - FMP API 키는 선택 사항이다. 없으면 company profile FMP pull만 제한된다.
+- RTPR API 키는 선택 사항이다. 없으면 RTPR pull만 제한된다.
 - EODHD 토큰은 `POST /api/news/pull-eodhd` 호출 시 파일에서 읽는다.
 - `GET /api/news`는 `news_items` 단독 조회가 아니라 `news_change_metrics`, `news_fulltext`, `news_ai_analysis`, sentiment snapshot, peers, company description, IPO date, market cap, industry를 join/병합해서 내려준다.
+- `POST /api/news/pull-investing`가 존재하며 Investing.com의 stock market / cryptocurrency category를 `news_items`에 적재한다.
 - `news_change_metrics`는 `CREATE TABLE IF NOT EXISTS`로 유지되는 영구 테이블이며, change update 작업이 metric 단위로 UPSERT 한다.
 - background job 상태와 로그는 메모리 기반이라 서버 재시작 시 유지되지 않는다.
 - `GET /api/jobs/active`, `GET /api/jobs/:jobId`는 뉴스 창 관련 장시간 작업에 대해 `category`와 `label`을 포함한다. 현재 핵심 category는 `news-update`, `news-fulltext`다.
 - default ticker universe는 서버 시작 시 CSV를 읽어 `securities`, `ticker_universes`, `ticker_universe_items`를 upsert하며, 이후 기본 경로 조회/수정은 DB-primary로 동작하고 CSV는 backup sync 성격이다.
 - case research 노트는 같은 `app.db`의 `research_tabs`, `research_pages` 테이블에 저장된다.
+- Model 2 evidence browser의 source of truth도 같은 `app.db`이며, `model2_analysis_runs`, `model2_case_summaries`, `model2_evidence_rows`를 사용한다.
 - `company_profiles`는 ticker당 단일 row가 아니라 `security_id + source` 기준 다중 row 구조다. ticker 심볼 해석은 `securities` JOIN이 필요하다.
 - `update_status`의 현재 핵심 컬럼은 `source_key`, `last_success_at`, `details_json`, `updated_at` 이다.
 - research API, bookmarks API, alerts API는 현재 고정 demo user id를 기준으로 동작한다.
@@ -74,6 +77,15 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 1. 환경 변수 `FMP_API_KEY`
 2. `ai_agent_plan/fmp_api_key/fmp_api_key`
+
+없어도 서버는 시작된다.
+
+### RTPR API 키
+
+조회 순서:
+
+1. 환경 변수 `RTPR_API_KEY`
+2. `ai_agent_plan/ptpr_api_key/ptpr_api_key` 첫 줄
 
 없어도 서버는 시작된다.
 
@@ -432,6 +444,7 @@ SEC filing companion table.
 - `POST /api/news/pull-finhub`
 - `POST /api/news/pull-eodhd`
 - `POST /api/news/pull-rtpr`
+- `POST /api/news/pull-investing`
 - `POST /api/news/pull-fmp-press-release`
 - `POST /api/news/pull-fmp-stock-news`
 - `POST /api/news/pull-fmp-sec-filing`
@@ -698,6 +711,43 @@ full text 안전장치:
 
 - `[][][]jobId[][][]`
 
+### `POST /api/news/pull-investing`
+
+Investing.com 기사 수집 job을 시작한다. backend는 stock market / cryptocurrency category를 구분해 `news_items`에 저장한다.
+
+요청 body:
+
+```json
+{
+  "mode": "recent",
+  "category": "stock-market-news",
+  "from": "2026-03-01",
+  "to": "2026-03-20",
+  "maxPages": 3,
+  "requestIntervalMs": 250,
+  "fulltextConcurrency": 10
+}
+```
+
+- `mode`: `recent | custom`
+- `category`: `all | stock-market-news | cryptocurrency-news`
+- `custom`: `from/to` 범위를 사용한다.
+- `maxPages`: category별 최대 fetch page 수
+- `requestIntervalMs`: category/page fetch 간격
+- `fulltextConcurrency`: 새 row가 생겼을 때 후속 fulltext worker 수
+- job category: `news-update`
+- 저장 규칙:
+  - stock market category는 `source='INVESTING'`, `source_type='investing_stock_market_news'`
+  - crypto category는 `source='INVESTING'`, `source_type='investing_cryptocurrency_news'`
+- 동작:
+  1. category별 page를 순회하며 기사 목록을 수집한다.
+  2. `UNIQUE (source, url)` 기준으로 `news_items`에 insert 한다.
+  3. 실제 새 row가 생기면 해당 id만 대상으로 후속 fulltext job 또는 inline fulltext 경로를 연결한다.
+
+응답 컬럼:
+
+- `[][][]jobId[][][]`
+
 ### `POST /api/news/pull-fmp-sec-filing`
 
 FMP SEC filing을 수집한다. primary endpoint는 `stable/sec-filings-search/symbol`이다.
@@ -939,6 +989,7 @@ Control Window / localStorage 공통 설정:
 - `GET /api/model2/analyses/:analysisId`
 - `GET /api/model2/analyses/:analysisId/cases`
 - `GET /api/model2/analyses/:analysisId/evidence`
+- `DELETE /api/model2/analyses/:analysisId`
 
 동작 규칙:
 
@@ -946,18 +997,35 @@ Control Window / localStorage 공통 설정:
 - `GET /api/model1/news/:id`는 단건 shadow view 조회이며, row가 없으면 404를 반환한다.
 - `GET /api/model2/analyses*` 계열은 호출 전에 `runResearchMaintenance()`를 수행해 soft delete 정리와 research maintenance를 먼저 반영한다.
 - `GET /api/model2/analyses`는 선택적 `[][][]pageId[][][]` query를 받을 수 있고, 분석 실행 목록을 최신순으로 반환한다.
+- `GET /api/model2/analyses/:analysisId`는 분석 실행 메타 1건을 반환한다.
 - `GET /api/model2/analyses/:analysisId/cases`는 해당 분석의 case summary 목록을 반환한다.
-- `GET /api/model2/analyses/:analysisId/evidence`는 `[][][]caseType[][][]`, `[][][]keyword[][][]`, `[][][]ticker[][][]`, `[][][]sortBy[][][]`, `[][][]sortDir[][][]`, `[][][]limit[][][]` query를 받아 evidence row를 필터링한다.
+- `GET /api/model2/analyses/:analysisId/evidence`는 `[][][]caseType[][][]`, `[][][]keyword[][][]`, `[][][]ticker[][][]`, `[][][]fromDate[][][]`, `[][][]toDate[][][]`, `[][][]sortBy[][][]`, `[][][]sortDir[][][]`, `[][][]limit[][][]`, `[][][]offset[][][]` query를 받아 evidence row를 필터링한다.
+- `DELETE /api/model2/analyses/:analysisId`는 해당 분석 실행과 하위 evidence/case summary를 함께 삭제한다.
 
 Model 2 evidence 저장 구조:
 
 - source table은 `model2_analysis_runs`, `model2_case_summaries`, `model2_evidence_rows`다.
+- `model2_analysis_runs` 핵심 컬럼:
+  - `[][][]id[][][]`, `[][][]page_id[][][]`, `[][][]title[][][]`, `[][][]note_title[][][]`, `[][][]source_type[][][]`, `[][][]source_name[][][]`
+  - `[][][]since[][][]`, `[][][]until[][][]`, `[][][]scope[][][]`
+  - `[][][]total_rows[][][]`, `[][][]analyzable_rows[][][]`, `[][][]impacted_rows[][][]`, `[][][]meaningless_rows[][][]`
+  - `[][][]created_at[][][]`, `[][][]updated_at[][][]`
+- `model2_case_summaries` 핵심 컬럼:
+  - `[][][]analysis_id[][][]`, `[][][]case_type[][][]`, `[][][]case_label_ko[][][]`, `[][][]top_level[][][]`
+  - `[][][]total_count[][][]`, `[][][]impacted_count[][][]`, `[][][]latest_published_at[][][]`
+  - `[][][]created_at[][][]`, `[][][]updated_at[][][]`
 - evidence row는 단순 기사 원문 복사가 아니라 다음 보강 필드를 함께 가진다.
   - 분류: `[][][]caseType[][][]`, `[][][]caseLabelKo[][][]`, `[][][]topLevel[][][]`, `[][][]reactionTag[][][]`, `[][][]isImpacted[][][]`
   - 종목/기업: `[][][]ticker[][][]`, `[][][]marketCap[][][]`, `[][][]marketCapBucket[][][]`, `[][][]industry[][][]`, `[][][]ipoDate[][][]`
   - 가격반응: `[][][]changePct[][][]`, `[][][]changeFromOpenPct[][][]`, `[][][]changeOpenToHighPct[][][]`, `[][][]change1dPct[][][]`, `[][][]change3dPct[][][]`, `[][][]change7dPct[][][]`, `[][][]change14dPct[][][]`, `[][][]change30dPct[][][]`
   - 점수: `[][][]immediateReactionScore[][][]`, `[][][]shortFollowthroughScore[][][]`, `[][][]mediumPersistenceScore[][][]`, `[][][]overallImpactScore[][][]`
-  - 기사 메타: `[][][]summary[][][]`, `[][][]publishedAt[][][]`, `[][][]source[][][]`, `[][][]publisher[][][]`, `[][][]sourceType[][][]`, `[][][]title[][][]`, `[][][]body[][][]`, `[][][]url[][][]`
+  - 기사 메타: `[][][]summary[][][]`, `[][][]publishedAt[][][]`, `[][][]source[][][]`, `[][][]publisher[][][]`, `[][][]sourceType[][][]`, `[][][]title[][][]`, `[][][]bodyPreview[][][]`, `[][][]url[][][]`
+
+Model 2 인덱스/제약:
+
+- `model2_evidence_rows`는 `UNIQUE (analysis_id, news_id)` 제약을 가진다.
+- evidence 정렬용으로 `(analysis_id, overall_impact_score DESC)`, `(analysis_id, published_at DESC, id DESC)` 인덱스를 사용한다.
+- case summary는 `(analysis_id, case_type)` 기본키를 가진 cache 테이블이다.
 
 blocked evidence 정리 규칙:
 
