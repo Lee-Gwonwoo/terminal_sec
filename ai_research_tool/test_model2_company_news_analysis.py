@@ -1,9 +1,13 @@
 import argparse
 import json
+import os
 import re
 import sqlite3
+import sys
+import time
 import uuid
 from collections import Counter, defaultdict
+from concurrent.futures import ProcessPoolExecutor
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
@@ -229,7 +233,7 @@ CASE_META: dict[str, dict[str, object]] = {
     "잡것들_jim_cramer_mention": {"label_ko": "잡것들_짐 크래머 언급·의견", "top_level": "residual", "definition": "Jim Cramer says, likes, mentions 형태.", "value_path": "미디어 인물 언급", "include_signals": ["jim cramer.*says", "jim cramer.*on", "jim cramer.*likes", "cramer.*says.*skip", "cramer.*bullish on"], "exclude_signals": [], "quick_questions": ["짐 크래머?"]},
     "잡것들_cathie_wood_mention": {"label_ko": "잡것들_캐시우드 언급·매매", "top_level": "residual", "definition": "Cathie Wood buys/sells, ARK fund activity.", "value_path": "미디어 인물 언급", "include_signals": ["cathie wood.*buy", "cathie wood.*sell", "cathie wood.*dump", "cathie wood.*bargain", "ark.*fund"], "exclude_signals": [], "quick_questions": ["캐시우드?"]},
     "잡것들_warren_buffett_mention": {"label_ko": "잡것들_워런 버핏 언급", "top_level": "residual", "definition": "Warren Buffett related, Berkshire mention.", "value_path": "미디어 인물 언급", "include_signals": ["warren buffett", "berkshire.*buy", "berkshire.*sell", "buffett.*portfolio"], "exclude_signals": [], "quick_questions": ["워런 버핏?"]},
-    "잡것들_unrelated_ticker_mention": {"label_ko": "잡것들_관련없는 종목 태그", "top_level": "residual", "definition": "SPY/QQQ/NVDA/AMZN 등 mega-cap 뉴스가 무관한 소형주에 태그.", "value_path": "잘못된 태깅", "include_signals": [], "exclude_signals": [], "quick_questions": ["종목 무관?"]},
+    "잡것들_unrelated_ticker_mention": {"label_ko": "잡것들_관련없는 종목 태그", "top_level": "residual", "definition": "SPY/QQQ/NVDA/AMZN 등 mega-cap 뉴스가 무관한 소형주에 태그.", "value_path": "잘못된 태깅", "include_signals": ["and other stocks", "along with shares of", "along with other stocks", "among.*stocks", "including.*shares of", "also moved", "joins.*in"], "exclude_signals": ["earnings", "guidance", "beat", "miss", "surge", "crash"], "quick_questions": ["종목 무관?", "기사 본문이 실제 이 종목에 대한 내용인가?"]},
     "잡것들_top_midday_gainers_losers": {"label_ko": "잡것들_Top Gainers/Losers 목록", "top_level": "residual", "definition": "Top Midday Gainers, Top Midday Decliners.", "value_path": "목록 기사", "include_signals": ["top midday gainers", "top midday decliners", "top midday losers"], "exclude_signals": [], "quick_questions": ["Gainers/Losers 목록?"]},
     "잡것들_zacks_trending_filler": {"label_ko": "잡것들_Zacks Trending 필러", "top_level": "residual", "definition": "Zacks Is a Trending Stock, facts to know 필러.", "value_path": "필러", "include_signals": ["trending stock.*facts to know", "facts to know before betting"], "exclude_signals": [], "quick_questions": ["Zacks 트렌딩?"]},
     "잡것들_fintel_price_target_filler": {"label_ko": "잡것들_Fintel 가격 목표 필러", "top_level": "residual", "definition": "Fintel Price Target Increased/Decreased 자동 게시물.", "value_path": "자동화 필러", "include_signals": ["price target increased by.*%.*to", "price target decreased by.*%.*to"], "exclude_signals": [], "quick_questions": ["Fintel 필러?"]},
@@ -312,6 +316,8 @@ DIRECT_SHORT_RULES: list[tuple[str, tuple[str, ...]]] = [
         "below expectations", "loss wider than expected",
         "revenues fall y/y", "revenue fell", "drops production forecast",
         "soft.*guidance", "sees.*below.*est",
+        "guidance.*missed", "missed significantly.*revenue.*eps",
+        "weak.*results", "weak quarter.*results",
         "revenue.*decline.*y/y", "eps.*misses",
     )),
     ("analyst_downgrade_negative", (
@@ -789,7 +795,8 @@ INFORMATION_FLOW_RULES: list[tuple[str, tuple[str, ...]]] = [
         "soars.*%", "up.*%.*after",
         "explodes over", "catapults",
         "rocketed", "doubles.*on",
-        "shares.*skyrocket",
+        "shares.*skyrocket", "stock.*skyrocket",
+        "skyrocketed",
     )),
     ("media_amplification_negative", (
         "trading lower today", "sinking today",
@@ -1245,8 +1252,8 @@ TRUE_RESIDUAL_RULES: list[tuple[str, tuple[str, ...]]] = [
         "oracle of omaha",
     )),
     ("잡것들_unrelated_ticker_mention", (
-        "and other stocks", "along with",
-        "among.*stocks", "including.*shares of",
+        "and other stocks", "along with shares of",
+        "along with other stocks", "among.*stocks", "including.*shares of",
         "also moved", "joins.*in",
     )),
     ("잡것들_top_midday_gainers_losers", (
@@ -1529,15 +1536,44 @@ def normalize_text(*parts: str | None) -> str:
     return "\n".join(part for part in parts if part).lower()
 
 
+# ── regex pre-compilation cache ──
+_COMPILED_REGEX_CACHE: dict[str, re.Pattern[str]] = {}
+
+
+def _is_regex_pattern(p: str) -> bool:
+    return ".*" in p or "[" in p or "\\" in p
+
+
+def _get_compiled(pattern: str) -> re.Pattern[str]:
+    c = _COMPILED_REGEX_CACHE.get(pattern)
+    if c is None:
+        c = re.compile(pattern)
+        _COMPILED_REGEX_CACHE[pattern] = c
+    return c
+
+
+def _precompile_rules() -> None:
+    """Pre-compile all regex patterns at import time."""
+    for _, rules in CASE_RULE_GROUPS:
+        for _, patterns in rules:
+            for p in patterns:
+                if _is_regex_pattern(p):
+                    _get_compiled(p)
+
+
 def contains_any(text: str, patterns: tuple[str, ...]) -> bool:
     for pattern in patterns:
-        if ".*" in pattern or "[" in pattern or "\\" in pattern:
-            if re.search(pattern, text):
+        if _is_regex_pattern(pattern):
+            if _get_compiled(pattern).search(text):
                 return True
             continue
         if pattern in text:
             return True
     return False
+
+
+# Pre-compile all regex patterns at module load time
+_precompile_rules()
 
 
 def is_fallback_case(case_type: str) -> bool:
@@ -1629,7 +1665,7 @@ def iter_company_news_rows(conn: sqlite3.Connection, since: str, until: str, chu
             yield dict(row)
 
 
-def prepare_row(base_row: dict, company_ctx: dict[str, dict], thresholds: dict[str, float]) -> dict:
+def prepare_row(base_row: dict, company_ctx: dict[str, dict], thresholds: dict[str, float], cached_case_type: str | None = None) -> dict:
     row = dict(base_row)
     ticker = first_ticker(row.get("tickers_csv"))
     context = company_ctx.get(ticker or "", {}) if ticker else {}
@@ -1638,7 +1674,10 @@ def prepare_row(base_row: dict, company_ctx: dict[str, dict], thresholds: dict[s
     row["industry"] = context.get("industry") or ""
     row["ipo_date"] = context.get("ipo_date") or ""
     row["market_cap_bucket"] = cap_bucket(row.get("market_cap"))
-    row["case_type"] = classify_company_news(row.get("title") or "", row.get("body") or "", row.get("full_text") or "", row.get("publisher") or "")
+    if cached_case_type is not None:
+        row["case_type"] = cached_case_type
+    else:
+        row["case_type"] = classify_company_news(row.get("title") or "", row.get("body") or "", row.get("full_text") or "", row.get("publisher") or "")
     case_label_ko, top_level = meta_for_case(row["case_type"])
     row["case_label_ko"] = case_label_ko
     row["top_level"] = top_level
@@ -1657,22 +1696,68 @@ def prepare_row(base_row: dict, company_ctx: dict[str, dict], thresholds: dict[s
     return row
 
 
-def compute_thresholds(conn: sqlite3.Connection, since: str, until: str, company_ctx: dict[str, dict], chunk_size: int) -> dict:
+def _classify_batch(batch: list[tuple[int, str, str, str, str]]) -> list[tuple[int, str]]:
+    """Worker function: classify a batch of (news_id, title, body, full_text, publisher) → (news_id, case_type).
+    Each worker pre-compiles regexes on first call."""
+    _precompile_rules()
+    results = []
+    for news_id, title, body, full_text, publisher in batch:
+        ct = classify_company_news(title, body, full_text, publisher)
+        results.append((news_id, ct))
+    return results
+
+
+def compute_thresholds(conn: sqlite3.Connection, since: str, until: str, company_ctx: dict[str, dict], chunk_size: int, num_workers: int = 6) -> dict:
+    """Phase 1: load all rows, classify with multiprocessing, compute thresholds.
+    Returns threshold_summary + classification_cache (news_id → case_type)."""
+    t0 = time.time()
+    print(f"[phase1] Loading rows from DB ...", flush=True)
+    all_rows: list[dict] = []
+    for raw_row in iter_company_news_rows(conn, since, until, chunk_size):
+        all_rows.append(raw_row)
+    total_rows = len(all_rows)
+    print(f"[phase1] Loaded {total_rows:,} rows in {time.time()-t0:.1f}s", flush=True)
+
+    # Build classification inputs
+    classify_inputs: list[tuple[int, str, str, str, str]] = []
+    for r in all_rows:
+        classify_inputs.append((
+            r["id"],
+            r.get("title") or "",
+            r.get("body") or "",
+            r.get("full_text") or "",
+            r.get("publisher") or "",
+        ))
+
+    # Parallel classification with N workers
+    batch_size = max(1, len(classify_inputs) // (num_workers * 4))
+    batches = [classify_inputs[i:i+batch_size] for i in range(0, len(classify_inputs), batch_size)]
+    print(f"[phase1] Classifying {total_rows:,} rows with {num_workers} workers ({len(batches)} batches) ...", flush=True)
+    t1 = time.time()
+    classification_cache: dict[int, str] = {}
+    with ProcessPoolExecutor(max_workers=num_workers) as executor:
+        for i, result_batch in enumerate(executor.map(_classify_batch, batches)):
+            for news_id, case_type in result_batch:
+                classification_cache[news_id] = case_type
+            if (i + 1) % 10 == 0 or (i + 1) == len(batches):
+                done = sum(1 for _ in classification_cache)
+                print(f"  [{done:,}/{total_rows:,}] classified ({time.time()-t1:.1f}s)", flush=True)
+    print(f"[phase1] Classification done in {time.time()-t1:.1f}s", flush=True)
+
+    # Compute thresholds using cached classifications
     bucket_scores: dict[str, list[float]] = defaultdict(list)
-    total_rows = 0
     analyzable_rows = 0
     meaningless_rows = 0
     case_counts: Counter[str] = Counter()
-    for raw_row in iter_company_news_rows(conn, since, until, chunk_size):
-        total_rows += 1
+    for raw_row in all_rows:
+        case_type = classification_cache.get(raw_row["id"], "unknown")
+        case_counts[case_type] += 1
+        if is_fallback_case(case_type):
+            meaningless_rows += 1
         ticker = first_ticker(raw_row.get("tickers_csv"))
         context = company_ctx.get(ticker or "", {}) if ticker else {}
         raw_row["market_cap"] = context.get("market_cap")
         raw_row["market_cap_bucket"] = cap_bucket(raw_row.get("market_cap"))
-        raw_row["case_type"] = classify_company_news(raw_row.get("title") or "", raw_row.get("body") or "", raw_row.get("full_text") or "", raw_row.get("publisher") or "")
-        case_counts[raw_row["case_type"]] += 1
-        if is_fallback_case(raw_row["case_type"]):
-            meaningless_rows += 1
         raw_row["immediate_reaction_score"] = immediate_reaction_score(raw_row)
         raw_row["short_followthrough_score"] = short_followthrough_score(raw_row)
         raw_row["medium_persistence_score"] = medium_persistence_score(raw_row)
@@ -1684,6 +1769,7 @@ def compute_thresholds(conn: sqlite3.Connection, since: str, until: str, company
     all_scores = [score for values in bucket_scores.values() for score in values]
     global_p80 = percentile(all_scores, 0.80) or 0.0
     thresholds = {bucket: percentile(values, 0.80) or global_p80 for bucket, values in bucket_scores.items()}
+    print(f"[phase1] Thresholds computed. Total time: {time.time()-t0:.1f}s", flush=True)
     return {
         "thresholds": thresholds,
         "bucket_meta": {bucket: percentile_meta(values) for bucket, values in bucket_scores.items()},
@@ -1692,6 +1778,7 @@ def compute_thresholds(conn: sqlite3.Connection, since: str, until: str, company
         "analyzable_rows": analyzable_rows,
         "meaningless_rows": meaningless_rows,
         "case_counts": dict(case_counts),
+        "_classification_cache": classification_cache,
     }
 
 
@@ -1761,13 +1848,16 @@ def refresh_case_summaries(conn: sqlite3.Connection, run_id: str) -> None:
     )
 
 
-def populate_evidence_rows(conn: sqlite3.Connection, run_id: str, since: str, until: str, company_ctx: dict[str, dict], thresholds: dict[str, float], chunk_size: int, insert_batch: int) -> dict:
+def populate_evidence_rows(conn: sqlite3.Connection, run_id: str, since: str, until: str, company_ctx: dict[str, dict], thresholds: dict[str, float], chunk_size: int, insert_batch: int, classification_cache: dict[int, str] | None = None) -> dict:
+    t0 = time.time()
+    print(f"[phase2] Populating evidence rows ...", flush=True)
     buffer: list[tuple] = []
     impacted_rows = 0
     inserted_rows = 0
     case_impacted: Counter[str] = Counter()
     for raw_row in iter_company_news_rows(conn, since, until, chunk_size):
-        row = prepare_row(raw_row, company_ctx, thresholds)
+        cached_ct = classification_cache.get(raw_row["id"]) if classification_cache else None
+        row = prepare_row(raw_row, company_ctx, thresholds, cached_case_type=cached_ct)
         if row["is_impacted"]:
             impacted_rows += 1
             case_impacted[row["case_type"]] += 1
@@ -1810,7 +1900,10 @@ def populate_evidence_rows(conn: sqlite3.Connection, run_id: str, since: str, un
         inserted_rows += 1
         if len(buffer) >= insert_batch:
             flush_rows(conn, buffer)
+            if inserted_rows % 50000 == 0:
+                print(f"  [phase2] {inserted_rows:,} rows inserted ({time.time()-t0:.1f}s)", flush=True)
     flush_rows(conn, buffer)
+    print(f"[phase2] All {inserted_rows:,} rows inserted in {time.time()-t0:.1f}s", flush=True)
     refresh_case_summaries(conn, run_id)
     conn.execute(
         "UPDATE model2_analysis_runs SET impacted_rows = ?, updated_at = datetime('now') WHERE id = ?",
@@ -1992,7 +2085,8 @@ def main() -> None:
     conn = sqlite3.connect(db_path)
     note_title = args.note_title or resolve_note_title(conn, args.page_id, args.note_title)
     company_ctx = load_company_context(conn)
-    threshold_summary = compute_thresholds(conn, args.since, until, company_ctx, args.chunk_size)
+    threshold_summary = compute_thresholds(conn, args.since, until, company_ctx, args.chunk_size, num_workers=6)
+    classification_cache = threshold_summary.pop("_classification_cache", None)
     run_id = str(uuid.uuid4())
     insert_analysis_run(conn, run_id, args.page_id, note_title, note_title, args.since, until, threshold_summary)
     insert_summary = populate_evidence_rows(
@@ -2004,6 +2098,7 @@ def main() -> None:
         threshold_summary["thresholds"],
         args.chunk_size,
         args.insert_batch,
+        classification_cache=classification_cache,
     )
     case_summaries = fetch_case_summaries(conn, run_id)
     markdown = make_markdown(run_id, note_title, args.since, until, threshold_summary, insert_summary, case_summaries, conn)

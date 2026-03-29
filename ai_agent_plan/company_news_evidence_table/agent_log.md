@@ -435,6 +435,42 @@
 ## 2026-03-26
 **업데이트 시각:** 18:02 (local)
 
+## 2026-03-29
+**업데이트 시각:** 17:48 (local)
+
+- plan 문서 보강:
+  - `ai_agent_plan/company_news_evidence_table/plan.md`
+    - `PLAN CHANGE — 2026-03-29 v7 taxonomy upgrade` 섹션 추가
+    - v7 확장 방식(`unknown/bookmark 샘플링 -> taxonomy 정의 -> rule ordering -> naming 정합화 -> full rerun`) 설명 추가
+    - 최신 run 수치(`analysis_id = a99f4a10-ff6d-4929-8ea2-5675af04b99f`, `CASE_META = 207`, `meaningless_rows = 206,440`)로 갱신
+    - `unknown` 감소와 `잡것들_*` 증가가 동시에 발생한 이유를 문서에 반영
+- 검증:
+  - `python tmp/_check_v7_distribution.py`로 `unknown = 166,132`, `잡것들_* = 40,308`, `meaningless total = 206,440` 확인
+  - 최신 run이 v7 classifier 결과를 반영한다는 점을 문서에 동기화
+- 상태:
+  - plan 최신화 완료
+  - 사용자 확인 대기
+
+## 2026-03-29
+**업데이트 시각:** 18:08 (local)
+
+- 사용자 오분류 리포트 반영:
+  - Planet Labs(PL) 기사 `Why Planet Labs (PL) Stock Is Nosediving`가 `잡것들_unrelated_ticker_mention`으로 분류된 현상 확인
+- 원인:
+  - `ai_research_tool/test_model2_company_news_analysis.py`의 `잡것들_unrelated_ticker_mention` rule에 `along with`가 너무 넓게 들어 있어, `guidance missed significantly along with this quarter's revenue and EPS` 문장을 잘못 noise로 흡수하고 있었음
+  - 동시에 `earnings_miss_cut_negative` 쪽에는 `guidance missed`, `weak results` 같은 서술형 miss 패턴이 부족했음
+- 수정 내용:
+  - `ai_research_tool/test_model2_company_news_analysis.py`
+    - `잡것들_unrelated_ticker_mention`: `along with` 제거, `along with shares of`, `along with other stocks`처럼 좁은 패턴만 유지
+    - `earnings_miss_cut_negative`: `guidance.*missed`, `missed significantly.*revenue.*eps`, `weak.*results`, `weak quarter.*results` 추가
+- 검증:
+  - `python tmp/_classify_pl_case.py` 재실행 결과 `classified: earnings_miss_cut_negative` 확인
+  - matched rule이 `direct_short earnings_miss_cut_negative`로 찍히는 것 확인
+  - `get_errors`에서 `test_model2_company_news_analysis.py` 에러 0건 확인
+- 상태:
+  - 특정 false positive 수정 완료
+  - full rerun은 아직 미실시
+
 - 추가 확인:
   - `publisher='FINNHUB'`이면서 body/title에 `Yahoo Finance`가 보이는 row를 따로 확인해 보니, 두 종류가 섞여 있었음
   - 하나는 실제 Yahoo branded transcript/video 기사(`Yahoo Finance Senior Reporter`, `Opening Bid`, `Market Minute`, `Good Buy or Goodbye`)였고, 다른 하나는 단순 citation(`according to Yahoo Finance`)이었음

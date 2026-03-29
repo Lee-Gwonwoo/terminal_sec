@@ -2,33 +2,64 @@
 - 최종 목적은 `company_news` 후속기사에서 실제 가격 영향 정보를 설명하는 taxonomy를 만드는 것이다.
 - 이 taxonomy는 직접 이벤트뿐 아니라 정책, peer 경쟁, 밸류에이션, 수급, 미디어 증폭, estimate reset 같은 간접 read-through까지 포함해야 한다.
 - 이번 tranche의 산출물은 아래 4가지다.
-  - `company_news`용 taxonomy v6 classifier
-  - `101`개 세부 `case_type`
+  - `company_news`용 taxonomy v7 classifier
+  - `207`개 세부 `case_type`
   - `page id = 99a89607-d943-4a57-8a98-be8ba86f731b` 갱신
   - Evidence Table / Case Description UI 동기화 + analysis version delete
 
 ### 현재 레포 상태(중요, 확인됨)
 - 최신 run은 아래 기준으로 이미 생성되어 있다.
-  - `analysis_id = d11b094f-b6db-4be3-a754-0354da385101`
-  - `scope = company_news_2025_plus_taxonomy_v6`
+  - `analysis_id = a99f4a10-ff6d-4929-8ea2-5675af04b99f`
+  - `scope = company_news_2025_plus_taxonomy_v6` (`run metadata`의 scope 문자열은 아직 v6로 남아 있으나 실제 classifier와 page 내용은 v7 기준으로 갱신됨)
   - `since = 2025-01-01`
   - `until = 2026-03-28`
 - 최신 수치:
   - `total_rows = 542,816`
-  - `analyzable_rows = 480,631`
-  - `impacted_rows = 96,153`
-  - `meaningless_rows = 225,889`
+  - `analyzable_rows = 480,707`
+  - `impacted_rows = 96,138`
+  - `meaningless_rows = 206,440`
 - 비교 기준:
   - 초기 broad run `6ec343f2-d7be-43e1-9297-90e5c35643ea`의 `meaningless_rows = 403,606`
   - taxonomy v6 run `d11b094f-b6db-4be3-a754-0354da385101`의 `meaningless_rows = 225,889`
-  - 즉 broad fallback 대비 residual은 크게 줄였고, v6에서는 fallback 내부를 `잡것들_*`와 `unknown`으로 의미 분리했다.
-- active classifier 파일은 `ai_research_tool/test_model2_company_news_analysis.py`이며, 현재 `CASE_META = 101`이 확인되었다.
+  - taxonomy v7 run `a99f4a10-ff6d-4929-8ea2-5675af04b99f`의 `meaningless_rows = 206,440`
+  - 즉 broad fallback 대비 residual은 크게 줄였고, v6에서 `잡것들_*`와 `unknown`을 분리한 뒤, v7에서는 `unknown` 내부를 더 많은 독립 case와 더 세밀한 noise 묶음으로 재분해했다.
+- active classifier 파일은 `ai_research_tool/test_model2_company_news_analysis.py`이며, 현재 `CASE_META = 207`이 확인되었다.
 - UI description registry는 `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/model2CaseDescriptions.ts`가 담당한다.
 - Evidence Table window는 현재 `analysis / case / keyword / ticker / 날짜(from~to) / limit` 필터와 analysis version 우클릭 `delete`를 지원한다.
 - frontend production build는 2026-03-27 로컬 검증에서 성공했다.
-- backend `/api/model2/analyses` 응답은 2026-03-28 로컬 검증에서 최신 v6 run 노출이 확인되었다.
+- backend `/api/model2/analyses` 응답은 2026-03-29 로컬 검증에서 최신 v7 run 노출이 확인되었다.
 
-### taxonomy v6 정리
+### PLAN CHANGE — 2026-03-29 v7 taxonomy upgrade
+- v6의 `101`개 taxonomy는 broad fallback을 줄이는 데는 충분했지만, `unknown = 218,798`이 여전히 너무 컸다.
+- 그래서 v7에서는 `unknown`과 bookmark 샘플을 다시 읽어, 반복되는 미분류 문체를 독립 case 또는 명시적 noise case로 올리는 방식으로 확장했다.
+- 확장 결과는 아래와 같다.
+  - `CASE_META 101 -> 207`
+  - `unknown 218,798 -> 166,132`
+  - `잡것들_* 7,091 -> 40,308`
+  - `meaningless_rows 225,889 -> 206,440`
+- 해석상 중요한 점은, v7의 개선이 단순히 `unknown`을 meaningful case로만 바꾼 것이 아니라, 기존에 `unknown`에 섞여 있던 저정보 기사도 `잡것들_*`로 명시 분리했다는 점이다.
+
+### taxonomy v7 정리
+- 현재 활성 taxonomy는 `207`개 `case_type`으로 구성되며, 해석 축은 여전히 `long / short / residual`이지만, residual 내부 설명력이 v6보다 훨씬 세밀해졌다.
+- v7은 `headline keyword 사전`을 기계적으로 늘린 것이 아니라, 아래 4단계 절차로 만들었다.
+  1. `unknown`과 고영향 residual, bookmark 저장 기사들을 다시 샘플링해 반복 문체를 확인했다.
+  2. 서로 다른 기사지만 같은 가치 경로를 설명하는 패턴을 하나의 case로 묶었다.
+  3. case 이름과 `CASE_META`를 먼저 고정한 뒤, rule group별 패턴을 맞춰 넣었다.
+  4. 마지막에 UI description key와 rule key를 일치시키고 full dataset을 다시 돌려 수치로 검증했다.
+- 즉 분류 기준의 1순위는 여전히 `단어 자체`가 아니라 `기사 문장이 어떤 가치 경로를 설명하느냐`다.
+
+### ver7 유형 분류를 어떤 식으로 했는가
+- 분류의 출발점은 `이 기사가 무엇을 말하는가`이지 `이 headline에 무슨 단어가 들어 있는가`가 아니다. headline/body/full_text/publisher를 같이 보고 사건의 가치 경로를 먼저 정한다.
+- v7에서 사용한 실제 절차는 아래와 같다.
+  1. `unknown`과 bookmark 기사 샘플을 대량으로 읽어, 같은 유형으로 반복되는 기사 묶음을 찾는다.
+  2. 그 묶음이 투자 case로 독립 가치가 있으면 새 `case_type`으로 승격하고, 정보량이 낮으면 `잡것들_*` noise로 분리한다.
+  3. 새 case는 `CASE_META`에 먼저 등록하고, 이후 `DIRECT_SHORT`, `INDIRECT_SHORT`, `DIRECT_LONG`, `INDIRECT_LONG`, `INFORMATION_FLOW`, `TRUE_RESIDUAL` 여섯 rule group 중 하나에 넣는다.
+  4. broad rule이 세부 사건을 덮어쓰지 않도록 ordering을 조정한다. 예를 들어 `earnings preview`나 `guidance update`가 `generic_feature_commentary`보다 먼저 잡혀야 한다.
+  5. rule 이름과 `CASE_META` 이름이 하나라도 어긋나면 UI/DB가 drift하므로, 전수 consistency check로 mismatch를 정리한다.
+  6. 전체 `542,816`건을 다시 돌려, 새 case가 실제로 사용되는지와 `unknown` 감소가 숫자로 확인되는지 검증한다.
+- 그래서 v7은 단순한 keyword 증가가 아니라, `샘플 판독 -> taxonomy 정의 -> rule ordering -> naming 정합화 -> full rerun`의 반복으로 만든 taxonomy다.
+
+### taxonomy v6 정리(이전 기준)
 - 현재 활성 taxonomy는 `101`개 `case_type`으로 구성되며, 상위 해석 축은 `long / short / residual`이다.
 - `long`은 기사 언어가 기업가치 상승 경로를 직접 또는 간접적으로 시사하는 경우다.
 - `short`는 기사 언어가 희석, 규제 실패, 법률 리스크, 수요 악화, 경쟁 심화처럼 하방 경로를 시사하는 경우다.
@@ -51,7 +82,7 @@
 - `기타 구조화 가능 유형`: patent/IP, activist investor, institutional portfolio shift, stock comparison, debt refinancing, IPO/listing
 - `잔여 / 노이즈 / 미분류`: `잡것들_*`, `unknown`, 그리고 legacy 호환용 `meaningless_others`
 
-### 유형 분류 방식(ver6)
+### 유형 분류 방식(ver6 baseline)
 - 분류의 1차 기준은 **주가 결과가 아니라 기사 언어와 사건 성격**이다. 먼저 `무슨 사건이 발생했는가`를 읽고, 그 다음 가격 반응을 본다.
 - 실제 rule 적용 순서는 아래와 같다.
   1. `direct_short`: 희석 조달, 거래정지/역분할, 파산/구조조정, 소송·조사, 임상 실패, miss·cut, downgrade 같은 명확한 직접 악재를 먼저 잡는다.
@@ -63,6 +94,15 @@
 - 핵심은 `broad한 비교/roundup 기사`가 먼저 잡혀서 실적·가이던스·임상 같은 더 의미 있는 사건을 덮어쓰지 않게 하는 것이다.
 - 따라서 `stock_comparison_article`, `market_movers_roundup`, `stock_why_moving_explanation` 같은 넓은 rule은 뒤쪽에 두고, `guidance sees`, `beats estimate`, `FDA accepts`, `public offering` 같은 사건성 rule을 앞에 둔다.
 - `change_pct` 계열은 유형을 만드는 기준이 아니다. 유형이 정해진 뒤에만 `overall_impact_score`와 market cap bucket 기준 `p80`을 써서 영향 여부를 본다.
+
+### v7에서 추가로 바뀐 분류 규칙의 핵심
+- `full_text`를 더 적극적으로 사용하도록 설계해, headline만 보면 애매한 기사도 본문 설명으로 보강했다.
+- `INFORMATION_FLOW`와 `TRUE_RESIDUAL`을 크게 확장해, 과거에는 전부 `unknown`으로 몰리던 explanation형 기사와 저정보 filler를 더 세밀하게 쪼갰다.
+- rule group 순서는 유지하되, 각 그룹 내부에서 broad phrase보다 사건성 phrase를 앞에 두는 방식으로 재정렬했다.
+- 다만 noise 규칙은 과도하게 넓으면 실제 사건 기사를 잘못 흡수할 수 있으므로, 2026-03-29에 `잡것들_unrelated_ticker_mention`의 `along with` 패턴을 `along with shares of`, `along with other stocks`처럼 더 좁은 표현으로 수정했다.
+- 같은 수정에서 `earnings_miss_cut_negative`에 `guidance.*missed`, `missed significantly.*revenue.*eps`, `weak.*results` 계열을 보강해 Planet Labs(PL) 같은 실적 miss 기사가 residual noise로 빠지지 않게 했다.
+- 새로 늘어난 case는 frontend의 `model2CaseDescriptions.ts`에도 같은 key로 동기화해 Evidence Table에서 즉시 설명 가능하게 맞췄다.
+- full rerun 성능 병목 때문에 v7부터는 regex pre-compilation, classification cache, `ProcessPoolExecutor(6 workers)`를 적용해 재분석 시간을 2.5시간대에서 약 6분대로 줄였다.
 
 ### 잡것들_*는 무엇인가
 - `잡것들_*`는 **의미가 전혀 없다는 뜻이 아니라**, `company_news` 기사 중에서 반복되지만 독립 투자 case로 승격시키기에는 정보량이 낮거나 가격 설명력이 약한 노이즈 묶음이다.
@@ -85,6 +125,8 @@
 - mock 데이터는 사용하지 않는다.
 
 ### 읽는 방법(비개발자/일반인 기준)
+- `PLAN CHANGE — 2026-03-29 v7 taxonomy upgrade`를 먼저 읽으면 왜 v6에서 v7로 넘어갔는지 바로 이해할 수 있다.
+- `taxonomy v7 정리`와 `ver7 유형 분류를 어떤 식으로 했는가`를 읽으면 이번에 분류기를 어떤 논리로 확장했는지 알 수 있다.
 - `taxonomy v6 정리`를 먼저 읽으면 현재 유형군이 어떤 식으로 묶였는지 바로 볼 수 있다.
 - `유형 분류 방식(ver6)`은 분류기가 어떤 순서로 rule을 적용하는지 설명한다.
 - `잡것들_*는 무엇인가`는 residual 내부에서 노이즈와 미분류를 어떻게 구분하는지 설명한다.
@@ -206,7 +248,7 @@
 |-----------|------|------|------|------|
 | 3-1 | active classifier로 전체 dataset 재분석 실행 | `ai_research_tool/test_model2_company_news_analysis.py` | 새 analysis run 생성 확인 | ⏳ |
 | 3-2 | `research_pages.body`와 analysis scope 갱신 | `terminal/backend/backend/data/app.db` | 최신 page / scope 확인 | ⏳ |
-| 3-3 | `meaningless_others` 감소 수치 확인 | `ai_agent_plan/company_news_evidence_table/plan.md` | 전/후 수치 표 확인 | ⏳ |
+| 3-3 | v6 -> v7 `unknown` / `잡것들_*` / `meaningless_rows` 변화 수치 확인 | `ai_agent_plan/company_news_evidence_table/plan.md` | 전/후 수치 표 확인 | ⏳ |
 
 - `3-1` 목적: taxonomy가 실제 데이터에 적용됐는지 확인하기 위함.
   설명: full dataset을 재실행해 최신 analysis run을 생성했다.
@@ -219,16 +261,16 @@
   사람 검증(비개발자): 최신 analysis title이 `taxonomy v6`로 보인다.
   흔한 문제/주의: run만 새로 만들고 page body를 안 갱신하면 연구 산출물이 분리된다.
 - `3-3` 목적: 실제 residual 축소 효과를 정량으로 확인하기 위함.
-  설명: 초기 broad run과 최신 v6 run의 `meaningless_rows`를 비교했다.
-  완료 조건(눈으로 확인): 감소 수치가 표로 있다.
-  사람 검증(비개발자): 잡것들 비율이 눈에 띄게 줄었다는 것을 숫자로 확인할 수 있다.
-  흔한 문제/주의: run별 total_rows 기준이 다르면 단순 비교가 왜곡될 수 있다.
+  설명: 초기 broad run, 최신 v6 run, 최신 v7 run의 `unknown`, `잡것들_*`, `meaningless_rows`를 비교했다.
+  완료 조건(눈으로 확인): `v6 -> v7` 변화 수치가 표와 문장으로 있다.
+  사람 검증(비개발자): `unknown`이 크게 줄었고 일부는 새 noise case로 이동했다는 점을 숫자로 확인할 수 있다.
+  흔한 문제/주의: `meaningless_rows`는 `unknown`만이 아니라 `잡것들_*`까지 합친 값이므로, `unknown 감소량`과 `meaningless 감소량`은 다를 수 있다.
 
 검증 훅:
 ```text
-- /api/model2/analyses에서 최신 run d11b094f-b6db-4be3-a754-0354da385101 확인
-- scope가 company_news_2025_plus_taxonomy_v6인지 확인
-- meaningless_rows가 225,889인지 확인
+- /api/model2/analyses에서 최신 run a99f4a10-ff6d-4929-8ea2-5675af04b99f 확인
+- latest run의 case_type_count가 207인지 확인
+- meaningless_rows가 206,440인지 확인
 ```
 사용자 확인 필요: **예**
 
@@ -344,10 +386,10 @@ Track B — UI / 검증
 
 ### 현재 tranche 최종 요약
 - `meaningless_others` 축소라는 이번 tranche의 핵심 목표는 달성됐다.
-- taxonomy는 `101`개로 확장됐고, active run은 `company_news_2025_plus_taxonomy_v6`로 저장됐다.
-- residual 내부는 ver6에서 `잡것들_*`와 `unknown`으로 의미 분리됐다.
+- taxonomy는 최종적으로 `207`개까지 확장됐고, 최신 active run은 `a99f4a10-ff6d-4929-8ea2-5675af04b99f`다.
+- residual 내부는 v6에서 `잡것들_*`와 `unknown`으로 의미 분리됐고, v7에서는 `unknown` 내부를 더 세밀한 case와 noise 묶음으로 재분해했다.
 - frontend build와 analyses API 응답도 확인됐다.
-- 다음 tranche의 본질적 과제는 `225,889`건으로 집계되는 fallback 묶음에서 `unknown`을 추가 taxonomy로 더 줄일지 여부다.
+- 다음 tranche의 본질적 과제는 남은 `166,132`건 `unknown`을 ML/LLM/cluster-assisted 방식으로 더 줄일지 여부다.
 
 ### ⏳ Step 6 — Evidence Table 로딩 병목 제거
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |

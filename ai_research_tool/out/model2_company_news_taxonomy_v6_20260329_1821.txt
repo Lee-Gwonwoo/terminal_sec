@@ -1,0 +1,8 @@
+analysis_id=76c6beec-f7b7-459f-9a7a-d4bed32df9ce
+since=2025-01-01
+until=2026-03-29
+scope=company_news_2025_plus_taxonomy_v6
+total_rows=542816
+analyzable_rows=480707
+impacted_rows=96138
+meaningless_rows=206146
