@@ -1,5 +1,23 @@
 ## company_news exact fulltext 복구 / publisher 재감사 plan
 
+### PLAN CHANGE (2026-03-28 19:26 local)
+
+- 사용자가 terminal에서 backfill 진행 상황이 일정 간격으로 보이도록 요구했다.
+- `runCompanyNewsOriginUrlBackfill()`는 기존의 row-count 기반 간헐 로그 대신, **1분 heartbeat 진행 로그**를 남기도록 변경한다.
+- heartbeat 로그에는 `processed/total`, `updated`, `unresolved`, `failed`, `batch`, `elapsed`, `rate(rows/min)`를 포함한다.
+
+### PLAN CHANGE (2026-03-28 19:31 local)
+
+- 실제 확인 결과 `appendLog()`는 in-memory job log만 갱신하고 terminal stdout에는 출력하지 않았다.
+- 따라서 1분 heartbeat는 job log뿐 아니라 **`console.log`로도 동시 미러링**해서 terminal에서 즉시 보이도록 보정한다.
+- 이 규칙은 standalone backfill foreground/background 실행 모두에 동일하게 적용한다.
+
+### PLAN CHANGE (2026-03-28 19:38 local)
+
+- 실제 샘플 측정 결과 oldest missing 50건은 `0/50`, newest missing 50건은 `40/50`가 복구됐다.
+- 따라서 historical backfill 기본 스캔 순서를 `rowid ASC`에서 **최신 row 우선(`rowid DESC`)**으로 바꿔, 죽은 오래된 wrapper에 시간을 먼저 쓰지 않도록 조정한다.
+- 이 변경은 전체 wall-clock 단축보다도 **유효 복구량(updated/min)** 개선을 목표로 한다.
+
 ### PLAN CHANGE (2026-03-28 14:45 local)
 
 - 사용자 요청에 따라 범위를 샘플 검증에서 멈추지 않고, **기존 저장된 FINNHUB company_news 전체의 missing `origin_url` 복구 실행**까지 확장한다.
@@ -224,6 +242,9 @@ select extraction_status, count(*) from news_items ni left join news_fulltext nf
 사람 검증(비개발자): 실패 기사 note를 보면 이유가 읽힌다.
 흔한 문제/주의: note를 너무 자유 텍스트로 쓰면 집계가 어려워진다.
 추가 구현 메모(2026-03-28 17:57 local): live pull 경로는 `company_news <symbol>: origin_url unresolved after 10 retries` 형식으로 남기고, backfill job은 `final origin_url unresolved after 10 retries` 형식으로 남긴다.
+추가 구현 메모(2026-03-28 19:26 local): historical backfill 진행 가시성을 위해 terminal/job log에 1분 heartbeat 로그를 남긴다. 포맷은 `[heartbeat] [processed/total] updated=... unresolved=... failed=... batches=... elapsed=... rate=.../min`이다.
+추가 구현 메모(2026-03-28 19:31 local): terminal stdout 가시성을 위해 위 heartbeat/start/complete 로그는 `appendLog()`와 별도로 `console.log`에도 미러링한다.
+추가 구현 메모(2026-03-28 19:38 local): historical backfill은 oldest-first가 아니라 recent-first로 스캔한다. 이유는 최신 missing row의 redirect 생존율이 훨씬 높기 때문이다.
 
 검증 훅:
 

@@ -418,6 +418,55 @@
     - generic citation 오분류를 피하기 위한 전제 아래 backfill 테스트 추가
 - 검증 예정:
   - backend 정적 오류 확인
+
+## 2026-03-28
+**업데이트 시각:** 20:20 (local)
+
+- 사용자 요구 반영:
+  - 의미없는 정보 계열 case는 key 앞에 `잡것들_` prefix를 붙이고,
+  - 끝까지 rule에 걸리지 않는 미분류 row는 `unknown`으로 따로 두며,
+  - Evidence Table에서 analysis version을 우클릭하면 `delete` 버튼이 떠서 관련 evidence가 삭제되게 해달라는 요청 반영
+- 구현 내용:
+  - `ai_research_tool/test_model2_company_news_analysis.py`
+    - noise 계열 case key를 `잡것들_promotional_appearance_noise`, `잡것들_screener_listicle_noise`, `잡것들_company_event_schedule_noise`, `잡것들_company_award_recognition`으로 변경
+    - 최종 fallback을 `meaningless_others` 대신 `unknown`으로 변경
+    - fallback 집계는 `잡것들_% + unknown + legacy meaningless_others`를 함께 세도록 수정
+    - analysis scope / note title / output stem을 `taxonomy v6` 기준으로 변경
+  - `terminal/backend/src/services/model2AnalysisRepository.ts`
+    - `deleteModel2AnalysisRun()` 추가
+    - analysis 삭제 시 cascade 기준 검증용 deleted evidence / case summary count 반환
+    - `meaningless_rows` 집계를 `unknown OR case_type LIKE '잡것들_%' OR legacy meaningless_others` 기준으로 보강
+  - `terminal/backend/src/server.ts`
+    - `DELETE /api/model2/analyses/:analysisId` endpoint 추가
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/EvidenceTableWindow.tsx`
+    - analysis selector를 custom dropdown으로 변경
+    - analysis version 행 우클릭 context menu + `delete` 버튼 추가
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/model2CaseDescriptions.ts`
+    - `잡것들_` prefixed noise case 설명 추가
+    - `unknown` 설명 추가
+    - legacy noise key alias 유지
+- 검증:
+  - 정적 분석: 수정 파일 에러 0건 확인
+  - backend `npm.cmd run build` 성공
+  - frontend `npm.cmd run build` 성공
+  - Python `py_compile` 성공
+  - taxonomy v6 재실행 완료:
+    - `analysis_id = d11b094f-b6db-4be3-a754-0354da385101`
+    - `scope = company_news_2025_plus_taxonomy_v6`
+    - `total_rows = 542816`
+    - `analyzable_rows = 480631`
+    - `impacted_rows = 96153`
+    - `meaningless_rows = 225889`
+    - `case_type_count = 101`
+  - DB 확인:
+    - 새 v6 run에서 fallback bucket 조회 시 `unknown = 218798` 확인
+  - delete API 런타임 확인:
+    - temp analysis `a9b6c6b9-6dbc-408b-8fd6-85b95687400b` 생성
+    - `DELETE /api/model2/analyses/a9b6c6b9-6dbc-408b-8fd6-85b95687400b` -> `deleted=true`, `evidenceRowsDeleted=264`, `caseSummariesDeleted=30`
+    - DB 재확인에서 run/evidence/summary count 모두 `0` 확인
+- 상태:
+  - taxonomy v6 + analysis version delete 구현/검증 완료
+  - 브라우저 시각 확인은 사용자 확인 대기
   - backend `npm run build`
   - backend `npm run test`
   - 실DB에서 Yahoo branded sample row 교정 여부 확인

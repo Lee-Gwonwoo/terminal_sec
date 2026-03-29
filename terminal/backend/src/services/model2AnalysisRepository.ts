@@ -81,6 +81,12 @@ export interface Model2BlockedEvidenceCleanupResult {
   affectedAnalysisIds: string[];
 }
 
+export interface DeleteModel2AnalysisResult {
+  deleted: boolean;
+  evidenceRowsDeleted: number;
+  caseSummariesDeleted: number;
+}
+
 const SORT_COLUMN_SQL: Record<string, string> = {
   published_at: "er.published_at",
   ticker: "er.ticker",
@@ -208,7 +214,7 @@ export async function cleanupBlockedFinnhubCompanyNewsEvidence(): Promise<Model2
            COUNT(*) AS total_rows,
            SUM(CASE WHEN overall_impact_score IS NOT NULL THEN 1 ELSE 0 END) AS analyzable_rows,
            SUM(CASE WHEN is_impacted = 1 THEN 1 ELSE 0 END) AS impacted_rows,
-           SUM(CASE WHEN case_type = 'meaningless_others' THEN 1 ELSE 0 END) AS meaningless_rows
+           SUM(CASE WHEN case_type = 'unknown' OR case_type = 'meaningless_others' OR case_type LIKE '잡것들_%' THEN 1 ELSE 0 END) AS meaningless_rows
          FROM model2_evidence_rows
          WHERE analysis_id = ?`,
         analysisId,
@@ -262,6 +268,35 @@ export async function listModel2Analyses(pageId?: string): Promise<Model2Analysi
 export async function getModel2AnalysisRun(id: string): Promise<Model2AnalysisRun | null> {
   const db = getDb();
   return (await db.get<Model2AnalysisRun>("SELECT * FROM model2_analysis_runs WHERE id = ?", id)) ?? null;
+}
+
+export async function deleteModel2AnalysisRun(id: string): Promise<DeleteModel2AnalysisResult> {
+  const db = getDb();
+  const existing = await db.get<{ id: string }>("SELECT id FROM model2_analysis_runs WHERE id = ?", id);
+  if (!existing) {
+    return {
+      deleted: false,
+      evidenceRowsDeleted: 0,
+      caseSummariesDeleted: 0,
+    };
+  }
+
+  const evidenceCount = await db.get<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM model2_evidence_rows WHERE analysis_id = ?",
+    id,
+  );
+  const caseSummaryCount = await db.get<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM model2_case_summaries WHERE analysis_id = ?",
+    id,
+  );
+
+  await db.run("DELETE FROM model2_analysis_runs WHERE id = ?", id);
+
+  return {
+    deleted: true,
+    evidenceRowsDeleted: evidenceCount?.count ?? 0,
+    caseSummariesDeleted: caseSummaryCount?.count ?? 0,
+  };
 }
 
 export async function listModel2CaseSummaries(analysisId: string): Promise<Model2CaseSummary[]> {

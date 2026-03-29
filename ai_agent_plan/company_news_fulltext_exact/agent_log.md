@@ -25,6 +25,188 @@
 
 | 검증 계층 | 결과 | 비고 |
 |-----------|------|------|
+## 2026-03-28
+
+**작성 시각:** 19:26 (local)
+
+### 작업 항목
+
+- 사용자의 최신 지시에 따라 `company_news` origin_url historical backfill이 terminal에서 너무 오래 조용히 보이는 문제를 보완했다.
+- `runCompanyNewsOriginUrlBackfill()`에 1분 heartbeat 진행 로그를 추가해, 장시간 실행 중에도 현재 처리량과 누적 상태를 터미널/job log에서 바로 볼 수 있게 수정했다.
+- heartbeat 로그에는 `processed/total`, `updated`, `unresolved`, `failed`, `batches`, `elapsed`, `rate(rows/min)`를 포함하도록 했다.
+- plan 문서에도 이 운영 규칙을 동기화했다.
+
+### 변경 파일
+
+- `terminal/backend/src/services/fulltextUpdateService.ts`
+- `ai_agent_plan/company_news_fulltext_exact/plan.md`
+- `ai_agent_plan/company_news_fulltext_exact/agent_log.md`
+
+### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ⏳ | 코드 수정 직후 재확인 예정 |
+| 빌드 | ⏳ | 수정 직후 실행 예정 |
+| 자동 테스트 | ⏳ | build 이후 실행 예정 |
+| 런타임 통합 | ⏳ | standalone backfill 재시작 후 1분 heartbeat 로그 확인 예정 |
+
+### 사용자 확인 상태
+
+- 상태: 확인 대기 (awaiting user confirmation)
+- 다만 사용자의 최신 지시에 따라 확인을 기다리지 않고 backfill visibility 개선과 재검증까지 계속 진행한다.
+
+### 리스크 / 메모
+
+- 1분 heartbeat 로그는 visibility를 높이지만, stuck 상태를 자동 복구하는 기능은 아니다.
+- 기존에 남아 있는 idle/stuck standalone process가 있으면 새 heartbeat 로그를 보려면 updated code로 재시작이 필요하다.
+- batch 단위 fetch 로그와 heartbeat 로그가 같이 보이므로, 장시간 실행 터미널에서는 로그량이 다소 늘어난다.
+
+## 2026-03-28
+
+**작성 시각:** 19:31 (local)
+
+### 작업 항목
+
+- 19:26 변경 후 standalone backfill을 실제로 다시 띄워 확인했다.
+- 그 결과 `appendLog()`는 terminal stdout에 아무 것도 찍지 않고 메모리 job log만 갱신한다는 점을 확인했다.
+- 사용자가 요구한 “터미널에서 1분마다 진행 상황 표시”를 만족시키기 위해, company_news historical backfill의 start / heartbeat / complete / cancel 로그를 `console.log`에도 함께 미러링하도록 추가 수정했다.
+
+### 변경 파일
+
+- `terminal/backend/src/services/fulltextUpdateService.ts`
+- `ai_agent_plan/company_news_fulltext_exact/plan.md`
+- `ai_agent_plan/company_news_fulltext_exact/agent_log.md`
+
+### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ⏳ | 수정 직후 재확인 예정 |
+| 빌드 | ⏳ | 수정 직후 실행 예정 |
+| 자동 테스트 | ⏳ | build 이후 실행 예정 |
+| 런타임 통합 | ✅ | standalone relaunch 75초 관찰에서 stdout에는 시작 로그만 있고 heartbeat가 없음을 재현해 원인 확인 |
+
+### 사용자 확인 상태
+
+- 상태: 확인 대기 (awaiting user confirmation)
+- 사용자 최신 지시에 따라 terminal visibility 수정과 재검증을 계속 진행한다.
+
+### 리스크 / 메모
+
+- `console.log` 미러링은 standalone 실행 기준 terminal visibility를 해결하지만, HTTP route로 실행한 background job은 별도 서버 프로세스 stdout를 봐야 한다.
+- 기존 foreground/background run이 남아 있으면 새 로그 포맷 검증 전에 종료/재시작이 필요하다.
+
+## 2026-03-28
+
+**작성 시각:** 19:33 (local)
+
+### 작업 항목
+
+- updated code로 standalone `company_news` origin_url backfill을 다시 시작했다.
+- 75초 관찰 결과 terminal stdout에서 시작 로그와 1분 heartbeat 로그가 실제로 출력되는 것을 확인했다.
+- 따라서 사용자가 요구한 “터미널에서 1분마다 진행과정 표시”는 standalone backfill 경로 기준으로 충족됐다.
+
+### 실행 정보
+
+- standalone heartbeat terminal id: `2da765ae-30cc-40bf-99dd-4f8936eb019f`
+- standalone heartbeat jobId: `bba3ca4d-3701-4b2f-8bda-30d8ab6f9c7d`
+- 관찰된 heartbeat 예시:
+	- `[company-origin-backfill] [heartbeat] [600/1200530] updated=0 unresolved=600 failed=0 batches=2 elapsed=1m 8s rate=524.7/min`
+
+### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `get_errors` 기준 0 errors |
+| 빌드 | ✅ | `npm.cmd run build` (`terminal/`) 성공 |
+| 자동 테스트 | ✅ | `npm.cmd run test` (`terminal/`) 84/84 pass |
+| 런타임 통합 | ✅ | standalone backfill 재시작 후 75초 관찰에서 stdout heartbeat 1회 이상 확인 |
+
+### 사용자 확인 상태
+
+- 상태: 확인 대기 (awaiting user confirmation)
+- 사용자의 최신 지시에 따라 backfill process는 계속 실행 중이며, 중단 지시가 없으면 유지한다.
+
+### 리스크 / 메모
+
+- 현재 관찰된 초기 600건은 모두 `unresolved`였으므로, row 구간별 redirect 생존율 편차를 계속 봐야 한다.
+- terminal visibility는 해결됐지만, 전체 historical backfill 자체는 아직 완료되지 않았다.
+
+## 2026-03-28
+
+**작성 시각:** 19:38 (local)
+
+### 작업 항목
+
+- 사용자의 “1분당 10000개 수준으로 더 빨라질 방법” 질문에 맞춰 현재 병목을 추가 측정했다.
+- 측정 결과 oldest missing 50건은 `resolved=0`, newest missing 50건은 `resolved=40`으로 차이가 매우 컸다.
+- 따라서 현재 historical backfill의 가장 큰 낭비는 oldest-first 순회라고 판단했고, 스캔 순서를 `recent-first`로 바꾸는 코드를 반영했다.
+
+### 변경 파일
+
+- `terminal/backend/src/services/fulltextUpdateService.ts`
+- `ai_agent_plan/company_news_fulltext_exact/plan.md`
+- `ai_agent_plan/company_news_fulltext_exact/agent_log.md`
+
+### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ⏳ | 수정 직후 재확인 예정 |
+| 빌드 | ⏳ | 수정 직후 실행 예정 |
+| 자동 테스트 | ⏳ | build 이후 실행 예정 |
+| 런타임 통합 | ✅ | oldest/newest 50-sample recoverability 측정으로 recent-first 우선순위 근거 확인 |
+
+### 사용자 확인 상태
+
+- 상태: 확인 대기 (awaiting user confirmation)
+- 최신 row 우선 실행으로 backfill을 다시 시작하기 전이다.
+
+### 리스크 / 메모
+
+- recent-first는 “유효 복구량”을 높이지만, 전체 raw 처리량 자체를 10,000/min까지 끌어올리는 마법은 아니다.
+- 오래된 row 전체 복구가 목표라면 결국 오래된 dead wrapper 구간도 나중에 다시 만나게 된다.
+
+## 2026-03-28
+
+**작성 시각:** 19:41 (local)
+
+### 작업 항목
+
+- recent-first 변경 후 build/test를 다시 통과시켰다.
+- 기존 old-first standalone backfill을 종료하고, terminal 출력 기준으로 recent-first가 실제로 초기 복구율을 높이는지 확인했다.
+- old-first에서는 초기 heartbeat 구간이 `updated=0` 연속이었지만, recent-first 관찰 구간에서는 `updated=33` 이후 `updated=165`까지 증가했다.
+- 검증 후 recent-first 기준 standalone backfill을 다시 시작했다.
+
+### 실행 정보
+
+- recent-first runtime 확인 시 old run 마지막 관찰:
+	- `[3500/1200530] updated=33 unresolved=3467 failed=0`
+	- `[4217/1200530] updated=165 unresolved=4052 failed=0`
+- 재시작 terminal id: `cefec34b-2d0c-4d8f-a29a-86c7cc7d5d46`
+
+### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `get_errors` 기준 0 errors |
+| 빌드 | ✅ | `npm.cmd run build` (`terminal/`) 성공 |
+| 자동 테스트 | ✅ | `npm.cmd run test` (`terminal/`) 84/84 pass |
+| 런타임 통합 | ✅ | old-first 대비 recent-first에서 초기 `updated` 증가를 terminal heartbeat로 확인 |
+
+### 사용자 확인 상태
+
+- 상태: 확인 대기 (awaiting user confirmation)
+- backfill은 recent-first 기준으로 다시 실행 중이다.
+
+### 리스크 / 메모
+
+- recent-first로 “쓸모 있는 복구”는 빨라졌지만, 순수 스캔 처리량은 여전히 외부 redirect 응답 속도에 묶인다.
+- 1분당 10,000건 목표를 달성하려면 별도 2-pass 전략이나 정책 완화가 추가로 필요하다.
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
 | 정적 분석 | ✅ | 문서 생성 작업이라 code error 대상 없음 |
 | 빌드 | ✅ | 빌드 비대상. 코드 변경 없음 |
 | 자동 테스트 | ✅ | 테스트 비대상. 코드 변경 없음 |
@@ -234,3 +416,42 @@
 - local dev server에 대한 HTTP POST route 자체는 shared terminal 환경에서 응답 캡처가 비정상적으로 지연돼 별도 shell-level 확인이 추가로 필요할 수 있다.
 - live pull에서 redirect resolve를 insert 전에 수행하므로, company_news pull latency는 이전보다 늘 수 있다.
 - final failure log는 무제한 출력이 아니라 cap을 두었으므로, 대량 실패 run에서는 suppressed count를 같이 확인해야 한다.
+
+## 2026-03-28
+
+**작성 시각:** 18:47 (local)
+
+### 작업 항목
+
+- 사용자의 최신 지시에 따라 남은 `company_news origin_url` historical backfill을 다시 시작했다.
+- 먼저 backend dev watcher(`src/server.ts` watch process)를 중지해 SQLite single-writer 상태를 만들었다.
+- 초기 standalone 실행은 `initDb()` 누락 때문에 내부에서 즉시 실패 처리되고 반환된 것을 확인했고, DB 초기화를 포함해 다시 실행했다.
+- 재시작한 standalone backfill은 `concurrency=20`, `batchSize=500`으로 구동 중이며, 메모리 job progress 로그 기준 `174/1,226,366` 이후 `500/1,226,366`까지 진행을 확인했다.
+- DB 실측으로도 `missing origin_url`이 `1,226,366 -> 1,226,293`으로 감소한 것을 확인했다.
+
+### 실행 정보
+
+- standalone backfill terminal id: `9144d75e-1f4d-4d00-9367-02ab4b6e4caf`
+- standalone backfill jobId: `226e40d4-7358-4abd-b7dc-cddf00029215`
+- 시작 시 총 missing 대상: `1,226,366`
+- 확인 시점 DB 상태: `missing=1,226,293`, `with_origin=83,513`
+
+### 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 코드 수정 없음 |
+| 빌드 | ✅ | 직전 build 성공 상태 유지 |
+| 자동 테스트 | ✅ | 직전 test 84/84 pass 상태 유지 |
+| 런타임 통합 | ✅ | backend watcher 종료 후 standalone backfill 재기동, progress log 및 DB count 감소 확인 |
+
+### 사용자 확인 상태
+
+- 상태: 확인 대기 (awaiting user confirmation)
+- 실행은 이미 계속 진행 중이며, 사용자가 중단 지시를 하지 않는 한 그대로 두면 된다.
+
+### 리스크 / 메모
+
+- backend watcher를 다시 올리면 동일 DB write contention이 재발할 수 있다.
+- progress log는 메모리 job 기준이라, 장시간 실행 중 상태 조회는 terminal output과 DB count를 같이 봐야 한다.
+- unresolved/final-failure 비율은 row 구간별로 다를 수 있으므로, 일정 시간이 지난 뒤 누적 로그를 다시 보는 편이 좋다.

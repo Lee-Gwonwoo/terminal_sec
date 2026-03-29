@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CalendarRange, ChevronDown, ExternalLink, RefreshCw, Search, TrendingUp } from 'lucide-react';
+import { CalendarRange, ChevronDown, ExternalLink, RefreshCw, Search, Trash2, TrendingUp } from 'lucide-react';
 import { getModel2CaseDescription } from '../model2CaseDescriptions';
 import type { CaseDescriptionWindowData } from '../types';
 
@@ -110,9 +110,13 @@ export function EvidenceTableWindow() {
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isAnalysisMenuOpen, setIsAnalysisMenuOpen] = useState(false);
   const [isCaseMenuOpen, setIsCaseMenuOpen] = useState(false);
+  const [analysisContextMenu, setAnalysisContextMenu] = useState<{ x: number; y: number; item: AnalysisRun } | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: CaseSummary } | null>(null);
+  const analysisMenuRef = useRef<HTMLDivElement | null>(null);
   const caseMenuRef = useRef<HTMLDivElement | null>(null);
+  const analysisContextMenuRef = useRef<HTMLDivElement | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const effectiveAnalysisId = selectedAnalysisId || analyses[0]?.id || '';
 
@@ -124,6 +128,15 @@ export function EvidenceTableWindow() {
     () => cases.find(item => item.caseType === selectedCaseType) ?? null,
     [cases, selectedCaseType],
   );
+  const selectedAnalysisLabel = useMemo(() => {
+    if (!selectedAnalysis) {
+      return null;
+    }
+    return {
+      title: selectedAnalysis.title,
+      dateRange: `${selectedAnalysis.since} - ${selectedAnalysis.until}`,
+    };
+  }, [selectedAnalysis]);
   const activeDateRangeLabel = useMemo(() => {
     if (!debouncedFromDate && !debouncedToDate) {
       return null;
@@ -141,6 +154,10 @@ export function EvidenceTableWindow() {
     setError(null);
     if (data.length > 0 && (!selectedAnalysisId || !data.some(item => item.id === selectedAnalysisId))) {
       setSelectedAnalysisId(data[0].id);
+      return;
+    }
+    if (data.length === 0) {
+      setSelectedAnalysisId('');
     }
   }, [selectedAnalysisId]);
 
@@ -274,16 +291,22 @@ export function EvidenceTableWindow() {
   useEffect(() => {
     const handlePointerDown = (event: MouseEvent) => {
       const target = event.target as Node;
+      const clickedInsideAnalysisMenu = analysisMenuRef.current?.contains(target) ?? false;
       const clickedInsideCaseMenu = caseMenuRef.current?.contains(target) ?? false;
+      const clickedInsideAnalysisContextMenu = analysisContextMenuRef.current?.contains(target) ?? false;
       const clickedInsideContextMenu = contextMenuRef.current?.contains(target) ?? false;
-      if (!clickedInsideCaseMenu && !clickedInsideContextMenu) {
+      if (!clickedInsideAnalysisMenu && !clickedInsideCaseMenu && !clickedInsideAnalysisContextMenu && !clickedInsideContextMenu) {
+        setIsAnalysisMenuOpen(false);
         setIsCaseMenuOpen(false);
+        setAnalysisContextMenu(null);
         setContextMenu(null);
       }
     };
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        setIsAnalysisMenuOpen(false);
         setIsCaseMenuOpen(false);
+        setAnalysisContextMenu(null);
         setContextMenu(null);
       }
     };
@@ -294,6 +317,33 @@ export function EvidenceTableWindow() {
       document.removeEventListener('keydown', handleEscape);
     };
   }, []);
+
+  const handleDeleteAnalysis = useCallback(async (analysis: AnalysisRun) => {
+    const confirmed = window.confirm(`Delete evidence version?\n\n${analysis.title}\n${analysis.since} -> ${analysis.until}`);
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await fetch(`${API_BASE}/api/model2/analyses/${analysis.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        throw new Error(`Failed to delete analysis (HTTP ${res.status})`);
+      }
+      if (effectiveAnalysisId === analysis.id) {
+        setSelectedAnalysisId('');
+        setSelectedCaseType('all');
+      }
+      setIsAnalysisMenuOpen(false);
+      setAnalysisContextMenu(null);
+      await fetchAnalyses();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete analysis');
+    } finally {
+      setLoading(false);
+    }
+  }, [effectiveAnalysisId, fetchAnalyses]);
 
   const handleRefresh = useCallback(() => {
     if (!effectiveAnalysisId) {
@@ -345,16 +395,54 @@ export function EvidenceTableWindow() {
   return (
     <div className="flex h-full min-h-0 flex-col bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       <div className="border-b border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-800 dark:bg-slate-900">
-        <div className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(220px,1.2fr)_minmax(220px,1.1fr)_minmax(200px,1fr)_minmax(140px,0.8fr)_minmax(170px,0.9fr)_minmax(170px,0.9fr)_minmax(120px,0.7fr)_auto]">
-          <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900">
-            <ChevronDown size={12} className="text-slate-400" />
-            <select value={selectedAnalysisId} onChange={e => setSelectedAnalysisId(e.target.value)} className="w-full bg-transparent outline-none">
-              {analyses.length === 0 && <option value="">No analyses</option>}
-              {analyses.map(item => (
-                <option key={item.id} value={item.id}>{item.title}</option>
-              ))}
-            </select>
-          </label>
+        <div className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(300px,1.5fr)_minmax(220px,1.1fr)_minmax(200px,1fr)_minmax(140px,0.8fr)_minmax(170px,0.9fr)_minmax(170px,0.9fr)_minmax(120px,0.7fr)_auto]">
+          <div ref={analysisMenuRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setIsAnalysisMenuOpen(prev => !prev)}
+              className="flex w-full items-start gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900"
+            >
+              <ChevronDown size={12} className="mt-0.5 shrink-0 text-slate-400" />
+              {selectedAnalysisLabel ? (
+                <span className="min-w-0 text-left leading-4">
+                  <span className="block break-words whitespace-normal text-[12px] text-slate-900 dark:text-slate-100">{selectedAnalysisLabel.title}</span>
+                  <span className="mt-1 block text-[10px] text-slate-400">{selectedAnalysisLabel.dateRange}</span>
+                </span>
+              ) : (
+                <span className="text-left text-[12px] text-slate-500 dark:text-slate-400">No analyses</span>
+              )}
+            </button>
+
+            {isAnalysisMenuOpen && (
+              <div className="absolute left-0 top-[calc(100%+6px)] z-30 max-h-80 w-full overflow-auto rounded-lg border border-slate-200 bg-white p-1 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                {analyses.length === 0 && (
+                  <div className="px-3 py-2 text-xs text-slate-400">No analyses</div>
+                )}
+                {analyses.map(item => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`flex w-full items-start justify-between rounded-md px-3 py-2 text-left text-xs hover:bg-slate-100 dark:hover:bg-slate-800 ${effectiveAnalysisId === item.id ? 'bg-slate-100 dark:bg-slate-800' : ''}`}
+                    onClick={() => {
+                      setSelectedAnalysisId(item.id);
+                      setIsAnalysisMenuOpen(false);
+                    }}
+                    onContextMenu={event => {
+                      event.preventDefault();
+                      setAnalysisContextMenu({ x: event.clientX, y: event.clientY, item });
+                    }}
+                    title="Right click for delete"
+                  >
+                    <span className="min-w-0 pr-3">
+                      <span className="block break-words whitespace-normal leading-4">{item.title}</span>
+                      <span className="mt-1 block text-[10px] text-slate-400">{item.since} - {item.until}</span>
+                    </span>
+                    <span className="shrink-0 text-[10px] text-slate-400">{item.created_at.slice(0, 16).replace('T', ' ')}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           <div ref={caseMenuRef} className="relative">
             <button
@@ -528,6 +616,26 @@ export function EvidenceTableWindow() {
           </tbody>
         </table>
       </div>
+
+      {analysisContextMenu && (
+        <div
+          ref={analysisContextMenuRef}
+          className="fixed z-40 min-w-[220px] rounded-lg border border-slate-200 bg-white p-1 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+          style={{ top: analysisContextMenu.y, left: analysisContextMenu.x }}
+        >
+          <button
+            type="button"
+            className="flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-xs hover:bg-slate-100 dark:hover:bg-slate-800"
+            onClick={() => void handleDeleteAnalysis(analysisContextMenu.item)}
+          >
+            <span className="inline-flex items-center gap-2 text-rose-600 dark:text-rose-400">
+              <Trash2 size={12} />
+              delete
+            </span>
+            <span className="ml-3 truncate text-slate-400">{analysisContextMenu.item.title}</span>
+          </button>
+        </div>
+      )}
 
       {contextMenu && (
         <div

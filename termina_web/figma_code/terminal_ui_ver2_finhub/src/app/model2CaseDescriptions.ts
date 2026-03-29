@@ -441,8 +441,8 @@ const TAXONOMY_V4_CASES: Record<string, CaseDescriptionWindowData> = {
     boundaryCase: '한 종목 집중 설명이 아니라 다종목 나열이면 이 유형으로 둔다.',
     quickQuestions: ['멀티종목 roundup인가?', '요약·레이더 기사인가?'],
   }),
-  promotional_appearance_noise: buildCase('promotional_appearance_noise', {
-    caseLabelKo: '행사·인터뷰·홍보성 appearance',
+  잡것들_promotional_appearance_noise: buildCase('잡것들_promotional_appearance_noise', {
+    caseLabelKo: '잡것들_행사·인터뷰·홍보성 appearance',
     topLevel: 'residual',
     description: 'conference appearance, podcast, webinar, 행사 참가 안내처럼 IR 노출 중심 기사다.',
     definition: '직접 가격 영향 사건보다 행사 참가·인터뷰·패널 노출이 headline 중심이면 이 유형이다.',
@@ -452,8 +452,8 @@ const TAXONOMY_V4_CASES: Record<string, CaseDescriptionWindowData> = {
     boundaryCase: '행사에서 공개한 실질 사건이 headline이면 direct/indirect case를 우선하고, 단순 appearance면 이 유형이다.',
     quickQuestions: ['행사 참가/인터뷰 공지인가?', '직접 가치 경로보다 IR 노출이 중심인가?'],
   }),
-  screener_listicle_noise: buildCase('screener_listicle_noise', {
-    caseLabelKo: '리스트형 screener·주간 요약 노이즈',
+  잡것들_screener_listicle_noise: buildCase('잡것들_screener_listicle_noise', {
+    caseLabelKo: '잡것들_리스트형 screener·주간 요약 노이즈',
     topLevel: 'residual',
     description: 'why these stocks, top meme stocks, penny-stock roundup처럼 다수 종목을 엮는 listicle 기사다.',
     definition: '개별 원인 분석보다 트래픽형 큐레이션·리스트 구조가 headline 중심이면 이 유형이다.',
@@ -1036,8 +1036,8 @@ const TAXONOMY_V4_CASES: Record<string, CaseDescriptionWindowData> = {
     boundaryCase: '실제 데이터이면 clinical_trial_data_update로.',
     quickQuestions: ['학회 발표 예정인가?'],
   }),
-  company_event_schedule_noise: buildCase('company_event_schedule_noise', {
-    caseLabelKo: '이벤트 일정·스케줄 공지',
+  잡것들_company_event_schedule_noise: buildCase('잡것들_company_event_schedule_noise', {
+    caseLabelKo: '잡것들_이벤트 일정·스케줄 공지',
     topLevel: 'residual',
     description: 'events schedule, webcast schedule 형태의 일정 공지 기사다.',
     definition: '이벤트 일정 공지가 핵심이면 이 유형이다.',
@@ -1047,8 +1047,8 @@ const TAXONOMY_V4_CASES: Record<string, CaseDescriptionWindowData> = {
     boundaryCase: '실적 발표 preview이면 earnings_preview_watch로.',
     quickQuestions: ['일정 공지인가?'],
   }),
-  company_award_recognition: buildCase('company_award_recognition', {
-    caseLabelKo: '수상·인증·랭킹',
+  잡것들_company_award_recognition: buildCase('잡것들_company_award_recognition', {
+    caseLabelKo: '잡것들_수상·인증·랭킹',
     topLevel: 'residual',
     description: 'award, ranking, named one of 형태의 인지도 이벤트 기사다.',
     definition: '수상/랭킹이 핵심이면 이 유형이다.',
@@ -1124,20 +1124,47 @@ const TAXONOMY_V4_CASES: Record<string, CaseDescriptionWindowData> = {
     boundaryCase: '갭 종목 나열이면 gapping_stocks_analysis로.',
     quickQuestions: ['프리마켓 갭 해설인가?'],
   }),
-  meaningless_others: buildCase('meaningless_others', {
-    caseLabelKo: '잡것들',
+  unknown: buildCase('unknown', {
+    caseLabelKo: 'unknown',
     topLevel: 'residual',
-    description: '독립 유형으로 재현 가능하게 설명하기 어려운 저정보 residual 기사다.',
-    definition: '반복 패턴이 약하거나 직접 가치 경로가 불명확한 row를 임시로 이 버킷에 둔다.',
-    valuePath: '직접 가격 설명력이 약하거나 아직 분리 기준이 부족하다.',
-    includeSignals: ['generic promotion', 'ambiguous article', '저정보 recap'],
-    excludeSignals: ['실적, analyst, 계약, 정책, peer, valuation, flow처럼 독립 설명이 가능한 기사'],
-    boundaryCase: '휴지통이 아니라 후속 승격 후보 보관소다. 반복 패턴이 보이면 독립 case로 빼야 한다.',
-    quickQuestions: ['독립 유형으로 올릴 만큼 반복 패턴이 약한가?', '직접 가치 경로가 불명확한가?'],
+    description: '현재 taxonomy 어디에도 안정적으로 들어가지 않는 미분류 기사다.',
+    definition: '명백한 잡것들_ 노이즈도 아니고, 기존 case 규칙에도 안 맞으면 이 유형이다.',
+    valuePath: '다음 tranche에서 별도 case로 승격될 수 있다.',
+    includeSignals: ['substantive but unmatched', 'uncaptured pattern'],
+    excludeSignals: ['잡것들_ prefix 노이즈 기사', '기존 명확한 case'],
+    boundaryCase: '노이즈성 기사면 잡것들_ 계열로, 실제 사건성은 있는데 rule이 없으면 unknown으로 둔다.',
+    quickQuestions: ['현재 rule로 안정 분류가 안 되는가?', '새 case 후보인가?'],
+  }),
+  meaningless_others: buildCase('meaningless_others', {
+    caseLabelKo: '잡것들(legacy)',
+    topLevel: 'residual',
+    description: 'legacy broad fallback이다. 새 run에서는 잡것들_ 계열과 unknown으로 분리한다.',
+    definition: '이전 run 호환용 broad fallback bucket이다.',
+    valuePath: 'legacy fallback.',
+    includeSignals: ['legacy fallback'],
+    excludeSignals: ['unknown', '잡것들_*'],
+    boundaryCase: '새 taxonomy에서는 이 broad fallback을 줄이는 것이 목표다.',
+    quickQuestions: ['legacy run row인가?'],
   }),
 };
 
 const LEGACY_COMPAT_CASES: Record<string, CaseDescriptionWindowData> = {
+  promotional_appearance_noise: aliasCase('promotional_appearance_noise', TAXONOMY_V4_CASES.잡것들_promotional_appearance_noise, {
+    caseLabelKo: '행사·인터뷰·홍보성 appearance',
+    description: 'legacy key다. 새 taxonomy에서는 잡것들_promotional_appearance_noise로 본다.',
+  }),
+  screener_listicle_noise: aliasCase('screener_listicle_noise', TAXONOMY_V4_CASES.잡것들_screener_listicle_noise, {
+    caseLabelKo: '리스트형 screener·주간 요약 노이즈',
+    description: 'legacy key다. 새 taxonomy에서는 잡것들_screener_listicle_noise로 본다.',
+  }),
+  company_event_schedule_noise: aliasCase('company_event_schedule_noise', TAXONOMY_V4_CASES.잡것들_company_event_schedule_noise, {
+    caseLabelKo: '이벤트 일정·스케줄 공지',
+    description: 'legacy key다. 새 taxonomy에서는 잡것들_company_event_schedule_noise로 본다.',
+  }),
+  company_award_recognition: aliasCase('company_award_recognition', TAXONOMY_V4_CASES.잡것들_company_award_recognition, {
+    caseLabelKo: '수상·인증·랭킹',
+    description: 'legacy key다. 새 taxonomy에서는 잡것들_company_award_recognition으로 본다.',
+  }),
   earnings_guidance_positive: aliasCase('earnings_guidance_positive', TAXONOMY_V4_CASES.earnings_beat_raise_positive, {
     caseLabelKo: '실적 호조·가이던스 상향',
     description: 'legacy broad bucket이다. taxonomy v3에서는 earnings_beat_raise_positive로 세분화했다.',
@@ -1184,5 +1211,5 @@ export const MODEL2_CASE_DESCRIPTIONS: Record<string, CaseDescriptionWindowData>
 };
 
 export function getModel2CaseDescription(caseType: string): CaseDescriptionWindowData {
-  return MODEL2_CASE_DESCRIPTIONS[caseType] ?? MODEL2_CASE_DESCRIPTIONS.meaningless_others;
+  return MODEL2_CASE_DESCRIPTIONS[caseType] ?? MODEL2_CASE_DESCRIPTIONS.unknown;
 }

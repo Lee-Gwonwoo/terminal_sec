@@ -27,7 +27,7 @@ const COMPANY_ORIGIN_BACKFILL_MAX_RETRIES = 10;
 const COMPANY_ORIGIN_BACKFILL_BASE_DELAY_MS = 100;
 const COMPANY_ORIGIN_BACKFILL_TIMEOUT_MS = 8000;
 const COMPANY_ORIGIN_BACKFILL_WRITE_CHUNK_SIZE = 100;
-const COMPANY_ORIGIN_BACKFILL_PROGRESS_LOG_INTERVAL = 250;
+const COMPANY_ORIGIN_BACKFILL_PROGRESS_LOG_INTERVAL_MS = 60_000;
 const COMPANY_ORIGIN_BACKFILL_FINAL_FAILURE_LOG_LIMIT = 100;
 
 function countWords(text: string): number {
@@ -41,6 +41,13 @@ function isSqliteBusyError(error: unknown): boolean {
 
 async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatElapsedMs(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${seconds}s`;
 }
 
 async function runSqliteBusyRetry<T>(action: () => Promise<T>): Promise<T> {
@@ -519,6 +526,34 @@ export async function runCompanyNewsOriginUrlBackfill(
 ): Promise<void> {
   const effectiveConcurrency = Math.max(1, Math.min(concurrency, COMPANY_ORIGIN_BACKFILL_MAX_CONCURRENCY));
   const effectiveBatchSize = Math.max(effectiveConcurrency, Math.min(batchSize, 1_000));
+  const startedAt = Date.now();
+  let progressTimer: NodeJS.Timeout | null = null;
+  let processed = 0;
+  let updated = 0;
+  let unresolved = 0;
+  let failed = 0;
+  let finalFailureLogs = 0;
+  let suppressedFinalFailureLogs = 0;
+  let lastRowId = Number.MAX_SAFE_INTEGER;
+  let batchNumber = 0;
+
+  const logBackfillMessage = (message: string, mirrorToConsole: boolean = false) => {
+    appendLog(jobId, message);
+    if (mirrorToConsole) {
+      console.log(`[company-origin-backfill] ${message}`);
+    }
+  };
+
+  const emitProgressLog = (total: number, reason: "heartbeat" | "final" = "heartbeat") => {
+    const elapsedMs = Date.now() - startedAt;
+    const elapsedMinutes = elapsedMs / 60_000;
+    const rowsPerMinute = elapsedMinutes > 0 ? (processed / elapsedMinutes).toFixed(1) : "0.0";
+    const prefix = reason === "final" ? "final" : "heartbeat";
+    logBackfillMessage(
+      `[${prefix}] [${processed}/${total}] updated=${updated} unresolved=${unresolved} failed=${failed} batches=${batchNumber} elapsed=${formatElapsedMs(elapsedMs)} rate=${rowsPerMinute}/min`,
+      true,
+    );
+  };
 
   try {
     const db = getDb();
@@ -533,23 +568,21 @@ export async function runCompanyNewsOriginUrlBackfill(
     ));
 
     const total = countRow?.count ?? 0;
-    appendLog(jobId, `company_news origin_url backfill: ${total} missing rows, concurrency=${effectiveConcurrency}, batchSize=${effectiveBatchSize}`);
+    logBackfillMessage(`company_news origin_url backfill: ${total} missing rows, concurrency=${effectiveConcurrency}, batchSize=${effectiveBatchSize}`, true);
     updateProgress(jobId, 0, total);
 
     if (total === 0) {
-      appendLog(jobId, "No FINNHUB company_news rows are missing origin_url — nothing to do");
+      logBackfillMessage("No FINNHUB company_news rows are missing origin_url — nothing to do", true);
       completeJob(jobId, { processed: 0, updated: 0, unresolved: 0, failed: 0, sourceType: "company_news" });
       return;
     }
 
-    let processed = 0;
-    let updated = 0;
-    let unresolved = 0;
-    let failed = 0;
-    let finalFailureLogs = 0;
-    let suppressedFinalFailureLogs = 0;
-    let lastRowId = 0;
-    let batchNumber = 0;
+    progressTimer = setInterval(() => {
+      if (!isJobCancelled(jobId)) {
+        emitProgressLog(total, "heartbeat");
+      }
+    }, COMPANY_ORIGIN_BACKFILL_PROGRESS_LOG_INTERVAL_MS);
+    progressTimer.unref?.();
 
     while (!isJobCancelled(jobId)) {
       const rows = await runSqliteBusyRetry(() => db.all<{ sqlite_rowid: number; id: string; url: string; origin_url: string | null }[]>(
@@ -558,8 +591,8 @@ export async function runCompanyNewsOriginUrlBackfill(
          WHERE source = 'FINNHUB'
            AND source_type = 'company_news'
            AND (origin_url IS NULL OR TRIM(origin_url) = '')
-           AND rowid > ?
-         ORDER BY rowid ASC
+           AND rowid < ?
+         ORDER BY rowid DESC
          LIMIT ?`,
         [lastRowId, effectiveBatchSize],
       ));
@@ -569,8 +602,8 @@ export async function runCompanyNewsOriginUrlBackfill(
       }
 
       batchNumber++;
-      lastRowId = rows[rows.length - 1].sqlite_rowid;
-      appendLog(jobId, `[batch ${batchNumber}] fetched ${rows.length} rows (rowid<=${lastRowId})`);
+  lastRowId = rows[rows.length - 1].sqlite_rowid;
+  appendLog(jobId, `[batch ${batchNumber}] fetched ${rows.length} recent-first rows (next rowid<${lastRowId})`);
 
       let cursor = 0;
       const resolvedUpdates: Array<{ id: string; originUrl: string; publisher: string }> = [];
@@ -616,9 +649,6 @@ export async function runCompanyNewsOriginUrlBackfill(
 
           processed++;
           updateProgress(jobId, processed, total);
-          if (processed % COMPANY_ORIGIN_BACKFILL_PROGRESS_LOG_INTERVAL === 0 || processed === total) {
-            appendLog(jobId, `[${processed}/${total}] updated=${updated} unresolved=${unresolved} failed=${failed}`);
-          }
         }
       }
 
@@ -652,16 +682,21 @@ export async function runCompanyNewsOriginUrlBackfill(
     }
 
     if (isJobCancelled(jobId)) {
-      appendLog(jobId, `🛑 Cancelled — processed=${processed}, updated=${updated}, unresolved=${unresolved}, failed=${failed}`);
+      logBackfillMessage(`🛑 Cancelled — processed=${processed}, updated=${updated}, unresolved=${unresolved}, failed=${failed}`, true);
       return;
     }
 
-    appendLog(jobId, `company_news origin_url backfill complete: processed=${processed}, updated=${updated}, unresolved=${unresolved}, failed=${failed}`);
+    logBackfillMessage(`company_news origin_url backfill complete: processed=${processed}, updated=${updated}, unresolved=${unresolved}, failed=${failed}`, true);
+    emitProgressLog(total, "final");
     if (suppressedFinalFailureLogs > 0) {
-      appendLog(jobId, `company_news origin_url backfill final-failure logs suppressed=${suppressedFinalFailureLogs}`);
+      logBackfillMessage(`company_news origin_url backfill final-failure logs suppressed=${suppressedFinalFailureLogs}`, true);
     }
     completeJob(jobId, { processed, updated, unresolved, failed, sourceType: "company_news" });
   } catch (err: any) {
     failJob(jobId, err.message ?? "Unknown error in runCompanyNewsOriginUrlBackfill");
+  } finally {
+    if (progressTimer) {
+      clearInterval(progressTimer);
+    }
   }
 }

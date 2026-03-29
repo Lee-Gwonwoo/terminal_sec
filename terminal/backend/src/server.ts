@@ -88,6 +88,7 @@ import {
 } from "./services/researchRepository.js";
 import {
   cleanupBlockedFinnhubCompanyNewsEvidence,
+  deleteModel2AnalysisRun,
   getModel2AnalysisRun,
   listModel2Analyses,
   listModel2CaseSummaries,
@@ -4422,7 +4423,6 @@ app.get("/api/research/search", async (req, res, next) => {
 
 app.get("/api/model2/analyses", async (req, res, next) => {
   try {
-    await runResearchMaintenance();
     const pageId = typeof req.query.pageId === "string" && req.query.pageId.trim() ? req.query.pageId.trim() : undefined;
     const analyses = await listModel2Analyses(pageId);
     res.json(analyses);
@@ -4431,7 +4431,6 @@ app.get("/api/model2/analyses", async (req, res, next) => {
 
 app.get("/api/model2/analyses/:analysisId", async (req, res, next) => {
   try {
-    await runResearchMaintenance();
     const analysis = await getModel2AnalysisRun(req.params.analysisId);
     if (!analysis) {
       res.status(404).json({ error: "Analysis not found" });
@@ -4443,7 +4442,6 @@ app.get("/api/model2/analyses/:analysisId", async (req, res, next) => {
 
 app.get("/api/model2/analyses/:analysisId/cases", async (req, res, next) => {
   try {
-    await runResearchMaintenance();
     const analysis = await getModel2AnalysisRun(req.params.analysisId);
     if (!analysis) {
       res.status(404).json({ error: "Analysis not found" });
@@ -4456,7 +4454,6 @@ app.get("/api/model2/analyses/:analysisId/cases", async (req, res, next) => {
 
 app.get("/api/model2/analyses/:analysisId/evidence", async (req, res, next) => {
   try {
-    await runResearchMaintenance();
     const analysis = await getModel2AnalysisRun(req.params.analysisId);
     if (!analysis) {
       res.status(404).json({ error: "Analysis not found" });
@@ -4478,21 +4475,39 @@ app.get("/api/model2/analyses/:analysisId/evidence", async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+app.delete("/api/model2/analyses/:analysisId", async (req, res, next) => {
+  try {
+    await runResearchMaintenance();
+    const result = await deleteModel2AnalysisRun(req.params.analysisId);
+    if (!result.deleted) {
+      res.status(404).json({ error: "Analysis not found" });
+      return;
+    }
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
 async function runStartupMaintenance(): Promise<void> {
   try {
+    const enableHeavyStartupMaintenance = process.env.ENABLE_HEAVY_STARTUP_MAINTENANCE === "1";
+
     const deletedBlockedCompanyNews = await deleteBlockedFinnhubCompanyNews();
     if (deletedBlockedCompanyNews > 0) {
       console.log(`[startup] deleted blocked FINNHUB company_news rows: ${deletedBlockedCompanyNews}`);
     }
 
-    const blockedEvidenceCleanup = await cleanupBlockedFinnhubCompanyNewsEvidence();
-    if (blockedEvidenceCleanup.deletedEvidenceRows > 0) {
-      console.log(`[startup] deleted blocked FINNHUB company_news evidence rows: ${blockedEvidenceCleanup.deletedEvidenceRows} (analyses=${blockedEvidenceCleanup.affectedAnalysisIds.join(",")})`);
-    }
+    if (enableHeavyStartupMaintenance) {
+      const blockedEvidenceCleanup = await cleanupBlockedFinnhubCompanyNewsEvidence();
+      if (blockedEvidenceCleanup.deletedEvidenceRows > 0) {
+        console.log(`[startup] deleted blocked FINNHUB company_news evidence rows: ${blockedEvidenceCleanup.deletedEvidenceRows} (analyses=${blockedEvidenceCleanup.affectedAnalysisIds.join(",")})`);
+      }
 
-    const publisherBackfilled = await backfillPublisher();
-    if (publisherBackfilled > 0) {
-      console.log(`[startup] backfilled publisher for ${publisherBackfilled} news_items rows`);
+      const publisherBackfilled = await backfillPublisher();
+      if (publisherBackfilled > 0) {
+        console.log(`[startup] backfilled publisher for ${publisherBackfilled} news_items rows`);
+      }
+    } else {
+      console.log("[startup] skipped heavy maintenance (set ENABLE_HEAVY_STARTUP_MAINTENANCE=1 to enable)");
     }
 
     const addedCols = await ensureDerivedColumns();
@@ -4517,10 +4532,15 @@ async function runStartupMaintenance(): Promise<void> {
 async function start(): Promise<void> {
   await initDb();
   await ensureSeedData();
+  const runStartupMaintenanceOnBoot = process.env.RUN_STARTUP_MAINTENANCE === "1";
 
   app.listen(config.port, () => {
     console.log(`Backend listening on http://localhost:${config.port}`);
-    void runStartupMaintenance();
+    if (runStartupMaintenanceOnBoot) {
+      void runStartupMaintenance();
+    } else {
+      console.log("[startup] automatic maintenance disabled (set RUN_STARTUP_MAINTENANCE=1 to enable)");
+    }
   });
 }
 

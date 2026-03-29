@@ -27,8 +27,8 @@ from model2_case_analysis import (
 )
 
 # ═══════════════════════════════════════════════════════════════════════
-# Taxonomy v4 — 100 case types (기존 42 + 신규 58)
-# meaningless_others 대폭 축소 목표. 고영향 기사 500건 분석 기반 설계.
+# Taxonomy v6 — noise prefix + unknown fallback
+# 의미없는 정보 계열은 `잡것들_` prefix를 붙이고, 끝까지 분류되지 않으면 `unknown`으로 둔다.
 # ═══════════════════════════════════════════════════════════════════════
 
 CASE_META: dict[str, dict[str, object]] = {
@@ -137,12 +137,12 @@ CASE_META: dict[str, dict[str, object]] = {
     "renewable_energy_milestone": {"label_ko": "신재생에너지 마일스톤", "top_level": "long", "definition": "solar project, renewable energy milestone.", "value_path": "에너지전환 투자→성장", "include_signals": ["solar", "renewable energy", "clean energy", "wind farm"], "exclude_signals": [], "quick_questions": ["신재생에너지 이벤트?"]},
     "biotech_pipeline_presentation": {"label_ko": "바이오 파이프라인·학회 발표", "top_level": "residual", "definition": "data presentation at medical conference.", "value_path": "학회 발표→관심", "include_signals": ["present.*data at", "present at.*meeting", "upcoming presentation", "poster presentation"], "exclude_signals": [], "quick_questions": ["학회 발표 예정?"]},
     # ─── NOISE / RESIDUAL (6) ────────────────────────────────────────
-    "promotional_appearance_noise": {"label_ko": "행사·인터뷰·홍보성", "top_level": "residual", "definition": "conference participation, podcast, fireside chat.", "value_path": "IR 노출", "include_signals": ["participate in", "investor conference", "fireside chat"], "exclude_signals": [], "quick_questions": ["홍보 노출?"]},
-    "screener_listicle_noise": {"label_ko": "리스트형 screener 노이즈", "top_level": "residual", "definition": "listicle, penny stocks, meme stocks.", "value_path": "큐레이션/트래픽 유도", "include_signals": ["best meme stocks", "penny stocks", "what you need to know"], "exclude_signals": [], "quick_questions": ["리스트형 기사?"]},
+    "잡것들_promotional_appearance_noise": {"label_ko": "잡것들_행사·인터뷰·홍보성", "top_level": "residual", "definition": "conference participation, podcast, fireside chat.", "value_path": "IR 노출", "include_signals": ["participate in", "investor conference", "fireside chat"], "exclude_signals": [], "quick_questions": ["홍보 노출?"]},
+    "잡것들_screener_listicle_noise": {"label_ko": "잡것들_리스트형 screener 노이즈", "top_level": "residual", "definition": "listicle, penny stocks, meme stocks.", "value_path": "큐레이션/트래픽 유도", "include_signals": ["best meme stocks", "penny stocks", "what you need to know"], "exclude_signals": [], "quick_questions": ["리스트형 기사?"]},
     "ipo_listing_event": {"label_ko": "IPO·상장 이벤트", "top_level": "residual", "definition": "IPO, direct listing, market debut.", "value_path": "유동성 이벤트", "include_signals": ["goes public", "ipo", "direct listing", "debut"], "exclude_signals": ["trading halt"], "quick_questions": ["상장 이벤트?"]},
     "generic_feature_commentary": {"label_ko": "feature·투자아이디어 해설", "top_level": "residual", "definition": "deep dive, feature, opinion article.", "value_path": "opinion layer", "include_signals": ["is it a buy", "deep dive", "feature"], "exclude_signals": ["formal analyst"], "quick_questions": ["feature/opinion?"]},
-    "company_event_schedule_noise": {"label_ko": "이벤트 일정·스케줄 공지", "top_level": "residual", "definition": "events schedule, calendar announcement.", "value_path": "일정 안내", "include_signals": ["events schedule", "schedules.*webcast", "sets.*schedule"], "exclude_signals": [], "quick_questions": ["일정 공지?"]},
-    "company_award_recognition": {"label_ko": "수상·인증·랭킹", "top_level": "residual", "definition": "award, ranked, named one of.", "value_path": "인지도 이벤트", "include_signals": ["named one of", "award", "ranked", "top performing"], "exclude_signals": [], "quick_questions": ["수상/랭킹?"]},
+    "잡것들_company_event_schedule_noise": {"label_ko": "잡것들_이벤트 일정·스케줄 공지", "top_level": "residual", "definition": "events schedule, calendar announcement.", "value_path": "일정 안내", "include_signals": ["events schedule", "schedules.*webcast", "sets.*schedule"], "exclude_signals": [], "quick_questions": ["일정 공지?"]},
+    "잡것들_company_award_recognition": {"label_ko": "잡것들_수상·인증·랭킹", "top_level": "residual", "definition": "award, ranked, named one of.", "value_path": "인지도 이벤트", "include_signals": ["named one of", "award", "ranked", "top performing"], "exclude_signals": [], "quick_questions": ["수상/랭킹?"]},
     # ─── OTHER (5) ───────────────────────────────────────────────────
     "patent_ip_event": {"label_ko": "특허·IP 이벤트", "top_level": "residual", "definition": "patent win/loss, IP acquisition.", "value_path": "IP 가치 변화", "include_signals": ["patent", "intellectual property", "ip.*acqui"], "exclude_signals": [], "quick_questions": ["특허/IP 이벤트?"]},
     "activist_investor_event": {"label_ko": "행동주의 투자자 이벤트", "top_level": "long", "definition": "activist investor, activist stake, board fight.", "value_path": "거버넌스 변화→재평가", "include_signals": ["activist", "board fight", "proxy fight", "starboard"], "exclude_signals": [], "quick_questions": ["행동주의 투자자?"]},
@@ -151,7 +151,8 @@ CASE_META: dict[str, dict[str, object]] = {
     "debt_restructuring_event": {"label_ko": "부채 관리·리파이낸싱", "top_level": "long", "definition": "debt paydown, refinancing, maturity extension.", "value_path": "재무 건전성→안정", "include_signals": ["refinancing", "debt paydown", "maturity extension", "deleveraging"], "exclude_signals": [], "quick_questions": ["부채 관리 이벤트?"]},
     "pre_market_gap_move": {"label_ko": "프리마켓 갭 무브", "top_level": "residual", "definition": "프리마켓에서 갭 상승/하락 후 해설 기사.", "value_path": "갭 해설", "include_signals": ["gaps up", "gaps down", "pre-market gap"], "exclude_signals": [], "quick_questions": ["프리마켓 갭?"]},
     # ─── FALLBACK ────────────────────────────────────────────────────
-    "meaningless_others": {"label_ko": "잡것들", "top_level": "residual", "definition": "위 유형으로 분류하기 어려운 저정보 잔여 기사.", "value_path": "직접 가치 경로 불명확", "include_signals": [], "exclude_signals": [], "quick_questions": ["반복 패턴이 약한가?"]},
+    "unknown": {"label_ko": "unknown", "top_level": "residual", "definition": "현재 taxonomy rule 어디에도 안정적으로 들어가지 않는 미분류 기사.", "value_path": "사건성은 있을 수 있으나 rule 미정", "include_signals": [], "exclude_signals": ["명확한 기존 case", "명백한 잡것들_ 노이즈 패턴"], "quick_questions": ["현재 rule로는 안정 분류가 안 되는가?"]},
+    "meaningless_others": {"label_ko": "잡것들(legacy)", "top_level": "residual", "definition": "legacy broad fallback bucket.", "value_path": "legacy fallback", "include_signals": [], "exclude_signals": [], "quick_questions": ["legacy run row인가?"]},
 }
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -601,22 +602,22 @@ INFORMATION_FLOW_RULES: list[tuple[str, tuple[str, ...]]] = [
 ]
 
 TRUE_RESIDUAL_RULES: list[tuple[str, tuple[str, ...]]] = [
-    ("promotional_appearance_noise", (
+    ("잡것들_promotional_appearance_noise", (
         "participate in the", "investor conference",
         "podcast featuring", "webcasting its participation",
         "fireside chat", "panel discussion",
         "conference presentation",
     )),
-    ("company_event_schedule_noise", (
+    ("잡것들_company_event_schedule_noise", (
         "events schedule", "schedules.*webcast",
         "sets.*schedule", "sets.*events",
     )),
-    ("company_award_recognition", (
+    ("잡것들_company_award_recognition", (
         "named one of", "named to.*list",
         "award", "top performing companies",
         "ranks.*on.*list",
     )),
-    ("screener_listicle_noise", (
+    ("잡것들_screener_listicle_noise", (
         "why these", "healthcare stocks are surging",
         "penny stocks with market caps", "best meme stocks",
         "wall street but", "promising penny stocks",
@@ -815,11 +816,15 @@ def contains_any(text: str, patterns: tuple[str, ...]) -> bool:
     return False
 
 
+def is_fallback_case(case_type: str) -> bool:
+    return case_type == "unknown" or case_type == "meaningless_others" or case_type.startswith("잡것들_")
+
+
 def classify_company_news(title: str, body: str, full_text: str = "", publisher: str = "") -> str:
     title_text = (title or "").lower()
     text = normalize_text(title, body, full_text, publisher)
     if not text.strip():
-        return "meaningless_others"
+        return "unknown"
     for _, rules in CASE_RULE_GROUPS:
         for case_type, patterns in rules:
             if contains_any(text, patterns):
@@ -838,16 +843,16 @@ def classify_company_news(title: str, body: str, full_text: str = "", publisher:
     # fallback: "why stock"
     if "why " in title_text and ("stock" in title_text or "shares" in title_text):
         return "generic_feature_commentary"
-    return "meaningless_others"
+    return "unknown"
 
 
 def meta_for_case(case_type: str) -> tuple[str, str]:
-    meta = CASE_META.get(case_type, CASE_META["meaningless_others"])
+    meta = CASE_META.get(case_type, CASE_META["unknown"])
     return str(meta["label_ko"]), str(meta["top_level"])
 
 
 def case_meta(case_type: str) -> dict[str, object]:
-    return CASE_META.get(case_type, CASE_META["meaningless_others"])
+    return CASE_META.get(case_type, CASE_META["unknown"])
 
 
 def summary_text(row: dict) -> str:
@@ -942,7 +947,7 @@ def compute_thresholds(conn: sqlite3.Connection, since: str, until: str, company
         raw_row["market_cap_bucket"] = cap_bucket(raw_row.get("market_cap"))
         raw_row["case_type"] = classify_company_news(raw_row.get("title") or "", raw_row.get("body") or "", raw_row.get("full_text") or "", raw_row.get("publisher") or "")
         case_counts[raw_row["case_type"]] += 1
-        if raw_row["case_type"] == "meaningless_others":
+        if is_fallback_case(raw_row["case_type"]):
             meaningless_rows += 1
         raw_row["immediate_reaction_score"] = immediate_reaction_score(raw_row)
         raw_row["short_followthrough_score"] = short_followthrough_score(raw_row)
@@ -972,7 +977,7 @@ def insert_analysis_run(conn: sqlite3.Connection, run_id: str, page_id: str, tit
         INSERT INTO model2_analysis_runs (
             id, page_id, title, note_title, source_type, source_name, since, until, scope,
             total_rows, analyzable_rows, impacted_rows, meaningless_rows
-        ) VALUES (?, ?, ?, ?, 'company_news', 'FINNHUB', ?, ?, 'company_news_2025_plus_taxonomy_v4', ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, 'company_news', 'FINNHUB', ?, ?, 'company_news_2025_plus_taxonomy_v6', ?, ?, ?, ?)
         """,
         (
             run_id,
@@ -1149,15 +1154,15 @@ def make_markdown(run_id: str, note_title: str, since: str, until: str, threshol
     lines.append(f"- 전체 분류 row: {threshold_summary['total_rows']:,}")
     lines.append(f"- impact 계산 가능 row: {threshold_summary['analyzable_rows']:,}")
     lines.append(f"- impact 판정 row: {insert_summary['impacted_rows']:,}")
-    lines.append(f"- `잡것들` row: {threshold_summary['meaningless_rows']:,}")
+    lines.append(f"- `fallback rows (잡것들_* + unknown)`: {threshold_summary['meaningless_rows']:,}")
     lines.append("- evidence table window에서 analysis를 선택한 뒤 case별 근거 row를 정렬/검색할 수 있다.")
     lines.append("")
-    lines.append("## taxonomy v4 설계 포인트")
+    lines.append("## taxonomy v6 설계 포인트")
     lines.append("")
-    lines.append("- 100개 유형으로 확장. 기존 v3의 ~40개에서 대폭 증가.")
+    lines.append("- 100개+ 유형 구조를 유지하면서, 의미없는 정보 계열은 `잡것들_` prefix로, 끝까지 분류되지 않은 row는 `unknown`으로 분리했다.")
     lines.append("- BENZINGA EPS/guidance 포맷 regex 패턴 추가로 실적 기사 포착률 대폭 향상.")
     lines.append("- 섹터 movers, 갭 분석, 장전/장후, 일간 요약 등 반복 패턴 독립 유형화.")
-    lines.append("- 고영향 잡것들 500건 분석 기반으로 패턴 설계.")
+    lines.append("- 고영향 residual 샘플을 기준으로 노이즈와 미분류 fallback을 분리했다.")
     lines.append("")
     lines.append("## bucket 기준")
     lines.append("")
@@ -1205,21 +1210,21 @@ def make_markdown(run_id: str, note_title: str, since: str, until: str, threshol
         lines.append("")
     lines.append("## 해석")
     lines.append("")
-    lines.append("- v4 taxonomy는 100개 유형으로 잡것들을 대폭 축소하는 것을 목표로 한다.")
-    lines.append("- 남은 `meaningless_others`는 패턴 반복이 약하거나 분류 가치가 낮은 진짜 잔여 기사다.")
+    lines.append("- v6 taxonomy는 의미없는 정보 계열을 `잡것들_*`로 명시하고, 진짜 미분류 row는 `unknown`으로 남긴다.")
+    lines.append("- `unknown`은 다음 tranche에서 새 case로 승격할 후보를 모으는 버킷이다.")
     return "\n".join(lines)
 
 
 def write_outputs(out_dir: Path, note_title: str, run_id: str, since: str, until: str, threshold_summary: dict, insert_summary: dict, case_summaries: list[dict], markdown: str) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M")
-    stem = f"model2_company_news_taxonomy_v4_{stamp}"
+    stem = f"model2_company_news_taxonomy_v6_{stamp}"
     payload = {
         "analysis_id": run_id,
         "note_title": note_title,
         "since": since,
         "until": until,
-        "scope": "company_news_2025_plus_taxonomy_v4",
+        "scope": "company_news_2025_plus_taxonomy_v6",
         "threshold_summary": threshold_summary,
         "insert_summary": insert_summary,
         "case_summaries": case_summaries,
@@ -1232,7 +1237,7 @@ def write_outputs(out_dir: Path, note_title: str, run_id: str, since: str, until
                 f"analysis_id={run_id}",
                 f"since={since}",
                 f"until={until}",
-                "scope=company_news_2025_plus_taxonomy_v4",
+                "scope=company_news_2025_plus_taxonomy_v6",
                 f"total_rows={threshold_summary['total_rows']}",
                 f"analyzable_rows={threshold_summary['analyzable_rows']}",
                 f"impacted_rows={insert_summary['impacted_rows']}",
@@ -1241,8 +1246,8 @@ def write_outputs(out_dir: Path, note_title: str, run_id: str, since: str, until
         ),
         encoding="utf-8",
     )
-    (out_dir / "model2_company_news_taxonomy_v4_latest.md").write_text(markdown, encoding="utf-8")
-    (out_dir / "model2_company_news_taxonomy_v4_latest.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    (out_dir / "model2_company_news_taxonomy_v6_latest.md").write_text(markdown, encoding="utf-8")
+    (out_dir / "model2_company_news_taxonomy_v6_latest.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def main() -> None:
@@ -1251,7 +1256,7 @@ def main() -> None:
     parser.add_argument("--since", default="2025-01-01")
     parser.add_argument("--until", default="")
     parser.add_argument("--page-id", default="99a89607-d943-4a57-8a98-be8ba86f731b")
-    parser.add_argument("--note-title", default="Model 2 company_news taxonomy v4 (2025+)")
+    parser.add_argument("--note-title", default="Model 2 company_news taxonomy v6 (2025+)")
     parser.add_argument("--out-dir", default=r"ai_research_tool\out")
     parser.add_argument("--chunk-size", type=int, default=5000)
     parser.add_argument("--insert-batch", type=int, default=1000)

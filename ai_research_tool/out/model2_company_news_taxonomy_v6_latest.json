@@ -1,0 +1,294 @@
+{
+  "analysis_id": "a9b6c6b9-6dbc-408b-8fd6-85b95687400b",
+  "note_title": "tmp-delete-check",
+  "since": "2025-01-01",
+  "until": "2025-01-01",
+  "scope": "company_news_2025_plus_taxonomy_v6",
+  "threshold_summary": {
+    "thresholds": {},
+    "bucket_meta": {},
+    "global_p80": 0.0,
+    "total_rows": 264,
+    "analyzable_rows": 0,
+    "meaningless_rows": 149,
+    "case_counts": {
+      "unknown": 147,
+      "stock_surge_explanation_positive": 6,
+      "analyst_note_amplification_positive": 1,
+      "macro_market_commentary": 13,
+      "earnings_beat_raise_positive": 8,
+      "earnings_summary_assessment": 1,
+      "investment_thesis_article": 25,
+      "잡것들_screener_listicle_noise": 2,
+      "commercial_launch_expansion_positive": 2,
+      "crypto_digital_asset_event": 2,
+      "valuation_narrative_positive": 5,
+      "earnings_preview_watch": 1,
+      "positioning_flow_positive": 2,
+      "corporate_deal_billion_positive": 1,
+      "media_amplification_positive": 1,
+      "short_interest_update": 2,
+      "activist_investor_event": 1,
+      "insider_selling_concern": 2,
+      "litigation_regulatory_negative": 2,
+      "peer_competition_negative": 1,
+      "generic_feature_commentary": 5,
+      "analyst_downgrade_negative": 3,
+      "product_technology_integration": 3,
+      "stock_why_moving_explanation": 12,
+      "market_movers_roundup": 1,
+      "demand_backlog_positive": 1,
+      "earnings_estimate_comparison": 1,
+      "analyst_upgrade_positive": 6,
+      "stock_comparison_article": 6,
+      "technical_analysis_signal": 1
+    }
+  },
+  "insert_summary": {
+    "impacted_rows": 0,
+    "inserted_rows": 264,
+    "case_impacted": {}
+  },
+  "case_summaries": [
+    {
+      "case_type": "unknown",
+      "case_label_ko": "unknown",
+      "top_level": "residual",
+      "total_count": 147,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "investment_thesis_article",
+      "case_label_ko": "투자 논점·알파 아이디어",
+      "top_level": "residual",
+      "total_count": 25,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "macro_market_commentary",
+      "case_label_ko": "매크로·시장 코멘터리",
+      "top_level": "residual",
+      "total_count": 13,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "stock_why_moving_explanation",
+      "case_label_ko": "주가 움직임 이유·해설",
+      "top_level": "residual",
+      "total_count": 12,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "earnings_beat_raise_positive",
+      "case_label_ko": "실적 Beat·가이던스 상향",
+      "top_level": "long",
+      "total_count": 8,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "analyst_upgrade_positive",
+      "case_label_ko": "애널리스트 상향·커버리지 개시",
+      "top_level": "long",
+      "total_count": 6,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "stock_comparison_article",
+      "case_label_ko": "종목 비교·vs 기사",
+      "top_level": "residual",
+      "total_count": 6,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "stock_surge_explanation_positive",
+      "case_label_ko": "급등 해설·상승 이유",
+      "top_level": "long",
+      "total_count": 6,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "generic_feature_commentary",
+      "case_label_ko": "feature·투자아이디어 해설",
+      "top_level": "residual",
+      "total_count": 5,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "valuation_narrative_positive",
+      "case_label_ko": "밸류에이션 discount 해소",
+      "top_level": "long",
+      "total_count": 5,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "analyst_downgrade_negative",
+      "case_label_ko": "애널리스트 하향·목표가 하향",
+      "top_level": "short",
+      "total_count": 3,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "product_technology_integration",
+      "case_label_ko": "제품·기술 통합·AI 도입",
+      "top_level": "long",
+      "total_count": 3,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "commercial_launch_expansion_positive",
+      "case_label_ko": "출시·상업화·확장",
+      "top_level": "long",
+      "total_count": 2,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "crypto_digital_asset_event",
+      "case_label_ko": "암호화폐·디지털자산 이벤트",
+      "top_level": "residual",
+      "total_count": 2,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "insider_selling_concern",
+      "case_label_ko": "내부자 매도·우려 시그널",
+      "top_level": "short",
+      "total_count": 2,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "litigation_regulatory_negative",
+      "case_label_ko": "소송·조사·회계 리스크",
+      "top_level": "short",
+      "total_count": 2,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "positioning_flow_positive",
+      "case_label_ko": "숏커버·매수 유입",
+      "top_level": "long",
+      "total_count": 2,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "short_interest_update",
+      "case_label_ko": "공매도 비율·변동",
+      "top_level": "residual",
+      "total_count": 2,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "잡것들_screener_listicle_noise",
+      "case_label_ko": "잡것들_리스트형 screener 노이즈",
+      "top_level": "residual",
+      "total_count": 2,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "activist_investor_event",
+      "case_label_ko": "행동주의 투자자 이벤트",
+      "top_level": "long",
+      "total_count": 1,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "analyst_note_amplification_positive",
+      "case_label_ko": "애널리스트 코멘트 증폭(긍정)",
+      "top_level": "long",
+      "total_count": 1,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "corporate_deal_billion_positive",
+      "case_label_ko": "대형 딜·인프라 투자",
+      "top_level": "long",
+      "total_count": 1,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "demand_backlog_positive",
+      "case_label_ko": "수요 급증·백로그 확대",
+      "top_level": "long",
+      "total_count": 1,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "earnings_estimate_comparison",
+      "case_label_ko": "실적 vs 추정치 비교",
+      "top_level": "residual",
+      "total_count": 1,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "earnings_preview_watch",
+      "case_label_ko": "실적 발표 전 기대 기사",
+      "top_level": "residual",
+      "total_count": 1,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "earnings_summary_assessment",
+      "case_label_ko": "실적 요약·평가 기사",
+      "top_level": "residual",
+      "total_count": 1,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "market_movers_roundup",
+      "case_label_ko": "멀티종목 movers 기사",
+      "top_level": "residual",
+      "total_count": 1,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "media_amplification_positive",
+      "case_label_ko": "미디어 증폭·상승 해설",
+      "top_level": "long",
+      "total_count": 1,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "peer_competition_negative",
+      "case_label_ko": "peer 경쟁 심화 read-through",
+      "top_level": "short",
+      "total_count": 1,
+      "impacted_count": 0,
+      "max_impact_score": null
+    },
+    {
+      "case_type": "technical_analysis_signal",
+      "case_label_ko": "기술적 분석·차트 시그널",
+      "top_level": "residual",
+      "total_count": 1,
+      "impacted_count": 0,
+      "max_impact_score": null
+    }
+  ]
+}

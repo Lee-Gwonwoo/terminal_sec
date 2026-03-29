@@ -2,35 +2,35 @@
 - 최종 목적은 `company_news` 후속기사에서 실제 가격 영향 정보를 설명하는 taxonomy를 만드는 것이다.
 - 이 taxonomy는 직접 이벤트뿐 아니라 정책, peer 경쟁, 밸류에이션, 수급, 미디어 증폭, estimate reset 같은 간접 read-through까지 포함해야 한다.
 - 이번 tranche의 산출물은 아래 4가지다.
-  - `company_news`용 taxonomy v4 classifier
-  - `100`개 세부 `case_type`
+  - `company_news`용 taxonomy v6 classifier
+  - `101`개 세부 `case_type`
   - `page id = 99a89607-d943-4a57-8a98-be8ba86f731b` 갱신
-  - Evidence Table / Case Description UI 동기화
+  - Evidence Table / Case Description UI 동기화 + analysis version delete
 
 ### 현재 레포 상태(중요, 확인됨)
 - 최신 run은 아래 기준으로 이미 생성되어 있다.
-  - `analysis_id = 36a99839-1570-4b08-a364-121c453d1b98`
-  - `scope = company_news_2025_plus_taxonomy_v4`
+  - `analysis_id = d11b094f-b6db-4be3-a754-0354da385101`
+  - `scope = company_news_2025_plus_taxonomy_v6`
   - `since = 2025-01-01`
-  - `until = 2026-03-27`
+  - `until = 2026-03-28`
 - 최신 수치:
-  - `total_rows = 541,970`
-  - `analyzable_rows = 480,549`
-  - `impacted_rows = 96,115`
-  - `meaningless_rows = 218,383`
+  - `total_rows = 542,816`
+  - `analyzable_rows = 480,631`
+  - `impacted_rows = 96,153`
+  - `meaningless_rows = 225,889`
 - 비교 기준:
   - 초기 broad run `6ec343f2-d7be-43e1-9297-90e5c35643ea`의 `meaningless_rows = 403,606`
-  - taxonomy v4 run `36a99839-1570-4b08-a364-121c453d1b98`의 `meaningless_rows = 218,383`
-  - 즉, `meaningless_others`가 `185,223`건 줄었고, 사용자 대화에서 핵심으로 잡은 `v3 대비 371,983 -> 218,383` 기준으로도 대폭 감소가 확인되었다.
-- active classifier 파일은 `ai_research_tool/test_model2_company_news_analysis.py`이며, 현재 `CASE_META = 100`이 확인되었다.
+  - taxonomy v6 run `d11b094f-b6db-4be3-a754-0354da385101`의 `meaningless_rows = 225,889`
+  - 즉 broad fallback 대비 residual은 크게 줄였고, v6에서는 fallback 내부를 `잡것들_*`와 `unknown`으로 의미 분리했다.
+- active classifier 파일은 `ai_research_tool/test_model2_company_news_analysis.py`이며, 현재 `CASE_META = 101`이 확인되었다.
 - UI description registry는 `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/model2CaseDescriptions.ts`가 담당한다.
-- Evidence Table window는 현재 `analysis / case / keyword / ticker / 날짜(from~to) / limit` 필터를 지원한다.
+- Evidence Table window는 현재 `analysis / case / keyword / ticker / 날짜(from~to) / limit` 필터와 analysis version 우클릭 `delete`를 지원한다.
 - frontend production build는 2026-03-27 로컬 검증에서 성공했다.
-- backend `/api/model2/analyses` 응답은 2026-03-27 로컬 검증에서 정상 `200` 응답이 확인되었다.
+- backend `/api/model2/analyses` 응답은 2026-03-28 로컬 검증에서 최신 v6 run 노출이 확인되었다.
 
 ### 제약 / 비범위
 - 이번 문서는 `plan 정리`가 목적이므로, 새 taxonomy 확장 자체를 추가 구현하지는 않는다.
-- `meaningless_others`를 더 줄이는 다음 tranche는 별도 작업으로 둔다.
+- `unknown`을 더 줄이는 다음 tranche는 별도 작업으로 둔다.
 - `agent_log.md`는 이 plan 정리 작업에 대한 변경만 append한다.
 - mock 데이터는 사용하지 않는다.
 
@@ -68,16 +68,17 @@
 - 결정 1: 이번 tranche의 목표는 `company_news residual 축소 + 100개 taxonomy 설계`로 고정한다.
 - 결정 2: taxonomy 정의는 실증 샘플 기반으로 설계하고, classifier는 그 taxonomy를 재현하는 도구로 둔다.
 - 결정 3: UI description은 classifier key와 동일 key를 사용한다.
-- 결정 4: 현재 tranche는 완료 상태를 정리하고, 다음 tranche는 `remaining meaningless_others`의 재샘플링으로 둔다.
+- 결정 4: 현재 tranche는 완료 상태를 정리하고, 다음 tranche는 `remaining unknown`의 재샘플링으로 둔다.
 
 ### 계획 중간 필수 확인
-- `meaningless_others` 감소는 단순 비율 감소가 아니라 실제 영향 기사 회수가 동반돼야 한다.
+- `unknown` 감소는 단순 비율 감소가 아니라 실제 영향 기사 회수가 동반돼야 한다.
+- `잡것들_*` prefix는 명백한 저정보/노이즈 기사에만 붙어야 한다.
 - `stock_comparison_article`처럼 broad rule이 가이던스/estimate 기사보다 먼저 잡히는 순서 문제를 피해야 한다.
 - `BENZINGA EPS`, `guidance sees`, `Chartmill movers`, `rallies/surges`, `reiterates`, `analysts boost` 같은 패턴이 독립 유형 또는 정확한 기존 유형으로 흡수됐는지 확인해야 한다.
 - UI description registry가 classifier key와 drift 나지 않아야 한다.
 
 ### 제안하는 구현 순서(이유)
-1. `meaningless_others` 고영향 기사 대량 샘플링
+1. `unknown` 고영향 기사 대량 샘플링
 2. 반복 패턴을 taxonomy로 분리
 3. classifier 재작성
 4. full dataset 재실행
@@ -116,10 +117,10 @@
 ```
 사용자 확인 필요: **예**
 
-#### ⏳ Step 2 — taxonomy v4 설계와 classifier 전면 재작성
+#### ⏳ Step 2 — taxonomy v6 설계와 classifier 전면 재작성
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 2-1 | `CASE_META`를 100개 유형으로 확장 | `ai_research_tool/test_model2_company_news_analysis.py` | `CASE_META = 100` 확인 | ⏳ |
+| 2-1 | `CASE_META`를 101개 유형으로 확장하고 `잡것들_*` / `unknown` naming 반영 | `ai_research_tool/test_model2_company_news_analysis.py` | `CASE_META = 101` 확인 | ⏳ |
 | 2-2 | rule group을 direct/indirect/information-flow 중심으로 재정렬 | `ai_research_tool/test_model2_company_news_analysis.py` | validation script 통과 | ⏳ |
 | 2-3 | ordering bug와 broad match 충돌 수정 | `ai_research_tool/test_model2_company_news_analysis.py` | 대표 edge case 재분류 확인 | ⏳ |
 
@@ -177,12 +178,13 @@
 ```
 사용자 확인 필요: **예**
 
-#### ⏳ Step 4 — UI description 동기화
+#### ⏳ Step 4 — UI description 동기화 + analysis version delete
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
 | 4-1 | case description registry를 v4 key에 맞게 동기화 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/model2CaseDescriptions.ts` | registry compile 확인 | ⏳ |
 | 4-2 | Evidence Table / Case Description 창이 새 key를 읽도록 유지 | frontend code | build 확인 | ⏳ |
 | 4-3 | Evidence Table에 날짜 range filter 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/EvidenceTableWindow.tsx`, `terminal/backend/src/services/model2AnalysisRepository.ts` | build + filtered API 응답 확인 | ⏳ |
+| 4-4 | Evidence version 우클릭 `delete`와 backend cascade delete 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/EvidenceTableWindow.tsx`, `terminal/backend/src/server.ts`, `terminal/backend/src/services/model2AnalysisRepository.ts` | temp analysis 생성 후 `DELETE /api/model2/analyses/:id` 검증 | ⏳ |
 
 - `4-1` 목적: classifier key와 UI key drift를 막기 위함.
   설명: UI description registry가 taxonomy v4 key를 읽도록 맞췄다.
