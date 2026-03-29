@@ -637,6 +637,10 @@ export function FinnhubNewsWindow({
   const [rtprTickerConcurrencyInput, setRtprTickerConcurrencyInput] = useState(() => String(getRtprTickerConcurrency()));
   const [showPreflightModal, setShowPreflightModal] = useState(false);
   const [preflightData, setPreflightData] = useState<{ totalTickers: number; fallbackCount: number; fallbackTickers: string[] } | null>(null);
+  const [showCustomPreflightModal, setShowCustomPreflightModal] = useState(false);
+  const [customPreflightData, setCustomPreflightData] = useState<any | null>(null);
+  const [customPreflightTitle, setCustomPreflightTitle] = useState('Custom Update Preflight');
+  const [pendingCustomExecute, setPendingCustomExecute] = useState<(() => void) | null>(null);
   const [pendingUpdateSourceType, setPendingUpdateSourceType] = useState<UpdateSourceType>('all');
 
   // ─── Background job tracking ───
@@ -1131,6 +1135,48 @@ export function FinnhubNewsWindow({
     setShowCustomDateModal(true);
   };
 
+  const openCustomPreflight = async (endpoint: string, body: Record<string, unknown>, title: string, onContinue: () => void) => {
+    try {
+      const res = await fetch(`${API_BASE}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        onContinue();
+        return;
+      }
+      setCustomPreflightTitle(title);
+      setCustomPreflightData(data);
+      setPendingCustomExecute(() => onContinue);
+      setShowCustomPreflightModal(true);
+    } catch {
+      onContinue();
+    }
+  };
+
+  const handleCustomPreflightStart = async (sourceType: UpdateSourceType, from: string, to: string) => {
+    const continueRun = () => { void handleUpdate('custom', sourceType, from, to); };
+    if (sourceType === 'market_news') {
+      continueRun();
+      return;
+    }
+    if (sourceType === 'fmp_press_release') {
+      await openCustomPreflight('/api/news/pull-fmp-press-release/preflight-custom', { mode: 'custom', from, to }, 'FMP Press Release Preflight', continueRun);
+      return;
+    }
+    if (sourceType === 'fmp_stock_news') {
+      await openCustomPreflight('/api/news/pull-fmp-stock-news/preflight-custom', { mode: 'custom', from, to }, 'FMP Stock News Preflight', continueRun);
+      return;
+    }
+    if (sourceType === 'fmp_sec_filing') {
+      await openCustomPreflight('/api/news/pull-fmp-sec-filing/preflight-custom', { mode: 'custom', from, to }, 'FMP SEC Filing Preflight', continueRun);
+      return;
+    }
+    await openCustomPreflight('/api/news/pull-finhub/preflight-custom', { mode: 'custom', sourceType, from, to }, `${getSourceTypeLabel(sourceType)} Preflight`, continueRun);
+  };
+
   // ─── PTPR (RTPR) press release pull ───
   const handlePtprUpdate = async (mode: 'recent' | 'custom', from?: string, to?: string) => {
     setUpdating(true);
@@ -1171,6 +1217,11 @@ export function FinnhubNewsWindow({
     setPtprCustomFrom('');
     setPtprCustomTo(new Date().toISOString().slice(0, 10));
     setShowPtprCustomDateModal(true);
+  };
+
+  const handlePtprCustomPreflightStart = async (from: string, to: string) => {
+    const continueRun = () => { void handlePtprUpdate('custom', from, to); };
+    await openCustomPreflight('/api/news/pull-rtpr/preflight-custom', { mode: 'custom', from, to }, 'RTPR Preflight', continueRun);
   };
 
   const handleSaveControlWindow = () => {
@@ -2985,7 +3036,11 @@ export function FinnhubNewsWindow({
             <div className="flex justify-end gap-2 mt-4">
               <button onClick={() => setShowCustomDateModal(false)} className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
               <button
-                onClick={() => { if (!customFrom || !customTo) return; setShowCustomDateModal(false); handleUpdate('custom', pendingUpdateSourceType, customFrom, customTo); }}
+                onClick={() => {
+                  if (!customFrom || !customTo) return;
+                  setShowCustomDateModal(false);
+                  void handleCustomPreflightStart(pendingUpdateSourceType, customFrom, customTo);
+                }}
                 disabled={!customFrom || !customTo}
                 className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
               >Start Update</button>
@@ -3031,7 +3086,7 @@ export function FinnhubNewsWindow({
                   try { localStorage.setItem('rtpr-ticker-concurrency', String(rtprTickerConcurrency)); } catch { /* ignore */ }
                   setRtprTickerConcurrencyInput(String(rtprTickerConcurrency));
                   setShowPtprCustomDateModal(false);
-                  handlePtprUpdate('custom', ptprCustomFrom, ptprCustomTo);
+                  void handlePtprCustomPreflightStart(ptprCustomFrom, ptprCustomTo);
                 }}
                 disabled={!ptprCustomFrom || !ptprCustomTo}
                 className="px-3 py-1.5 text-xs bg-cyan-600 text-white rounded hover:bg-cyan-700 disabled:opacity-50"
@@ -3219,6 +3274,36 @@ export function FinnhubNewsWindow({
                 onClick={() => { setShowPreflightModal(false); handleUpdate('recent', pendingUpdateSourceType); }}
                 className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
               >계속</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCustomPreflightModal && customPreflightData && (
+        <div className="absolute inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-4 w-[42rem] max-w-[92vw] border border-gray-200 dark:border-gray-700">
+            <h3 className="text-sm font-semibold mb-2 flex items-center gap-2"><RotateCw className="w-4 h-4 text-blue-500" />{customPreflightTitle}</h3>
+            <p className="text-xs text-gray-600 dark:text-gray-300 mb-3">실행 전에 현재 coverage와 예상 처리 범위를 보여줍니다.</p>
+            <pre className="max-h-[24rem] overflow-auto rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-3 text-[11px] leading-5 text-gray-700 dark:text-gray-200 whitespace-pre-wrap break-all">{JSON.stringify(customPreflightData, null, 2)}</pre>
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={() => {
+                  setShowCustomPreflightModal(false);
+                  setCustomPreflightData(null);
+                  setPendingCustomExecute(null);
+                }}
+                className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700"
+              >Cancel</button>
+              <button
+                onClick={() => {
+                  const execute = pendingCustomExecute;
+                  setShowCustomPreflightModal(false);
+                  setCustomPreflightData(null);
+                  setPendingCustomExecute(null);
+                  execute?.();
+                }}
+                className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+              >Continue</button>
             </div>
           </div>
         </div>

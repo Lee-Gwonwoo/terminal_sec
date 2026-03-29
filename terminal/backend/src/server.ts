@@ -4,7 +4,7 @@ import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { config } from "./config.js";
 import { initDb } from "./db.js";
-import { deleteBlockedFinnhubCompanyNews, getModel1News, getModel1NewsById, getNews, getNewsById, getNewsIdBySourceUrl } from "./services/newsRepository.js";
+import { deleteBlockedFinnhubCompanyNews, getModel1News, getModel1NewsById, getNews, getNewsById, getNewsIdBySourceUrl, getTickerNewsCoverage, type IsoDateRange } from "./services/newsRepository.js";
 import { createSavedView, deleteSavedView, listSavedViews } from "./services/savedViewRepository.js";
 import { createWatchlist, deleteWatchlist, listWatchlists, updateWatchlist, backfillWatchlistSecurityIds } from "./services/watchlistRepository.js";
 import {
@@ -124,6 +124,131 @@ function buildBatchLevels(requestedConcurrency: number): number[] {
   const safeConcurrency = Math.max(1, Math.min(20, Math.floor(requestedConcurrency)));
   const middleConcurrency = Math.max(1, Math.ceil(safeConcurrency / 2));
   return [...new Set([safeConcurrency, middleConcurrency, 1])].sort((a, b) => b - a);
+}
+
+type GapExecutionMode = "gap-only" | "fully-covered-skip" | "summary-only";
+
+type TickerGapPlan = {
+  ticker: string;
+  coveredRanges: IsoDateRange[];
+  missingRanges: IsoDateRange[];
+  requestedDayCount: number;
+  missingDayCount: number;
+  fullyCovered: boolean;
+  executionMode: GapExecutionMode;
+};
+
+function addDaysToIsoDate(isoDate: string, days: number): string {
+  const date = new Date(`${isoDate}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function countIsoDateRangeDays(from: string, to: string): number {
+  const fromMs = Date.parse(`${from}T00:00:00.000Z`);
+  const toMs = Date.parse(`${to}T00:00:00.000Z`);
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs < fromMs) {
+    return 0;
+  }
+  return Math.floor((toMs - fromMs) / 86_400_000) + 1;
+}
+
+/**
+ * Build missing ranges from the envelope (min~max) of covered data.
+ * Given a single covered envelope [envFrom, envTo], the gaps are:
+ *   - [from, envFrom - 1 day]  (if from < envFrom)
+ *   - [envTo + 1 day, to]      (if envTo < to)
+ * If there is no coverage at all, the entire [from, to] is missing.
+ */
+function buildMissingRangesFromEnvelope(from: string, to: string, coveredRanges: IsoDateRange[]): IsoDateRange[] {
+  if (coveredRanges.length === 0) {
+    return [{ from, to }];
+  }
+  // coveredRanges is always a single envelope [min_date, max_date]
+  const envFrom = coveredRanges[0].from;
+  const envTo = coveredRanges[coveredRanges.length - 1].to;
+  const gaps: IsoDateRange[] = [];
+  if (from < envFrom) {
+    gaps.push({ from, to: addDaysToIsoDate(envFrom, -1) });
+  }
+  if (envTo < to) {
+    gaps.push({ from: addDaysToIsoDate(envTo, 1), to });
+  }
+  return gaps;
+}
+
+function sumIsoDateRangeDays(ranges: IsoDateRange[]): number {
+  return ranges.reduce((total, range) => total + countIsoDateRangeDays(range.from, range.to), 0);
+}
+
+function isIsoDateInRanges(isoDate: string, ranges: IsoDateRange[]): boolean {
+  return ranges.some((range) => isoDate >= range.from && isoDate <= range.to);
+}
+
+async function buildTickerGapPlans(params: {
+  tickers: string[];
+  source: string;
+  sourceType: string;
+  from: string;
+  to: string;
+  executionMode: GapExecutionMode;
+}): Promise<Map<string, TickerGapPlan>> {
+  const coverageMap = await getTickerNewsCoverage({
+    tickers: params.tickers,
+    source: params.source,
+    sourceType: params.sourceType,
+    from: params.from,
+    to: params.to,
+  });
+  const requestedDayCount = countIsoDateRangeDays(params.from, params.to);
+  const plans = new Map<string, TickerGapPlan>();
+
+  for (const ticker of params.tickers) {
+    const coverage = coverageMap.get(ticker) ?? { coveredRanges: [] };
+    const missingRanges = buildMissingRangesFromEnvelope(params.from, params.to, coverage.coveredRanges);
+    plans.set(ticker, {
+      ticker,
+      coveredRanges: coverage.coveredRanges,
+      missingRanges,
+      requestedDayCount,
+      missingDayCount: sumIsoDateRangeDays(missingRanges),
+      fullyCovered: missingRanges.length === 0,
+      executionMode: params.executionMode,
+    });
+  }
+
+  return plans;
+}
+
+function summarizeTickerGapPlans(params: {
+  source: string;
+  sourceType: string;
+  requestedRange: IsoDateRange;
+  plans: Map<string, TickerGapPlan>;
+  executionMode: GapExecutionMode;
+}) {
+  const plans = Array.from(params.plans.values());
+  return {
+    source: params.source,
+    sourceType: params.sourceType,
+    requestedRange: params.requestedRange,
+    executionMode: params.executionMode,
+    totalTickers: plans.length,
+    fullyCoveredTickers: plans.filter((plan) => plan.fullyCovered).length,
+    tickersWithMissingGaps: plans.filter((plan) => plan.missingRanges.length > 0).length,
+    totalMissingRanges: plans.reduce((total, plan) => total + plan.missingRanges.length, 0),
+    totalMissingDays: plans.reduce((total, plan) => total + plan.missingDayCount, 0),
+    examples: plans
+      .filter((plan) => plan.missingRanges.length > 0 || plan.fullyCovered)
+      .slice(0, 10)
+      .map((plan) => ({
+        ticker: plan.ticker,
+        coveredRanges: plan.coveredRanges,
+        missingRanges: plan.missingRanges,
+        missingDayCount: plan.missingDayCount,
+        fullyCovered: plan.fullyCovered,
+      })),
+  };
 }
 
 // Track running pull-finhub jobs to prevent duplicate concurrent pulls
@@ -739,6 +864,97 @@ app.get("/api/news/pull-finhub/preflight", async (req, res, next) => {
   }
 });
 
+app.post("/api/news/pull-finhub/preflight-custom", async (req, res, next) => {
+  try {
+    const input = pullFinnhubSchema.parse({ ...(req.body ?? {}), mode: "custom" });
+    if (!input.from) {
+      res.status(400).json({ error: "Custom preflight requires 'from' date" });
+      return;
+    }
+
+    const requestedRange = {
+      from: input.from,
+      to: input.to ?? new Date().toISOString().slice(0, 10),
+    };
+
+    let tickerList: string[];
+    if (input.csvPath === DEFAULT_TICKERS_CSV) {
+      tickerList = await getDefaultUniverseTickers();
+    } else {
+      try {
+        const csvResult = readTickersFromCsv(input.csvPath);
+        tickerList = csvResult.tickers;
+      } catch {
+        tickerList = await getDefaultUniverseTickers();
+      }
+    }
+    if (input.maxTickers > 0) tickerList = tickerList.slice(0, input.maxTickers);
+
+    if (input.sourceType === "market_news") {
+      res.json({
+        source: "FINNHUB",
+        sourceType: input.sourceType,
+        requestedRange,
+        executionMode: "summary-only",
+        supported: false,
+        reason: "market_news custom mode does not support ticker gap planning",
+      });
+      return;
+    }
+
+    const summaries: Record<string, unknown> = {};
+    if (input.sourceType === "all" || input.sourceType === "company_news") {
+      const plans = await buildTickerGapPlans({
+        tickers: tickerList,
+        source: "FINNHUB",
+        sourceType: "company_news",
+        from: requestedRange.from,
+        to: requestedRange.to,
+        executionMode: "gap-only",
+      });
+      summaries.company_news = summarizeTickerGapPlans({
+        source: "FINNHUB",
+        sourceType: "company_news",
+        requestedRange,
+        plans,
+        executionMode: "gap-only",
+      });
+    }
+    if (input.sourceType === "all" || input.sourceType === "press_release") {
+      const plans = await buildTickerGapPlans({
+        tickers: tickerList,
+        source: "FINNHUB",
+        sourceType: "press_release",
+        from: requestedRange.from,
+        to: requestedRange.to,
+        executionMode: "gap-only",
+      });
+      summaries.press_release = summarizeTickerGapPlans({
+        source: "FINNHUB",
+        sourceType: "press_release",
+        requestedRange,
+        plans,
+        executionMode: "gap-only",
+      });
+    }
+
+    if (input.sourceType === "all") {
+      res.json({
+        source: "FINNHUB",
+        sourceType: input.sourceType,
+        requestedRange,
+        totalTickers: tickerList.length,
+        bySourceType: summaries,
+      });
+      return;
+    }
+
+    res.json(summaries[input.sourceType]);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/news/pull-finhub", async (req, res, next) => {
   try {
     const input = pullFinnhubSchema.parse(req.body ?? {});
@@ -783,6 +999,30 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
       tickerList = [];
     }
     console.log(`[pull-finhub] mode=${input.mode} sourceType=${input.sourceType} maxTickers=${input.maxTickers} tickerConcurrency=${input.tickerConcurrency} requestIntervalMs=${input.requestIntervalMs} fulltextConcurrency=${input.fulltextConcurrency} batchLevels=${batchLevels.join(",")} → tickerList.length=${tickerList.length}`);
+
+    const customRequestedRange = isCustom ? { from: effectiveFrom!, to: effectiveTo } : null;
+    let companyCustomGapPlans: Map<string, TickerGapPlan> | undefined;
+    let pressCustomGapPlans: Map<string, TickerGapPlan> | undefined;
+    if (isCustom && pullCompany) {
+      companyCustomGapPlans = await buildTickerGapPlans({
+        tickers: tickerList,
+        source: "FINNHUB",
+        sourceType: "company_news",
+        from: effectiveFrom!,
+        to: effectiveTo,
+        executionMode: "gap-only",
+      });
+    }
+    if (isCustom && pullPress) {
+      pressCustomGapPlans = await buildTickerGapPlans({
+        tickers: tickerList,
+        source: "FINNHUB",
+        sourceType: "press_release",
+        from: effectiveFrom!,
+        to: effectiveTo,
+        executionMode: "gap-only",
+      });
+    }
 
     // For recent mode, load per-ticker anchor maps
     let companyAnchorMap: Map<string, string> | undefined;
@@ -832,7 +1072,8 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
     const fallback7d = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10);
 
     (async () => {
-      const counters = { totalInserted: 0, totalSkipped: 0 };
+      const counters = { totalInserted: 0, totalSkipped: 0, fullyCoveredSkipped: 0, gapRangesFetched: 0 };
+      const fetchedTickers = new Set<string>();
       const newItems: Array<{ id: string; tickers: string[]; publishedAt: string }> = [];
       const companyNewsNewItems: Array<{ id: string; tickers: string[]; publishedAt: string }> = [];
       const detailsPerType: Record<string, { fetched: number; inserted: number }> = {
@@ -842,17 +1083,67 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
       };
 
       try {
+        if (isCustom && customRequestedRange) {
+          if (companyCustomGapPlans) {
+            const summary = summarizeTickerGapPlans({
+              source: "FINNHUB",
+              sourceType: "company_news",
+              requestedRange: customRequestedRange,
+              plans: companyCustomGapPlans,
+              executionMode: "gap-only",
+            });
+            appendLog(jobId, `[custom preflight company_news] fullyCovered=${summary.fullyCoveredTickers}, missingTickers=${summary.tickersWithMissingGaps}, missingRanges=${summary.totalMissingRanges}`);
+          }
+          if (pressCustomGapPlans) {
+            const summary = summarizeTickerGapPlans({
+              source: "FINNHUB",
+              sourceType: "press_release",
+              requestedRange: customRequestedRange,
+              plans: pressCustomGapPlans,
+              executionMode: "gap-only",
+            });
+            appendLog(jobId, `[custom preflight press_release] fullyCovered=${summary.fullyCoveredTickers}, missingTickers=${summary.tickersWithMissingGaps}, missingRanges=${summary.totalMissingRanges}`);
+          }
+        }
         // ── Per-ticker processor: throws on rate-limit to signal adaptive batch runner ──
         const processOneTicker = async (ticker: string): Promise<void> => {
           const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
           let hadRateLimitError = false;
+          const companyPlan = companyCustomGapPlans?.get(ticker);
+          const pressPlan = pressCustomGapPlans?.get(ticker);
+
+          if (isCustom) {
+            const companyNeedsFetch = pullCompany && (companyPlan?.missingRanges.length ?? 0) > 0;
+            const pressNeedsFetch = pullPress && (pressPlan?.missingRanges.length ?? 0) > 0;
+            if ((pullCompany || pullPress) && !companyNeedsFetch && !pressNeedsFetch) {
+              counters.fullyCoveredSkipped += 1;
+              appendLog(jobId, `  ${ticker}: fully covered, skip custom fetch`);
+              return;
+            }
+          }
 
           // Company news
           if (pullCompany) {
             try {
               let items: FinnhubMappedItem[];
               if (isCustom) {
-                items = await pullCompanyNewsBackfill(ticker, effectiveFrom!, effectiveTo);
+                items = [];
+                const missingRanges = companyPlan?.missingRanges ?? [];
+                let fetchedCount = 0;
+                for (const gapRange of missingRanges) {
+                  counters.gapRangesFetched += 1;
+                  fetchedTickers.add(ticker);
+                  const rangeItems = await pullCompanyNewsBackfill(ticker, gapRange.from, gapRange.to);
+                  fetchedCount += rangeItems.length;
+                  const companyNewsStart = newItems.length;
+                  await insertFetchedItems(rangeItems, detailsPerType.company_news, newItems, counters);
+                  if (newItems.length > companyNewsStart) {
+                    companyNewsNewItems.push(...newItems.slice(companyNewsStart));
+                  }
+                }
+                if (missingRanges.length > 0) {
+                  appendLog(jobId, `  company_news ${ticker}: ${missingRanges.length} gap(s), ${fetchedCount} fetched`);
+                }
               } else {
                 let tickerFrom = effectiveFrom!;
                 if (isRecent) {
@@ -883,12 +1174,14 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
                   });
                 }
               }
-              const companyNewsStart = newItems.length;
-              await insertFetchedItems(items, detailsPerType.company_news, newItems, counters);
-              if (newItems.length > companyNewsStart) {
-                companyNewsNewItems.push(...newItems.slice(companyNewsStart));
+              if (!isCustom) {
+                const companyNewsStart = newItems.length;
+                await insertFetchedItems(items, detailsPerType.company_news, newItems, counters);
+                if (newItems.length > companyNewsStart) {
+                  companyNewsNewItems.push(...newItems.slice(companyNewsStart));
+                }
               }
-              if (items.length > 0) {
+              if (!isCustom && items.length > 0) {
                 appendLog(jobId, `  company_news ${ticker}: ${items.length} fetched`);
               }
             } catch (err: any) {
@@ -903,7 +1196,19 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
             try {
               let items: FinnhubMappedItem[];
               if (isCustom) {
-                items = await pullPressReleasesBackfill(ticker, effectiveFrom!, effectiveTo);
+                items = [];
+                const missingRanges = pressPlan?.missingRanges ?? [];
+                let fetchedCount = 0;
+                for (const gapRange of missingRanges) {
+                  counters.gapRangesFetched += 1;
+                  fetchedTickers.add(ticker);
+                  const rangeItems = await pullPressReleasesBackfill(ticker, gapRange.from, gapRange.to);
+                  fetchedCount += rangeItems.length;
+                  await insertFetchedItems(rangeItems, detailsPerType.press_release, newItems, counters);
+                }
+                if (missingRanges.length > 0) {
+                  appendLog(jobId, `  press_release ${ticker}: ${missingRanges.length} gap(s), ${fetchedCount} fetched`);
+                }
               } else {
                 let tickerFrom = effectiveFrom!;
                 if (isRecent) {
@@ -925,8 +1230,10 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
                   items = await fetchPressReleasesRaw(ticker, tickerFrom, effectiveTo);
                 }
               }
-              await insertFetchedItems(items, detailsPerType.press_release, newItems, counters);
-              if (items.length > 0) {
+              if (!isCustom) {
+                await insertFetchedItems(items, detailsPerType.press_release, newItems, counters);
+              }
+              if (!isCustom && items.length > 0) {
                 appendLog(jobId, `  press_release ${ticker}: ${items.length} fetched`);
               }
             } catch (err: any) {
@@ -1059,6 +1366,9 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
           tickerCount: tickerList.length,
           inserted: counters.totalInserted,
           skipped: counters.totalSkipped,
+          fullyCoveredSkipped: counters.fullyCoveredSkipped,
+          gapRangesFetched: counters.gapRangesFetched,
+          tickersFetched: fetchedTickers.size,
           changeMerged: changeMergeResult.merged,
           autoFulltextJobId,
           autoFulltextConcurrency: autoFulltextJobId ? input.fulltextConcurrency : null,
@@ -1071,6 +1381,9 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
           tickerCount: tickerList.length,
           inserted: counters.totalInserted,
           skipped: counters.totalSkipped,
+          fullyCoveredSkipped: counters.fullyCoveredSkipped,
+          gapRangesFetched: counters.gapRangesFetched,
+          tickersFetched: fetchedTickers.size,
           changeMerged: changeMergeResult.merged,
           autoFulltextJobId,
           autoFulltextConcurrency: autoFulltextJobId ? input.fulltextConcurrency : null,
@@ -1127,6 +1440,136 @@ const pullFmpSecFilingSchema = z.object({
   maxPages: z.number().int().min(1).max(100).optional().default(40),
 });
 
+app.post("/api/news/pull-rtpr/preflight-custom", async (req, res, next) => {
+  try {
+    const input = pullRtprSchema.parse({ ...(req.body ?? {}), mode: "custom" });
+    if (!input.from) {
+      res.status(400).json({ error: "Custom preflight requires 'from' date" });
+      return;
+    }
+    const requestedRange = {
+      from: input.from,
+      to: input.to ?? new Date().toISOString().slice(0, 10),
+    };
+    const tickerList = await getDefaultUniverseTickers();
+    const plans = await buildTickerGapPlans({
+      tickers: tickerList,
+      source: "RTPR",
+      sourceType: "press_release",
+      from: requestedRange.from,
+      to: requestedRange.to,
+      executionMode: "fully-covered-skip",
+    });
+    res.json(summarizeTickerGapPlans({
+      source: "RTPR",
+      sourceType: "press_release",
+      requestedRange,
+      plans,
+      executionMode: "fully-covered-skip",
+    }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/news/pull-fmp-press-release/preflight-custom", async (req, res, next) => {
+  try {
+    const input = pullFmpPressReleaseSchema.parse({ ...(req.body ?? {}), mode: "custom" });
+    if (!input.from) {
+      res.status(400).json({ error: "Custom preflight requires 'from' date" });
+      return;
+    }
+    const requestedRange = {
+      from: input.from,
+      to: input.to ?? getEtDateString(new Date()),
+    };
+    const tickerList = await getDefaultUniverseTickers();
+    const plans = await buildTickerGapPlans({
+      tickers: tickerList,
+      source: "FMP",
+      sourceType: "fmp_press_release",
+      from: requestedRange.from,
+      to: requestedRange.to,
+      executionMode: "gap-only",
+    });
+    res.json(summarizeTickerGapPlans({
+      source: "FMP",
+      sourceType: "fmp_press_release",
+      requestedRange,
+      plans,
+      executionMode: "gap-only",
+    }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/news/pull-fmp-stock-news/preflight-custom", async (req, res, next) => {
+  try {
+    const input = pullFmpStockNewsSchema.parse({ ...(req.body ?? {}), mode: "custom" });
+    if (!input.from) {
+      res.status(400).json({ error: "Custom preflight requires 'from' date" });
+      return;
+    }
+    const requestedRange = {
+      from: input.from,
+      to: input.to ?? getEtDateString(new Date()),
+    };
+    const tickerList = await getDefaultUniverseTickers();
+    const plans = await buildTickerGapPlans({
+      tickers: tickerList,
+      source: "FMP",
+      sourceType: "fmp_stock_news",
+      from: requestedRange.from,
+      to: requestedRange.to,
+      executionMode: "gap-only",
+    });
+    res.json(summarizeTickerGapPlans({
+      source: "FMP",
+      sourceType: "fmp_stock_news",
+      requestedRange,
+      plans,
+      executionMode: "gap-only",
+    }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/news/pull-fmp-sec-filing/preflight-custom", async (req, res, next) => {
+  try {
+    const input = pullFmpSecFilingSchema.parse({ ...(req.body ?? {}), mode: "custom" });
+    if (!input.from) {
+      res.status(400).json({ error: "Custom preflight requires 'from' date" });
+      return;
+    }
+    const requestedRange = {
+      from: input.from,
+      to: input.to ?? getEtDateString(new Date()),
+    };
+    const tickerList = await getDefaultUniverseTickers();
+    const existing = await getDb().get<{ existingItemsInRange: number }>(
+      `SELECT COUNT(*) AS existingItemsInRange
+       FROM news_items
+       WHERE source = 'FMP'
+         AND source_type = 'fmp_sec_filing'
+         AND published_at >= ?
+         AND published_at <= ?`,
+      [requestedRange.from, `${requestedRange.to}T23:59:59.999Z`],
+    );
+    res.json({
+      source: "FMP",
+      sourceType: "fmp_sec_filing",
+      requestedRange,
+      executionMode: "summary-only",
+      totalTickers: tickerList.length,
+      existingItemsInRange: existing?.existingItemsInRange ?? 0,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/news/pull-rtpr", async (req, res, next) => {
   try {
     if (!config.rtprApiKey) {
@@ -1159,6 +1602,19 @@ app.post("/api/news/pull-rtpr", async (req, res, next) => {
 
     // Both modes use per-ticker fetch from universe
     const tickerList = await getDefaultUniverseTickers();
+    const customRequestedRange = isCustom
+      ? { from: input.from!, to: input.to ?? new Date().toISOString().slice(0, 10) }
+      : null;
+    const customGapPlans = isCustom
+      ? await buildTickerGapPlans({
+        tickers: tickerList,
+        source: "RTPR",
+        sourceType: "press_release",
+        from: customRequestedRange!.from,
+        to: customRequestedRange!.to,
+        executionMode: "fully-covered-skip",
+      })
+      : undefined;
 
     const jobId = createJob(tickerList.length, {
       category: "news-update",
@@ -1178,7 +1634,7 @@ app.post("/api/news/pull-rtpr", async (req, res, next) => {
 
     // Background job execution
     (async () => {
-      const counters = { totalInserted: 0, totalSkipped: 0 };
+      const counters = { totalInserted: 0, totalSkipped: 0, fullyCoveredSkipped: 0, gapRangesFetched: 0 };
       const newItems: Array<{ id: string; tickers: string[]; publishedAt: string }> = [];
       const fallback7d = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10);
       const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
@@ -1212,6 +1668,16 @@ app.post("/api/news/pull-rtpr", async (req, res, next) => {
       };
 
       try {
+        if (isCustom && customRequestedRange && customGapPlans) {
+          const summary = summarizeTickerGapPlans({
+            source: "RTPR",
+            sourceType: "press_release",
+            requestedRange: customRequestedRange,
+            plans: customGapPlans,
+            executionMode: "fully-covered-skip",
+          });
+          appendLog(jobId, `[custom preflight] fullyCovered=${summary.fullyCoveredTickers}, missingTickers=${summary.tickersWithMissingGaps}, missingRanges=${summary.totalMissingRanges}`);
+        }
         if (!isCustom) {
           // ── Recent mode: per-ticker incremental with anchor + confirmed-empty skip ──
           const fallbackCount = tickerList.filter(
@@ -1281,17 +1747,23 @@ app.post("/api/news/pull-rtpr", async (req, res, next) => {
           });
         } else {
           // ── Custom mode: per-ticker fetch with explicit date range filter ──
-          const effectiveFrom = input.from!;
-          const effectiveTo = input.to ?? new Date().toISOString().slice(0, 10);
+          const effectiveFrom = customRequestedRange!.from;
+          const effectiveTo = customRequestedRange!.to;
           appendLog(jobId, `Custom mode: ${effectiveFrom} ~ ${effectiveTo}, ${tickerList.length} tickers`);
 
           await runTickerPool(async (ticker) => {
             try {
+              const plan = customGapPlans?.get(ticker);
+              if (!plan || plan.missingRanges.length === 0) {
+                counters.fullyCoveredSkipped += 1;
+                return;
+              }
+              counters.gapRangesFetched += plan.missingRanges.length;
               const items = await fetchRtprArticlesByTicker(ticker, 100);
               // Filter by date range
               const filtered = items.filter((item) => {
                 const d = item.publishedAt.slice(0, 10);
-                return d >= effectiveFrom && d <= effectiveTo;
+                return d >= effectiveFrom && d <= effectiveTo && isIsoDateInRanges(d, plan.missingRanges);
               });
 
               for (const rawItem of filtered) {
@@ -1352,6 +1824,8 @@ app.post("/api/news/pull-rtpr", async (req, res, next) => {
           tickerConcurrency: input.tickerConcurrency,
           inserted: counters.totalInserted,
           skipped: counters.totalSkipped,
+          fullyCoveredSkipped: counters.fullyCoveredSkipped,
+          gapRangesFetched: counters.gapRangesFetched,
           changeMerged: changeMergeResult.merged,
         });
 
@@ -1362,6 +1836,8 @@ app.post("/api/news/pull-rtpr", async (req, res, next) => {
           tickerConcurrency: input.tickerConcurrency,
           inserted: counters.totalInserted,
           skipped: counters.totalSkipped,
+          fullyCoveredSkipped: counters.fullyCoveredSkipped,
+          gapRangesFetched: counters.gapRangesFetched,
           changeMerged: changeMergeResult.merged,
         });
         activePullJobs.delete(rtprJobKey);
@@ -1408,6 +1884,17 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
     const todayEt = getEtDateString(new Date());
     const fallback7d = getEtDateString(new Date(Date.now() - 7 * 86_400_000));
     const effectiveTo = input.to ?? todayEt;
+    const customRequestedRange = isCustom ? { from: input.from!, to: effectiveTo } : null;
+    const customGapPlans = isCustom
+      ? await buildTickerGapPlans({
+        tickers: tickerList,
+        source: "FMP",
+        sourceType: "fmp_press_release",
+        from: customRequestedRange!.from,
+        to: customRequestedRange!.to,
+        executionMode: "gap-only",
+      })
+      : undefined;
     const jobId = createJob(tickerList.length, {
       category: "news-update",
       label: "FMP PR Pull",
@@ -1424,7 +1911,7 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
     res.json({ jobId });
 
     (async () => {
-      const counters = { totalInserted: 0, totalSkipped: 0 };
+      const counters = { totalInserted: 0, totalSkipped: 0, fullyCoveredSkipped: 0, gapRangesFetched: 0 };
       const newItems: Array<{ id: string; tickers: string[]; publishedAt: string }> = [];
       const newFulltextTargets: Array<{ id: string; url: string; publisher: string | null; body: string | null; source_type: string }> = [];
       const confirmedEmptyKey = "fmp_press_release";
@@ -1457,6 +1944,16 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
       };
 
       try {
+        if (isCustom && customRequestedRange && customGapPlans) {
+          const summary = summarizeTickerGapPlans({
+            source: "FMP",
+            sourceType: "fmp_press_release",
+            requestedRange: customRequestedRange,
+            plans: customGapPlans,
+            executionMode: "gap-only",
+          });
+          appendLog(jobId, `[custom preflight] fullyCovered=${summary.fullyCoveredTickers}, missingTickers=${summary.tickersWithMissingGaps}, missingRanges=${summary.totalMissingRanges}`);
+        }
         if (!isCustom) {
           const fallbackCount = tickerList.filter((ticker) => !anchorMap!.has(ticker.toUpperCase())).length;
           if (fallbackCount > 0) {
@@ -1526,53 +2023,64 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
             }
           });
         } else {
-          const effectiveFrom = input.from!;
+          const effectiveFrom = customRequestedRange!.from;
           appendLog(jobId, `Custom mode: ${effectiveFrom} ~ ${effectiveTo}, ${tickerList.length} tickers`);
 
           await runTickerPool(async (ticker) => {
             try {
-              const items = await fetchFmpPressReleasesByTicker(ticker, {
-                fromDate: effectiveFrom,
-                toDate: effectiveTo,
-                pageLimit: input.pageLimit,
-                maxPages: input.maxPages,
-                requestIntervalMs: input.requestIntervalMs,
-              });
+              const plan = customGapPlans?.get(ticker);
+              if (!plan || plan.missingRanges.length === 0) {
+                counters.fullyCoveredSkipped += 1;
+                return;
+              }
 
-              for (const rawItem of items) {
-                const inserted = await insertNewsItem({
-                  publishedAt: rawItem.publishedAt,
-                  source: rawItem.source,
-                  sourceType: rawItem.sourceType,
-                  title: rawItem.title,
-                  body: rawItem.body,
-                  url: rawItem.url,
-                  tickers: rawItem.providerTickers,
-                  tags: rawItem.tags,
-                  publisher: rawItem.publisher,
+              let fetchedCount = 0;
+              for (const gapRange of plan.missingRanges) {
+                counters.gapRangesFetched += 1;
+                const items = await fetchFmpPressReleasesByTicker(ticker, {
+                  fromDate: gapRange.from,
+                  toDate: gapRange.to,
+                  pageLimit: input.pageLimit,
+                  maxPages: input.maxPages,
+                  requestIntervalMs: input.requestIntervalMs,
                 });
-                if (inserted) {
-                  counters.totalInserted++;
-                  newItems.push({
-                    id: inserted.id,
-                    tickers: inserted.tickers,
-                    publishedAt: inserted.published_at,
-                  });
-                  newFulltextTargets.push({
-                    id: inserted.id,
-                    url: rawItem.url,
-                    publisher: rawItem.publisher ?? null,
+                fetchedCount += items.length;
+
+                for (const rawItem of items) {
+                  const inserted = await insertNewsItem({
+                    publishedAt: rawItem.publishedAt,
+                    source: rawItem.source,
+                    sourceType: rawItem.sourceType,
+                    title: rawItem.title,
                     body: rawItem.body,
-                    source_type: rawItem.sourceType,
+                    url: rawItem.url,
+                    tickers: rawItem.providerTickers,
+                    tags: rawItem.tags,
+                    publisher: rawItem.publisher,
                   });
-                  streamHub.publishNews(inserted);
-                } else {
-                  counters.totalSkipped++;
+                  if (inserted) {
+                    counters.totalInserted++;
+                    newItems.push({
+                      id: inserted.id,
+                      tickers: inserted.tickers,
+                      publishedAt: inserted.published_at,
+                    });
+                    newFulltextTargets.push({
+                      id: inserted.id,
+                      url: rawItem.url,
+                      publisher: rawItem.publisher ?? null,
+                      body: rawItem.body,
+                      source_type: rawItem.sourceType,
+                    });
+                    streamHub.publishNews(inserted);
+                  } else {
+                    counters.totalSkipped++;
+                  }
                 }
               }
 
-              if (items.length > 0) {
-                appendLog(jobId, `  FMP PR ${ticker}: ${items.length} in range`);
+              if (fetchedCount > 0) {
+                appendLog(jobId, `  FMP PR ${ticker}: ${plan.missingRanges.length} gap(s), ${fetchedCount} fetched`);
               }
             } catch (err: any) {
               console.error(`[pull-fmp-press-release] ${ticker}: ${err.message}`);
@@ -1611,6 +2119,8 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
           maxPages: input.maxPages,
           inserted: counters.totalInserted,
           skipped: counters.totalSkipped,
+          fullyCoveredSkipped: counters.fullyCoveredSkipped,
+          gapRangesFetched: counters.gapRangesFetched,
           changeMerged: changeMergeResult.merged,
           fulltextSuccess: fulltextResult.success,
           fulltextSkipped: fulltextResult.skipped,
@@ -1624,6 +2134,8 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
           tickerCount: tickerList.length,
           inserted: counters.totalInserted,
           skipped: counters.totalSkipped,
+          fullyCoveredSkipped: counters.fullyCoveredSkipped,
+          gapRangesFetched: counters.gapRangesFetched,
           changeMerged: changeMergeResult.merged,
           fulltextSuccess: fulltextResult.success,
           fulltextSkipped: fulltextResult.skipped,
@@ -1673,6 +2185,17 @@ app.post("/api/news/pull-fmp-stock-news", async (req, res, next) => {
     const todayEt = getEtDateString(new Date());
     const fallback7d = getEtDateString(new Date(Date.now() - 7 * 86_400_000));
     const effectiveTo = input.to ?? todayEt;
+    const customRequestedRange = isCustom ? { from: input.from!, to: effectiveTo } : null;
+    const customGapPlans = isCustom
+      ? await buildTickerGapPlans({
+        tickers: tickerList,
+        source: "FMP",
+        sourceType: "fmp_stock_news",
+        from: customRequestedRange!.from,
+        to: customRequestedRange!.to,
+        executionMode: "gap-only",
+      })
+      : undefined;
     const jobId = createJob(tickerList.length, {
       category: "news-update",
       label: "FMP Stock Pull",
@@ -1689,7 +2212,7 @@ app.post("/api/news/pull-fmp-stock-news", async (req, res, next) => {
     res.json({ jobId });
 
     (async () => {
-      const counters = { totalInserted: 0, totalSkipped: 0 };
+      const counters = { totalInserted: 0, totalSkipped: 0, fullyCoveredSkipped: 0, gapRangesFetched: 0 };
       const newItems: Array<{ id: string; tickers: string[]; publishedAt: string }> = [];
       const newFulltextTargets: Array<{ id: string; url: string; publisher: string | null; body: string | null; source_type: string }> = [];
       const confirmedEmptyKey = "fmp_stock_news";
@@ -1722,6 +2245,16 @@ app.post("/api/news/pull-fmp-stock-news", async (req, res, next) => {
       };
 
       try {
+        if (isCustom && customRequestedRange && customGapPlans) {
+          const summary = summarizeTickerGapPlans({
+            source: "FMP",
+            sourceType: "fmp_stock_news",
+            requestedRange: customRequestedRange,
+            plans: customGapPlans,
+            executionMode: "gap-only",
+          });
+          appendLog(jobId, `[custom preflight] fullyCovered=${summary.fullyCoveredTickers}, missingTickers=${summary.tickersWithMissingGaps}, missingRanges=${summary.totalMissingRanges}`);
+        }
         if (!isCustom) {
           const fallbackCount = tickerList.filter((ticker) => !anchorMap!.has(ticker.toUpperCase())).length;
           if (fallbackCount > 0) {
@@ -1791,53 +2324,64 @@ app.post("/api/news/pull-fmp-stock-news", async (req, res, next) => {
             }
           });
         } else {
-          const effectiveFrom = input.from!;
+          const effectiveFrom = customRequestedRange!.from;
           appendLog(jobId, `Custom mode: ${effectiveFrom} ~ ${effectiveTo}, ${tickerList.length} tickers`);
 
           await runTickerPool(async (ticker) => {
             try {
-              const items = await fetchFmpStockNewsByTicker(ticker, {
-                fromDate: effectiveFrom,
-                toDate: effectiveTo,
-                pageLimit: input.pageLimit,
-                maxPages: input.maxPages,
-                requestIntervalMs: input.requestIntervalMs,
-              });
+              const plan = customGapPlans?.get(ticker);
+              if (!plan || plan.missingRanges.length === 0) {
+                counters.fullyCoveredSkipped += 1;
+                return;
+              }
 
-              for (const rawItem of items) {
-                const inserted = await insertNewsItem({
-                  publishedAt: rawItem.publishedAt,
-                  source: rawItem.source,
-                  sourceType: rawItem.sourceType,
-                  title: rawItem.title,
-                  body: rawItem.body,
-                  url: rawItem.url,
-                  tickers: rawItem.providerTickers,
-                  tags: rawItem.tags,
-                  publisher: rawItem.publisher,
+              let fetchedCount = 0;
+              for (const gapRange of plan.missingRanges) {
+                counters.gapRangesFetched += 1;
+                const items = await fetchFmpStockNewsByTicker(ticker, {
+                  fromDate: gapRange.from,
+                  toDate: gapRange.to,
+                  pageLimit: input.pageLimit,
+                  maxPages: input.maxPages,
+                  requestIntervalMs: input.requestIntervalMs,
                 });
-                if (inserted) {
-                  counters.totalInserted++;
-                  newItems.push({
-                    id: inserted.id,
-                    tickers: inserted.tickers,
-                    publishedAt: inserted.published_at,
-                  });
-                  newFulltextTargets.push({
-                    id: inserted.id,
-                    url: rawItem.url,
-                    publisher: rawItem.publisher ?? null,
+                fetchedCount += items.length;
+
+                for (const rawItem of items) {
+                  const inserted = await insertNewsItem({
+                    publishedAt: rawItem.publishedAt,
+                    source: rawItem.source,
+                    sourceType: rawItem.sourceType,
+                    title: rawItem.title,
                     body: rawItem.body,
-                    source_type: rawItem.sourceType,
+                    url: rawItem.url,
+                    tickers: rawItem.providerTickers,
+                    tags: rawItem.tags,
+                    publisher: rawItem.publisher,
                   });
-                  streamHub.publishNews(inserted);
-                } else {
-                  counters.totalSkipped++;
+                  if (inserted) {
+                    counters.totalInserted++;
+                    newItems.push({
+                      id: inserted.id,
+                      tickers: inserted.tickers,
+                      publishedAt: inserted.published_at,
+                    });
+                    newFulltextTargets.push({
+                      id: inserted.id,
+                      url: rawItem.url,
+                      publisher: rawItem.publisher ?? null,
+                      body: rawItem.body,
+                      source_type: rawItem.sourceType,
+                    });
+                    streamHub.publishNews(inserted);
+                  } else {
+                    counters.totalSkipped++;
+                  }
                 }
               }
 
-              if (items.length > 0) {
-                appendLog(jobId, `  FMP Stock ${ticker}: ${items.length} in range`);
+              if (fetchedCount > 0) {
+                appendLog(jobId, `  FMP Stock ${ticker}: ${plan.missingRanges.length} gap(s), ${fetchedCount} fetched`);
               }
             } catch (err: any) {
               console.error(`[pull-fmp-stock-news] ${ticker}: ${err.message}`);
@@ -1877,6 +2421,8 @@ app.post("/api/news/pull-fmp-stock-news", async (req, res, next) => {
           maxPages: input.maxPages,
           inserted: counters.totalInserted,
           skipped: counters.totalSkipped,
+          fullyCoveredSkipped: counters.fullyCoveredSkipped,
+          gapRangesFetched: counters.gapRangesFetched,
           changeMerged: changeMergeResult.merged,
           fulltextSuccess: fulltextResult.success,
           fulltextSkipped: fulltextResult.skipped,
@@ -1890,6 +2436,8 @@ app.post("/api/news/pull-fmp-stock-news", async (req, res, next) => {
           tickerCount: tickerList.length,
           inserted: counters.totalInserted,
           skipped: counters.totalSkipped,
+          fullyCoveredSkipped: counters.fullyCoveredSkipped,
+          gapRangesFetched: counters.gapRangesFetched,
           changeMerged: changeMergeResult.merged,
           fulltextSuccess: fulltextResult.success,
           fulltextSkipped: fulltextResult.skipped,
@@ -2109,6 +2657,48 @@ const pullInvestingSchema = z.object({
   maxPages: z.number().int().min(1).max(50).optional().default(5),
   requestIntervalMs: z.number().int().min(0).max(10_000).optional().default(1000),
   fulltextConcurrency: z.number().int().min(1).max(200).optional().default(10),
+});
+
+app.post("/api/news/pull-investing/preflight-custom", async (req, res, next) => {
+  try {
+    const input = pullInvestingSchema.parse({ ...(req.body ?? {}), mode: "custom" });
+    if (!input.from) {
+      res.status(400).json({ error: "Custom preflight requires 'from' date" });
+      return;
+    }
+
+    const requestedRange = {
+      from: input.from,
+      to: input.to ?? getEtDateString(new Date()),
+    };
+    const categories: InvestingCategory[] =
+      input.category === "all"
+        ? ["stock-market-news", "cryptocurrency-news"]
+        : [input.category];
+    const placeholders = categories.map(() => "?").join(",");
+    const rows = await getDb().all<{ source_type: string; item_count: number }[]>(
+      `SELECT source_type, COUNT(*) AS item_count
+       FROM news_items
+       WHERE source = 'INVESTING'
+         AND source_type IN (${placeholders})
+         AND published_at >= ?
+         AND published_at <= ?
+       GROUP BY source_type`,
+      [...categories, requestedRange.from, `${requestedRange.to}T23:59:59.999Z`],
+    );
+    res.json({
+      source: "INVESTING",
+      sourceType: input.category,
+      requestedRange,
+      executionMode: "summary-only",
+      categories: categories.map((category) => ({
+        category,
+        existingItemsInRange: rows.find((row) => row.source_type === category)?.item_count ?? 0,
+      })),
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.post("/api/news/pull-investing", async (req, res, next) => {
@@ -2492,6 +3082,37 @@ const customChangeSchema = z.object({
   ibkrConcurrency: z.number().int().min(1).max(100).optional(),
 });
 
+app.post("/api/news/change/update-custom/preflight", async (req, res, next) => {
+  try {
+    const { from, to } = customChangeSchema.parse(req.body);
+    const counts = await getDb().get<{
+      totalRowsInRange: number;
+      rowsWithChangePct: number;
+    }>(
+      `SELECT COUNT(*) AS totalRowsInRange,
+              SUM(CASE WHEN ncm.news_id IS NOT NULL THEN 1 ELSE 0 END) AS rowsWithChangePct
+       FROM news_items ni
+       LEFT JOIN news_change_metrics ncm
+         ON ncm.news_id = ni.id AND ncm.metric_key = 'change_pct'
+       WHERE ni.published_at >= ?
+         AND ni.published_at <= ?`,
+      [from, `${to}T23:59:59.999Z`],
+    );
+    const totalRowsInRange = counts?.totalRowsInRange ?? 0;
+    const rowsWithChangePct = counts?.rowsWithChangePct ?? 0;
+    res.json({
+      route: "/api/news/change/update-custom",
+      requestedRange: { from, to },
+      executionMode: "summary-only",
+      totalRowsInRange,
+      rowsWithChangePct,
+      rowsExpectedToUpdate: Math.max(0, totalRowsInRange - rowsWithChangePct),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/news/change/update-custom", async (req, res, next) => {
   try {
     const { from, to, fmpConcurrency, fmpRequestIntervalMs, ibkrConcurrency } = customChangeSchema.parse(req.body);
@@ -2857,6 +3478,36 @@ app.post("/api/ibkr/calendar/update", async (req, res, next) => {
 });
 
 // Custom calendar update: user-specified date range, default universe tickers
+app.post("/api/ibkr/calendar/update-custom/preflight", async (req, res, next) => {
+  try {
+    const from = req.body?.from;
+    const to = req.body?.to;
+    if (!from || !to || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+      res.status(400).json({ error: "from/to must be YYYY-MM-DD" });
+      return;
+    }
+    const tickers = await getDefaultUniverseTickers();
+    const summary = await getDb().get<{ existingEventsInRange: number; existingEventDays: number }>(
+      `SELECT COUNT(*) AS existingEventsInRange,
+              COUNT(DISTINCT substr(event_at, 1, 10)) AS existingEventDays
+       FROM calendar_events
+       WHERE event_at >= ?
+         AND event_at <= ?`,
+      [from, `${to}T23:59:59.999Z`],
+    );
+    res.json({
+      route: "/api/ibkr/calendar/update-custom",
+      requestedRange: { from, to },
+      executionMode: "summary-only",
+      totalTickers: tickers.length,
+      existingEventsInRange: summary?.existingEventsInRange ?? 0,
+      existingEventDays: summary?.existingEventDays ?? 0,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/ibkr/calendar/update-custom", async (req, res, next) => {
   try {
     const from = req.body?.from;

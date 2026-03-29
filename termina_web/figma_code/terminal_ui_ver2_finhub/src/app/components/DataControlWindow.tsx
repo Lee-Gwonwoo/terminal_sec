@@ -67,6 +67,10 @@ export function DataControlWindow({
   const [jobStatuses, setJobStatuses] = useState<Record<SectionKey, JobStatus | null>>({
     price: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, yahooDesc: null, peersPull: null, ipoDate: null, 'recent': null, custom: null,
   });
+  const [showCustomPreflightModal, setShowCustomPreflightModal] = useState(false);
+  const [customPreflightTitle, setCustomPreflightTitle] = useState('Custom Update Preflight');
+  const [customPreflightData, setCustomPreflightData] = useState<any | null>(null);
+  const [pendingCustomExecute, setPendingCustomExecute] = useState<(() => void) | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
 
   // ─── App DB inspection state ───
@@ -441,6 +445,8 @@ export function DataControlWindow({
     try {
       let url = '';
       let body: string | undefined;
+      let preflightUrl = '';
+      let preflightTitle = '';
       const headers: Record<string, string> = {};
 
       switch (key) {
@@ -461,6 +467,8 @@ export function DataControlWindow({
           url = `${API_BASE}/api/ibkr/calendar/update-custom`;
           headers['Content-Type'] = 'application/json';
           body = JSON.stringify({ from: calendarCustomFrom, to: calendarCustomTo });
+          preflightUrl = `${API_BASE}/api/ibkr/calendar/update-custom/preflight`;
+          preflightTitle = 'Calendar Custom Preflight';
           break;
         case 'companyDesc':
           url = `${API_BASE}/api/company-profiles/pull-fmp`;
@@ -505,16 +513,42 @@ export function DataControlWindow({
           url = `${API_BASE}/api/news/change/update-custom`;
           headers['Content-Type'] = 'application/json';
           body = JSON.stringify({ from: customChangeFrom, to: customChangeTo, fmpConcurrency: changeFmpConcurrency });
+          preflightUrl = `${API_BASE}/api/news/change/update-custom/preflight`;
+          preflightTitle = 'News Change Custom Preflight';
           break;
       }
 
-      const res = await fetch(url, { method: 'POST', headers, body });
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `HTTP ${res.status}`);
+      const executeUpdate = async () => {
+        const res = await fetch(url, { method: 'POST', headers, body });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || `HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        setJobIds(prev => ({ ...prev, [key]: data.jobId }));
+      };
+
+      if (preflightUrl && body) {
+        const preflightRes = await fetch(preflightUrl, { method: 'POST', headers, body });
+        const preflightData = await preflightRes.json();
+        if (preflightRes.ok) {
+          setCustomPreflightTitle(preflightTitle);
+          setCustomPreflightData(preflightData);
+          setPendingCustomExecute(() => () => {
+            setUpdating(prev => ({ ...prev, [key]: true }));
+            void executeUpdate().catch((err: unknown) => {
+              const message = err instanceof Error ? err.message : 'Failed to start update';
+              setErrors(prev => ({ ...prev, [key]: message }));
+              setUpdating(prev => ({ ...prev, [key]: false }));
+            });
+          });
+          setShowCustomPreflightModal(true);
+          setUpdating(prev => ({ ...prev, [key]: false }));
+          return;
+        }
       }
-      const data = await res.json();
-      setJobIds(prev => ({ ...prev, [key]: data.jobId }));
+
+      await executeUpdate();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to start update';
       setErrors(prev => ({ ...prev, [key]: message }));
@@ -1650,6 +1684,36 @@ export function DataControlWindow({
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {showCustomPreflightModal && customPreflightData && (
+        <div className="absolute inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-4 w-[42rem] max-w-[92vw] border border-gray-200 dark:border-gray-700">
+            <h3 className="text-sm font-semibold mb-2 flex items-center gap-2"><RefreshCw className="w-4 h-4 text-blue-500" />{customPreflightTitle}</h3>
+            <p className="text-xs text-gray-600 dark:text-gray-300 mb-3">실행 전에 현재 coverage와 예상 처리 범위를 보여줍니다.</p>
+            <pre className="max-h-[24rem] overflow-auto rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-3 text-[11px] leading-5 text-gray-700 dark:text-gray-200 whitespace-pre-wrap break-all">{JSON.stringify(customPreflightData, null, 2)}</pre>
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={() => {
+                  setShowCustomPreflightModal(false);
+                  setCustomPreflightData(null);
+                  setPendingCustomExecute(null);
+                }}
+                className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700"
+              >Cancel</button>
+              <button
+                onClick={() => {
+                  const execute = pendingCustomExecute;
+                  setShowCustomPreflightModal(false);
+                  setCustomPreflightData(null);
+                  setPendingCustomExecute(null);
+                  execute?.();
+                }}
+                className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+              >Continue</button>
+            </div>
+          </div>
         </div>
       )}
     </div>

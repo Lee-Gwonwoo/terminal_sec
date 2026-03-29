@@ -52,6 +52,72 @@ function encodeCursor(item: Pick<NewsItem, "published_at" | "id">): string {
   return Buffer.from(`${item.published_at}|${item.id}`).toString("base64");
 }
 
+export interface IsoDateRange {
+  from: string;
+  to: string;
+}
+
+export interface TickerNewsCoverage {
+  /** min/max envelope: single range from earliest to latest existing data date, or empty */
+  coveredRanges: IsoDateRange[];
+}
+
+export async function getTickerNewsCoverage(params: {
+  tickers: string[];
+  source: string;
+  sourceType: string;
+  from: string;
+  to: string;
+}): Promise<Map<string, TickerNewsCoverage>> {
+  const normalizedTickers = Array.from(
+    new Set(params.tickers.map((ticker) => ticker.trim().toUpperCase()).filter(Boolean)),
+  );
+  const tickerSet = new Set(normalizedTickers);
+
+  if (normalizedTickers.length === 0) {
+    return new Map();
+  }
+
+  const rows = await getDb().all<{ tickers_csv: string; min_date: string; max_date: string }[]>(
+    `SELECT tickers_csv,
+            MIN(substr(published_at, 1, 10)) AS min_date,
+            MAX(substr(published_at, 1, 10)) AS max_date
+     FROM news_items
+     WHERE source = ?
+       AND source_type = ?
+       AND published_at >= ?
+       AND published_at <= ?
+     GROUP BY tickers_csv`,
+    [params.source, params.sourceType, params.from, `${params.to}T23:59:59.999Z`],
+  );
+
+  // Per-ticker min/max tracking
+  const minMaxMap = new Map<string, { min: string; max: string }>();
+  for (const row of rows) {
+    const rowTickers = splitCsvEnvelope(row.tickers_csv);
+    for (const ticker of rowTickers) {
+      if (!tickerSet.has(ticker)) continue;
+      const existing = minMaxMap.get(ticker);
+      if (!existing) {
+        minMaxMap.set(ticker, { min: row.min_date, max: row.max_date });
+      } else {
+        if (row.min_date < existing.min) existing.min = row.min_date;
+        if (row.max_date > existing.max) existing.max = row.max_date;
+      }
+    }
+  }
+
+  const result = new Map<string, TickerNewsCoverage>();
+  for (const ticker of normalizedTickers) {
+    const mm = minMaxMap.get(ticker);
+    result.set(ticker, {
+      coveredRanges: mm ? [{ from: mm.min, to: mm.max }] : [],
+    });
+  }
+
+  return result;
+}
+
 export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; nextCursor?: string }> {
   const where: string[] = [];
   const values: unknown[] = [];
