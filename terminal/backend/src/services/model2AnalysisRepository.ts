@@ -146,6 +146,12 @@ function normalizeDateInput(value?: string): string | undefined {
   return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : undefined;
 }
 
+function nextDateExclusive(value: string): string {
+  const date = new Date(`${value}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
 export async function cleanupBlockedFinnhubCompanyNewsEvidence(): Promise<Model2BlockedEvidenceCleanupResult> {
   const db = getDb();
   const blockedWhere = `
@@ -348,13 +354,13 @@ export async function listModel2EvidenceRows(options: ListModel2EvidenceOptions)
   }
 
   if (normalizedFromDate) {
-    where.push("SUBSTR(er.published_at, 1, 10) >= ?");
+    where.push("er.published_at >= ?");
     values.push(normalizedFromDate);
   }
 
   if (normalizedToDate) {
-    where.push("SUBSTR(er.published_at, 1, 10) <= ?");
-    values.push(normalizedToDate);
+    where.push("er.published_at < ?");
+    values.push(nextDateExclusive(normalizedToDate));
   }
 
   const whereSql = `WHERE ${where.join(" AND ")}`;

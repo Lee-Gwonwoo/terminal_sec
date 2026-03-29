@@ -126,29 +126,29 @@ rg -n "setDebouncedKeyword|setDebouncedTicker|fetch\(`${API_BASE}/api/model2" te
 
 사용자 확인 필요: **예**
 
-#### ⬜ Step 1 — backend query/index 저위험 최적화
+#### ⏳ Step 1 — backend query/index 저위험 최적화
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 1-1 | `news_change_metrics(news_id, metric_key)` 등 조회형 composite index 추가/점검 | `terminal/backend/src/db.ts` | build + `/api/news` 응답 확인 | ⬜ |
-| 1-2 | `/api/news` 후속 enrichment query 수를 줄이거나 batch를 재구성 | `terminal/backend/src/services/newsRepository.ts` | `/api/news` payload 의미 비교 | ⬜ |
-| 1-3 | evidence 조회용 filter index 보강 | `terminal/backend/src/db.ts`, `terminal/backend/src/services/model2AnalysisRepository.ts` | evidence 검색/정렬 응답 확인 | ⬜ |
+| 1-1 | sentiment/company profile 최신 조회용 index 추가 | `terminal/backend/src/db.ts` | build + `/api/news` 응답 확인 | ⏳ |
+| 1-2 | `/api/news` enrichment batch를 최신 row 중심으로 재구성 | `terminal/backend/src/services/newsRepository.ts` | `/api/news` payload 의미 비교 | ⏳ |
+| 1-3 | evidence 날짜 filter를 index 친화적인 range 비교로 변경 | `terminal/backend/src/services/model2AnalysisRepository.ts` | evidence 검색/정렬 응답 확인 | ⏳ |
 
-1-1 목적: JOIN lookup 비용을 줄인다.
-설명: 같은 `news_id + metric_key` 조회가 반복되므로 composite index가 가장 안전한 첫 단계다.
-완료 조건(눈으로 확인): 스키마에 조회형 index가 추가되어 있어야 한다.
+1-1 목적: 최신 sentiment/profile 대표 row 조회 비용을 줄인다.
+설명: `news_sentiment_snapshots`, `company_profiles`에서 ticker/security별 최신 row를 더 싸게 찾도록 index를 추가한다.
+완료 조건(눈으로 확인): 스키마에 sentiment/profile 조회형 index가 추가되어 있어야 한다.
 사람 검증(비개발자): 화면은 같고 로딩만 빨라져야 한다.
 흔한 문제/주의: 기존 index와 중복 이름 충돌을 피해야 한다.
 
-1-2 목적: `/api/news` 한 번 호출당 SQL round trip을 줄인다.
-설명: sentiment / peers / market cap / description / ipoDate를 지금보다 덜 비싸게 묶어 읽도록 바꾼다.
-완료 조건(눈으로 확인): `/api/news` 호출 코드에서 후속 batch read가 줄거나 단순해져야 한다.
+1-2 목적: `/api/news` 한 번 호출당 enrichment 비용을 줄인다.
+설명: sentiment / peers / market cap / description / ipoDate를 ticker별 최신 non-null row 기준으로 읽도록 정리한다.
+완료 조건(눈으로 확인): `/api/news` 호출 코드에서 최신 row 선택 helper와 단순화된 enrichment 경로가 보여야 한다.
 사람 검증(비개발자): 뉴스 표의 peers, market cap, company desc 값이 그대로 보여야 한다.
 흔한 문제/주의: null handling이 바뀌면 일부 컬럼이 빈값으로 보일 수 있다.
 
-1-3 목적: evidence table filter/search 정렬 비용을 줄인다.
-설명: analysis_id, ticker, case_type, published_at 중심 조회를 index 친화적으로 만든다.
-완료 조건(눈으로 확인): evidence 관련 schema/index가 추가되어 있어야 한다.
+1-3 목적: evidence table 날짜 filter 비용을 줄인다.
+설명: `SUBSTR(published_at, 1, 10)` 대신 range 비교를 사용해 기존 published_at index를 더 잘 활용하게 만든다.
+완료 조건(눈으로 확인): evidence query가 문자열 함수 대신 `>=`, `<` range 조건을 사용해야 한다.
 사람 검증(비개발자): 같은 검색어/정렬에서 결과 의미가 바뀌지 않아야 한다.
 흔한 문제/주의: body preview/text 검색 semantics는 그대로 유지해야 한다.
 
@@ -163,22 +163,22 @@ Invoke-RestMethod -Uri "http://localhost:8080/api/model2/analyses" | ConvertTo-J
 
 사용자 확인 필요: **예**
 
-#### ⬜ Step 2 — frontend 초기 로딩 waterfall 축소
+#### ⏳ Step 2 — frontend 초기 로딩 waterfall 축소
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 2-1 | `FinnhubNewsWindow` 초기 로드 시 불필요한 연쇄 fetch/useEffect 정리 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 초기 진입 시 첫 결과 노출 확인 | ⬜ |
-| 2-2 | 초기 mount에서 대형 localStorage parse/useEffect 반복을 줄일 수 있는지 정리 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 필터 복원/저장 유지 확인 | ⬜ |
+| 2-1 | `FinnhubNewsWindow` 초기 로드 시 불필요한 bookmark fetch를 lazy-load로 전환 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 초기 진입 시 첫 결과 노출 확인 | ⏳ |
+| 2-2 | 초기 mount에서 대형 localStorage parse/useEffect 반복을 줄이는 캐시 ref 적용 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 필터 복원/저장 유지 확인 | ⏳ |
 | 2-3 | EvidenceTable 초기 로딩 순서를 점검해 불필요한 재호출을 제거 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/EvidenceTableWindow.tsx` | 분석 목록/케이스/row 로드 확인 | ⬜ |
 
 2-1 목적: 같은 데이터를 더 빨리 화면에 올린다.
-설명: 북마크 목록과 뉴스 목록 중 어떤 것이 blocking인지 분리하고, 첫 paint를 늦추는 경로를 줄인다.
+설명: 북마크 목록을 창 진입 직후 강제로 불러오지 않고, 실제 메뉴/선택 시점에만 lazy-load 하도록 바꾼다.
 완료 조건(눈으로 확인): Finnhub 창 진입 후 표가 더 빨리 채워져야 한다.
 사람 검증(비개발자): 창을 열었을 때 빈 화면 대기가 줄어야 한다.
 흔한 문제/주의: 북마크 기능이 늦게 초기화되더라도 표 조회는 유지돼야 한다.
 
 2-2 목적: mount cost를 줄인다.
-설명: 여러 번의 `JSON.parse(localStorage)`와 상태 복원을 필요한 범위로 줄인다.
+설명: 여러 번의 `JSON.parse(localStorage)` 대신 mount 초기에 한 번만 읽고 ref로 재사용한다.
 완료 조건(눈으로 확인): mount 시 복원 로직이 덜 분산돼 보여야 한다.
 사람 검증(비개발자): 재실행 후 필터/컬럼 상태는 계속 복원돼야 한다.
 흔한 문제/주의: 저장 키 호환성을 깨뜨리면 기존 사용 상태가 날아갈 수 있다.

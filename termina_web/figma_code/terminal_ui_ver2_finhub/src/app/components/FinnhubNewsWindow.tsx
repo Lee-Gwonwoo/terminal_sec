@@ -248,6 +248,19 @@ function getRtprTickerConcurrency(): number {
   }
 }
 
+function readStoredObject(key: string): Record<string, unknown> | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Backend news item ───
 interface BackendNewsItem {
   id: string;
@@ -451,39 +464,19 @@ export function FinnhubNewsWindow({
   titleFontSize = 12,
   summaryFontSize = 11,
 }: FinnhubNewsWindowProps) {
+  const persistedUiStateRef = useRef<Record<string, unknown> | null>(null);
+  if (persistedUiStateRef.current === null) {
+    persistedUiStateRef.current = readStoredObject('finhub-news-ui-state') ?? {};
+  }
+  const persistedUiState = persistedUiStateRef.current;
+
   const [searchQuery, setSearchQuery] = useState(initialTicker || '');
   const [tickerQuery, setTickerQuery] = useState(initialTicker || '');
-  const [fromDate, setFromDate] = useState(() => {
-    try {
-      const saved = localStorage.getItem('finhub-news-ui-state');
-      if (saved) {
-        const p = JSON.parse(saved);
-        if (typeof p.fromDate === 'string') return p.fromDate;
-      }
-    } catch { /* ignore */ }
-    return '';
-  });
-  const [toDate, setToDate] = useState(() => {
-    try {
-      const saved = localStorage.getItem('finhub-news-ui-state');
-      if (saved) {
-        const p = JSON.parse(saved);
-        if (typeof p.toDate === 'string') return p.toDate;
-      }
-    } catch { /* ignore */ }
-    return '';
-  });
+  const [fromDate, setFromDate] = useState(() => typeof persistedUiState?.fromDate === 'string' ? persistedUiState.fromDate : '');
+  const [toDate, setToDate] = useState(() => typeof persistedUiState?.toDate === 'string' ? persistedUiState.toDate : '');
   const [bookmarkFolders, setBookmarkFolders] = useState<BookmarkFolder[]>([]);
-  const [selectedBookmarkFolderId, setSelectedBookmarkFolderId] = useState<string>(() => {
-    try {
-      const saved = localStorage.getItem('finhub-news-ui-state');
-      if (saved) {
-        const p = JSON.parse(saved);
-        if (typeof p.selectedBookmarkFolderId === 'string') return p.selectedBookmarkFolderId;
-      }
-    } catch { /* ignore */ }
-    return '';
-  });
+  const [bookmarkFoldersLoaded, setBookmarkFoldersLoaded] = useState(false);
+  const [selectedBookmarkFolderId, setSelectedBookmarkFolderId] = useState<string>(() => typeof persistedUiState?.selectedBookmarkFolderId === 'string' ? persistedUiState.selectedBookmarkFolderId : '');
   const [showBookmarkMenu, setShowBookmarkMenu] = useState(false);
   const [showBookmarkManager, setShowBookmarkManager] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
@@ -543,41 +536,17 @@ export function FinnhubNewsWindow({
   const [descPopup, setDescPopup] = useState<{ ticker: string; text: string } | null>(null);
 
   // Display mode
-  const [displayMode, setDisplayMode] = useState<DisplayMode>(() => {
-    try {
-      const saved = localStorage.getItem('finhub-news-ui-state');
-      if (saved) {
-        const p = JSON.parse(saved);
-        if (p.displayMode === 'title-abstract') return 'title-abstract';
-      }
-    } catch { /* ignore */ }
-    return 'title-only';
-  });
-  const [newsProjection, setNewsProjection] = useState<NewsProjectionMode>(() => {
-    try {
-      const saved = localStorage.getItem('finhub-news-ui-state');
-      if (saved) {
-        const p = JSON.parse(saved);
-        if (p.newsProjection === 'model1-safe') return 'model1-safe';
-      }
-    } catch { /* ignore */ }
-    return 'full';
-  });
+  const [displayMode, setDisplayMode] = useState<DisplayMode>(() => persistedUiState?.displayMode === 'title-abstract' ? 'title-abstract' : 'title-only');
+  const [newsProjection, setNewsProjection] = useState<NewsProjectionMode>(() => persistedUiState?.newsProjection === 'model1-safe' ? 'model1-safe' : 'full');
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
 
   // Column ordering + visibility
   const [columns, setColumns] = useState<ColumnDef[]>(DEFAULT_COLUMNS);
   const [visibleCols, setVisibleCols] = useState<Set<ColumnId>>(() => {
-    try {
-      const saved = localStorage.getItem('finhub-news-ui-state');
-      if (saved) {
-        const p = JSON.parse(saved);
-        if (Array.isArray(p.visibleCols)) {
-          const valid = (p.visibleCols as string[]).filter(c => DEFAULT_COLUMNS.some(d => d.id === c)) as ColumnId[];
-          if (valid.length > 0) return new Set(valid);
-        }
-      }
-    } catch { /* ignore */ }
+    if (Array.isArray(persistedUiState?.visibleCols)) {
+      const valid = (persistedUiState.visibleCols as string[]).filter(c => DEFAULT_COLUMNS.some(d => d.id === c)) as ColumnId[];
+      if (valid.length > 0) return new Set(valid);
+    }
     return DEFAULT_VISIBLE;
   });
   const [showColumnMenu, setShowColumnMenu] = useState(false);
@@ -618,16 +587,10 @@ export function FinnhubNewsWindow({
 
   // Source type filter
   const [sourceTypeFilter, setSourceTypeFilter] = useState<SourceTypeFilter>(() => {
-    try {
-      const saved = localStorage.getItem('finhub-news-ui-state');
-      if (saved) {
-        const p = JSON.parse(saved);
-        if (['all', 'company_news', 'press_release', 'fmp_press_release', 'fmp_stock_news', 'fmp_sec_filing', 'market_news'].includes(p.sourceTypeFilter)) {
-          return p.sourceTypeFilter as SourceTypeFilter;
-        }
-      }
-    } catch { /* ignore */ }
-    return 'all';
+    const savedValue = persistedUiState?.sourceTypeFilter;
+    return ['all', 'company_news', 'press_release', 'fmp_press_release', 'fmp_stock_news', 'fmp_sec_filing', 'market_news'].includes(String(savedValue))
+      ? savedValue as SourceTypeFilter
+      : 'all';
   });
 
   // Backend data
@@ -785,14 +748,19 @@ export function FinnhubNewsWindow({
     try {
       const res = await fetch(`${API_BASE}/api/bookmarks/folders`);
       const data = await res.json();
-      if (!res.ok) return;
+      if (!res.ok) {
+        setBookmarkFoldersLoaded(false);
+        return;
+      }
       const folders: BookmarkFolder[] = Array.isArray(data) ? data : Array.isArray(data.folders) ? data.folders : [];
       setBookmarkFolders(folders);
+      setBookmarkFoldersLoaded(true);
       // fallback: if restored selectedBookmarkFolderId no longer exists, reset
       if (selectedBookmarkFolderId && folders.length > 0 && !folders.some(f => f.id === selectedBookmarkFolderId)) {
         setSelectedBookmarkFolderId('');
       }
     } catch {
+      setBookmarkFoldersLoaded(false);
       // keep bookmark UI empty on failure
     }
   }, [selectedBookmarkFolderId]);
@@ -977,8 +945,12 @@ export function FinnhubNewsWindow({
   }, [isModel1SafeMode, sort.column]);
 
   useEffect(() => {
-    fetchBookmarkFolders();
-  }, [fetchBookmarkFolders]);
+    const shouldLoadBookmarks = Boolean(selectedBookmarkFolderId || showBookmarkMenu || showBookmarkManager || rowCtxMenu);
+    if (!shouldLoadBookmarks || bookmarkFoldersLoaded) {
+      return;
+    }
+    void fetchBookmarkFolders();
+  }, [selectedBookmarkFolderId, showBookmarkMenu, showBookmarkManager, rowCtxMenu, bookmarkFoldersLoaded, fetchBookmarkFolders]);
 
   // ─── Auto-reload when discrete filters change (source type, bookmark, dates) ───
   useEffect(() => {

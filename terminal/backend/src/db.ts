@@ -217,6 +217,9 @@ export async function initDb(): Promise<void> {
       UNIQUE (ticker, asof_date)
     );
   `);
+  await db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_news_sentiment_ticker_asof ON news_sentiment_snapshots (ticker, asof_date DESC, id DESC);"
+  );
 
   // ver3: news_ai_analysis — per-article AI analysis results
   await db.exec(`
@@ -332,6 +335,9 @@ export async function initDb(): Promise<void> {
       // Column already exists — ignore
     }
   }
+  await db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_company_profiles_security_fetched ON company_profiles (security_id, fetched_at DESC, id DESC);"
+  );
 
   await db.exec(`
     CREATE TABLE IF NOT EXISTS ticker_universes (

@@ -159,113 +159,7 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
   `;
 
   const rows = await getDb().all<any[]>(sql, values);
-
-  // Collect unique tickers from results for sentiment lookup
-  const tickerSet = new Set<string>();
-  for (const row of rows) {
-    const tickers = splitCsvEnvelope(row.tickers_csv);
-    if (tickers.length > 0) tickerSet.add(tickers[0]);
-  }
-
-  // Batch fetch sentiment snapshots for all tickers in this page
-  const sentimentMap = new Map<string, { bullishPct: number | null; bearishPct: number | null; newsScore: number | null }>();
-  if (tickerSet.size > 0) {
-    const tickerArr = Array.from(tickerSet);
-    const placeholders = tickerArr.map(() => "?").join(",");
-    const sentRows = await getDb().all<any[]>(
-      `SELECT ticker, sentiment_bullish_pct, sentiment_bearish_pct, company_news_score
-       FROM news_sentiment_snapshots
-       WHERE ticker IN (${placeholders})
-       AND asof_date = (SELECT MAX(asof_date) FROM news_sentiment_snapshots s2 WHERE s2.ticker = news_sentiment_snapshots.ticker)`,
-      tickerArr,
-    );
-    for (const sr of sentRows) {
-      sentimentMap.set(sr.ticker, {
-        bullishPct: sr.sentiment_bullish_pct,
-        bearishPct: sr.sentiment_bearish_pct,
-        newsScore: sr.company_news_score,
-      });
-    }
-  }
-
-  // Batch fetch peers from company_profiles for all tickers in this page
-  const peersMap = new Map<string, string[]>();
-  if (tickerSet.size > 0) {
-    const tickerArr = Array.from(tickerSet);
-    const placeholders = tickerArr.map(() => "?").join(",");
-    const peersRows = await getDb().all<any[]>(
-      `SELECT s.ticker, cp.peers_json
-       FROM company_profiles cp
-       JOIN securities s ON s.id = cp.security_id
-       WHERE s.ticker IN (${placeholders}) AND cp.peers_json IS NOT NULL
-       ORDER BY cp.fetched_at DESC`,
-      tickerArr,
-    );
-    for (const pr of peersRows) {
-      if (!peersMap.has(pr.ticker) && pr.peers_json) {
-        try { peersMap.set(pr.ticker, JSON.parse(pr.peers_json)); } catch { /* skip malformed */ }
-      }
-    }
-  }
-
-  const marketCapMap = new Map<string, number | null>();
-  if (tickerSet.size > 0) {
-    const tickerArr = Array.from(tickerSet);
-    const placeholders = tickerArr.map(() => "?").join(",");
-    const marketCapRows = await getDb().all<any[]>(
-      `SELECT s.ticker, cp.market_cap
-       FROM company_profiles cp
-       JOIN securities s ON s.id = cp.security_id
-       WHERE s.ticker IN (${placeholders}) AND cp.market_cap IS NOT NULL
-       ORDER BY cp.fetched_at DESC`,
-      tickerArr,
-    );
-    for (const mr of marketCapRows) {
-      if (!marketCapMap.has(mr.ticker)) {
-        marketCapMap.set(mr.ticker, mr.market_cap ?? null);
-      }
-    }
-  }
-
-  // Batch fetch company descriptions from company_profiles for all tickers in this page
-  const descMap = new Map<string, string>();
-  if (tickerSet.size > 0) {
-    const tickerArr = Array.from(tickerSet);
-    const placeholders = tickerArr.map(() => "?").join(",");
-    const descRows = await getDb().all<any[]>(
-      `SELECT s.ticker, cp.description
-       FROM company_profiles cp
-       JOIN securities s ON s.id = cp.security_id
-       WHERE s.ticker IN (${placeholders}) AND cp.description IS NOT NULL AND cp.description != ''
-       ORDER BY cp.fetched_at DESC`,
-      tickerArr,
-    );
-    for (const dr of descRows) {
-      if (!descMap.has(dr.ticker)) {
-        descMap.set(dr.ticker, dr.description);
-      }
-    }
-  }
-
-  const ipoMap = new Map<string, string | null>();
-  if (tickerSet.size > 0) {
-    const tickerArr = Array.from(tickerSet);
-    const placeholders = tickerArr.map(() => "?").join(",");
-    const ipoRows = await getDb().all<any[]>(
-      `SELECT s.ticker, cp.ipo_date
-       FROM company_profiles cp
-       JOIN securities s ON s.id = cp.security_id
-       WHERE s.ticker IN (${placeholders}) AND cp.ipo_date IS NOT NULL AND cp.ipo_date != ''
-       ORDER BY cp.fetched_at DESC`,
-      tickerArr,
-    );
-    for (const ir of ipoRows) {
-      if (!ipoMap.has(ir.ticker)) {
-        ipoMap.set(ir.ticker, ir.ipo_date ?? null);
-      }
-    }
-  }
-
+  const { sentimentMap, peersMap, marketCapMap, descMap, ipoMap } = await loadNewsEnrichmentMaps(rows);
   const mapped = rows.map((row) => mapNewsRow(row, sentimentMap, peersMap, descMap, marketCapMap, ipoMap));
   const hasMore = mapped.length > limit;
   const items = hasMore ? mapped.slice(0, limit) : mapped;
@@ -781,10 +675,19 @@ async function loadSentimentMap(
   const tickerArr = Array.from(tickerSet);
   const placeholders = tickerArr.map(() => "?").join(",");
   const sentRows = await getDb().all<any[]>(
-    `SELECT ticker, sentiment_bullish_pct, sentiment_bearish_pct, company_news_score
-     FROM news_sentiment_snapshots
-     WHERE ticker IN (${placeholders})
-     AND asof_date = (SELECT MAX(asof_date) FROM news_sentiment_snapshots s2 WHERE s2.ticker = news_sentiment_snapshots.ticker)`,
+    `WITH ranked_sentiment AS (
+       SELECT
+         ticker,
+         sentiment_bullish_pct,
+         sentiment_bearish_pct,
+         company_news_score,
+         ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY asof_date DESC, id DESC) AS row_num
+       FROM news_sentiment_snapshots
+       WHERE ticker IN (${placeholders})
+     )
+     SELECT ticker, sentiment_bullish_pct, sentiment_bearish_pct, company_news_score
+     FROM ranked_sentiment
+     WHERE row_num = 1`,
     tickerArr,
   );
   for (const row of sentRows) {
@@ -804,15 +707,7 @@ async function loadPeersMap(tickerSet: Set<string>): Promise<Map<string, string[
   }
 
   const tickerArr = Array.from(tickerSet);
-  const placeholders = tickerArr.map(() => "?").join(",");
-  const peersRows = await getDb().all<any[]>(
-    `SELECT s.ticker, cp.peers_json
-     FROM company_profiles cp
-     JOIN securities s ON s.id = cp.security_id
-     WHERE s.ticker IN (${placeholders}) AND cp.peers_json IS NOT NULL
-     ORDER BY cp.fetched_at DESC`,
-    tickerArr,
-  );
+  const peersRows = await selectLatestCompanyProfileFieldRows(tickerArr, "peers_json", "cp.peers_json IS NOT NULL");
   for (const row of peersRows) {
     if (!peersMap.has(row.ticker) && row.peers_json) {
       try {
@@ -832,15 +727,7 @@ async function loadMarketCapMap(tickerSet: Set<string>): Promise<Map<string, num
   }
 
   const tickerArr = Array.from(tickerSet);
-  const placeholders = tickerArr.map(() => "?").join(",");
-  const marketCapRows = await getDb().all<any[]>(
-    `SELECT s.ticker, cp.market_cap
-     FROM company_profiles cp
-     JOIN securities s ON s.id = cp.security_id
-     WHERE s.ticker IN (${placeholders}) AND cp.market_cap IS NOT NULL
-     ORDER BY cp.fetched_at DESC`,
-    tickerArr,
-  );
+  const marketCapRows = await selectLatestCompanyProfileFieldRows(tickerArr, "market_cap", "cp.market_cap IS NOT NULL");
   for (const row of marketCapRows) {
     if (!marketCapMap.has(row.ticker)) {
       marketCapMap.set(row.ticker, row.market_cap ?? null);
@@ -856,15 +743,7 @@ async function loadDescriptionMap(tickerSet: Set<string>): Promise<Map<string, s
   }
 
   const tickerArr = Array.from(tickerSet);
-  const placeholders = tickerArr.map(() => "?").join(",");
-  const descRows = await getDb().all<any[]>(
-    `SELECT s.ticker, cp.description
-     FROM company_profiles cp
-     JOIN securities s ON s.id = cp.security_id
-     WHERE s.ticker IN (${placeholders}) AND cp.description IS NOT NULL AND cp.description != ''
-     ORDER BY cp.fetched_at DESC`,
-    tickerArr,
-  );
+  const descRows = await selectLatestCompanyProfileFieldRows(tickerArr, "description", "cp.description IS NOT NULL AND cp.description != ''");
   for (const row of descRows) {
     if (!descMap.has(row.ticker)) {
       descMap.set(row.ticker, row.description);
@@ -880,21 +759,40 @@ async function loadIpoMap(tickerSet: Set<string>): Promise<Map<string, string | 
   }
 
   const tickerArr = Array.from(tickerSet);
-  const placeholders = tickerArr.map(() => "?").join(",");
-  const ipoRows = await getDb().all<any[]>(
-    `SELECT s.ticker, cp.ipo_date
-     FROM company_profiles cp
-     JOIN securities s ON s.id = cp.security_id
-     WHERE s.ticker IN (${placeholders}) AND cp.ipo_date IS NOT NULL AND cp.ipo_date != ''
-     ORDER BY cp.fetched_at DESC`,
-    tickerArr,
-  );
+  const ipoRows = await selectLatestCompanyProfileFieldRows(tickerArr, "ipo_date", "cp.ipo_date IS NOT NULL AND cp.ipo_date != ''");
   for (const row of ipoRows) {
     if (!ipoMap.has(row.ticker)) {
       ipoMap.set(row.ticker, row.ipo_date ?? null);
     }
   }
   return ipoMap;
+}
+
+async function selectLatestCompanyProfileFieldRows(
+  tickers: string[],
+  fieldName: "peers_json" | "market_cap" | "description" | "ipo_date",
+  whereClause: string,
+): Promise<any[]> {
+  if (tickers.length === 0) {
+    return [];
+  }
+
+  const placeholders = tickers.map(() => "?").join(",");
+  return getDb().all<any[]>(
+    `WITH ranked_company_profiles AS (
+       SELECT
+         s.ticker,
+         cp.${fieldName} AS ${fieldName},
+         ROW_NUMBER() OVER (PARTITION BY s.ticker ORDER BY cp.fetched_at DESC, cp.id DESC) AS row_num
+       FROM company_profiles cp
+       JOIN securities s ON s.id = cp.security_id
+       WHERE s.ticker IN (${placeholders}) AND ${whereClause}
+     )
+     SELECT ticker, ${fieldName}
+     FROM ranked_company_profiles
+     WHERE row_num = 1`,
+    tickers,
+  );
 }
 
 function splitCsvEnvelope(csv: string): string[] {
