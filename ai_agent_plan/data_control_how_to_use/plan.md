@@ -289,3 +289,28 @@ Track B — 버튼 UX 연결
 - `DataControlWindow.tsx`에는 update 버튼 우클릭 context menu + `How To Use` 항목 + outside click / ESC 닫힘 처리를 붙였다.
 - `App.tsx` / `DraggableWindow.tsx`에는 `open-data-control-how-to-use` custom event와 draggable window 렌더 분기를 연결했다.
 - 현재 남은 것은 사용자 시각 확인 후 상태를 `✅`로 올리는 일과, Step 4의 선택 UX 여부 결정이다.
+
+### PLAN CHANGE — 2026-03-29 (runtime bug fix)
+
+- 사용자 보고 기준으로 `DataControlWindow.tsx`의 우클릭 메뉴가 실제 화면에 보이지 않는 문제가 확인됐다.
+- 원인은 두 가지였다.
+  - 메뉴를 연 직후 전역 `contextmenu` 리스너가 다시 실행되어 메뉴를 즉시 닫을 수 있었다.
+  - 메뉴 좌표는 `clientX/clientY` viewport 기준인데, 메뉴는 `absolute`로 렌더링되어 부모 컨테이너 기준 좌표로 해석되고 있었다.
+- 수정 방향은 다음으로 확정했다.
+  - 전역 `contextmenu` close 리스너 제거
+  - 메뉴를 `fixed` 기준으로 렌더링해 viewport 좌표와 일치시킴
+  - 메뉴 자체 우클릭은 `preventDefault()`로 브라우저 기본 메뉴와 충돌하지 않게 처리
+- 이번 수정 후 확인 포인트는 다시 단순해졌다.
+  - update 버튼 우클릭 시 `How To Use` 메뉴가 즉시 보여야 함
+  - outside click / ESC로 메뉴가 닫혀야 함
+  - `How To Use` 클릭 시 설명 창이 열려야 함
+
+### PLAN CHANGE — 2026-03-29 (visible fallback added)
+
+- 우클릭 UX만으로는 실제 사용자 검증이 충분하지 않다는 문제가 드러났다.
+- 따라서 모든 update 버튼 옆에 보이는 `How To Use` 버튼을 추가해, 우클릭 없이도 동일한 설명 창을 열 수 있게 했다.
+- 우클릭 메뉴는 그대로 유지하되, 주요 사용 경로는 이제 visible button + 우클릭 둘 다 지원한다.
+- 이번 변경의 확인 포인트는 아래와 같다.
+  - Update 옆 `How To Use` 버튼 클릭 시 설명 창이 열려야 함
+  - 우클릭 메뉴가 보여도 동일한 설명 창으로 연결돼야 함
+  - hidden gesture를 몰라도 기능 접근이 가능해야 함

@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { Search, Save, FolderOpen, Filter, ChevronDown, ArrowUp, ArrowDown, GripVertical, FileText, AlignLeft, RotateCw, Download, Columns3, Eye, X, Calendar, TrendingUp, Plus, Settings2, Square } from 'lucide-react';
+import { Search, Save, FolderOpen, Filter, ChevronDown, ArrowUp, ArrowDown, GripVertical, FileText, AlignLeft, RotateCw, Download, Columns3, Eye, X, Calendar, TrendingUp, Plus, Settings2, Square, CircleHelp } from 'lucide-react';
+import type { DataControlHowToUseWindowData } from '../types';
 import { VariableSizeList as List } from 'react-window';
 import { BookmarkManager } from './BookmarkManager';
 
@@ -2535,6 +2536,57 @@ export function FinnhubNewsWindow({
                       <button onClick={() => { setShowUpdateMenu(false); handlePtprCustomStart(); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <Calendar className="w-3.5 h-3.5 shrink-0 text-cyan-500" />
                         <div><div className="font-medium">Custom PTPR Press Release</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick date range · per-ticker RTPR press release pull</div></div>
+                      </button>
+
+                      {/* ── How To Use ── */}
+                      <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
+                      <button onClick={() => {
+                        setShowUpdateMenu(false);
+                        const payload: DataControlHowToUseWindowData = {
+                          key: 'finnhubNewsUpdate',
+                          title: 'Finnhub News — Update 드롭다운 사용법',
+                          summary: 'Custom Co. 버튼 드롭다운의 6개 카테고리 중 특히 Custom 계열이 어떻게 동작하는지 설명합니다. Custom은 무조건 지정한 전체 날짜를 다시 받는 것이 아니라, 버튼 종류에 따라 gap-only, fully-covered-skip, summary-only, preflight-only 방식으로 다르게 동작합니다.',
+                          purpose: '워치리스트 종목에 대한 뉴스·캘린더·PR 데이터를 수집하거나, 이미 저장된 뉴스의 change%를 다시 계산할 때 어떤 버튼을 눌러야 하는지와 Custom 실행 시 실제로 무엇이 다시 다운로드되는지를 구체적으로 안내합니다.',
+                          whenToRun: [
+                            '7d Update — 초기 세팅 직후 최근 7일 구간을 빠르게 채울 때 사용합니다. 최근 구간을 통째로 한번 받아오는 성격입니다.',
+                            'Recent Update — 매일 또는 수시로 최신 뉴스만 증분 수집할 때 사용합니다. 운영 중에는 보통 이 버튼이 기본입니다.',
+                            'Custom Update — 과거 특정 날짜 범위를 직접 지정할 때 사용합니다. Finnhub company news / press release, FMP PR / FMP stock news는 gap-only로 동작합니다.',
+                            'Change Update — 뉴스를 다시 받는 버튼이 아니라, 이미 저장된 뉴스 행의 1D/5D 등 change%를 다시 계산할 때 사용합니다.',
+                            'Calendar Update — Earnings, IPO, analyst/event 달력 데이터를 초기 적재하거나 특정 구간만 다시 채울 때 사용합니다.',
+                            'PTPR Press Release — RTPR press release를 ticker 기준으로 수집할 때 사용합니다. provider 제약 때문에 일반 custom gap-only와는 다르게 동작합니다.',
+                          ],
+                          inputs: [
+                            '7d Update (All) = Company News + Press Release + Market News를 최근 7일 기준으로 동시에 실행합니다. 개별 버튼은 해당 소스만 따로 실행합니다.',
+                            'Recent Update (All) = Company News, Press Release, FMP PR, FMP Stock, FMP SEC Filing, Market News를 최신 구간 기준으로 한 번에 갱신합니다.',
+                            'Custom Update 공통 흐름 = 날짜 모달에서 from/to 입력 → 즉시 실행하지 않고 preflight API를 먼저 호출 → summary를 확인한 뒤 Continue를 눌러야 실제 job이 시작됩니다.',
+                            'Custom gap-only 대상 = Finnhub Company News / Finnhub Press Release / FMP Press Release / FMP Stock News. 이들은 DB coverage envelope 바깥의 missing gap만 실제로 fetch합니다.',
+                            '예: 요청 범위가 2026-01-01~2026-03-29이고 AAPL coverage가 2026-01-15~2026-03-10이면, 01-01~01-14와 03-11~03-29만 다시 호출하고 중간 구간은 재조회하지 않습니다.',
+                            'Custom fully-covered-skip = PTPR. provider가 from/to 원격 조회를 직접 지원하지 않아, 요청 범위가 이미 fully covered면 skip하고 아니면 ticker별 custom 조회를 실행합니다.',
+                            'Custom summary-only = FMP SEC Filing / Market News 계열. ticker별 gap 계산 대신 preflight에서 existingItemsInRange 같은 요약 수치를 보여주고, 실행은 요청 범위를 기준으로 진행합니다.',
+                            'Change Update: Recent는 최근 7일 재계산, Custom은 지정 날짜 범위 재계산입니다. 뉴스 원문을 다시 받지 않습니다.',
+                            'Calendar Update: Backfill은 과거 2년 + 미래 180일 초기 적재, Refresh는 최근 30일 + 미래 90일 유지보수, Custom은 지정 범위 수집입니다.',
+                          ],
+                          cautions: [
+                            'Custom의 핵심은 gap-only가 가능한 버튼과 아닌 버튼을 구분해서 보는 것입니다. 모든 Custom 버튼이 missing gap만 받는 것은 아닙니다.',
+                            'gap-only에서 coverage는 개별 날짜 점이 아니라 min/max envelope 기준입니다. envelope 안쪽에 뉴스가 비어 있는 날짜는 다시 받지 않습니다.',
+                            '같은 범위를 두 번 연속 실행하면 gap-only 대상 버튼은 두 번째 실행에서 많은 ticker가 fully covered로 판정되어 skip될 수 있습니다.',
+                            '넓은 날짜 범위(예: 6개월~1년)를 주면 preflight의 totalMissingDays, totalMissingRanges를 먼저 보고 규모를 확인해야 합니다. 요약 수치가 크면 소스별로 나눠 실행하는 편이 안전합니다.',
+                            'Change Update는 뉴스 다운로드가 아니라 재계산입니다. inserted가 늘지 않아도 정상일 수 있습니다.',
+                            'Calendar Backfill은 초기 1회용에 가깝습니다. 이미 데이터가 있는 상태에서 반복 실행하면 불필요하게 무거울 수 있습니다.',
+                          ],
+                          verify: [
+                            'Custom 실행 전 preflight 모달에서 executionMode가 무엇인지 먼저 확인합니다. gap-only / fully-covered-skip / summary-only / preflight-only 중 어떤 방식인지 여기서 드러납니다.',
+                            'gap-only 대상 버튼이면 preflight JSON에서 fullyCoveredTickers, tickersWithMissingGaps, totalMissingRanges, totalMissingDays를 확인합니다. 이 값이 작을수록 실제 API 호출이 줄어든 것입니다.',
+                            'Examples에 AAPL 같은 샘플 ticker가 보이면 coveredRanges와 missingRanges가 앞뒤 gap 형태로만 나오는지 확인합니다. 중간 빈 날짜가 잘게 쪼개져 보이면 비정상입니다.',
+                            'Continue 후에는 View Log에서 fullyCoveredSkipped, gapRangesFetched, inserted, skippedExisting 같은 summary를 확인합니다. fullyCoveredSkipped가 보이면 gap 절약 로직이 실제 실행에도 반영된 것입니다.',
+                            'Change Update 완료 후에는 뉴스 행의 1D/5D 등 변동률 컬럼 값이 채워졌는지 확인하고, Calendar Update 완료 후에는 해당 날짜 범위의 이벤트가 늘었는지 확인합니다.',
+                          ],
+                          route: 'POST /api/news/pull-finhub, /api/news/pull-fmp-press-release, /api/news/pull-fmp-stock-news, /api/news/pull-rtpr, /api/news/pull-investing, /api/news/change/update-custom, /api/ibkr/calendar/update-custom',
+                        };
+                        window.dispatchEvent(new CustomEvent('open-data-control-how-to-use', { detail: payload }));
+                      }} className="w-full text-left px-3 py-2 text-xs hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded flex items-center gap-2 text-blue-600 dark:text-blue-400">
+                        <CircleHelp className="w-3.5 h-3.5 shrink-0" />
+                        <div className="font-medium">How To Use</div>
                       </button>
                     </div>
                   </div>

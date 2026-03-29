@@ -125,3 +125,27 @@
 - 상태:
   - Step 4-1 ~ 4-3 구현 완료 후 사용자 확인 대기.
   - `calendar custom` actual fetch는 현재 환경에서 IBKR 연결이 없어 failed로 끝났지만, preflight/result/job contract 자체는 정상 동작 확인.
+
+**작성 시각:** 2026-03-29 15:08 (local)
+
+### Finnhub News How To Use 설명 보강
+
+- 생성/수정 파일:
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+  - `ai_agent_plan/custom_update_gap/plan.md`
+  - `ai_agent_plan/custom_update_gap/agent_log.md`
+- 수행 내용:
+  - Finnhub News 드롭다운의 How To Use 창에서 `Custom` 관련 설명이 부족한 문제를 보강했다.
+  - 6개 카테고리의 단순 개요 수준이 아니라, `Custom` 실행의 실제 동작 차이인 `gap-only`, `fully-covered-skip`, `summary-only`, `preflight-only`를 구분해서 설명하도록 payload 문구를 다시 작성했다.
+  - 날짜 모달 → preflight → Continue → 실제 job 흐름, envelope 기반 gap 예시, preflight/result에서 확인할 핵심 수치(`fullyCoveredTickers`, `totalMissingRanges`, `fullyCoveredSkipped`, `gapRangesFetched`)를 How To Use에 직접 포함했다.
+- 검증 표:
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `FinnhubNewsWindow.tsx` 0 errors |
+| 빌드 | ✅ | frontend `npx vite build` 성공 |
+| 자동 테스트 | ✅ | workspace `terminal` 테스트 `npm.cmd run test` 0 실패 |
+| 런타임 통합 | ✅ | `DataControlHowToUseWindow.tsx` 렌더 구조와 `FinnhubNewsWindow.tsx` payload 연결 코드 리뷰 + 개발 서버 기준 How To Use 창 진입 경로 확인, 브라우저 시각 확인은 사용자 위임 |
+
+- 상태:
+  - Finnhub News How To Use 설명 보강 구현 완료, 사용자 확인 대기.

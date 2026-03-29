@@ -27,7 +27,7 @@ from model2_case_analysis import (
 )
 
 # ═══════════════════════════════════════════════════════════════════════
-# Taxonomy v7 — 211 case types (v6 101 → v7 211)
+# Taxonomy v7 — 207 case types (v6 101 → v7 207)
 # 의미없는 정보 계열은 `잡것들_` prefix를 붙이고, 끝까지 분류되지 않으면 `unknown`으로 둔다.
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -150,6 +150,122 @@ CASE_META: dict[str, dict[str, object]] = {
     "stock_comparison_article": {"label_ko": "종목 비교·vs 기사", "top_level": "residual", "definition": "A vs B: which stock is better.", "value_path": "비교 분석", "include_signals": ["which stock is", "better value option", "vs.*which is"], "exclude_signals": [], "quick_questions": ["종목 비교 기사?"]},
     "debt_restructuring_event": {"label_ko": "부채 관리·리파이낸싱", "top_level": "long", "definition": "debt paydown, refinancing, maturity extension.", "value_path": "재무 건전성→안정", "include_signals": ["refinancing", "debt paydown", "maturity extension", "deleveraging"], "exclude_signals": [], "quick_questions": ["부채 관리 이벤트?"]},
     "pre_market_gap_move": {"label_ko": "프리마켓 갭 무브", "top_level": "residual", "definition": "프리마켓에서 갭 상승/하락 후 해설 기사.", "value_path": "갭 해설", "include_signals": ["gaps up", "gaps down", "pre-market gap"], "exclude_signals": [], "quick_questions": ["프리마켓 갭?"]},
+    # ─── BIOTECH EXPANDED (16) ───────────────────────────────────────
+    "biotech_clinical_phase3_positive": {"label_ko": "임상3상 긍정 결과", "top_level": "long", "definition": "Phase 3 trial meets primary endpoint.", "value_path": "NDA 가시성→상업화 기대", "include_signals": ["phase 3.*met primary", "phase 3.*positive", "pivotal trial.*success"], "exclude_signals": [], "quick_questions": ["Phase 3 성공?"]},
+    "biotech_clinical_phase2_positive": {"label_ko": "임상2상 긍정 결과", "top_level": "long", "definition": "Phase 2 trial positive results.", "value_path": "Phase 3 진입 기대", "include_signals": ["phase 2.*results", "phase 2b.*data"], "exclude_signals": ["failed"], "quick_questions": ["Phase 2 긍정?"]},
+    "biotech_drug_commercialization": {"label_ko": "바이오 약물 상업화·매출 성장", "top_level": "long", "definition": "Drug sales milestone, commercial traction.", "value_path": "상업화 진전→매출", "include_signals": ["drug sales", "commercial traction", "prescription growth"], "exclude_signals": [], "quick_questions": ["약물 상업화?"]},
+    "biotech_pipeline_acquisition": {"label_ko": "바이오 파이프라인 인수·라이선스인", "top_level": "long", "definition": "License-in deal, pipeline acquisition, milestone deal.", "value_path": "파이프라인 확장→portfolio value", "include_signals": ["license.*rights", "milestone.*deal", "pipeline.*acquisition", "\\$.*billion.*deal.*pharma"], "exclude_signals": [], "quick_questions": ["파이프라인 인수/라이선스?"]},
+    "biotech_safety_concern_negative": {"label_ko": "바이오 안전성 우려", "top_level": "short", "definition": "Adverse events, safety signal, dose-limiting toxicity.", "value_path": "안전성 리스크→개발 차질", "include_signals": ["adverse event", "safety concern", "toxicity", "dose-limiting", "liver injury"], "exclude_signals": [], "quick_questions": ["안전성 이슈?"]},
+    "biotech_program_discontinuation": {"label_ko": "바이오 프로그램 중단", "top_level": "short", "definition": "Halts development, discontinues program.", "value_path": "자산 가치 상실", "include_signals": ["halts development", "discontinues", "suspends.*program", "deprioritiz"], "exclude_signals": [], "quick_questions": ["개발 중단?"]},
+    "biotech_enrollment_milestone": {"label_ko": "바이오 등록·모집 마일스톤", "top_level": "long", "definition": "Enrollment completion, screening milestone.", "value_path": "임상 진행 가시성", "include_signals": ["completes enrollment", "enrollment completed", "screening over"], "exclude_signals": [], "quick_questions": ["등록 완료?"]},
+    "biotech_exclusivity_patent_extension": {"label_ko": "바이오 독점권·특허 연장", "top_level": "long", "definition": "NCE exclusivity, patent extension, Orange Book.", "value_path": "독점 기간 연장→매출 보호", "include_signals": ["exclusivity", "patent.*extend", "orange book", "nce.*exclusiv"], "exclude_signals": [], "quick_questions": ["독점권 연장?"]},
+    "biotech_conference_data_poster": {"label_ko": "바이오 학회 데이터·포스터 발표", "top_level": "residual", "definition": "Conference presentation, poster at ASCO/ASH/SABCS.", "value_path": "학회 데이터→관심 환기", "include_signals": ["asco", "ash.*meeting", "sabcs", "worldsymposium", "idweek", "aav.*meeting"], "exclude_signals": [], "quick_questions": ["학회 발표?"]},
+    "biotech_obesity_glp1_event": {"label_ko": "비만·GLP-1 관련 이벤트", "top_level": "long", "definition": "GLP-1 trial, obesity drug, weight loss results.", "value_path": "비만치료 시장→TAM 기대", "include_signals": ["glp-1", "obesity.*trial", "weight loss.*results", "oral glp", "nlrp3"], "exclude_signals": [], "quick_questions": ["비만/GLP-1 관련?"]},
+    "biotech_gene_cell_therapy": {"label_ko": "유전자·세포치료 이벤트", "top_level": "long", "definition": "Gene therapy, cell therapy, CAR-T, iPSC, exosome.", "value_path": "첨단치료 진전→차세대 의약", "include_signals": ["gene therapy", "cell therapy", "car-t", "ipsc", "exosome", "sirna", "morpholino"], "exclude_signals": [], "quick_questions": ["유전자/세포치료?"]},
+    "biotech_rare_disease_orphan": {"label_ko": "희귀질환·오판약 이벤트", "top_level": "long", "definition": "Rare disease treatment, orphan drug event.", "value_path": "희귀질환→고마진 기대", "include_signals": ["rare disease", "orphan.*drug", "ultra-rare"], "exclude_signals": [], "quick_questions": ["희귀질환?"]},
+    "biotech_investor_lawsuit_negative": {"label_ko": "바이오 투자자 소송·조사", "top_level": "short", "definition": "Investor lawsuit, shareholder investigation in pharma.", "value_path": "법적 리스크→할인", "include_signals": ["investor.*urged to contact", "law firm.*investigat", "pomerantz.*investigat", "hagens berman"], "exclude_signals": [], "quick_questions": ["투자자 소송/조사?"]},
+    "biotech_real_world_data": {"label_ko": "바이오 실사용 데이터·레지스트리", "top_level": "residual", "definition": "Real-world data, registry study, post-marketing data.", "value_path": "실사용 근거→확장 적응증", "include_signals": ["real-world", "registry study", "post-marketing", "utract"], "exclude_signals": [], "quick_questions": ["실사용 데이터?"]},
+    "biotech_regulatory_international": {"label_ko": "비FDA 규제기관 승인·조치", "top_level": "long", "definition": "Saudi FDA, MHRA, TGA, non-US approval.", "value_path": "해외시장→매출 다각화", "include_signals": ["saudi food and drug", "mhra", "ema.*approve", "health canada.*approve", "sfda"], "exclude_signals": [], "quick_questions": ["비FDA 승인?"]},
+    "biotech_compassionate_access": {"label_ko": "자비적 사용·확대접근 프로그램", "top_level": "long", "definition": "Expanded access, compassionate use.", "value_path": "환자 접근→상업화 전 매출", "include_signals": ["expanded access", "compassionate use", "named patient"], "exclude_signals": [], "quick_questions": ["확대접근?"]},
+    # ─── AI / TECH / SEMICONDUCTOR (12) ──────────────────────────────
+    "ai_infrastructure_investment": {"label_ko": "AI 인프라 투자·데이터센터", "top_level": "long", "definition": "AI cloud, hyperscaler capex, GPU cluster.", "value_path": "AI 인프라 TAM→매출 기대", "include_signals": ["ai infrastructure", "hyperscal", "gpu cluster", "ai cloud", "ai.*data center", "ai.*capex"], "exclude_signals": [], "quick_questions": ["AI 인프라?"]},
+    "ai_model_product_launch": {"label_ko": "AI 모델·제품 출시", "top_level": "long", "definition": "AI model release, foundation model, LLM update.", "value_path": "AI 역량→시장 관심", "include_signals": ["foundation model", "llm.*launch", "ai.*agent.*launch", "genai.*capabilities"], "exclude_signals": [], "quick_questions": ["AI 제품 출시?"]},
+    "ai_partnership_deal": {"label_ko": "AI 파트너십·딜", "top_level": "long", "definition": "AI-specific partnership or investment deal.", "value_path": "AI 생태계 연결→가치 증대", "include_signals": ["nvidia.*invest", "openai.*deal", "ai.*partnership", "nvidia.*select", "nvidia.*collaborat"], "exclude_signals": [], "quick_questions": ["AI 파트너십?"]},
+    "semiconductor_design_win": {"label_ko": "반도체 디자인윈", "top_level": "long", "definition": "Chip design win, GPU selection, SoC qualification.", "value_path": "디자인윈→장기 매출", "include_signals": ["design win", "selected.*chip", "qualified.*soc", "automotive.*qualified", "aec-plus"], "exclude_signals": [], "quick_questions": ["반도체 디자인윈?"]},
+    "semiconductor_technology_advance": {"label_ko": "반도체 기술 진보", "top_level": "long", "definition": "GaN, SiC, new fabrication process.", "value_path": "기술 리더십→시장 침투", "include_signals": ["gan.*ic", "sic mosfet", "gan technology", "silicon carbide", "bi-directional gan"], "exclude_signals": [], "quick_questions": ["반도체 기술 진보?"]},
+    "quantum_computing_event": {"label_ko": "양자컴퓨팅 이벤트", "top_level": "long", "definition": "Quantum computing milestones, installations.", "value_path": "양자 기술 진전→시장 형성", "include_signals": ["quantum comput", "quantum.*install", "annealing quantum", "quantum.*networking", "quantum.*photon"], "exclude_signals": [], "quick_questions": ["양자컴퓨팅?"]},
+    "satellite_space_communication": {"label_ko": "위성·우주통신 이벤트", "top_level": "long", "definition": "Satellite, space-based broadband, SPOT devices.", "value_path": "우주통신→TAM 확대", "include_signals": ["satellite.*broadband", "space-based.*cellular", "spot.*device", "satellite iot", "leo.*satellite"], "exclude_signals": [], "quick_questions": ["위성/우주통신?"]},
+    "space_defense_launch_contract": {"label_ko": "우주·방산 발사 계약", "top_level": "long", "definition": "Rocket launch contract, hypersonic, defense satellite.", "value_path": "방산/우주 backlog", "include_signals": ["launch contract", "hypersonic.*launch", "haste.*launch", "defense.*satellite", "neutron.*progress"], "exclude_signals": [], "quick_questions": ["우주/방산 발사?"]},
+    "drone_uav_defense": {"label_ko": "드론·UAV 방산 이벤트", "top_level": "long", "definition": "Drone defense, UAV contract, autonomous attack.", "value_path": "드론 방산→수주", "include_signals": ["drone.*defense", "uav.*contract", "unmanned aircraft", "autonomous.*attack", "one-way attack"], "exclude_signals": [], "quick_questions": ["드론/UAV?"]},
+    "cybersecurity_event": {"label_ko": "사이버보안 이벤트", "top_level": "long", "definition": "Cybersecurity deal, security platform deployment.", "value_path": "보안 수요→매출", "include_signals": ["cybersecurity", "security.*platform", "falcon.*platform", "zero trust"], "exclude_signals": [], "quick_questions": ["사이버보안?"]},
+    "ev_vehicle_product_event": {"label_ko": "EV·전기차 제품 이벤트", "top_level": "long", "definition": "EV launch, electric vehicle production.", "value_path": "EV 제품→시장 기대", "include_signals": ["electric suv", "ev.*production", "ev.*launch", "gravity.*suv", "electric vehicle", "ev charger"], "exclude_signals": [], "quick_questions": ["EV 제품?"]},
+    "compute_in_memory_chip": {"label_ko": "CIM·뉴로모픽 컴퓨팅", "top_level": "long", "definition": "Compute-in-memory, neuromorphic, APU AI.", "value_path": "차세대 컴퓨팅→시장 형성", "include_signals": ["compute-in-memory", "neuromorphic", "apu.*ai"], "exclude_signals": [], "quick_questions": ["CIM/뉴로모픽?"]},
+    # ─── MINING / RESOURCES / ENERGY (8) ─────────────────────────────
+    "mining_critical_minerals": {"label_ko": "핵심광물·희소금속 이벤트", "top_level": "long", "definition": "Critical minerals, rare earth, antimony, cobalt.", "value_path": "공급망 전략→가치 재평가", "include_signals": ["critical mineral", "antimony", "rare earth.*supply", "cobalt supply", "niobium"], "exclude_signals": [], "quick_questions": ["핵심광물?"]},
+    "mining_production_results": {"label_ko": "광산 생산 실적·가이던스", "top_level": "residual", "definition": "Quarterly production report, ounces produced.", "value_path": "생산 실적 확인", "include_signals": ["ounces of gold", "ounces.*produced", "production.*results", "development update"], "exclude_signals": [], "quick_questions": ["광산 생산 실적?"]},
+    "mining_exploration_discovery": {"label_ko": "광산 탐사·발견", "top_level": "long", "definition": "Drill results, high-grade discovery, vein extension.", "value_path": "탐사 성과→자원 가치 상향", "include_signals": ["high-grade", "vein extension", "airborne survey", "drill.*intersect", "g/t silver", "magnetic anomaly"], "exclude_signals": [], "quick_questions": ["탐사 발견?"]},
+    "mining_government_support": {"label_ko": "광산 정부 지원·도로 건설", "top_level": "long", "definition": "Government road access, mining district support.", "value_path": "정부 지원→개발 가속", "include_signals": ["ambler road", "mining district", "government.*mining", "dod.*delivery order"], "exclude_signals": [], "quick_questions": ["정부 광산 지원?"]},
+    "nuclear_energy_event": {"label_ko": "원자력·SMR 이벤트", "top_level": "long", "definition": "Nuclear power, SMR, nuclear reactor.", "value_path": "원자력→에너지 수요", "include_signals": ["nuclear.*power", "small modular reactor", "smr", "nuclear.*construct"], "exclude_signals": [], "quick_questions": ["원자력?"]},
+    "hydrogen_fuel_cell_event": {"label_ko": "수소·연료전지 이벤트", "top_level": "long", "definition": "Hydrogen fuel cell, green hydrogen.", "value_path": "수소경제→TAM", "include_signals": ["hydrogen", "fuel cell", "green hydrogen", "fuelcell"], "exclude_signals": [], "quick_questions": ["수소/연료전지?"]},
+    "utility_infrastructure_event": {"label_ko": "전력·유틸리티 인프라 이벤트", "top_level": "long", "definition": "Power grid, utility project, energy infrastructure.", "value_path": "인프라 투자→매출 파이프라인", "include_signals": ["power grid", "utility.*project", "energy infrastructure", "grid moderniz"], "exclude_signals": [], "quick_questions": ["전력/유틸리티?"]},
+    "helium_specialty_gas_event": {"label_ko": "헬륨·특수가스 이벤트", "top_level": "long", "definition": "Helium recovery, specialty gas, CO2 capture.", "value_path": "특수가스→희소 자원", "include_signals": ["helium.*recovery", "helium.*production", "specialty gas", "co2 capture"], "exclude_signals": [], "quick_questions": ["헬륨/특수가스?"]},
+    # ─── REAL ESTATE / PROPTECH (3) ──────────────────────────────────
+    "real_estate_platform_event": {"label_ko": "부동산·프롭테크 이벤트", "top_level": "residual", "definition": "Real estate marketplace, housing platform.", "value_path": "부동산 플랫폼→시장 전개", "include_signals": ["real estate.*platform", "housing market", "ibuying", "home.*market"], "exclude_signals": [], "quick_questions": ["부동산 플랫폼?"]},
+    "reit_property_event": {"label_ko": "REIT·부동산 자산 이벤트", "top_level": "residual", "definition": "REIT acquisition, property deal.", "value_path": "부동산 자산→임대수익", "include_signals": ["reit.*acqui", "property.*deal", "reit.*merger"], "exclude_signals": [], "quick_questions": ["REIT 이벤트?"]},
+    "home_construction_materials": {"label_ko": "건자재·주택건설 이벤트", "top_level": "residual", "definition": "Home construction, building materials.", "value_path": "건설 시장→매출 동향", "include_signals": ["home construction", "building material", "construction.*materials"], "exclude_signals": [], "quick_questions": ["건자재?"]},
+    # ─── FINANCIAL SERVICES EXPANDED (5) ─────────────────────────────
+    "fintech_payment_event": {"label_ko": "핀테크·결제 이벤트", "top_level": "long", "definition": "Payment platform, BNPL, fintech growth.", "value_path": "핀테크→시장 침투", "include_signals": ["buy now.*pay later", "bnpl", "payment.*platform", "fintech.*growth"], "exclude_signals": [], "quick_questions": ["핀테크/결제?"]},
+    "insurance_event": {"label_ko": "보험·인슈어테크 이벤트", "top_level": "residual", "definition": "Insurance pricing, underwriting event.", "value_path": "보험 시장→수익성", "include_signals": ["insurance.*pricing", "underwriting", "insurtech"], "exclude_signals": [], "quick_questions": ["보험?"]},
+    "banking_credit_event": {"label_ko": "은행·여신 이벤트", "top_level": "residual", "definition": "Bank earnings, credit quality, NIM.", "value_path": "은행 실적→금융 환경", "include_signals": ["net interest margin", "credit quality", "bank.*quarter"], "exclude_signals": [], "quick_questions": ["은행/여신?"]},
+    "exchange_listing_index_change": {"label_ko": "거래소·지수 편입/편출", "top_level": "residual", "definition": "Index inclusion, Russell reconstitution, S&P 500 add.", "value_path": "수급 변화→포지셔닝", "include_signals": ["added to.*index", "russell.*index", "s&p 500.*add", "index reconstitution", "bloomberg.*index"], "exclude_signals": [], "quick_questions": ["지수 편입/편출?"]},
+    "go_private_buyout_event": {"label_ko": "비상장화·바이아웃", "top_level": "long", "definition": "Go-private deal, take-private, private equity buyout.", "value_path": "비상장 프리미엄→주주가치", "include_signals": ["go private", "take.*private", "private equity.*buy", "\\$.*per.*share.*deal"], "exclude_signals": [], "quick_questions": ["비상장화?"]},
+    # ─── CORPORATE ACTIONS EXPANDED (5) ──────────────────────────────
+    "stock_split_event": {"label_ko": "주식분할·병합 이벤트", "top_level": "residual", "definition": "Stock split, forward split, reverse split (already separate).", "value_path": "주식 구조 변경→유동성 변화", "include_signals": ["forward.*split", "stock split", "share consolidation", "splitting.*shares"], "exclude_signals": ["reverse stock split"], "quick_questions": ["주식분할?"]},
+    "spinoff_separation_event": {"label_ko": "스핀오프·분사 이벤트", "top_level": "long", "definition": "Spin-off, corporate separation.", "value_path": "기업가치 재평가→unlock", "include_signals": ["spin-off", "spin off", "separation", "bear up into.*companies", "split.*into.*companies"], "exclude_signals": [], "quick_questions": ["스핀오프?"]},
+    "share_repurchase_program_new": {"label_ko": "신규 자사주 매입 프로그램", "top_level": "long", "definition": "New buyback program authorization.", "value_path": "주주환원 의지→수급 지지", "include_signals": ["repurchase program", "share reprchase", "new buyback"], "exclude_signals": [], "quick_questions": ["신규 자사주 프로그램?"]},
+    "domestication_reincorporation": {"label_ko": "본사 이전·법인 전환", "top_level": "residual", "definition": "Domestication from Cayman to Delaware, reincorporation.", "value_path": "거버넌스 변화", "include_signals": ["domestication", "reincorporation", "cayman.*delaware"], "exclude_signals": [], "quick_questions": ["법인 전환?"]},
+    "shelf_registration_filing": {"label_ko": "혼합 선반등록·Shelf Filing", "top_level": "residual", "definition": "Mixed shelf filing without immediate offering.", "value_path": "향후 조달 가능성", "include_signals": ["mixed shelf", "shelf.*registration", "shelf of up to"], "exclude_signals": ["public offering", "common stock offering"], "quick_questions": ["선반등록?"]},
+    # ─── MACRO / POLICY EXPANDED (6) ─────────────────────────────────
+    "fed_rate_decision": {"label_ko": "Fed 금리 결정·FOMC", "top_level": "residual", "definition": "Fed rate decision, FOMC meeting, rate cut expectations.", "value_path": "금리 변화→시장 방향", "include_signals": ["fed rate", "fomc", "rate cut", "rate decision", "monetary policy", "lowering rates"], "exclude_signals": [], "quick_questions": ["Fed 금리?"]},
+    "china_trade_event": {"label_ko": "중국 무역·규제 이벤트", "top_level": "residual", "definition": "China trade talks, China export controls, H20 chip.", "value_path": "중국 리스크→매출 영향", "include_signals": ["china.*trade", "china.*tariff", "china.*export", "h20.*chip", "china.*regulation"], "exclude_signals": [], "quick_questions": ["중국 무역?"]},
+    "us_government_policy_executive": {"label_ko": "미국 정부 정책·행정명령", "top_level": "residual", "definition": "Executive order, Trump policy, White House initiative.", "value_path": "정책 방향→산업 영향", "include_signals": ["executive order", "trump.*policy", "white house.*initiative", "president.*signs"], "exclude_signals": [], "quick_questions": ["미 행정명령?"]},
+    "drug_pricing_policy": {"label_ko": "약가 정책·CMS 모델", "top_level": "short", "definition": "Drug pricing order, Medicare model, IRA drug pricing.", "value_path": "약가 압박→바이오 마진", "include_signals": ["drug pric", "cms.*model", "medicare.*drug", "ira.*drug pricing"], "exclude_signals": [], "quick_questions": ["약가 정책?"]},
+    "infrastructure_bill_spending": {"label_ko": "인프라 법안·지출", "top_level": "long", "definition": "Infrastructure bill, government spending program.", "value_path": "정부 지출→수혜 기업", "include_signals": ["infrastructure.*bill", "chips act", "iija", "government.*spending"], "exclude_signals": [], "quick_questions": ["인프라 법안?"]},
+    "esg_sustainability_event": {"label_ko": "ESG·지속가능성 이벤트", "top_level": "residual", "definition": "ESG report, sustainability initiative, carbon reduction.", "value_path": "ESG 관심→평판", "include_signals": ["esg.*report", "sustainability", "carbon.*reduction", "corporate responsibility"], "exclude_signals": [], "quick_questions": ["ESG/지속가능성?"]},
+    # ─── CONSUMER / RETAIL (4) ───────────────────────────────────────
+    "consumer_brand_event": {"label_ko": "소비자·브랜드 이벤트", "top_level": "residual", "definition": "Store opening, retail concept, brand campaign.", "value_path": "브랜드 변화→매출 영향", "include_signals": ["new store", "store opening", "retail.*concept", "brand.*campaign", "luxury store"], "exclude_signals": [], "quick_questions": ["소비자 브랜드?"]},
+    "fashion_apparel_event": {"label_ko": "패션·의류 산업 이벤트", "top_level": "residual", "definition": "Fashion industry, apparel tariff, resale.", "value_path": "패션 시장→매출 동향", "include_signals": ["fashion industry", "apparel.*tariff", "resale.*market", "de minimis"], "exclude_signals": [], "quick_questions": ["패션/의류?"]},
+    "gaming_entertainment_event": {"label_ko": "게임·엔터테인먼트 이벤트", "top_level": "residual", "definition": "Gaming industry, video game release, GTA 6.", "value_path": "게임 시장→매출 기대", "include_signals": ["gta 6", "gaming.*company", "video game", "game.*release", "bookings.*climb", "gaming stock"], "exclude_signals": [], "quick_questions": ["게임/엔터?"]},
+    "streaming_media_event": {"label_ko": "스트리밍·미디어 이벤트", "top_level": "residual", "definition": "Streaming platform, content deal, media merger.", "value_path": "미디어 시장→경쟁", "include_signals": ["streaming.*platform", "content deal", "media.*merger", "ad revenue.*surpass"], "exclude_signals": [], "quick_questions": ["스트리밍/미디어?"]},
+    # ─── NOISE — 잡것들_ EXPANDED (38 new) ───────────────────────────
+    "잡것들_hypothetical_return_calculator": {"label_ko": "잡것들_가상수익 계산 기사", "top_level": "residual", "definition": "$X invested Y years ago 유형의 역사적 수익 계산 기사.", "value_path": "트래픽 유도", "include_signals": ["invested.*years ago", "\\$1000 invested", "\\$100 invested", "\\$10.*invested", "worth this much today", "if you.*invested.*you would"], "exclude_signals": [], "quick_questions": ["가상수익 계산?"]},
+    "잡것들_stock_of_the_day_promotional": {"label_ko": "잡것들_오늘의 종목·편집형 추천", "top_level": "residual", "definition": "Stock Of The Day, Reasons to Retain 형태의 편집형 추천.", "value_path": "편집 추천·트래픽 유도", "include_signals": ["stock of the day", "reasons to retain", "reasons to add.*to your portfolio", "reasons to buy.*right now"], "exclude_signals": [], "quick_questions": ["편집형 추천?"]},
+    "잡것들_dividend_yield_filler": {"label_ko": "잡것들_배당수익률·소극적 소득 필러", "top_level": "residual", "definition": "배당수익률 중심의 필러 기사.", "value_path": "트래픽 유도", "include_signals": ["yearly dividends", "dividend.*yield.*stock", "passive income", "reliable.*dividend", "no-brainer.*dividend", "dividend.*yield.*buy"], "exclude_signals": [], "quick_questions": ["배당 필러?"]},
+    "잡것들_listicle_best_worst": {"label_ko": "잡것들_Best/Worst 리스트 기사", "top_level": "residual", "definition": "Best X stocks, Worst X stocks, Top picks 리스트형.", "value_path": "큐레이션·트래픽", "include_signals": ["best.*stocks.*buy", "worst.*stocks", "top picks", "top.*stocks.*buy", "gems.*to buy", "under \\$50.*worth"], "exclude_signals": [], "quick_questions": ["리스트형 Best/Worst?"]},
+    "잡것들_retirement_personal_finance": {"label_ko": "잡것들_은퇴·개인자산 관리 기사", "top_level": "residual", "definition": "은퇴, 개인재무 관리, 401k 관련 기사.", "value_path": "개인재무 콘텐츠", "include_signals": ["retirement.*portfolio", "nest egg", "retire.*stock", "401k", "rmd.*portfolio", "estate plan"], "exclude_signals": [], "quick_questions": ["개인재무?"]},
+    "잡것들_millionaire_maker_clickbait": {"label_ko": "잡것들_백만장자 가능? 클릭베이트", "top_level": "residual", "definition": "Can this stock make you a millionaire 유형 클릭베이트.", "value_path": "클릭베이트", "include_signals": ["millionaire-maker", "set you up for life", "millionaire.*stock", "make you rich"], "exclude_signals": [], "quick_questions": ["클릭베이트?"]},
+    "잡것들_multi_ticker_roundup_noise": {"label_ko": "잡것들_멀티종목 나열·언급만", "top_level": "residual", "definition": "여러 종목 나열 기사에서 해당 종목은 단순 언급.", "value_path": "언급만", "include_signals": ["5 things to know before", "stocks making.*biggest moves", "these stocks moved the most", "making the biggest moves"], "exclude_signals": [], "quick_questions": ["멀티종목 나열?"]},
+    "잡것들_etf_fund_commentary": {"label_ko": "잡것들_ETF·펀드 코멘터리", "top_level": "residual", "definition": "ETF flow, fund spotlight, ETF comparison.", "value_path": "ETF 소개·트래픽", "include_signals": ["etf.*buy.*hold", "etf.*league.*table", "etf.*flow", "simple etf", "exchange-traded fund"], "exclude_signals": [], "quick_questions": ["ETF 코멘터리?"]},
+    "잡것들_jim_cramer_mention": {"label_ko": "잡것들_짐 크래머 언급·의견", "top_level": "residual", "definition": "Jim Cramer says, likes, mentions 형태.", "value_path": "미디어 인물 언급", "include_signals": ["jim cramer.*says", "jim cramer.*on", "jim cramer.*likes", "cramer.*says.*skip", "cramer.*bullish on"], "exclude_signals": [], "quick_questions": ["짐 크래머?"]},
+    "잡것들_cathie_wood_mention": {"label_ko": "잡것들_캐시우드 언급·매매", "top_level": "residual", "definition": "Cathie Wood buys/sells, ARK fund activity.", "value_path": "미디어 인물 언급", "include_signals": ["cathie wood.*buy", "cathie wood.*sell", "cathie wood.*dump", "cathie wood.*bargain", "ark.*fund"], "exclude_signals": [], "quick_questions": ["캐시우드?"]},
+    "잡것들_warren_buffett_mention": {"label_ko": "잡것들_워런 버핏 언급", "top_level": "residual", "definition": "Warren Buffett related, Berkshire mention.", "value_path": "미디어 인물 언급", "include_signals": ["warren buffett", "berkshire.*buy", "berkshire.*sell", "buffett.*portfolio"], "exclude_signals": [], "quick_questions": ["워런 버핏?"]},
+    "잡것들_unrelated_ticker_mention": {"label_ko": "잡것들_관련없는 종목 태그", "top_level": "residual", "definition": "SPY/QQQ/NVDA/AMZN 등 mega-cap 뉴스가 무관한 소형주에 태그.", "value_path": "잘못된 태깅", "include_signals": [], "exclude_signals": [], "quick_questions": ["종목 무관?"]},
+    "잡것들_top_midday_gainers_losers": {"label_ko": "잡것들_Top Gainers/Losers 목록", "top_level": "residual", "definition": "Top Midday Gainers, Top Midday Decliners.", "value_path": "목록 기사", "include_signals": ["top midday gainers", "top midday decliners", "top midday losers"], "exclude_signals": [], "quick_questions": ["Gainers/Losers 목록?"]},
+    "잡것들_zacks_trending_filler": {"label_ko": "잡것들_Zacks Trending 필러", "top_level": "residual", "definition": "Zacks Is a Trending Stock, facts to know 필러.", "value_path": "필러", "include_signals": ["trending stock.*facts to know", "facts to know before betting"], "exclude_signals": [], "quick_questions": ["Zacks 트렌딩?"]},
+    "잡것들_fintel_price_target_filler": {"label_ko": "잡것들_Fintel 가격 목표 필러", "top_level": "residual", "definition": "Fintel Price Target Increased/Decreased 자동 게시물.", "value_path": "자동화 필러", "include_signals": ["price target increased by.*%.*to", "price target decreased by.*%.*to"], "exclude_signals": [], "quick_questions": ["Fintel 필러?"]},
+    "잡것들_chartmill_technical_filler": {"label_ko": "잡것들_ChartMill 기술적 필러", "top_level": "residual", "definition": "ChartMill SEPA, momentum, technical score 자동 게시.", "value_path": "자동화 필러", "include_signals": ["minervini sepa", "high.*technical.*score", "high-growth momentum.*strong technical"], "exclude_signals": [], "quick_questions": ["ChartMill 필러?"]},
+    "잡것들_needham_reiterate_hold": {"label_ko": "잡것들_Needham Hold 재확인(무변동)", "top_level": "residual", "definition": "Needham Reiterates Hold to Hold (실질 변동 없음).", "value_path": "무변동 기사", "include_signals": ["reiterates hold.*to hold", "reiterates.*holdto hold"], "exclude_signals": [], "quick_questions": ["Hold→Hold?"]},
+    "잡것들_fair_value_dcf_filler": {"label_ko": "잡것들_적정가치 DCF 필러", "top_level": "residual", "definition": "Calculating fair value, DCF model estimate 유형 필러.", "value_path": "자동 DCF 기사", "include_signals": ["calculating the fair value", "estimating the fair value", "fair value.*us\\$", "dcf.*model.*undervalued"], "exclude_signals": [], "quick_questions": ["DCF 필러?"]},
+    "잡것들_ownership_institutional_filler": {"label_ko": "잡것들_기관 보유·지분구조 필러", "top_level": "residual", "definition": "Retail investors account for X%, insiders have X riding.", "value_path": "지분구조 소개", "include_signals": ["retail investors account for", "institutional.*ownership", "insiders have.*lot riding", "ownership.*piqued.*interest"], "exclude_signals": [], "quick_questions": ["지분구조 필러?"]},
+    "잡것들_unpopular_stocks_filler": {"label_ko": "잡것들_Unpopular Stocks 필러", "top_level": "residual", "definition": "Unpopular stocks we steer clear/think twice.", "value_path": "큐레이션 필러", "include_signals": ["unpopular stocks.*we", "cash-producing stocks.*we", "stocks.*facing headwinds", "stocks.*open questions", "stocks.*hot water", "stocks with.*challenges"], "exclude_signals": [], "quick_questions": ["비인기종목 필러?"]},
+    "잡것들_sector_earnings_recap": {"label_ko": "잡것들_섹터별 실적 시즌 회고", "top_level": "residual", "definition": "Q4 Recap Benchmarking X vs peers, sector recap.", "value_path": "섹터 회고", "include_signals": ["stocks q[1-4] recap", "benchmarking.*vs.*rest", "q[1-4].*best and worst", "recap.*benchmarking"], "exclude_signals": [], "quick_questions": ["섹터 회고?"]},
+    "잡것들_political_geopolitical_noise": {"label_ko": "잡것들_정치·지정학 노이즈(종목 무관)", "top_level": "residual", "definition": "Greenland, Iran, Venezuela 등 정치 기사 태깅된 종목과 무관.", "value_path": "정치 노이즈", "include_signals": ["greenland.*seizure", "greenland.*security", "iran.*briefing", "venezuela.*oil"], "exclude_signals": [], "quick_questions": ["정치 노이즈?"]},
+    "잡것들_trump_social_post_noise": {"label_ko": "잡것들_트럼프 SNS 포스트 노이즈", "top_level": "residual", "definition": "Trump Posts On Truth Social (종목과 무관).", "value_path": "정치 노이즈", "include_signals": ["trump posts on truth social", "president trump posts"], "exclude_signals": [], "quick_questions": ["트럼프 SNS?"]},
+    "잡것들_spy_qqq_macro_tag": {"label_ko": "잡것들_SPY/QQQ 매크로 기사 태그", "top_level": "residual", "definition": "SPY/QQQ로 태그된 범용 매크로 기사.", "value_path": "범용 매크로", "include_signals": ["s&p.*call.*for december", "macro.*etf", "spy vs.*iwm"], "exclude_signals": [], "quick_questions": ["SPY/QQQ 매크로?"]},
+    "잡것들_hiring_appointment_minor": {"label_ko": "잡것들_사소한 인사·임원 선임", "top_level": "residual", "definition": "Minor executive appointment, non-C-suite hires.", "value_path": "사소한 인사", "include_signals": ["appoints.*to board of dir", "appoints.*as senior vice", "appoints.*as vp", "appointed to.*board", "appoints.*counsel"], "exclude_signals": ["appoints new ceo", "appoints veteran", "appoints.*cfo"], "quick_questions": ["사소한 인사?"]},
+    "잡것들_conference_call_schedule": {"label_ko": "잡것들_실적 일정·컨퍼런스콜 공지", "top_level": "residual", "definition": "Schedules Conference Call, sets earnings date.", "value_path": "일정 안내", "include_signals": ["schedules.*conference call", "to announce.*results on", "sets.*conference call", "to host.*webcast"], "exclude_signals": [], "quick_questions": ["컨퍼런스콜 일정?"]},
+    "잡것들_index_fund_reconstitution": {"label_ko": "잡것들_인덱스 재구성·펀드 리밸런스", "top_level": "residual", "definition": "Russell reconstitution, index add/remove automated.", "value_path": "자동 게시", "include_signals": ["added to russell", "reconstitution", "semi-annual.*reconstitution"], "exclude_signals": [], "quick_questions": ["인덱스 재구성?"]},
+    "잡것들_community_csr_noise": {"label_ko": "잡것들_CSR·지역사회 활동 노이즈", "top_level": "residual", "definition": "CSR, charity, community support news.", "value_path": "CSR 노이즈", "include_signals": ["staffers help", "community.*support", "charity", "holiday.*gift", "wrapping gifts"], "exclude_signals": [], "quick_questions": ["CSR 노이즈?"]},
+    "잡것들_ring_bell_ceremony_noise": {"label_ko": "잡것들_NYSE 벨 행사 노이즈", "top_level": "residual", "definition": "NYSE bell ringing ceremony.", "value_path": "행사 노이즈", "include_signals": ["rings.*nyse.*bell", "nyse.*bell.*ringing", "nyse content update"], "exclude_signals": [], "quick_questions": ["벨 행사?"]},
+    "잡것들_unrelated_subsidiary_noise": {"label_ko": "잡것들_무관 자회사·타사 뉴스 태그", "top_level": "residual", "definition": "Subsidiary or unrelated company news tagged to parent.", "value_path": "잘못된 태깅", "include_signals": ["title resources group", "parcel plus", "piper sandler.*circle", "opendoor.*title resources"], "exclude_signals": [], "quick_questions": ["무관 자회사?"]},
+    "잡것들_personal_finance_money_noise": {"label_ko": "잡것들_개인 재테크·돈 관리 노이즈", "top_level": "residual", "definition": "How to invest $10K, money tips, financial growth.", "value_path": "개인 재테크", "include_signals": ["got.*extra.*\\$10k", "how to put it to work", "financial growth", "how much.*to invest", "investment.*for.*growth"], "exclude_signals": [], "quick_questions": ["개인 재테크?"]},
+    "잡것들_short_report_attack": {"label_ko": "잡것들_공매도 보고서 공격", "top_level": "residual", "definition": "Short seller report, short attack.", "value_path": "공매도 공격", "include_signals": ["culper.*research.*short", "short.*report", "hindenburg.*short", "citron.*short", "muddy waters.*short", "bear cave"], "exclude_signals": [], "quick_questions": ["공매도 보고서?"]},
+    "잡것들_agm_voting_result": {"label_ko": "잡것들_주주총회 투표 결과", "top_level": "residual", "definition": "AGM results, annual meeting voting.", "value_path": "AGM 결과", "include_signals": ["results of annual general meeting", "voting results", "annual.*meeting.*results", "shareholder.*meeting.*results"], "exclude_signals": [], "quick_questions": ["AGM 투표?"]},
+    "잡것들_analyst_ratings_roundup": {"label_ko": "잡것들_애널리스트 레이팅 종합 나열", "top_level": "residual", "definition": "Here Are 10 Top Analyst Forecasts, 5 Analysts Have This To Say.", "value_path": "나열형 기사", "include_signals": ["top analyst forecasts for", "analysts have this to say", "analyst forecasts for.*monday", "analyst forecasts for.*tuesday", "analyst forecasts for.*wednesday", "analyst forecasts for.*thursday", "analyst forecasts for.*friday"], "exclude_signals": [], "quick_questions": ["레이팅 나열?"]},
+    "잡것들_spotlight_stocks_radar": {"label_ko": "잡것들_Spotlight/Radar 자동 기사", "top_level": "residual", "definition": "5 Stocks In The Spotlight, On Investors' Radars.", "value_path": "자동 기사", "include_signals": ["stocks in the spotlight", "on investors.*radars", "stocks that may collapse", "stocks that may keep you up"], "exclude_signals": [], "quick_questions": ["Spotlight 자동?"]},
+    "잡것들_momentum_outpacing_filler": {"label_ko": "잡것들_모멘텀·실적 뒤따르기 필러", "top_level": "residual", "definition": "Outpacing peers, momentum stock, strong buy now.", "value_path": "모멘텀 필러", "include_signals": ["outpacing.*peers", "is.*stock.*outpacing", "what makes.*strong momentum", "strong momentum stock.*buy now"], "exclude_signals": [], "quick_questions": ["모멘텀 필러?"]},
+    "잡것들_dividend_ex_date_filler": {"label_ko": "잡것들_배당 기준일 필러", "top_level": "residual", "definition": "Going ex-dividend soon, increases quarterly dividend.", "value_path": "배당 기준일", "include_signals": ["going ex-dividend", "trade ex-dividend", "about to trade ex-dividend", "pays a.*dividend in"], "exclude_signals": [], "quick_questions": ["배당 기준일?"]},
+    "잡것들_returns_on_capital_filler": {"label_ko": "잡것들_자본수익률 필러", "top_level": "residual", "definition": "Returns on capital heading higher, ROIC analysis.", "value_path": "자본수익률 분석", "include_signals": ["returns on capital.*heading higher", "returns on capital.*are heading", "investors should be encouraged"], "exclude_signals": [], "quick_questions": ["자본수익률 필러?"]},
+    # ─── v7 NEW: additional CASE_META entries for INFORMATION_FLOW / TRUE_RESIDUAL rules ──
+    "satellite_spectrum_regulatory": {"label_ko": "위성 스펙트럼·규제 인가", "top_level": "long", "definition": "FCC spectrum allocation, satellite license, orbital coordination.", "value_path": "규제 인가→상업화 경로", "include_signals": ["spectrum allocation", "fcc approval", "satellite license"], "exclude_signals": [], "quick_questions": ["스펙트럼 인가?"]},
+    "ev_delivery_production": {"label_ko": "EV 인도·생산 실적", "top_level": "residual", "definition": "Quarterly delivery/production numbers for EV makers.", "value_path": "분기 실적 확인", "include_signals": ["deliveries.*q", "production.*q", "units delivered"], "exclude_signals": [], "quick_questions": ["EV 인도/생산?"]},
+    "government_contract_award_info": {"label_ko": "정부 계약 수주 정보(flow)", "top_level": "long", "definition": "Government/DOD contract award, federal procurement.", "value_path": "계약 수주→backlog", "include_signals": ["government contract", "dod contract", "defense contract"], "exclude_signals": [], "quick_questions": ["정부 계약?"]},
+    "insider_transaction_disclosure": {"label_ko": "내부자 거래 공시(Form4)", "top_level": "residual", "definition": "Form 4 insider buy/sell, 10b5-1 plan execution.", "value_path": "내부자 포지셔닝 시그널", "include_signals": ["form 4", "insider.*buy", "insider.*sell", "10b5-1 plan"], "exclude_signals": [], "quick_questions": ["내부자 거래 공시?"]},
+    "warrant_exercise_conversion": {"label_ko": "워런트 행사·전환", "top_level": "residual", "definition": "Warrant exercise, note conversion, cashless exercise.", "value_path": "희석/자본 변화", "include_signals": ["warrant.*exercise", "note conversion"], "exclude_signals": [], "quick_questions": ["워런트/전환?"]},
+    "spac_merger_event": {"label_ko": "SPAC 합병·디스팩", "top_level": "long", "definition": "SPAC merger, de-SPAC, business combination vote.", "value_path": "상장 경로→재평가", "include_signals": ["spac.*merger", "de-spac", "business combination"], "exclude_signals": [], "quick_questions": ["SPAC 합병?"]},
+    "supply_chain_disruption_event": {"label_ko": "공급망 차질 이벤트", "top_level": "short", "definition": "Supply chain disruption, component shortage.", "value_path": "공급 차질→생산 영향", "include_signals": ["supply chain disruption", "component shortage"], "exclude_signals": [], "quick_questions": ["공급망 차질?"]},
+    "cybersecurity_breach_event": {"label_ko": "사이버보안 침해 이벤트", "top_level": "short", "definition": "Data breach, ransomware, security incident.", "value_path": "보안 사고→비용/신뢰", "include_signals": ["data breach", "ransomware", "security incident"], "exclude_signals": [], "quick_questions": ["보안 침해?"]},
+    "dividend_policy_change": {"label_ko": "배당 정책 변경", "top_level": "residual", "definition": "Dividend increase/cut/suspend/initiate.", "value_path": "배당 정책→수급 변화", "include_signals": ["dividend.*increase", "dividend.*cut", "special dividend"], "exclude_signals": [], "quick_questions": ["배당 정책 변경?"]},
     # ─── FALLBACK ────────────────────────────────────────────────────
     "unknown": {"label_ko": "unknown", "top_level": "residual", "definition": "현재 taxonomy rule 어디에도 안정적으로 들어가지 않는 미분류 기사.", "value_path": "사건성은 있을 수 있으나 rule 미정", "include_signals": [], "exclude_signals": ["명확한 기존 case", "명백한 잡것들_ 노이즈 패턴"], "quick_questions": ["현재 rule로는 안정 분류가 안 되는가?"]},
     "meaningless_others": {"label_ko": "잡것들(legacy)", "top_level": "residual", "definition": "legacy broad fallback bucket.", "value_path": "legacy fallback", "include_signals": [], "exclude_signals": [], "quick_questions": ["legacy run row인가?"]},
@@ -217,6 +333,26 @@ DIRECT_SHORT_RULES: list[tuple[str, tuple[str, ...]]] = [
         "insiders sell", "insider.*selling", "insider.*sold",
         "insider.*offloaded", "executive.*sold shares",
         "insiders.*signalling caution",
+    )),
+    ("biotech_safety_concern_negative", (
+        "adverse event", "safety concern", "dose-limiting toxicity",
+        "drug-induced liver", "toxicity signal", "safety issue",
+    )),
+    ("biotech_program_discontinuation", (
+        "halts development", "discontinues.*program",
+        "suspends.*program", "deprioritiz",
+        "stops development", "abandons.*program",
+    )),
+    ("biotech_investor_lawsuit_negative", (
+        "investor.*urged to contact", "law firm.*investigat",
+        "pomerantz.*investigat", "hagens berman",
+        "faruqi.*investigat", "howard g.*smith",
+        "loss.*urged to contact", "investors who lost money",
+    )),
+    ("drug_pricing_policy", (
+        "drug pric.*order", "cms.*model.*drug",
+        "medicare.*drug.*price", "ira.*drug pricing",
+        "lower drug costs",
     )),
 ]
 
@@ -447,6 +583,167 @@ DIRECT_LONG_RULES: list[tuple[str, tuple[str, ...]]] = [
         "activist", "starboard.*stake", "proxy fight",
         "board fight", "activist.*stake",
     )),
+    # ─── v7 biotech expanded ────────────────────────────────────────
+    ("biotech_clinical_phase3_positive", (
+        "phase 3.*met primary", "phase 3.*positive",
+        "pivotal trial.*success", "phase 3.*superior",
+        "phase iii.*met", "phase 3.*statistically significant",
+    )),
+    ("biotech_clinical_phase2_positive", (
+        "phase 2.*results", "phase 2b.*data",
+        "phase 2a.*results", "phase ii.*data",
+        "phase 2.*promising",
+    )),
+    ("biotech_drug_commercialization", (
+        "commercial.*traction", "prescription growth",
+        "drug.*prescription.*growth", "sales.*commercializ",
+    )),
+    ("biotech_pipeline_acquisition", (
+        "license.*rights", "milestone.*deal.*pharma",
+        "pipeline.*acquisition", "\\$.*billion.*deal.*pharma",
+        "license.*ex-.*rights", "ex-greater china rights",
+        "in-license",
+    )),
+    ("biotech_enrollment_milestone", (
+        "completes enrollment", "enrollment completed",
+        "screening over.*patient", "completed enrollment",
+    )),
+    ("biotech_exclusivity_patent_extension", (
+        "nce.*exclusiv", "patent.*extend", "orange book",
+        "exclusivity through", "patent.*expir.*extend",
+    )),
+    ("biotech_obesity_glp1_event", (
+        "glp-1", "obesity.*trial", "weight loss.*results",
+        "oral glp", "nlrp3", "glp.*receptor agonist",
+    )),
+    ("biotech_gene_cell_therapy", (
+        "gene therapy", "cell therapy", "car-t",
+        "ipsc", "exosome.*therap", "sirna",
+        "morpholino", "oligonucleotide",
+    )),
+    ("biotech_rare_disease_orphan", (
+        "rare disease", "orphan.*indication",
+        "ultra-rare", "rare.*condition",
+    )),
+    ("biotech_regulatory_international", (
+        "saudi food and drug", "mhra.*approv",
+        "ema.*approv", "health canada.*approv",
+        "sfda.*approv",
+    )),
+    ("biotech_compassionate_access", (
+        "expanded access", "compassionate use",
+        "named patient basis",
+    )),
+    # ─── v7 AI / tech / semiconductor ───────────────────────────────
+    ("ai_infrastructure_investment", (
+        "ai infrastructure", "hyperscal", "gpu.*cluster",
+        "ai cloud", "ai.*data center", "ai.*capex",
+        "ai.*spend.*billion",
+    )),
+    ("ai_model_product_launch", (
+        "foundation model", "llm.*launch",
+        "genai.*capabilities", "ai.*agent.*launch",
+    )),
+    ("ai_partnership_deal", (
+        "nvidia.*invest.*\\$", "nvidia.*select",
+        "nvidia.*collaborat", "openai.*deal",
+        "ai.*partnership.*\\$",
+    )),
+    ("semiconductor_design_win", (
+        "design win", "selected.*chip",
+        "automotive.*qualified", "aec-plus",
+    )),
+    ("semiconductor_technology_advance", (
+        "gansense", "gan.*ic.*deliver",
+        "sic mosfet", "silicon carbide",
+        "bi-directional gan", "gallium nitride",
+    )),
+    ("quantum_computing_event", (
+        "quantum comput", "quantum.*install",
+        "annealing quantum", "quantum.*networking",
+        "quantum.*photon", "quantum.*vibrometer",
+    )),
+    ("satellite_space_communication", (
+        "satellite.*broadband", "space-based.*cellular",
+        "spot.*device", "satellite iot",
+        "leo.*satellite", "spectrum.*sale",
+    )),
+    ("space_defense_launch_contract", (
+        "launch contract", "hypersonic.*launch",
+        "haste.*launch", "neutron.*progress",
+        "rocket.*contract", "launch.*\\$.*million",
+    )),
+    ("drone_uav_defense", (
+        "drone.*defense", "uav.*contract",
+        "unmanned aircraft", "one-way attack",
+        "autonomous.*uav",
+    )),
+    ("cybersecurity_event", (
+        "cybersecurity.*deal", "falcon.*platform",
+        "zero trust", "cybersecurity.*model",
+        "cybersecurity.*memorandum",
+    )),
+    ("ev_vehicle_product_event", (
+        "electric suv", "ev.*production.*volume",
+        "ev.*launch", "electric vehicle.*unveil",
+        "gravity.*suv", "ev charger",
+        "brightdrop.*ev",
+    )),
+    ("compute_in_memory_chip", (
+        "compute-in-memory", "neuromorphic",
+        "apu.*ai.*performance",
+    )),
+    # ─── v7 mining / resources / energy ─────────────────────────────
+    ("mining_critical_minerals", (
+        "critical mineral", "antimony.*metal",
+        "rare earth.*supply", "niobium",
+        "antimony.*dod",
+    )),
+    ("mining_exploration_discovery", (
+        "high-grade.*vein", "vein extension",
+        "airborne survey", "g/t silver",
+        "magnetic anomaly", "drill.*intersect",
+    )),
+    ("mining_government_support", (
+        "ambler road", "mining district.*unlock",
+        "dod.*delivery order",
+    )),
+    ("nuclear_energy_event", (
+        "nuclear.*power", "small modular reactor",
+        "smr.*nuclear", "nuclear.*construct",
+    )),
+    ("hydrogen_fuel_cell_event", (
+        "hydrogen.*fuel cell", "green hydrogen",
+        "fuelcell", "hydrogen.*economy",
+    )),
+    ("helium_specialty_gas_event", (
+        "helium.*recovery", "helium.*production",
+        "specialty gas", "co2.*capture.*facility",
+    )),
+    # ─── v7 financial / corporate ───────────────────────────────────
+    ("go_private_buyout_event", (
+        "go.*private.*\\$", "take.*private.*\\$",
+        "private equity.*buy.*\\$", "all-cash.*deal.*per.*share",
+    )),
+    ("spinoff_separation_event", (
+        "spin-off", "spin off",
+        "bear up into.*companies", "split.*into.*companies",
+        "corporate.*separation",
+    )),
+    ("stock_split_event", (
+        "forward.*split", "stock split.*takes effect",
+        "share consolidation",
+    )),
+    ("domestication_reincorporation", (
+        "domestication.*from.*cayman",
+        "reincorporation", "cayman.*delaware",
+    )),
+    ("share_repurchase_program_new", (
+        "new.*repurchase program", "new.*buyback program",
+        "authorizes.*repurchase", "approves.*share repurchase",
+        "\\$.*million.*repurchase program",
+        "\\$.*billion.*buyback",
+    )),
 ]
 
 INDIRECT_LONG_RULES: list[tuple[str, tuple[str, ...]]] = [
@@ -598,6 +895,106 @@ INFORMATION_FLOW_RULES: list[tuple[str, tuple[str, ...]]] = [
         "stock.*still a buy",
         "assessing.*valuation",
         "opened.*valuation opportunity",
+    )),
+    # ── v7 NEW: INFORMATION_FLOW additions ──
+    ("잡것들_short_report_attack", (
+        "short report", "short seller report",
+        "hindenburg.*research", "citron.*research",
+        "muddy waters", "grizzly research",
+        "iceberg research", "wolfpack research",
+        "kerrisdale capital", "blue orca",
+        "scorpion capital", "spruce point",
+        "short.*attack", "short.*target",
+    )),
+    ("shelf_registration_filing", (
+        "shelf registration", "s-3 filing",
+        "shelf offering", "universal shelf",
+        "registration statement",
+    )),
+    ("exchange_listing_index_change", (
+        "added to.*index", "removed from.*index",
+        "index inclusion", "index rebalance",
+        "s&p 500.*add", "s&p 500.*remove",
+        "russell.*reconstitution", "nasdaq.*listing",
+        "uplisting", "delisting notice",
+        "compliance with.*listing",
+        "nasdaq listing rule",
+        "regain.*compliance",
+    )),
+    ("biotech_conference_data_poster", (
+        "data.*presented at", "poster.*at.*conference",
+        "abstract accepted", "late-breaking abstract",
+        "oral presentation at", "scientific session",
+        "medical conference", "asco presentation",
+        "data readout at", "interim data at",
+    )),
+    ("biotech_real_world_data", (
+        "real.world.*data", "real.world.*evidence",
+        "rwe study", "rwd analysis",
+        "retrospective.*study", "registry data",
+        "post-marketing data",
+    )),
+    ("mining_production_results", (
+        "production report", "quarterly production",
+        "production results", "production update",
+        "mill throughput", "ore grade",
+        "gold equivalent ounces", "silver production",
+        "copper production", "mining output",
+    )),
+    ("satellite_spectrum_regulatory", (
+        "spectrum allocation", "spectrum license",
+        "fcc approval", "fcc authorization",
+        "itu coordination", "spectrum sharing",
+        "orbital slot", "satellite license",
+    )),
+    ("ev_delivery_production", (
+        "deliveries.*q[1-4]", "production.*q[1-4]",
+        "vehicle deliveries", "production numbers",
+        "delivery report", "units delivered",
+        "ev.*deliveries", "ev.*production update",
+    )),
+    ("government_contract_award_info", (
+        "government contract", "dod contract",
+        "defense contract award", "federal contract",
+        "gsa contract", "military contract",
+        "army contract", "navy contract",
+        "air force contract", "pentagon.*award",
+    )),
+    ("insider_transaction_disclosure", (
+        "insider.*buy", "insider.*sell",
+        "insider.*purchase", "director.*purchase",
+        "ceo.*purchase", "cfo.*sold",
+        "insider.*transaction", "form 4",
+        "10b5-1 plan", "insider.*trading",
+    )),
+    ("warrant_exercise_conversion", (
+        "warrant.*exercise", "conversion of",
+        "note conversion", "convertible.*exercise",
+        "warrant.*expir", "cashless exercise",
+    )),
+    ("spac_merger_event", (
+        "spac.*merger", "de-spac",
+        "business combination", "blank check",
+        "spac.*vote", "spac.*extension",
+        "definitive agreement.*merger",
+    )),
+    ("supply_chain_disruption_event", (
+        "supply chain disruption", "supply shortage",
+        "component shortage", "chip shortage",
+        "logistics.*disruption", "port congestion",
+        "raw material.*shortage",
+    )),
+    ("cybersecurity_breach_event", (
+        "data breach", "cyber attack",
+        "ransomware", "security incident",
+        "unauthorized access", "hacking",
+        "cybersecurity.*breach",
+    )),
+    ("dividend_policy_change", (
+        "dividend.*increase", "dividend.*cut",
+        "dividend.*suspend", "dividend.*initiat",
+        "special dividend", "dividend.*reinstat",
+        "raises.*quarterly dividend",
     )),
 ]
 
@@ -775,6 +1172,333 @@ TRUE_RESIDUAL_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("debt_restructuring_event", (
         "debt paydown", "maturity extension",
         "deleveraging", "debt reduction",
+    )),
+    # ── v7 NEW: TRUE_RESIDUAL additions (noise 잡것들_ + others) ──
+    ("잡것들_hypothetical_return_calculator", (
+        "\\$1000 invested", "\\$10000 invested",
+        "\\$100 invested", "if you invested",
+        "what would it be worth", "how much would",
+        "years ago.*worth today",
+        "invested.*years ago",
+    )),
+    ("잡것들_stock_of_the_day_promotional", (
+        "stock of the day", "top stock pick",
+        "pick of the day", "stock.*pick of the week",
+        "stock.*of the week", "must-own stock",
+    )),
+    ("잡것들_dividend_yield_filler", (
+        "dividend yield", "above-average yield",
+        "high.*yield.*dividend", "passive income.*dividend",
+        "dividend.*aristocrat", "dividend.*champion",
+        "dividend.*king", "dividend.*portfolio",
+        "yield.*top.*%", "highest.*yield",
+        "income.*investment.*dividend",
+    )),
+    ("잡것들_listicle_best_worst", (
+        "best stocks to buy", "worst stocks",
+        "top [0-9]+ stocks", "bottom [0-9]+ stocks",
+        "[0-9]+ best.*stocks", "[0-9]+ worst.*stocks",
+        "stocks.*buy now", "buy in 202[0-9]",
+        "stocks for 202[0-9]",
+        "[0-9]+ stocks.*consider",
+        "stocks.*wish.*bought",
+    )),
+    ("잡것들_retirement_personal_finance", (
+        "retire.*early", "retire.*rich",
+        "retirement.*portfolio", "retirement.*income",
+        "financial freedom", "nest egg",
+        "social security", "retire.*comfortably",
+    )),
+    ("잡것들_millionaire_maker_clickbait", (
+        "millionaire.*maker", "make you.*millionaire",
+        "next.*millionaire", "get rich",
+        "become.*millionaire", "wealth.*building",
+        "fortune.*stock", "life-changing.*returns",
+    )),
+    ("잡것들_multi_ticker_roundup_noise", (
+        "[0-9]+ stocks.*today", "[0-9]+ stocks.*this week",
+        "stocks.*making moves", "stocks to keep",
+        "stocks.*eye on", "roundup.*stocks",
+        "stocks.*monitor", "market movers.*today",
+    )),
+    ("잡것들_etf_fund_commentary", (
+        "etf.*focus", "etf.*spotlight",
+        "fund.*performance", "etf.*buy",
+        "etf.*inflows", "etf.*outflows",
+        "best etfs", "etf.*portfolio",
+    )),
+    ("잡것들_jim_cramer_mention", (
+        "jim cramer", "cramer says",
+        "cramer picks", "cramer.*lightning round",
+        "mad money", "cramer.*buy",
+    )),
+    ("잡것들_cathie_wood_mention", (
+        "cathie wood", "ark invest",
+        "ark.*buy", "ark.*sell",
+        "ark.*fund", "cathie.*buy",
+        "cathie.*sell",
+    )),
+    ("잡것들_warren_buffett_mention", (
+        "warren buffett", "buffett.*buy",
+        "buffett.*sell", "berkshire.*buy",
+        "berkshire.*sell", "buffett.*portfolio",
+        "oracle of omaha",
+    )),
+    ("잡것들_unrelated_ticker_mention", (
+        "and other stocks", "along with",
+        "among.*stocks", "including.*shares of",
+        "also moved", "joins.*in",
+    )),
+    ("잡것들_top_midday_gainers_losers", (
+        "midday.*gainers", "midday.*losers",
+        "afternoon.*gainers", "afternoon.*losers",
+        "morning.*gainers", "morning.*losers",
+        "top gainers.*today", "top losers.*today",
+        "biggest.*gainers", "biggest.*losers",
+    )),
+    ("잡것들_zacks_trending_filler", (
+        "zacks.*trending", "zacks.*rank",
+        "zacks.*#[0-9]", "zacks.*bull",
+        "zacks.*bear", "zacks.*strong buy",
+    )),
+    ("잡것들_fintel_price_target_filler", (
+        "fintel reports", "fintel.*price target",
+        "consensus.*price target.*fintel",
+        "price target.*consensus",
+    )),
+    ("잡것들_chartmill_technical_filler", (
+        "chartmill", "chart pattern",
+        "technical setup", "cup and handle",
+        "head and shoulders", "flag pattern",
+        "triangle pattern",
+    )),
+    ("잡것들_needham_reiterate_hold", (
+        "reiterate.*hold", "maintains.*hold",
+        "reaffirms.*hold", "holds.*rating",
+        "maintain.*neutral",
+    )),
+    ("잡것들_fair_value_dcf_filler", (
+        "fair value", "intrinsic value",
+        "dcf.*model", "discounted cash flow",
+        "undervalued.*according", "overvalued.*according",
+        "simply wall st", "simplywall",
+    )),
+    ("잡것들_ownership_institutional_filler", (
+        "institutional ownership", "insider ownership",
+        "ownership.*structure", "who owns",
+        "top shareholders", "shareholder.*structure",
+    )),
+    ("잡것들_unpopular_stocks_filler", (
+        "unpopular.*stock", "unloved.*stock",
+        "overlooked.*stock", "under the radar",
+        "hidden gem", "sleeper stock",
+        "under-followed",
+    )),
+    ("잡것들_sector_earnings_recap", (
+        "sector.*recap", "earnings.*season.*recap",
+        "sector.*wrapping up", "sector.*review",
+        "industry.*recap",
+    )),
+    ("잡것들_political_geopolitical_noise", (
+        "white house", "congress.*bill",
+        "senate.*vote", "house.*vote",
+        "president.*says", "political.*risk",
+        "election.*impact", "policy.*uncertainty",
+    )),
+    ("잡것들_trump_social_post_noise", (
+        "truth social", "trump.*post",
+        "trump.*says", "trump.*announces",
+        "trump.*truth", "president trump.*social",
+    )),
+    ("잡것들_spy_qqq_macro_tag", (
+        "spy.*etf", "qqq.*etf",
+        "spy.*index", "qqq.*index",
+        "s&p 500 etf", "nasdaq 100 etf",
+        "market.*breadth",
+    )),
+    ("잡것들_hiring_appointment_minor", (
+        "appoints.*director", "names.*director",
+        "appoints.*vp", "names.*vp",
+        "new board member", "board.*appointment",
+        "hires.*chief", "new hire",
+    )),
+    ("잡것들_conference_call_schedule", (
+        "schedules.*conference call",
+        "schedules.*call.*discuss",
+        "to host.*call", "conference call.*scheduled",
+        "announces.*conference call",
+    )),
+    ("잡것들_index_fund_reconstitution", (
+        "reconstitution", "rebalancing",
+        "index.*changes", "index.*additions",
+        "index.*deletions",
+    )),
+    ("잡것들_community_csr_noise", (
+        "community.*support", "charitable",
+        "donation.*to", "corporate social",
+        "sustainability report", "esg.*report",
+        "volunteer", "gives back",
+    )),
+    ("잡것들_ring_bell_ceremony_noise", (
+        "ring.*bell", "opening bell",
+        "closing bell", "bell ceremony",
+        "nasdaq.*bell",
+    )),
+    ("잡것들_unrelated_subsidiary_noise", (
+        "subsidiary.*unrelated", "unit.*divest",
+        "non-core.*business", "legacy.*business",
+        "wind.*down",
+    )),
+    ("잡것들_personal_finance_money_noise", (
+        "personal finance", "save.*money",
+        "budget.*tip", "money.*management",
+        "financial.*literacy", "money.*move",
+    )),
+    ("잡것들_agm_voting_result", (
+        "annual general meeting", "agm.*result",
+        "shareholder.*vote.*result", "proxy.*result",
+        "annual meeting.*result",
+    )),
+    ("잡것들_analyst_ratings_roundup", (
+        "[0-9]+ analyst.*rating", "consensus.*rating",
+        "analyst.*roundup", "analyst.*scorecard",
+        "wall street.*rating.*consensus",
+    )),
+    ("잡것들_spotlight_stocks_radar", (
+        "spotlight", "on.*radar",
+        "stocks.*radar", "stocks.*worth.*watching",
+        "stocks.*watch list",
+    )),
+    ("잡것들_momentum_outpacing_filler", (
+        "outpacing.*market", "outperform.*market",
+        "beating.*market", "lagging.*market",
+        "underperform.*market", "momentum.*score",
+    )),
+    ("잡것들_dividend_ex_date_filler", (
+        "ex-dividend date", "ex-date",
+        "record date", "dividend.*payable",
+        "goes ex-dividend",
+    )),
+    ("잡것들_returns_on_capital_filler", (
+        "return on.*capital", "return on equity",
+        "roic", "roce", "roe.*analysis",
+        "capital allocation.*review",
+    )),
+    # ── v7 NEW: additional residual categories ──
+    ("fed_rate_decision", (
+        "fed.*rate", "federal reserve.*rate",
+        "fomc.*decision", "rate.*hike", "rate.*cut",
+        "basis points", "bps.*cut", "bps.*hike",
+        "fed.*meeting", "powell.*says",
+    )),
+    ("china_trade_event", (
+        "china.*tariff", "china.*trade",
+        "us-china", "china.*ban",
+        "chinese.*regulation", "china.*restrict",
+        "beijing.*policy",
+    )),
+    ("us_government_policy_executive", (
+        "executive order", "white house.*policy",
+        "policy.*shift", "regulation.*change",
+        "legislation.*pass", "bill.*sign",
+    )),
+    ("esg_sustainability_event", (
+        "esg.*score", "sustainability.*target",
+        "carbon.*neutral", "net zero",
+        "green.*bond", "carbon.*emission",
+        "climate.*commitment",
+    )),
+    ("consumer_brand_event", (
+        "brand.*launch", "product.*launch.*consumer",
+        "new.*product line", "consumer.*spending",
+        "retail.*expansion", "store.*opening",
+    )),
+    ("fintech_payment_event", (
+        "payment.*volume", "transaction.*volume",
+        "digital payment", "mobile.*payment",
+        "payment.*processing", "fintech.*partner",
+    )),
+    ("insurance_event", (
+        "insurance.*premium", "claims.*ratio",
+        "underwriting.*result", "insurance.*loss",
+        "catastrophe.*loss", "policyholder",
+    )),
+    ("banking_credit_event", (
+        "loan.*growth", "credit.*quality",
+        "net interest margin", "nim.*expansion",
+        "deposit.*growth", "credit.*loss",
+        "provision.*loss",
+    )),
+    ("real_estate_platform_event", (
+        "proptech", "real estate.*platform",
+        "property.*listing", "home.*sale",
+        "housing.*market", "mortgage.*rate",
+    )),
+    ("reit_property_event", (
+        "reit.*acquisition", "reit.*dividend",
+        "property.*acquisition", "occupancy.*rate",
+        "same-store.*growth", "noi.*growth",
+    )),
+    ("home_construction_materials", (
+        "home.*builder", "housing.*start",
+        "building.*permit", "construction.*spend",
+        "home.*improvement", "lumber.*price",
+    )),
+    ("nuclear_energy_event", (
+        "nuclear.*energy", "nuclear.*power",
+        "small modular reactor", "smr.*deploy",
+        "uranium.*price", "nuclear.*fuel",
+    )),
+    ("hydrogen_fuel_cell_event", (
+        "hydrogen.*fuel", "fuel cell",
+        "green hydrogen", "electrolyzer",
+        "hydrogen.*infrastructure", "h2.*project",
+    )),
+    ("helium_specialty_gas_event", (
+        "helium.*production", "helium.*supply",
+        "specialty gas", "rare gas",
+        "helium.*plant",
+    )),
+    ("utility_infrastructure_event", (
+        "utility.*rate", "rate case",
+        "utility.*infrastructure", "grid.*upgrade",
+        "transmission.*line", "power.*grid",
+    )),
+    ("gaming_entertainment_event", (
+        "game.*launch", "game.*release",
+        "esports", "gaming.*revenue",
+        "console.*sale", "mobile.*game",
+    )),
+    ("streaming_media_event", (
+        "subscriber.*growth", "streaming.*service",
+        "content.*spend", "streaming.*subscriber",
+        "cord.*cutting", "streaming.*war",
+    )),
+    ("fashion_apparel_event", (
+        "fashion.*brand", "apparel.*sale",
+        "luxury.*brand", "fashion.*week",
+        "clothing.*sale", "footwear.*sale",
+    )),
+    ("go_private_buyout_event", (
+        "go.*private", "take.*private",
+        "management.*buyout", "mbo.*offer",
+        "leveraged.*buyout", "lbo.*deal",
+    )),
+    ("spinoff_separation_event", (
+        "spin.*off", "separation.*into",
+        "independent.*company", "planned.*separation",
+    )),
+    ("stock_split_event", (
+        "stock.*split", "reverse.*split",
+        "forward.*split", "[0-9]+-for-[0-9]+.*split",
+    )),
+    ("domestication_reincorporation", (
+        "domestication", "reincorporation",
+        "change.*jurisdiction", "move.*domicile",
+    )),
+    ("infrastructure_bill_spending", (
+        "infrastructure.*bill", "infrastructure.*spend",
+        "infrastructure.*invest", "bipartisan.*infrastructure",
     )),
 ]
 

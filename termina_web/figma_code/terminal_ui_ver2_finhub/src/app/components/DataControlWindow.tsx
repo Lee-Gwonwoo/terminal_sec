@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { RefreshCw, Eye, X, Square } from 'lucide-react';
+import { RefreshCw, Eye, X, Square, CircleHelp } from 'lucide-react';
 import { dataControlHowToUseRegistry, type DataControlHowToUseKey } from '../dataControlHowToUse';
 
 const API_BASE = "";
@@ -450,7 +450,6 @@ export function DataControlWindow({
       }
       setHowToContextMenu(null);
     };
-    const handleContextMenu = () => setHowToContextMenu(null);
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setHowToContextMenu(null);
@@ -458,11 +457,9 @@ export function DataControlWindow({
     };
 
     document.addEventListener('mousedown', handleMouseDown);
-    window.addEventListener('contextmenu', handleContextMenu);
     document.addEventListener('keydown', handleKeyDown);
     return () => {
       document.removeEventListener('mousedown', handleMouseDown);
-      window.removeEventListener('contextmenu', handleContextMenu);
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [howToContextMenu]);
@@ -1600,6 +1597,15 @@ export function DataControlWindow({
                     <span>{isRunning ? 'Running...' : 'Update'}</span>
                   </button>
 
+                  <button
+                    onClick={() => openHowToUseWindow(key)}
+                    className="px-2.5 py-1 border border-gray-300 dark:border-gray-600 rounded text-xs hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1"
+                    title={`${label} how to use`}
+                  >
+                    <CircleHelp className="w-3 h-3" />
+                    <span>How To Use</span>
+                  </button>
+
                   {/* View Log button */}
                   <button
                     onClick={() => jobId && setLogSection(logSection === key ? null : key)}
@@ -1745,8 +1751,9 @@ export function DataControlWindow({
       {howToContextMenu && (
         <div
           ref={howToContextMenuRef}
-          className="absolute z-50 min-w-[240px] rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-xl p-1.5"
+          className="fixed z-50 min-w-[240px] rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-xl p-1.5"
           style={{ top: howToContextMenu.y, left: howToContextMenu.x }}
+          onContextMenu={(event) => event.preventDefault()}
         >
           <button
             onClick={() => openHowToUseWindow(howToContextMenu.key)}

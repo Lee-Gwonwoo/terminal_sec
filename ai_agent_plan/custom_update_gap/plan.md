@@ -8,6 +8,208 @@
 2. 본 실행 전에 어떤 ticker/category/date 구간이 처리될지 보여주는 `preflight`를 버튼별로 추가한다.
 3. ticker-news 계열 custom 버튼은 `gap-only 실행`으로, 나머지 custom 버튼은 최소한 `preflight + 범위 요약`을 갖추도록 설계를 고정한다.
 
+---
+
+### 기능 설명: Custom Update Gap-Only
+
+#### 문제 — 왜 gap-only가 필요한가
+
+기존 custom update는 사용자가 `from~to` 날짜를 지정하면, **이미 DB에 있는 뉴스 날짜와 상관없이** 전체 범위를 다시 API로 조회한다. 저장은 `INSERT OR IGNORE`라 기존 row를 덮어쓰지는 않지만, **이미 있는 뉴스까지 다시 API에서 읽어오는 호출**은 그대로 발생한다.
+
+예시: 워치리스트에 ticker 400개, 날짜 범위 6개월을 지정하면 → ticker별로 Finnhub/FMP API를 최대 범위로 호출 → 대부분 이미 DB에 있는 뉴스를 다시 받아오는 셈.
+
+#### 해결 — gap-only란 무엇인가
+
+**gap-only**는 사용자가 지정한 `from~to` 범위에서 **DB에 이미 데이터가 있는 구간(coverage)을 제외하고**, 아직 조회한 적 없는 빈 구간(gap)만 골라서 API를 호출하는 방식이다.
+
+핵심 원리:
+1. ticker별로 DB에 저장된 뉴스의 `published_date` 최솟값(min)과 최댓값(max)을 구한다 → 이것을 **envelope**이라 한다.
+2. envelope 안쪽의 빈 날짜는 "뉴스가 없었기 때문"이지 "조회 안 했기 때문"이 아니므로, 다시 조회하지 않는다.
+3. **gap은 최대 2개만 생긴다**: envelope 앞쪽(사용자 from ~ envelope 시작 전날)과 envelope 뒤쪽(envelope 끝 다음날 ~ 사용자 to).
+4. envelope 전체가 사용자 범위를 덮으면 → ticker를 **skip**(fully covered) 처리하고 API 호출을 아예 하지 않는다.
+
+#### 구체 예시: envelope 기반 gap 계산
+
+**사용자 요청 범위:** `2026-01-01 ~ 2026-03-29`
+
+| Ticker | DB에 있는 뉴스 날짜들 | Envelope (min~max) | Gap 1 (envelope 앞) | Gap 2 (envelope 뒤) | 결과 |
+|--------|--------------------|--------------------|---------------------|---------------------|------|
+| AAPL | 1/15, 2/3, 2/20, 3/10 | 1/15 ~ 3/10 | **1/1 ~ 1/14** | **3/11 ~ 3/29** | gap 2개 → 해당 범위만 API 호출 |
+| MSFT | 1/1, 1/5, 2/28, 3/29 | 1/1 ~ 3/29 | 없음 (from과 동일) | 없음 (to와 동일) | **fully covered → skip** |
+| NVDA | 2/1, 2/15 | 2/1 ~ 2/15 | **1/1 ~ 1/31** | **2/16 ~ 3/29** | gap 2개 |
+| TSLA | (DB에 데이터 없음) | 없음 | **1/1 ~ 3/29** (전체) | — | gap 1개 = 전체 범위 |
+
+- AAPL: 1/15~3/10 사이에 뉴스가 없는 날짜(예: 1/16~2/2)는 "그 기간에 뉴스가 없었던 것"으로 간주 → 다시 조회하지 않음.
+- MSFT: envelope이 요청 범위를 완전히 커버 → API 호출 0건.
+- TSLA: DB에 아무 데이터도 없으므로 요청 범위 전체가 gap.
+
+#### 지원 대상 버튼 / 적용 방식 분류
+
+| 버튼 (UI 이름) | Backend Route | 적용 방식 | 설명 |
+|----------------|--------------|-----------|------|
+| Custom Company News | `POST /api/news/pull-finhub` (sourceType=company_news) | **gap-only** | ticker별 envelope gap만 조회 |
+| Custom Press Release | `POST /api/news/pull-finhub` (sourceType=press_release) | **gap-only** | 위와 동일 |
+| Custom Update (All) | `POST /api/news/pull-finhub` (sourceType=all) | **gap-only** | company_news + press_release 각각 gap-only 적용 |
+| Custom FMP PR | `POST /api/news/pull-fmp-press-release` | **gap-only** | ticker별 envelope gap만 조회 |
+| Custom FMP Stock | `POST /api/news/pull-fmp-stock-news` | **gap-only** | ticker별 envelope gap만 조회 |
+| Custom FMP SEC Filing | `POST /api/news/pull-fmp-sec-filing` | **summary-only** | 전체 범위 조회하되 preflight에서 기존 건수 표시 |
+| Custom PTPR Press Release | `POST /api/news/pull-rtpr` | **fully-covered-skip** | RTPR API는 from/to 범위 fetch를 미지원 → envelope이 전체 커버하면 skip, 아니면 전체 다시 조회 |
+| Custom Market News | `POST /api/news/pull-investing` | **summary-only** | category 단위 fetch → ticker-level gap 불가, preflight에서 기존 건수만 표시 |
+| Custom Change% Update | `POST /api/news/change/update-custom` | **preflight-only** | 재계산이므로 gap 개념 없음, 대상 row 수만 preflight에서 표시 |
+| Custom Calendar Update | `POST /api/ibkr/calendar/update-custom` | **preflight-only** | 캘린더 이벤트 수집, 기존 이벤트 수/누락 일수 표시 |
+
+용어 정리:
+- **gap-only**: 빈 구간만 API 호출. 불필요한 호출을 최대한 줄임.
+- **fully-covered-skip**: envelope이 요청 범위를 완전히 커버하면 skip, 그 외에는 전체 범위 조회. (API가 from/to 범위 지정을 미지원하는 경우)
+- **summary-only**: ticker-level gap 계산이 어려운 구조. preflight에서 기존 건수만 보여주고, 실제 실행은 전체 범위 조회.
+- **preflight-only**: 재계산/수집 버튼으로 gap 개념이 아님. 처리 대상 row 수만 미리 표시.
+
+#### 사용자 관점 동작 흐름 (Custom Update 클릭 → 실행까지)
+
+```
+1. 사용자가 Finnhub News 창에서 [Custom Co.] 드롭다운 클릭
+     ↓
+2. 드롭다운에서 "Custom Company News" (또는 Custom Update All 등) 클릭
+     ↓
+3. 📅 날짜 입력 모달 표시
+   - From: [________]  (예: 2026-01-01)
+   - To:   [________]  (예: 2026-03-29)
+   - [Start Update] 버튼
+     ↓
+4. [Start Update] 클릭 → 즉시 실행하지 않고 preflight API 호출
+   - POST /api/news/pull-finhub/preflight-custom
+   - body: { mode: "custom", from: "2026-01-01", to: "2026-03-29", sourceType: "company_news" }
+     ↓
+5. 📞 Preflight 결과 모달 표시
+   ┌─────────────────────────────────────────────────┐
+   │ 📞 Custom Company News — Preflight              │
+   │                                                  │
+   │ 실행 전에 현재 coverage와 예상 처리 범위를       │
+   │ 보여줍니다.                                      │
+   │                                                  │
+   │ • requested range: 2026-01-01 ~ 2026-03-29       │
+   │ • execution mode: gap-only                       │
+   │ • total tickers: 420                             │
+   │ • fully covered (skip): 287                      │
+   │ • tickers with gaps: 133                         │
+   │ • total missing ranges: 191                      │
+   │ • total missing days: 2,480                      │
+   │                                                  │
+   │ Examples:                                        │
+   │  AAPL — gap: 1/1~1/14, 3/11~3/29 (28 days)     │
+   │  NVDA — gap: 1/1~1/31, 2/16~3/29 (73 days)     │
+   │  …                                              │
+   │                                                  │
+   │          [Cancel]  [Continue ▶]                  │
+   └─────────────────────────────────────────────────┘
+     ↓
+6-A. [Cancel] → 아무 것도 실행하지 않고 모달 닫힘
+6-B. [Continue ▶] → 실제 custom update job 시작
+     - backend에서 동일한 gap 계산 로직을 다시 실행
+     - fully covered ticker는 skip
+     - gap이 있는 ticker만 해당 sub-range별로 API 호출
+     - View Log 버튼으로 진행 상황 실시간 확인 가능
+     ↓
+7. 완료 후 job result에 다음 수치 표시:
+   - requestedTickers / fullyCoveredSkipped / tickersFetched
+   - gapRangesFetched / inserted / skippedExisting
+```
+
+#### Preflight API 요청/응답 형식
+
+**요청 (공통):**
+```json
+{
+  "mode": "custom",
+  "from": "2026-01-01",
+  "to": "2026-03-29",
+  "sourceType": "company_news"
+}
+```
+(`sourceType`은 Finnhub 계열에서만 사용. FMP/RTPR은 없음.)
+
+**응답 (gap-only 버튼):**
+```json
+{
+  "source": "FINNHUB",
+  "sourceType": "company_news",
+  "requestedRange": { "from": "2026-01-01", "to": "2026-03-29" },
+  "executionMode": "gap-only",
+  "totalTickers": 420,
+  "fullyCoveredTickers": 287,
+  "tickersWithMissingGaps": 133,
+  "totalMissingRanges": 191,
+  "totalMissingDays": 2480,
+  "examples": [
+    {
+      "ticker": "AAPL",
+      "coveredRanges": [{ "from": "2026-01-15", "to": "2026-03-10" }],
+      "missingRanges": [
+        { "from": "2026-01-01", "to": "2026-01-14" },
+        { "from": "2026-03-11", "to": "2026-03-29" }
+      ],
+      "missingDayCount": 28,
+      "fullyCovered": false
+    }
+  ]
+}
+```
+
+**응답 (summary-only 버튼 — FMP SEC Filing):**
+```json
+{
+  "source": "FMP",
+  "requestedRange": { "from": "2026-01-01", "to": "2026-03-29" },
+  "executionMode": "summary-only",
+  "totalTickers": 420,
+  "existingItemsInRange": 1523
+}
+```
+
+**응답 (preflight-only 버튼 — Change% Update):**
+```json
+{
+  "requestedRange": { "from": "2026-01-01", "to": "2026-03-29" },
+  "executionMode": "preflight-only",
+  "totalRowsInRange": 18442,
+  "rowsWithChangePct": 17901,
+  "rowsExpectedToUpdate": 541
+}
+```
+
+#### Gap 계산 핵심 로직 (Backend)
+
+1. **`getTickerNewsCoverage(source, sourceType, tickers)`** — `newsRepository.ts`
+   - `news_items` 테이블에서 ticker별 `MIN(published_date)`, `MAX(published_date)`를 조회
+   - 반환: `Map<ticker, { minDate, maxDate }>` (= envelope)
+
+2. **`buildMissingRangesFromEnvelope(envelope, from, to)`** — `server.ts`
+   - envelope이 없으면 → gap = `[from, to]` 전체
+   - envelope.minDate > from → gap 앞쪽: `[from, envelope.minDate - 1day]`
+   - envelope.maxDate < to → gap 뒤쪽: `[envelope.maxDate + 1day, to]`
+   - 둘 다 없으면 → fully covered (gap 0개)
+
+3. **`buildTickerGapPlans(coverageMap, tickers, from, to)`** — `server.ts`
+   - 모든 ticker에 대해 `buildMissingRangesFromEnvelope`를 적용
+   - 반환: `TickerGapPlan[]` (ticker, coveredRanges, missingRanges, missingDayCount, fullyCovered, executionMode)
+
+4. **`summarizeTickerGapPlans(plans)`** — `server.ts`
+   - plans를 집계: totalTickers, fullyCoveredTickers, tickersWithMissingGaps, totalMissingRanges, totalMissingDays
+   - 상위 10개 ticker를 examples로 추출
+
+#### 경계 조건 / 주의사항
+
+| 조건 | 동작 |
+|------|------|
+| ticker에 DB 데이터가 전혀 없음 | envelope 없음 → 요청 범위 전체가 gap |
+| envelope이 요청 범위를 완전히 커버 | gap 0개 → fully covered → skip |
+| envelope.minDate == from 이고 envelope.maxDate == to | 정확히 일치 → fully covered |
+| envelope 안쪽에 뉴스가 없는 날짜 존재 | "뉴스가 없었던 것"으로 간주, 다시 조회하지 않음 |
+| 사용자가 아주 넓은 범위(1년+) 지정 | gap이 크더라도 정상 동작. preflight에서 totalMissingDays로 규모 확인 가능 |
+| 같은 범위를 두 번 연속 custom update 실행 | 두 번째 실행 시 대부분 ticker가 fully covered → 거의 0건 API 호출 |
+
+---
+
 ### 현재 레포 상태(중요, 확인됨)
 
 - 현재 `POST /api/news/pull-finhub`는 `mode = custom`일 때 ticker별로 `pullCompanyNewsBackfill(ticker, from, to)` 또는 `pullPressReleasesBackfill(ticker, from, to)`를 그대로 호출한다.
@@ -400,3 +602,14 @@ Track C — non-ticker custom preflight
 - `news/change/update-custom` job result는 preflight와 같은 `totalRowsInRange / rowsWithChangePct / rowsExpectedToUpdate` 기준을 유지하면서 `rowsUpdated / rowsSkipped`를 함께 반환한다.
 - `ibkr/calendar/update-custom`은 sync 응답이 아니라 job 기반으로 바꿔 `DataControlWindow` custom flow와 맞췄고, result에 `totalTickers / existingEventsInRange / existingEventDays / fetchedEvents / upserted`를 남기도록 정리했다.
 - `DataControlWindow.tsx`의 done summary 영역도 custom change / custom calendar result vocabulary를 바로 읽을 수 있도록 보강했다.
+
+### PLAN CHANGE — 2026-03-29 (Finnhub News How To Use 설명 보강)
+
+- 사용자가 Finnhub News의 How To Use 창 설명이 부족하다고 지적했다.
+- 기존 문구는 6개 카테고리 개요만 있고, 핵심인 `Custom`의 실제 동작 차이(`gap-only`, `fully-covered-skip`, `summary-only`, `preflight-only`)를 충분히 설명하지 못했다.
+- `FinnhubNewsWindow.tsx`의 How To Use payload를 확장해 다음을 직접 설명하도록 보강한다.
+  - Custom 실행 공통 흐름: 날짜 모달 → preflight → Continue → 실제 job
+  - gap-only 대상 버튼과 비대상 버튼 구분
+  - envelope 기준 coverage와 missing gap 계산 예시
+  - preflight/result에서 사용자가 확인해야 할 핵심 수치(`fullyCoveredTickers`, `totalMissingRanges`, `fullyCoveredSkipped`, `gapRangesFetched`)
+- 이번 변경은 UI 도움말 강화이며 backend 동작 자체를 바꾸는 작업은 아니다.
