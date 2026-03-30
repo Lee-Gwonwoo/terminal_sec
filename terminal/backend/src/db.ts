@@ -7,6 +7,9 @@ import { getEtDateString, toEtNaiveIso } from "./services/timeUtils.js";
 
 let db: Database<sqlite3.Database, sqlite3.Statement>;
 
+const INVESTING_PUBLISHED_AT_MIGRATION_KEY = "investing_published_at_utc_to_et_v1";
+const INVESTING_PUBLISHED_AT_MIGRATION_CUTOFF_UTC = "2026-03-30 13:00:00";
+
 export async function initDb(): Promise<void> {
   const fullPath = path.resolve(config.sqlitePath);
   fs.mkdirSync(path.dirname(fullPath), { recursive: true });
@@ -506,6 +509,7 @@ export async function initDb(): Promise<void> {
 
   await purgeLegacyFinnhubSecFilings();
   await migrateFinnhubCompanyNewsPublishedAtToEt();
+  await migrateInvestingPublishedAtToEt();
   await backfillModel2EvidenceRowsNewsFields();
   await refreshModel2CaseSummariesCache();
 }
@@ -643,6 +647,78 @@ async function migrateFinnhubCompanyNewsPublishedAtToEt(): Promise<void> {
     }
     await db.exec("COMMIT");
     console.log(`[db] migrated ${rows.length} FINNHUB company_news published_at rows from UTC to ET`);
+  } catch (error) {
+    await db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+async function migrateInvestingPublishedAtToEt(): Promise<void> {
+  const marker = await db.get<{ last_success_at: string | null }>(
+    `SELECT last_success_at
+     FROM update_status
+     WHERE source_key = ?`,
+    [INVESTING_PUBLISHED_AT_MIGRATION_KEY],
+  );
+
+  if (marker?.last_success_at) {
+    return;
+  }
+
+  const rows = await db.all<{ id: string; published_at: string }[]>(
+    `SELECT id, published_at
+     FROM news_items
+     WHERE source = 'INVESTING'
+       AND source_type IN ('investing_stock_market_news', 'investing_cryptocurrency_news')
+       AND created_at <= ?`,
+    [INVESTING_PUBLISHED_AT_MIGRATION_CUTOFF_UTC],
+  );
+
+  let migrated = 0;
+
+  await db.exec("BEGIN TRANSACTION");
+  try {
+    for (const row of rows) {
+      const trimmed = row.published_at.trim();
+      if (!trimmed) {
+        continue;
+      }
+
+      const normalized = /(Z|[+-]\d{2}:\d{2})$/.test(trimmed)
+        ? toEtNaiveIso(trimmed)
+        : toEtNaiveIso(`${trimmed}Z`);
+
+      if (normalized === trimmed) {
+        continue;
+      }
+
+      await db.run(
+        `UPDATE news_items SET published_at = ? WHERE id = ?`,
+        [normalized, row.id],
+      );
+      migrated += 1;
+    }
+
+    await db.run(
+      `INSERT INTO update_status (source_key, last_success_at, details_json, updated_at)
+       VALUES (?, datetime('now'), ?, datetime('now'))
+       ON CONFLICT(source_key) DO UPDATE SET
+         last_success_at = excluded.last_success_at,
+         details_json = excluded.details_json,
+         updated_at = excluded.updated_at`,
+      [
+        INVESTING_PUBLISHED_AT_MIGRATION_KEY,
+        JSON.stringify({
+          migratedRows: migrated,
+          cutoffUtc: INVESTING_PUBLISHED_AT_MIGRATION_CUTOFF_UTC,
+        }),
+      ],
+    );
+
+    await db.exec("COMMIT");
+    if (migrated > 0) {
+      console.log(`[db] migrated ${migrated} INVESTING published_at rows from UTC to ET (cutoff<=${INVESTING_PUBLISHED_AT_MIGRATION_CUTOFF_UTC})`);
+    }
   } catch (error) {
     await db.exec("ROLLBACK");
     throw error;

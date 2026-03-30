@@ -89,6 +89,7 @@ const PUBLISHER_CANONICAL_MAP: Record<string, string> = {
   "SEEKING ALPHA": "SEEKINGALPHA",
   "PR NEWSWIRE": "PRNEWSWIRE",
   "GLOBE NEWS WIRE": "GLOBENEWSWIRE",
+  "INVESTING.COM": "INVESTING",
 };
 
 const CONTENT_PUBLISHER_HINTS: Array<{ publisher: string; patterns: RegExp[] }> = [
@@ -786,6 +787,7 @@ const PUBLISHER_MAP: [test: (h: string) => boolean, label: string][] = [
   [(h) => h.includes("dailyhodl.com"), "DAILY HODL"],
   [(h) => h.includes("bloomberg.com"), "BLOOMBERG"],
   [(h) => h.includes("investorplace.com"), "INVESTORPLACE"],
+  [(h) => h.includes("investing.com"), "INVESTING"],
   [(h) => h.includes("reuters.com"), "REUTERS"],
   [(h) => h.includes("barrons.com"), "BARRONS"],
   [(h) => h.includes("marketwatch.com"), "MARKETWATCH"],

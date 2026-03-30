@@ -75,7 +75,7 @@ function loadRtprApiKey(): string {
 
   // 2. File fallback
   const repoRoot = resolveRepoRoot();
-  const keyPath = path.join(repoRoot, "ai_agent_plan", "ptpr_api_key", "ptpr_api_key");
+  const keyPath = path.join(repoRoot, "ai_agent_plan", "api_key_rtpr", "api_key_rtpr");
   try {
     const raw = fs.readFileSync(keyPath, "utf8");
     // Key file may contain multiple lines (e.g. Customer ID on line 2) — take first line only

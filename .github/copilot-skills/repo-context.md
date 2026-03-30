@@ -164,17 +164,17 @@
 	- UI/백엔드에서 참조 CSV를 쓸 때는 사용자가 선택한 파일과 기본 파일을 구분해서 다룸
 
 - **API 키 / 시크릿 파일**
-	- 대표 경로: `EODHD/API TOKEN`, `finhub/finhub_api_key/finhub_api_key`, `ai_agent_plan/google_api_key/`, `ai_agent_plan/brave_api/`, `ai_agent_plan/ptpr_api_key/ptpr_api_key`
+	- 대표 경로: `EODHD/API TOKEN`, `finhub/finhub_api_key/finhub_api_key`, `ai_agent_plan/google_api_key/`, `ai_agent_plan/brave_api/`, `ai_agent_plan/api_key_rtpr/api_key_rtpr`
 	- 용도: 외부 provider 인증 정보
 	- 주의: 로그/출력/문서 예시에 실제 값을 노출하지 않음
 
 - **PTPR API 조사 상태 (2026-03-10)**
-	- 시크릿 파일은 `ai_agent_plan/ptpr_api_key/ptpr_api_key`에 존재함을 확인했다. 값 자체는 문서/로그에 노출하지 않는다.
+	- 시크릿 파일은 `ai_agent_plan/api_key_rtpr/api_key_rtpr`에 존재함을 확인했다. 값 자체는 문서/로그에 노출하지 않는다.
 	- 현재 레포에는 `terminal/backend/src/services/ptprNewsProvider.ts`와 `POST /api/news/pull-rtpr` 구현이 존재한다. 즉 provider별 base URL, auth 방식, endpoint 매핑의 source of truth는 이제 backend 코드다.
 	- 공식 문서는 `https://www.rtpr.io/docs`로 확인됐다. 실제 API base URL은 `https://api.rtpr.io`, WebSocket URL은 `wss://ws.rtpr.io`다.
 	- 인증 방식은 REST는 `Authorization: Bearer <API_KEY>`, WebSocket은 `wss://ws.rtpr.io?apiKey=<API_KEY>` query parameter다.
 	- REST rate limit은 분당 60 requests, WebSocket은 API key당 동시 1 connection이다.
-	- backend config는 `RTPR_API_KEY` 환경 변수 또는 `ai_agent_plan/ptpr_api_key/ptpr_api_key` 첫 줄을 읽는다.
+	- backend config는 `RTPR_API_KEY` 환경 변수 또는 `ai_agent_plan/api_key_rtpr/api_key_rtpr` 첫 줄을 읽는다.
 	- 2026-03-10 실제 probe 결과:
 		- `GET /articles?limit=100` 성공, 최근 100건 모두 `2026-03-10` UTC 기사였다.
 		- `GET /articles/AAPL?limit=5`는 당시 시점 기준 `count=0`이었다.

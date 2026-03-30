@@ -6,13 +6,24 @@
  */
 
 import * as cheerio from "cheerio";
+import fs from "node:fs";
+import { chromium, type Browser } from "playwright";
 import type { FinnhubMappedItem } from "./finnhubNewsProvider.js";
+import { toEtNaiveIso } from "./timeUtils.js";
 
 const MAX_RETRIES = 10;
 const BASE_DELAY_MS = 500;
 const MAX_BACKOFF_MS = 30_000;
+const BROWSER_TIMEOUT_MS = 15_000;
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0";
+
+const BROWSER_CANDIDATE_PATHS = [
+  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+  "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+  "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+];
 
 export type InvestingCategory = "stock-market-news" | "cryptocurrency-news";
 
@@ -22,6 +33,9 @@ export interface InvestingFetchOptions {
   fromDate?: string;
   toDate?: string;
 }
+
+let sharedBrowserPromise: Promise<Browser> | null = null;
+let investingHtmlLoaderForTests: ((url: string) => Promise<string>) | null = null;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -58,12 +72,146 @@ async function fetchWithRetry(
   throw new Error(`fetchWithRetry: exhausted ${MAX_RETRIES} attempts for ${url}`);
 }
 
-function categoryToSourceType(
+export function investingCategoryToSourceType(
   category: InvestingCategory,
 ): string {
   return category === "stock-market-news"
     ? "investing_stock_market_news"
     : "investing_cryptocurrency_news";
+}
+
+function findBrowserExecutable(): string | undefined {
+  return BROWSER_CANDIDATE_PATHS.find((candidate) => fs.existsSync(candidate));
+}
+
+function isCloudflareChallengeHtml(html: string): boolean {
+  const markers = [
+    "Enable JavaScript and cookies to continue",
+    "challenge-error-text",
+    "cf_chl_opt",
+    "cdn-cgi/challenge-platform",
+    "Just a moment...",
+  ];
+  return markers.some((marker) => html.includes(marker));
+}
+
+async function getBrowser(): Promise<Browser> {
+  if (!sharedBrowserPromise) {
+    sharedBrowserPromise = (async () => {
+      const executablePath = findBrowserExecutable();
+      if (executablePath) {
+        return chromium.launch({
+          executablePath,
+          headless: true,
+        });
+      }
+      try {
+        return await chromium.launch({ channel: "chrome", headless: true });
+      } catch {
+        try {
+          return await chromium.launch({ channel: "msedge", headless: true });
+        } catch {
+          return chromium.launch({ headless: true });
+        }
+      }
+    })();
+  }
+  return sharedBrowserPromise;
+}
+
+async function loadPageHtmlInBrowser(url: string): Promise<string> {
+  if (investingHtmlLoaderForTests) {
+    return investingHtmlLoaderForTests(url);
+  }
+
+  throw new Error("loadPageHtmlInBrowser should only be used with test loader");
+}
+
+async function loadPageItemsInBrowser(
+  category: InvestingCategory,
+  url: string,
+): Promise<FinnhubMappedItem[]> {
+  const browser = await getBrowser();
+  const page = await browser.newPage({
+    userAgent: `${UA} Safari/537.36`,
+    locale: "en-US",
+  });
+
+  const sourceType = investingCategoryToSourceType(category);
+
+  try {
+    await page.goto(url, {
+      waitUntil: "domcontentloaded",
+      timeout: BROWSER_TIMEOUT_MS,
+    });
+    await page.waitForURL((currentUrl) => !currentUrl.toString().includes("__cf_chl"), {
+      timeout: 15_000,
+    }).catch(() => undefined);
+    await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => undefined);
+    await page.waitForSelector('a[data-test="article-title-link"], article[data-test="article-item"], ul[data-test="news-list"]', {
+      timeout: 15_000,
+    }).catch(() => undefined);
+    await page.waitForTimeout(1500).catch(() => undefined);
+
+    const items = await page.evaluate(({ currentCategory, currentSourceType }) => {
+      const anchors = Array.from(document.querySelectorAll(`a[data-test="article-title-link"][href*="/news/${currentCategory}/"]`));
+      const seenUrls = new Set<string>();
+
+      return anchors
+        .map((anchor) => {
+          const href = anchor.getAttribute("href") || "";
+          const url = href.startsWith("http") ? href : `https://www.investing.com${href}`;
+          const title = (anchor.textContent || "").trim();
+          const container = anchor.closest('article[data-test="article-item"], article, li, div');
+          const description = (container?.querySelector('[data-test="article-description"]')?.textContent || container?.querySelector("p")?.textContent || "").trim();
+          const timeNode = container?.querySelector('[data-test="article-publish-date"], time');
+          const rawTime = (timeNode?.getAttribute("datetime") || timeNode?.textContent || "").trim();
+          const provider = (container?.querySelector('[data-test="news-provider-name"]')?.textContent || "INVESTING").trim();
+
+          return {
+            title,
+            url,
+            body: description,
+            rawTime,
+            provider,
+            sourceType: currentSourceType,
+            tags: [currentCategory],
+          };
+        })
+        .filter((item) => {
+          if (!item.title || !item.url) return false;
+          if (!item.url.includes(`/news/${currentCategory}/`)) return false;
+          if (seenUrls.has(item.url)) return false;
+          seenUrls.add(item.url);
+          return true;
+        });
+    }, { currentCategory: category, currentSourceType: sourceType });
+
+    if (items.length === 0) {
+      const bodyText = await page.locator("body").innerText().catch(() => "");
+      if (isCloudflareChallengeHtml(bodyText)) {
+        throw new Error("Cloudflare challenge page returned even after browser fallback");
+      }
+    }
+
+    return items.map((item) => ({
+      publishedAt: normalizeInvestingDate(item.rawTime),
+      source: "INVESTING",
+      sourceType: item.sourceType,
+      title: item.title,
+      body: item.body,
+      url: item.url,
+      providerTickers: [],
+      tags: item.tags,
+      publisher: item.provider || "INVESTING",
+    }));
+  } finally {
+    await page.close().catch(() => undefined);
+  }
+}
+
+export function setInvestingHtmlLoaderForTests(loader: ((url: string) => Promise<string>) | null): void {
+  investingHtmlLoaderForTests = loader;
 }
 
 /**
@@ -75,7 +223,7 @@ function parseListingPage(
 ): FinnhubMappedItem[] {
   const $ = cheerio.load(html);
   const items: FinnhubMappedItem[] = [];
-  const sourceType = categoryToSourceType(category);
+  const sourceType = investingCategoryToSourceType(category);
 
   // Investing article cards are rendered as <article> elements or <div> with data-test attributes.
   // Multiple selector strategies to handle layout variations:
@@ -164,14 +312,14 @@ function parseListingPage(
  */
 function normalizeInvestingDate(raw: string): string {
   if (!raw || !raw.trim()) {
-    return new Date().toISOString().slice(0, 19);
+    return toEtNaiveIso(new Date());
   }
   const trimmed = raw.trim();
 
   // ISO 8601 with timezone
   if (/^\d{4}-\d{2}-\d{2}T/.test(trimmed)) {
     try {
-      return new Date(trimmed).toISOString().slice(0, 19);
+      return toEtNaiveIso(trimmed);
     } catch {
       return trimmed.slice(0, 19);
     }
@@ -179,7 +327,7 @@ function normalizeInvestingDate(raw: string): string {
 
   // "YYYY-MM-DD HH:MM:SS" format
   if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(trimmed)) {
-    return trimmed.replace(" ", "T");
+    return toEtNaiveIso(`${trimmed.replace(" ", "T")}Z`);
   }
 
   // Relative time: "X hours ago", "X minutes ago", etc.
@@ -194,16 +342,16 @@ function normalizeInvestingDate(raw: string): string {
     else if (unit === "day") ms = amount * 86_400_000;
     else if (unit === "week") ms = amount * 7 * 86_400_000;
     else if (unit === "month") ms = amount * 30 * 86_400_000;
-    return new Date(now - ms).toISOString().slice(0, 19);
+    return toEtNaiveIso(new Date(now - ms));
   }
 
   // Try generic Date parse
   const parsed = new Date(trimmed);
   if (!Number.isNaN(parsed.getTime())) {
-    return parsed.toISOString().slice(0, 19);
+    return toEtNaiveIso(parsed);
   }
 
-  return new Date().toISOString().slice(0, 19);
+  return toEtNaiveIso(new Date());
 }
 
 /**
@@ -220,13 +368,12 @@ export async function fetchInvestingCategory(
   );
   const fromDate = options.fromDate?.trim() || "";
   const toDate = options.toDate?.trim() || "";
-  const fromTs = fromDate ? new Date(`${fromDate}T00:00:00Z`).getTime() : Number.NEGATIVE_INFINITY;
-  const toTs = toDate ? new Date(`${toDate}T23:59:59Z`).getTime() : Number.POSITIVE_INFINITY;
 
   const allItems: FinnhubMappedItem[] = [];
   const seenUrls = new Set<string>();
   let consecutiveEmptyPages = 0;
   let reachedOlderThanFrom = false;
+  let useBrowser = false;
 
   for (let page = 1; page <= maxPages; page++) {
     const pageUrl =
@@ -239,36 +386,62 @@ export async function fetchInvestingCategory(
     }
 
     try {
-      const res = await fetchWithRetry(pageUrl, {
-        headers: {
-          "User-Agent": UA,
-          Accept:
-            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-          "Accept-Language": "en-US,en;q=0.5",
-        },
-      });
+      let html = "";
+      let pageItems: FinnhubMappedItem[] = [];
+      if (useBrowser) {
+        if (investingHtmlLoaderForTests) {
+          html = await loadPageHtmlInBrowser(pageUrl);
+          pageItems = parseListingPage(html, category);
+        } else {
+          pageItems = await loadPageItemsInBrowser(category, pageUrl);
+        }
+      } else {
+        const res = await fetchWithRetry(pageUrl, {
+          headers: {
+            "User-Agent": UA,
+            Accept:
+              "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+          },
+        });
 
-      if (!res.ok) {
-        console.error(
-          `[investing] ${category} page ${page}: HTTP ${res.status}`,
-        );
-        break;
+        if (!res.ok && res.status !== 403 && res.status !== 503) {
+          console.error(
+            `[investing] ${category} page ${page}: HTTP ${res.status}`,
+          );
+          break;
+        }
+
+        const candidateHtml = await res.text();
+        if (!res.ok || isCloudflareChallengeHtml(candidateHtml)) {
+          useBrowser = true;
+          if (investingHtmlLoaderForTests) {
+            html = await loadPageHtmlInBrowser(pageUrl);
+            pageItems = parseListingPage(html, category);
+          } else {
+            pageItems = await loadPageItemsInBrowser(category, pageUrl);
+          }
+        } else {
+          html = candidateHtml;
+          pageItems = parseListingPage(html, category);
+        }
       }
 
-      const html = await res.text();
-      const pageItems = parseListingPage(html, category);
+      if (html && isCloudflareChallengeHtml(html)) {
+        throw new Error("Cloudflare challenge page returned even after browser fallback");
+      }
       const filteredPageItems: FinnhubMappedItem[] = [];
 
       for (const item of pageItems) {
-        const publishedTs = new Date(item.publishedAt).getTime();
-        if (Number.isNaN(publishedTs)) {
+        const publishedDate = item.publishedAt.slice(0, 10);
+        if (!publishedDate) {
           continue;
         }
-        if (publishedTs < fromTs) {
+        if (fromDate && publishedDate < fromDate) {
           reachedOlderThanFrom = true;
           continue;
         }
-        if (publishedTs > toTs) {
+        if (toDate && publishedDate > toDate) {
           continue;
         }
         filteredPageItems.push(item);

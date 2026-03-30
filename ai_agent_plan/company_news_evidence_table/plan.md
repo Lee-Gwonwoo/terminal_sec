@@ -1,4 +1,4 @@
-### 목표
+  ### 목표
 - 최종 목적은 `company_news` 후속기사에서 실제 가격 영향 정보를 설명하는 taxonomy를 만드는 것이다.
 - 이 taxonomy는 직접 이벤트뿐 아니라 정책, peer 경쟁, 밸류에이션, 수급, 미디어 증폭, estimate reset 같은 간접 read-through까지 포함해야 한다.
 - 이번 tranche의 산출물은 아래 4가지다.

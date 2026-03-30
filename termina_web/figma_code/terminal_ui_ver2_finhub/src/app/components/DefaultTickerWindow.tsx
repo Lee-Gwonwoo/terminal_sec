@@ -15,6 +15,7 @@ interface TickerRow {
   name: string | null;
   sector: string | null;
   industry: string | null;
+  addedAt: string | null;
   ipoDate: string | null;
   marketCap: number | null;
   floatPct: number | null;
@@ -35,7 +36,7 @@ interface JobStatus {
 const ROW_HEIGHT = 37;
 const HEADER_HEIGHT = 37;
 const MIN_LIST_HEIGHT = 200;
-const GRID_TEMPLATE_COLUMNS = "minmax(96px,0.9fr) minmax(180px,1.7fr) minmax(96px,0.8fr) minmax(128px,1.2fr) minmax(96px,0.8fr) minmax(128px,1fr) minmax(96px,0.8fr) minmax(96px,0.8fr) 48px";
+const GRID_TEMPLATE_COLUMNS = "minmax(96px,0.9fr) minmax(180px,1.7fr) minmax(96px,0.8fr) minmax(128px,1.1fr) minmax(96px,0.9fr) minmax(96px,0.8fr) minmax(128px,1fr) minmax(96px,0.8fr) minmax(96px,0.8fr) 48px";
 
 interface TickerListRowData {
   rows: TickerRow[];
@@ -51,6 +52,7 @@ function fallbackRowsFromTickers(tickers: string[] | undefined): TickerRow[] {
     name: null,
     sector: null,
     industry: null,
+    addedAt: null,
     ipoDate: null,
     marketCap: null,
     floatPct: null,
@@ -69,6 +71,7 @@ function normalizeRows(data: any): TickerRow[] {
       name: row.name ?? null,
       sector: row.sector ?? null,
       industry: row.industry ?? null,
+      addedAt: typeof row.addedAt === "string" && row.addedAt ? row.addedAt : null,
       ipoDate: typeof row.ipoDate === "string" && row.ipoDate ? row.ipoDate : null,
       marketCap: typeof row.marketCap === "number" ? row.marketCap : null,
       floatPct: typeof row.floatPct === "number" ? row.floatPct : null,
@@ -93,6 +96,14 @@ function formatMarketCap(value: number | null): string {
 function formatPct(value: number | null): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return "-";
   return `${value.toFixed(2)}%`;
+}
+
+function formatAddedDate(value: string | null): string {
+  if (!value) return "-";
+  const trimmed = value.trim();
+  if (!trimmed) return "-";
+  const match = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : trimmed;
 }
 
 function SourceBadge({ source }: { source: string | null }) {
@@ -131,6 +142,7 @@ const TickerListRow = memo(function TickerListRow({ data, index, style }: ListCh
         <div className="px-3 py-2 truncate text-gray-700 dark:text-gray-200" title={row.name ?? undefined}>{row.name ?? "-"}</div>
         <div className="px-3 py-2 truncate text-gray-500 dark:text-gray-400" title={row.exchange ?? undefined}>{row.exchange ?? "-"}</div>
         <div className="px-3 py-2 truncate text-gray-500 dark:text-gray-400" title={row.industry ?? undefined}>{row.industry ?? "-"}</div>
+        <div className="px-3 py-2 truncate text-gray-500 dark:text-gray-400" title={row.addedAt ?? undefined}>{formatAddedDate(row.addedAt)}</div>
         <div className="px-3 py-2 truncate text-gray-500 dark:text-gray-400" title={row.ipoDate ?? undefined}>{row.ipoDate ?? "-"}</div>
         <div className="px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-200 whitespace-nowrap overflow-hidden">
           {formatMarketCap(row.marketCap)}<SourceBadge source={row.marketCapSource} />
@@ -182,6 +194,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
   const [instJob, setInstJob] = useState<JobStatus | null>(null);
   const [showInstLog, setShowInstLog] = useState(false);
   const [filterText, setFilterText] = useState("");
+  const [sortMode, setSortMode] = useState<"default" | "recent-added">("default");
   const [dataSource, setDataSource] = useState<"db" | "csv" | null>(null);
   const [listHeight, setListHeight] = useState(MIN_LIST_HEIGHT);
   const listContainerRef = useRef<HTMLDivElement>(null);
@@ -520,19 +533,39 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
       row.ticker.includes(needle)
       || (row.name ?? "").toUpperCase().includes(needle)
       || (row.industry ?? "").toUpperCase().includes(needle)
+      || formatAddedDate(row.addedAt).toUpperCase().includes(needle)
       || (row.ipoDate ?? "").toUpperCase().includes(needle)
       || (row.exchange ?? "").toUpperCase().includes(needle),
     );
   }, [rows, deferredFilterText]);
 
+  const displayedRows = useMemo(() => {
+    if (sortMode === "default") {
+      return filteredRows;
+    }
+    return filteredRows
+      .map((row, index) => ({ row, index }))
+      .sort((left, right) => {
+        const leftKey = left.row.addedAt ?? "";
+        const rightKey = right.row.addedAt ?? "";
+        if (leftKey && rightKey && leftKey !== rightKey) {
+          return rightKey.localeCompare(leftKey);
+        }
+        if (leftKey && !rightKey) return -1;
+        if (!leftKey && rightKey) return 1;
+        return left.index - right.index;
+      })
+      .map(({ row }) => row);
+  }, [filteredRows, sortMode]);
+
   const listData = useMemo<TickerListRowData>(() => ({
-    rows: filteredRows,
+    rows: displayedRows,
     removing,
     onTickerClick,
     onRemove: (ticker: string) => {
       void handleRemove(ticker);
     },
-  }), [filteredRows, removing, onTickerClick, handleRemove]);
+  }), [displayedRows, removing, onTickerClick, handleRemove]);
 
   return (
     <div className="h-full flex flex-col p-3 text-sm">
@@ -718,11 +751,28 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
           value={filterText}
           onChange={(e) => setFilterText(e.target.value)}
           className="flex-1 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          placeholder="Filter ticker, name, exchange, industry..."
+          placeholder="Filter ticker, name, exchange, industry, added date..."
         />
+        <button
+          type="button"
+          onClick={() => setSortMode((mode) => (mode === "default" ? "recent-added" : "default"))}
+          className={`px-2 py-1 text-[11px] rounded border ${
+            sortMode === "recent-added"
+              ? "border-blue-500 bg-blue-50 text-blue-600 dark:border-blue-400 dark:bg-blue-900/30 dark:text-blue-300"
+              : "border-gray-300 text-gray-500 dark:border-gray-600 dark:text-gray-400"
+          }`}
+          title="Toggle between default order and recently added order"
+        >
+          {sortMode === "recent-added" ? "Recent Added" : "Default Order"}
+        </button>
         <span className="text-xs text-gray-400">
-          {filteredRows.length}/{rows.length}
+          {displayedRows.length}/{rows.length}
         </span>
+      </div>
+
+      <div className="mb-2 text-[11px] text-gray-500 dark:text-gray-400">
+        정렬 기준: {sortMode === "recent-added" ? "최근 추가순 (added date desc)" : "기본 universe 순서"}
+        {dataSource === "csv" ? " · CSV-only 경로는 Added Date가 없어 '-'로 표시됩니다." : ""}
       </div>
 
       <div ref={listContainerRef} className="flex-1 overflow-hidden border border-gray-200 dark:border-gray-700 rounded">
@@ -730,7 +780,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
           <div className="flex items-center justify-center h-full text-gray-400 text-xs">
             Loading...
           </div>
-        ) : filteredRows.length === 0 ? (
+        ) : displayedRows.length === 0 ? (
           <div className="flex items-center justify-center h-full text-gray-400 text-xs">
             {rows.length === 0 ? "No tickers loaded" : "No matches"}
           </div>
@@ -744,6 +794,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
               <div className="text-left font-semibold px-3 py-2">Name</div>
               <div className="text-left font-semibold px-3 py-2">Exchange</div>
               <div className="text-left font-semibold px-3 py-2">Industry</div>
+              <div className="text-left font-semibold px-3 py-2">Added Date</div>
               <div className="text-left font-semibold px-3 py-2">IPO Date</div>
               <div className="text-right font-semibold px-3 py-2">Market Cap</div>
               <div className="text-right font-semibold px-3 py-2">Float %</div>
@@ -753,7 +804,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
             <List
               height={listHeight}
               width="100%"
-              itemCount={filteredRows.length}
+              itemCount={displayedRows.length}
               itemSize={ROW_HEIGHT}
               itemData={listData}
               overscanCount={12}

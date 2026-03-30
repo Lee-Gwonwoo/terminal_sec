@@ -85,7 +85,7 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 조회 순서:
 
 1. 환경 변수 `RTPR_API_KEY`
-2. `ai_agent_plan/ptpr_api_key/ptpr_api_key` 첫 줄
+2. `ai_agent_plan/api_key_rtpr/api_key_rtpr` 첫 줄
 
 없어도 서버는 시작된다.
 

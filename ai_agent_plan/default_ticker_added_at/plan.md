@@ -242,6 +242,20 @@ Added At 값 확인
 | D2 | 최근 추가 식별 방식 | 최근 추가순 토글 추가 (확정) / 컬럼만 표시 | Step 3 |
 | D3 | custom CSV path 처리 | `-` 표시 / 별도 audit 도입 | Step 1, Step 4 |
 
+### PLAN CHANGE — 2026-03-30
+
+- `default_ticker_added_at`는 plan만 있고 실제 구현이 누락된 상태가 확인됐다.
+- 현재 기준 누락 지점은 아래 3개였다.
+  - backend `getDefaultUniverseRows()`가 `ticker_universe_items.created_at`를 select하지 않음
+  - `/api/tickers` 실응답에 `addedAt` 필드가 없음
+  - `DefaultTickerWindow.tsx`에 `Added Date` 컬럼과 `최근 추가순` 토글이 없음
+- 이번 변경에서는 Step 1~3의 핵심 범위를 한 번에 구현한다.
+  - default universe API row에 `addedAt` 연결
+  - custom CSV path는 `addedAt = null` 유지
+  - Default Ticker Window에 `Added Date` 컬럼 표시
+  - `최근 추가순` 토글과 현재 정렬 기준 문구 추가
+- legacy row 보정이나 CSV-only audit 저장은 이번 변경 범위에 포함하지 않는다.
+
 ### 실행 의존성 그래프
 
 Legend: `✅ 사용자 확인 완료` / `⏳ 구현완료, 사용자확인 대기` / `⬜ 미착수` / `🚫 차단`
@@ -249,18 +263,18 @@ Legend: `✅ 사용자 확인 완료` / `⏳ 구현완료, 사용자확인 대�
 Track A — backend data path
 - ⏳ 0-1 ticker_universe_items created_at 저장 확인
 - ⏳ 0-2 API 누락 지점 확인
-- ⬜ 0-3 frontend 누락 지점 확인
-- ⬜ 1-1 backend 타입에 addedAt 추가
-- ⬜ 1-2 default universe API 응답에 addedAt 연결
-- ⬜ 1-3 custom CSV path null 처리 고정
+- ⏳ 0-3 frontend 누락 지점 확인
+- ⏳ 1-1 backend 타입에 addedAt 추가
+- ⏳ 1-2 default universe API 응답에 addedAt 연결
+- ⏳ 1-3 custom CSV path null 처리 고정
 
 Track B — frontend display
-- ⬜ 2-1 row 타입/normalizer에 addedAt 추가
-- ⬜ 2-2 Added At 컬럼 추가
-- ⬜ 2-3 default/custom 표시 분기
-- ⬜ 3-1 최근 추가 식별 보조 정렬/토글
-- ⬜ 3-2 정렬 기준 문구 추가
-- ⬜ 3-3 신규 추가 후 탐색 확인
+- ⏳ 2-1 row 타입/normalizer에 addedAt 추가
+- ⏳ 2-2 Added At 컬럼 추가
+- ⏳ 2-3 default/custom 표시 분기
+- ⏳ 3-1 최근 추가 식별 보조 정렬/토글
+- ⏳ 3-2 정렬 기준 문구 추가
+- ⏳ 3-3 신규 추가 후 탐색 확인
 
 ┌──────────────────────────────────────────────┐
 │ 사용자 결정 필요                              │

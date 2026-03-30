@@ -8,7 +8,7 @@
 
 import * as cheerio from "cheerio";
 import { chromium, type Browser } from "playwright";
-import { derivePublisher } from "./finnhubNewsProvider.js";
+import { canonicalizePublisherLabel, derivePublisher } from "./finnhubNewsProvider.js";
 import { isFinnhubNewsRedirectUrl, resolveFinnhubNewsOriginUrl } from "./finnhubRedirectResolver.js";
 
 const MAX_RETRIES = 10;
@@ -171,6 +171,17 @@ function fallbackOrUnavailable(body: string | null, note: string, fallbackBody: 
   return fallbackBody ? bodyFallback(body, note) : unavailableResult(note);
 }
 
+function isBrowserChallengeHtml(html: string): boolean {
+  const markers = [
+    "Enable JavaScript and cookies to continue",
+    "challenge-error-text",
+    "cf_chl_opt",
+    "cdn-cgi/challenge-platform",
+    "Just a moment...",
+  ];
+  return markers.some((marker) => html.includes(marker));
+}
+
 async function extractTextViaHttp(
   url: string,
   body: string | null,
@@ -194,10 +205,16 @@ async function extractTextViaHttp(
     });
 
     if (!res.ok) {
+      if (res.status === 403 || res.status === 503) {
+        return extractTextViaBrowser(url, body, options);
+      }
       return fallbackOrUnavailable(body, `${options.notePrefix}-http-${res.status}`, fallbackBody);
     }
 
     const html = await res.text();
+    if (isBrowserChallengeHtml(html)) {
+      return extractTextViaBrowser(url, body, options);
+    }
     const $ = cheerio.load(html);
     removeNodes($, [
       "script",
@@ -261,7 +278,11 @@ async function loadPageHtmlInBrowser(url: string): Promise<string> {
       waitUntil: "domcontentloaded",
       timeout: BROWSER_TIMEOUT_MS,
     });
+    await page.waitForURL((currentUrl) => !currentUrl.toString().includes("__cf_chl"), {
+      timeout: 15_000,
+    }).catch(() => undefined);
     await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => undefined);
+    await page.waitForTimeout(1500).catch(() => undefined);
     return await page.content();
   } finally {
     await page.close().catch(() => undefined);
@@ -315,6 +336,145 @@ async function extractTextViaBrowser(
     };
   } catch (err: any) {
     return fallbackOrUnavailable(body, `${options.notePrefix}-${err.message?.slice(0, 200) ?? "browser-failed"}`, fallbackBody);
+  }
+}
+
+async function extractInvestingViaBrowser(url: string, body: string | null): Promise<ExtractionResult> {
+  if (browserHtmlLoaderForTests) {
+    return extractTextViaBrowser(url, body, {
+      notePrefix: "investing",
+      selectors: [
+        '[data-test="article-body"]',
+        ".articlePage",
+        ".WYSIWYG.articlePage",
+        "article",
+        "#__next article",
+        "main",
+      ],
+      removeSelectors: [
+        "header", "footer", "nav", "aside",
+        '[class*="ad-"]', '[class*="Ad-"]',
+        '[class*="newsletter"]', '[class*="related"]',
+        '[class*="comment"]', '[class*="social"]',
+        ".relatedArticles", ".articleFooter",
+      ],
+      clipMarkers: [
+        "Related Articles",
+        "Continue Reading on",
+        "This article was written by",
+        "Sign up for our free newsletter",
+      ],
+      fallbackBody: false,
+    });
+  }
+
+  try {
+    const browser = await getBrowser();
+    const page = await browser.newPage({
+      userAgent: `${UA} Safari/537.36`,
+      locale: "en-US",
+    });
+
+    try {
+      await page.goto(url, {
+        waitUntil: "domcontentloaded",
+        timeout: BROWSER_TIMEOUT_MS,
+      });
+      await page.waitForURL((currentUrl) => !currentUrl.toString().includes("__cf_chl"), {
+        timeout: 15_000,
+      }).catch(() => undefined);
+      await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => undefined);
+      await page.waitForSelector('[data-test="article-body"], .articlePage, article, main', {
+        timeout: 15_000,
+      }).catch(() => undefined);
+      await page.waitForTimeout(1500).catch(() => undefined);
+
+      const extracted = await page.evaluate(() => {
+        const container = document.querySelector('[data-test="article-body"]')
+          ?? document.querySelector(".articlePage")
+          ?? document.querySelector("article")
+          ?? document.querySelector("main");
+        const headline = (document.querySelector("h1")?.textContent || document.title || "")
+          .replace(/\s+/g, " ")
+          .trim();
+        const bodyText = (document.body?.innerText || "").replace(/\s+/g, " ").trim();
+
+        let containerText = "";
+        if (container instanceof HTMLElement) {
+          const clone = container.cloneNode(true);
+          if (clone instanceof HTMLElement) {
+            clone.querySelectorAll([
+              "script",
+              "style",
+              "noscript",
+              "svg",
+              "iframe",
+              "header",
+              "footer",
+              "nav",
+              "aside",
+              '[class*="ad-"]',
+              '[class*="Ad-"]',
+              '[class*="newsletter"]',
+              '[class*="related"]',
+              '[class*="comment"]',
+              '[class*="social"]',
+              ".relatedArticles",
+              ".articleFooter",
+            ].join(",")).forEach((node) => node.remove());
+
+            const lines = Array.from(clone.querySelectorAll("p, h2, h3, li"))
+              .map((node) => (node.textContent || "").replace(/\s+/g, " ").trim())
+              .filter(Boolean);
+
+            containerText = lines.join("\n\n") || (clone.innerText || "").replace(/\s+/g, " ").trim();
+          }
+        }
+
+        return { headline, bodyText, containerText };
+      });
+
+      let candidateText = extracted.containerText;
+
+      if (candidateText.length < 200 && extracted.bodyText) {
+        const headlineIndex = extracted.headline ? extracted.bodyText.indexOf(extracted.headline) : -1;
+        candidateText = headlineIndex >= 0
+          ? extracted.bodyText.slice(headlineIndex + extracted.headline.length)
+          : extracted.bodyText;
+      }
+
+      const clipped = clipAtMarkers(cleanPlainText(candidateText), [
+        "Related Articles",
+        "Continue Reading on",
+        "This article was written by",
+        "Sign up for our free newsletter",
+        "Latest comments",
+        "Comment Guidelines",
+        "Loading next article",
+        "Most Popular Articles",
+        "Market Movers",
+        "Investing Challenges",
+      ]);
+
+      if (!clipped) {
+        return fallbackOrUnavailable(body, "investing-no-body", false);
+      }
+
+      if (clipped.length < 200) {
+        return fallbackOrUnavailable(body, "investing-too-short", false);
+      }
+
+      return {
+        fullText: clipped,
+        extractionStatus: "success",
+        extractionNote: "investing-browser",
+        wordCount: countWords(clipped),
+      };
+    } finally {
+      await page.close().catch(() => undefined);
+    }
+  } catch (err: any) {
+    return fallbackOrUnavailable(body, `investing-${err.message?.slice(0, 200) ?? "browser-failed"}`, false);
   }
 }
 
@@ -777,7 +937,7 @@ export async function extractByDomain(
   body?: string | null,
   options?: ExtractByDomainOptions,
 ): Promise<ExtractionResult> {
-  const pub = (publisher ?? "").replace(/\s+/g, " ").trim().toUpperCase();
+  const pub = canonicalizePublisherLabel(publisher ?? "");
 
   let resolvedUrl = options?.originUrl?.trim() || "";
   if (!resolvedUrl && options?.sourceType === "company_news") {
@@ -785,7 +945,10 @@ export async function extractByDomain(
   }
 
   const effectiveUrl = resolvedUrl || url;
-  const effectivePub = resolvedUrl ? derivePublisher(resolvedUrl) : pub;
+  const derivedPub = effectiveUrl ? derivePublisher(effectiveUrl) : "UNKNOWN";
+  const effectivePub = resolvedUrl
+    ? derivedPub
+    : (derivedPub === "INVESTING" ? derivedPub : pub);
 
   if (options?.sourceType === "company_news") {
     let companyResult: ExtractionResult;
@@ -1225,31 +1388,7 @@ export async function extractByDomain(
       return extractSecEdgar(effectiveUrl, body ?? null);
 
     case "INVESTING":
-      return extractTextViaHttp(effectiveUrl, body ?? null, {
-        notePrefix: "investing",
-        selectors: [
-          '[data-test="article-body"]',
-          ".articlePage",
-          ".WYSIWYG.articlePage",
-          "article",
-          "#__next article",
-          "main",
-        ],
-        removeSelectors: [
-          "header", "footer", "nav", "aside",
-          '[class*="ad-"]', '[class*="Ad-"]',
-          '[class*="newsletter"]', '[class*="related"]',
-          '[class*="comment"]', '[class*="social"]',
-          ".relatedArticles", ".articleFooter",
-        ],
-        clipMarkers: [
-          "Related Articles",
-          "Continue Reading on",
-          "This article was written by",
-          "Sign up for our free newsletter",
-        ],
-        fallbackBody: false,
-      });
+      return extractInvestingViaBrowser(effectiveUrl, body ?? null);
 
     default:
       return bodyFallback(body ?? null, `no-scraper: ${effectivePub || "(empty)"}`);

@@ -20,7 +20,7 @@
 ### 인증 규칙
 - **REST**: `Authorization: Bearer <API_KEY>`
 - **WebSocket**: `wss://ws.rtpr.io?apiKey=<API_KEY>`
-- API 키는 `ai_agent_plan/ptpr_api_key/ptpr_api_key` 같은 시크릿 파일에서 읽고, 로그/문서/예시 출력에 실제 값을 노출하지 않는다.
+- API 키는 `ai_agent_plan/api_key_rtpr/api_key_rtpr` 같은 시크릿 파일에서 읽고, 로그/문서/예시 출력에 실제 값을 노출하지 않는다.
 - 브라우저 클라이언트 코드에 직접 키를 넣지 않는다. production에서는 서버사이드에서만 연결한다.
 
 ### 제한 / 운영 규칙

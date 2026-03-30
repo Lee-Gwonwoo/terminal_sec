@@ -69,6 +69,31 @@
 - 사용자 확인 후에만 `✅`로 올린다.
 - 이번 plan 문서 생성 시점에는 구현을 시작하지 않았으므로 세부 단계 상태는 기본적으로 `⬜`다.
 
+### PLAN CHANGE #1 (2026-03-30)
+- Investing 목록/본문 수집은 단순 HTTP HTML fetch만으로는 안정적으로 동작하지 않았다.
+- 실제 런타임에서 Investing.com이 Cloudflare JavaScript challenge를 반환해 plain fetch parser가 0건을 만들었다.
+- 따라서 현재 구현 기준은 다음으로 조정한다.
+  - 목록 수집: Playwright headless browser fallback으로 live DOM에서 기사 title/summary/time를 직접 추출
+  - 본문 수집: `fulltextExtractors.ts`에서 browser fallback 허용
+  - custom preflight: category slug가 아니라 실제 `[][][]source_type[][][]` 값으로 count 집계
+
+### PLAN CHANGE #2 (2026-03-30)
+- 실수집 후 확인 결과, 일부 Investing row는 `hasFullText=true`여도 실제로는 `body-fallback (no-scraper: INVESTING.COM)` 경로를 타고 있었다.
+- 원인은 기사 URL host가 `investing.com`인데 raw `publisher` 값이 `Investing.com`으로 저장되어 `case "INVESTING"` extractor dispatch와 불일치한 점이었다.
+- 또한 Investing 시각은 backend에 ET naive ISO로 저장되는데, 프론트 `InvestingNewsWindow`는 이를 `new Date(...)`로 다시 파싱해 로컬 타임존 영향을 받을 수 있었다.
+- 따라서 현재 구현 기준은 다음으로 조정한다.
+  - fulltext dispatch: `investing.com` host와 `Investing.com` label을 모두 `INVESTING`으로 canonicalize
+  - Investing 시간 표시: Finnhub와 동일하게 ET naive string을 직접 표시하는 formatter 사용
+  - category date filtering: date string 비교로 ET naive 저장 규칙과 일치시킴
+
+### PLAN CHANGE #3 (2026-03-30)
+- 새로 수집되는 Investing row만 ET로 맞추면 기존 DB row는 계속 UTC naive 상태로 남아 UI/필터링이 어긋난다.
+- 따라서 기존 DB를 한 번만 보정하는 startup migration을 추가한다.
+- 현재 구현 기준은 다음과 같다.
+  - `news_items.source='INVESTING'` 기존 row를 UTC naive로 간주해 ET naive로 1회 변환
+  - migration marker를 `update_status`에 저장해 재시작 시 중복 변환 방지
+  - cutoff를 두어 2026-03-30 timestamp-fix 이전에 적재된 row만 보정
+
 ### 아키텍처(상위)
 - 수집 입력:
   - `https://www.investing.com/news/stock-market-news`
@@ -135,9 +160,9 @@
 #### ⏳ Step 1 — Investing 저장 계약과 API contract 고정
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 1-1 | Investing source/source_type/publisher/origin_url 저장 규칙을 확정 | `ai_agent_plan/investing_news_window/plan.md` | 문서 결정 섹션 확인 | ⬜ |
-| 1-2 | `GET /api/news` 재사용 방식과 query 조합을 확정 | `ai_agent_plan/investing_news_window/plan.md` | source_names/source_type 규칙 확인 | ⬜ |
-| 1-3 | category filter와 update menu 기본 UX를 문서로 고정 | `ai_agent_plan/investing_news_window/plan.md` | Step 설명과 결정 항목 일치 확인 | ⬜ |
+| 1-1 | Investing source/source_type/publisher/origin_url 저장 규칙을 확정 | `ai_agent_plan/investing_news_window/plan.md` | 문서 결정 섹션 확인 | ⏳ |
+| 1-2 | `GET /api/news` 재사용 방식과 query 조합을 확정 | `ai_agent_plan/investing_news_window/plan.md` | source_names/source_type 규칙 확인 | ⏳ |
+| 1-3 | category filter와 update menu 기본 UX를 문서로 고정 | `ai_agent_plan/investing_news_window/plan.md` | Step 설명과 결정 항목 일치 확인 | ⏳ |
 
 - `1-1` 목적: backend와 frontend가 같은 source 이름을 쓰게 만든다.
   설명: `INVESTING` / `investing_stock_market_news` / `investing_cryptocurrency_news`를 공통 기준으로 고정한다.
@@ -165,10 +190,10 @@
 #### ⏳ Step 2 — backend Investing category 수집기와 pull endpoint 추가
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 2-1 | category list HTML parser와 detail URL normalizer를 구현 | `terminal/backend/src/services/investingNewsProvider.ts` | 샘플 HTML에서 기사 목록 파싱 확인 | ⬜ |
-| 2-2 | recent/custom/category 입력을 받는 `POST /api/news/pull-investing` route 추가 | `terminal/backend/src/server.ts` | endpoint 200 또는 validation 400 확인 | ⬜ |
-| 2-3 | page 순회, dedupe, retry, maxPages 정책을 job runner에 반영 | `terminal/backend/src/server.ts`, `terminal/backend/src/services/investingNewsProvider.ts` | job log에서 page/category 진행 확인 | ⬜ |
-| 2-4 | `news_items` insert를 `source='INVESTING'` 규칙으로 연결 | `terminal/backend/src/server.ts` | `GET /api/news?source_names=INVESTING` 조회 확인 | ⬜ |
+| 2-1 | category list HTML parser와 detail URL normalizer를 구현 | `terminal/backend/src/services/investingNewsProvider.ts` | 샘플 HTML에서 기사 목록 파싱 확인 | ⏳ |
+| 2-2 | recent/custom/category 입력을 받는 `POST /api/news/pull-investing` route 추가 | `terminal/backend/src/server.ts` | endpoint 200 또는 validation 400 확인 | ⏳ |
+| 2-3 | page 순회, dedupe, retry, maxPages 정책을 job runner에 반영 | `terminal/backend/src/server.ts`, `terminal/backend/src/services/investingNewsProvider.ts` | job log에서 page/category 진행 확인 | ⏳ |
+| 2-4 | `news_items` insert를 `source='INVESTING'` 규칙으로 연결 | `terminal/backend/src/server.ts` | `GET /api/news?source_names=INVESTING` 조회 확인 | ⏳ |
 
 - `2-1` 목적: Investing 카테고리 페이지를 앱이 읽을 수 있게 만든다.
   설명: 목록 페이지에서 기사 제목, URL, 발행 시각, 요약, category slug를 추출하는 parser를 만든다.
@@ -202,9 +227,9 @@
 #### ⏳ Step 3 — Investing 기사 full text 경로 추가
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 3-1 | Investing article detail extractor를 `fulltextExtractors.ts`에 추가 | `terminal/backend/src/services/fulltextExtractors.ts` | 샘플 기사 본문 추출 확인 | ⬜ |
-| 3-2 | Investing source_type 대상 full text update payload를 정의 | `ai_agent_plan/investing_news_window/plan.md` | sourceType/sourceName 규칙 확인 | ⬜ |
-| 3-3 | `POST /api/news/fulltext/update` 재사용으로 본문 저장 흐름을 확정 | `terminal/backend/src/server.ts` 또는 기존 공용 route 호출부 영향 확인 | investing row 대상 fulltext job 동작 확인 | ⬜ |
+| 3-1 | Investing article detail extractor를 `fulltextExtractors.ts`에 추가 | `terminal/backend/src/services/fulltextExtractors.ts` | 샘플 기사 본문 추출 확인 | ⏳ |
+| 3-2 | Investing source_type 대상 full text update payload를 정의 | `ai_agent_plan/investing_news_window/plan.md` | sourceType/sourceName 규칙 확인 | ⏳ |
+| 3-3 | `POST /api/news/fulltext/update` 재사용으로 본문 저장 흐름을 확정 | `terminal/backend/src/server.ts` 또는 기존 공용 route 호출부 영향 확인 | investing row 대상 fulltext job 동작 확인 | ⏳ |
 
 - `3-1` 목적: Finnhub 창과 비슷한 full text modal 경험을 유지한다.
   설명: Investing 기사 상세 페이지에서 headline/footer/ad를 제외한 본문 영역을 추출한다.
@@ -233,10 +258,10 @@
 #### ⏳ Step 4 — Investing News Window 프론트 추가
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 4-1 | `FinnhubNewsWindow`를 기준으로 `InvestingNewsWindow` 컴포넌트 초안을 만든다 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/InvestingNewsWindow.tsx` | 컴포넌트 렌더링 확인 | ⬜ |
-| 4-2 | source filter를 category filter(`all`, `stock-market-news`, `cryptocurrency-news`)로 교체 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/InvestingNewsWindow.tsx` | filter 메뉴 표시 확인 | ⬜ |
-| 4-3 | update 메뉴를 Investing 전용 항목으로 교체 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/InvestingNewsWindow.tsx` | update 메뉴 항목 확인 | ⬜ |
-| 4-4 | `GET /api/news`와 full text job 연동을 Investing source 기준으로 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/InvestingNewsWindow.tsx` | 목록/본문 modal 동작 확인 | ⬜ |
+| 4-1 | `FinnhubNewsWindow`를 기준으로 `InvestingNewsWindow` 컴포넌트 초안을 만든다 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/InvestingNewsWindow.tsx` | 컴포넌트 렌더링 확인 | ⏳ |
+| 4-2 | source filter를 category filter(`all`, `stock-market-news`, `cryptocurrency-news`)로 교체 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/InvestingNewsWindow.tsx` | filter 메뉴 표시 확인 | ⏳ |
+| 4-3 | update 메뉴를 Investing 전용 항목으로 교체 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/InvestingNewsWindow.tsx` | update 메뉴 항목 확인 | ⏳ |
+| 4-4 | `GET /api/news`와 full text job 연동을 Investing source 기준으로 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/InvestingNewsWindow.tsx` | 목록/본문 modal 동작 확인 | ⏳ |
 
 - `4-1` 목적: 기존 창과 사용감이 비슷한 새 창을 빠르게 만든다.
   설명: column/bookmark/job panel/full text modal/display mode 골격은 최대한 그대로 복사하고 Investing 전용 상태만 남긴다.
@@ -271,9 +296,9 @@
 #### ⏳ Step 5 — 탭 시스템 연결, 문서 동기화, 전체 검증
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 5-1 | 새 `WindowType`와 Add Tab/App title/DraggableWindow lazy import를 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/types.ts`, `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/AddTabModal.tsx`, `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DraggableWindow.tsx`, `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/App.tsx` | 새 탭 생성 확인 | ⬜ |
-| 5-2 | frontend/backend prompt 문서에 새 창과 Investing pull 흐름을 반영 | `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`, `terminal/backend_prompt.md` | 문서 검색 확인 | ⬜ |
-| 5-3 | 정적 분석/build/test/runtime 검증을 수행 | 관련 변경 파일 전체 | `get_errors`, build, test, dev runtime 확인 | ⬜ |
+| 5-1 | 새 `WindowType`와 Add Tab/App title/DraggableWindow lazy import를 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/types.ts`, `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/AddTabModal.tsx`, `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DraggableWindow.tsx`, `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/App.tsx` | 새 탭 생성 확인 | ⏳ |
+| 5-2 | frontend/backend prompt 문서에 새 창과 Investing pull 흐름을 반영 | `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`, `terminal/backend_prompt.md` | 문서 검색 확인 | ⏳ |
+| 5-3 | 정적 분석/build/test/runtime 검증을 수행 | 관련 변경 파일 전체 | `get_errors`, build, test, dev runtime 확인 | ⏳ |
 
 - `5-1` 목적: 사용자가 실제로 새 창을 열 수 있게 만든다.
   설명: 탭 생성 모달, app 제목, lazy import, window switch를 한 번에 연결한다.

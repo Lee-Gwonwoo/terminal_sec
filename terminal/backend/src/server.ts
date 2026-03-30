@@ -100,7 +100,12 @@ import { fetchFmpStockNewsByTicker } from "./services/fmpStockNewsProvider.js";
 import { fetchFmpSecFilings } from "./services/fmpSecFilingProvider.js";
 import { generateSecFilingSummary } from "./services/secFilingSummary.js";
 import { getEtDateString } from "./services/timeUtils.js";
-import { fetchInvestingCategory, fetchAllInvestingCategories, type InvestingCategory } from "./services/investingNewsProvider.js";
+import {
+  fetchInvestingCategory,
+  fetchAllInvestingCategories,
+  investingCategoryToSourceType,
+  type InvestingCategory,
+} from "./services/investingNewsProvider.js";
 import {
   clampFinnhubCompanyDataConcurrency,
   getFinnhubCompanyDataDefaults,
@@ -260,6 +265,7 @@ type TickerListRow = {
   name: string | null;
   sector: string | null;
   industry: string | null;
+  addedAt: string | null;
   ipoDate: string | null;
   marketCap: number | null;
   floatPct: number | null;
@@ -492,6 +498,7 @@ function mapCsvTickerRowsToListRows(rows: Array<{ ticker: string; name: string |
     name: row.name,
     sector: row.sector,
     industry: row.industry,
+    addedAt: null,
     ipoDate: null,
     marketCap: null,
     floatPct: null,
@@ -533,6 +540,7 @@ async function getDefaultUniverseRows(): Promise<TickerListRow[]> {
         name: string | null;
         sector: string | null;
         industry: string | null;
+        added_at: string | null;
         ipo_date: string | null;
         market_cap: number | null;
         float_pct: number | null;
@@ -542,6 +550,7 @@ async function getDefaultUniverseRows(): Promise<TickerListRow[]> {
         institutional_source: string | null;
       }>>(
         `SELECT s.ticker, s.exchange, s.name, s.sector, s.industry,
+          ui.created_at AS added_at,
                 (
                   SELECT cp.ipo_date
                   FROM company_profiles cp
@@ -604,6 +613,7 @@ async function getDefaultUniverseRows(): Promise<TickerListRow[]> {
           name: row.name ?? null,
           sector: row.sector ?? null,
           industry: row.industry ?? null,
+          addedAt: row.added_at ?? null,
           ipoDate: row.ipo_date ?? null,
           marketCap: row.market_cap ?? null,
           floatPct: row.float_pct ?? null,
@@ -628,6 +638,7 @@ async function getDefaultUniverseRows(): Promise<TickerListRow[]> {
       name: null,
       sector: null,
       industry: null,
+      addedAt: null,
       ipoDate: null,
       marketCap: null,
       floatPct: null,
@@ -2675,6 +2686,7 @@ app.post("/api/news/pull-investing/preflight-custom", async (req, res, next) => 
       input.category === "all"
         ? ["stock-market-news", "cryptocurrency-news"]
         : [input.category];
+    const sourceTypes = categories.map((category) => investingCategoryToSourceType(category));
     const placeholders = categories.map(() => "?").join(",");
     const rows = await getDb().all<{ source_type: string; item_count: number }[]>(
       `SELECT source_type, COUNT(*) AS item_count
@@ -2684,7 +2696,7 @@ app.post("/api/news/pull-investing/preflight-custom", async (req, res, next) => 
          AND published_at >= ?
          AND published_at <= ?
        GROUP BY source_type`,
-      [...categories, requestedRange.from, `${requestedRange.to}T23:59:59.999Z`],
+      [...sourceTypes, requestedRange.from, `${requestedRange.to}T23:59:59.999Z`],
     );
     res.json({
       source: "INVESTING",
@@ -2693,7 +2705,7 @@ app.post("/api/news/pull-investing/preflight-custom", async (req, res, next) => 
       executionMode: "summary-only",
       categories: categories.map((category) => ({
         category,
-        existingItemsInRange: rows.find((row) => row.source_type === category)?.item_count ?? 0,
+        existingItemsInRange: rows.find((row) => row.source_type === investingCategoryToSourceType(category))?.item_count ?? 0,
       })),
     });
   } catch (error) {
@@ -2742,6 +2754,7 @@ app.post("/api/news/pull-investing", async (req, res, next) => {
       | undefined;
 
     if (isCustom) {
+      const sourceTypes = categories.map((category) => investingCategoryToSourceType(category));
       const placeholders = categories.map(() => "?").join(",");
       const rows = await getDb().all<{ source_type: string; item_count: number }[]>(
         `SELECT source_type, COUNT(*) AS item_count
@@ -2751,7 +2764,7 @@ app.post("/api/news/pull-investing", async (req, res, next) => {
            AND published_at >= ?
            AND published_at <= ?
          GROUP BY source_type`,
-        [...categories, effectiveFrom, `${effectiveTo}T23:59:59.999Z`],
+        [...sourceTypes, effectiveFrom, `${effectiveTo}T23:59:59.999Z`],
       );
       customSummary = {
         route: "/api/news/pull-investing",
@@ -2759,7 +2772,7 @@ app.post("/api/news/pull-investing", async (req, res, next) => {
         executionMode: "summary-only",
         categories: categories.map((category) => ({
           category,
-          existingItemsInRange: rows.find((row) => row.source_type === category)?.item_count ?? 0,
+          existingItemsInRange: rows.find((row) => row.source_type === investingCategoryToSourceType(category))?.item_count ?? 0,
         })),
       };
     }

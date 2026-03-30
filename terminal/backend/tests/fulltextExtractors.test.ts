@@ -214,6 +214,133 @@ describe("fulltextExtractors", () => {
     expect(result.fullText).not.toContain("Related News");
   });
 
+  it("should extract Investing article body via browser fallback when fetch returns a challenge page", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => `
+          <html>
+            <body>
+              <div class="h2"><span id="challenge-error-text">Enable JavaScript and cookies to continue</span></div>
+              <script>window._cf_chl_opt = {};</script>
+            </body>
+          </html>
+        `,
+      }),
+    );
+    setBrowserHtmlLoaderForTests(async () => `
+      <html>
+        <body>
+          <main>
+            <article>
+              <div data-test="article-body">
+                <p>Investing paragraph one covers a material market-moving update with enough body text to pass the extractor threshold.</p>
+                <p>Investing paragraph two adds details about guidance, revenue outlook, and investor reaction for the browser fallback path.</p>
+                <p>Investing paragraph three adds enough length so the full text extractor does not fall back to a short summary body.</p>
+                <div>Related Articles</div>
+              </div>
+            </article>
+          </main>
+        </body>
+      </html>
+    `);
+
+    const result = await extractByDomain("https://www.investing.com/news/stock-market-news/example-123", "INVESTING", "short fallback body");
+
+    expect(result.extractionStatus).toBe("success");
+    expect(result.extractionNote).toBe("investing-browser");
+    expect(result.fullText).toContain("material market-moving update");
+    expect(result.fullText).not.toContain("Related Articles");
+  });
+
+  it("should normalize Investing.com publisher labels into the Investing scraper path", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => `
+          <html>
+            <body>
+              <div class="h2"><span id="challenge-error-text">Enable JavaScript and cookies to continue</span></div>
+              <script>window._cf_chl_opt = {};</script>
+            </body>
+          </html>
+        `,
+      }),
+    );
+    setBrowserHtmlLoaderForTests(async () => `
+      <html>
+        <body>
+          <main>
+            <article>
+              <div data-test="article-body">
+                <p>Investing host normalization paragraph one has enough content to trigger the Investing extractor.</p>
+                <p>Investing host normalization paragraph two confirms that a raw publisher label of Investing.com still resolves correctly.</p>
+                <p>Investing host normalization paragraph three keeps the result above the minimum full text threshold.</p>
+              </div>
+            </article>
+          </main>
+        </body>
+      </html>
+    `);
+
+    const result = await extractByDomain(
+      "https://www.investing.com/news/stock-market-news/example-456",
+      "Investing.com",
+      "short fallback body",
+    );
+
+    expect(result.extractionStatus).toBe("success");
+    expect(result.extractionNote).toBe("investing-browser");
+    expect(result.fullText).toContain("raw publisher label of Investing.com");
+  });
+
+  it("should prefer the Investing URL host over a Reuters publisher label", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => `
+          <html>
+            <body>
+              <div class="h2"><span id="challenge-error-text">Enable JavaScript and cookies to continue</span></div>
+              <script>window._cf_chl_opt = {};</script>
+            </body>
+          </html>
+        `,
+      }),
+    );
+    setBrowserHtmlLoaderForTests(async () => `
+      <html>
+        <body>
+          <main>
+            <article>
+              <div data-test="article-body">
+                <p>Investing-hosted Reuters label paragraph one should still take the Investing scraper path.</p>
+                <p>Paragraph two proves that URL host precedence is applied before the raw publisher label.</p>
+                <p>Paragraph three keeps the result above the minimum full text threshold for the regression test.</p>
+              </div>
+            </article>
+          </main>
+        </body>
+      </html>
+    `);
+
+    const result = await extractByDomain(
+      "https://www.investing.com/news/stock-market-news/example-789",
+      "Reuters",
+      "short fallback body",
+    );
+
+    expect(result.extractionStatus).toBe("success");
+    expect(result.extractionNote).toBe("investing-browser");
+    expect(result.fullText).toContain("Investing-hosted Reuters label");
+  });
+
   it("should resolve Finnhub company_news redirect and extract Yahoo article body", async () => {
     vi.stubGlobal(
       "fetch",
