@@ -182,6 +182,108 @@
 - 상태:
   - 구현 및 1차 검증 완료, 사용자 확인 대기.
 
+**작성 시각:** 2026-03-30 13:18 (local)
+
+### Daily Change History Window custom change를 date-range popup + preflight로 변경
+
+- 생성/수정 파일:
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DailyChangeHistoryWindow.tsx`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+  - `ai_agent_plan/daily_change_history_window/plan.md`
+  - `ai_agent_plan/daily_change_history_window/agent_log.md`
+- 수행 내용:
+  - `Custom Change Update` 버튼을 즉시 실행 방식에서 date-range popup 방식으로 변경했다.
+  - popup 안에서 `From`, `To`를 직접 선택할 수 있게 했고, `Calculate Scope`로 custom preflight 결과를 표시하도록 구현했다.
+  - preflight는 범위 내 전체 뉴스 row 수, 기존 change 보유 row 수, 예상 update row 수를 보여준다.
+  - `Start Custom Update`는 선택 기간 전체를 대상으로 기존 `/api/news/change/update-custom` route를 실행한다.
+  - 실행 후에는 기존 창 내부 polling/auto-refresh 흐름을 그대로 사용한다.
+- 검증 예정:
+  - 정적 분석: `DailyChangeHistoryWindow.tsx` 에러 0건
+  - frontend build 성공 (`terminal_ui_ver2_finhub npm run build`)
+  - custom preflight 검증 성공: `from=2026-03-20`, `to=2026-03-27` 호출에서 `totalRowsInRange=15118`, `rowsExpectedToUpdate=5970` 확인
+  - custom route 검증 성공: 같은 range로 `POST /api/news/change/update-custom` 호출 시 `jobId=90238e3b-b5a0-4e46-91e4-5846daa9bd8e` 반환
+  - 브라우저 시각 확인은 사용자 확인 대기
+- 상태:
+  - 구현 및 1차 검증 완료, 사용자 확인 대기.
+
+**작성 시각:** 2026-03-30 13:15 (local)
+
+### Daily Change History Window custom change 버튼 + close-from-open 색상 규칙 추가
+
+- 생성/수정 파일:
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DailyChangeHistoryWindow.tsx`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+  - `ai_agent_plan/daily_change_history_window/plan.md`
+  - `ai_agent_plan/daily_change_history_window/agent_log.md`
+- 수행 내용:
+  - Daily Change History Window에 `Custom Change Update` 버튼을 추가했다.
+  - 이 버튼은 현재 선택된 날짜를 `from/to`로 사용해 `POST /api/news/change/update-custom` route를 직접 호출한다.
+  - 기존 창 내부 change action polling/auto-refresh 흐름에 custom job도 포함되도록 확장했다.
+  - table의 `Close From Open %` cell을 값 부호 기준으로 `+` 초록, `-` 빨강, `null` amber tone으로 표시하도록 수정했다.
+  - frontend prompt와 plan change 항목을 함께 동기화했다.
+- 검증 예정:
+  - 정적 분석: `DailyChangeHistoryWindow.tsx` 에러 0건
+  - frontend build 성공 (`terminal_ui_ver2_finhub npm run build`)
+  - custom route 검증 성공: `POST /api/news/change/update-custom`가 `jobId=f941f4f1-97d0-49a9-b7c0-21bbdb5c1bb1` 반환
+  - 브라우저 시각 확인은 사용자 확인 대기
+- 상태:
+  - 구현 및 1차 검증 완료, 사용자 확인 대기.
+
+**작성 시각:** 2026-03-30 13:23 (local)
+
+### Daily Change History custom popup의 `fmpConcurrency` validation 에러 수정
+
+- 생성/수정 파일:
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DailyChangeHistoryWindow.tsx`
+  - `ai_agent_plan/daily_change_history_window/plan.md`
+  - `ai_agent_plan/daily_change_history_window/agent_log.md`
+- 수행 내용:
+  - 사용자 첨부 화면 기준으로 custom popup에서 `fmpConcurrency`가 `0`으로 전송돼 backend `min(1)` 검증에 걸리는 문제를 확인했다.
+  - 원인은 `change-fmp-concurrency` localStorage 값이 invalid여도 Daily Change History Window가 그대로 payload에 실어 보내는 것이었다.
+  - 프런트에 범위 보정 helper를 추가해 `change-fmp-concurrency`는 `1~20`, `fmp-request-interval-ms`는 `0~5000` 범위를 벗어나면 각각 기본값 `5`, `250`으로 fallback 하도록 수정했다.
+  - `Recent Change Update`, `FMP Missing Change Fill`, `Custom Change Update`가 모두 같은 sanitized option helper를 재사용하도록 정리했다.
+  - backend가 구조화된 validation error 배열을 내려줄 때 popup에 raw JSON 전체가 보이지 않도록, 첫 번째 핵심 메시지를 읽기 쉬운 문자열로 변환하는 에러 추출 로직을 추가했다.
+- 사용자가 직접 확인할 수 있는 검증 방법:
+  - Daily Change History Window에서 `Custom Change Update`를 다시 열고 `Calculate Scope`를 누른다.
+  - 이전처럼 빨간 박스에 raw JSON 검증 배열이 뜨지 않고, 정상 preflight 수치가 보이는지 확인한다.
+  - 필요하면 브라우저 개발자도구 Application > Local Storage에서 `change-fmp-concurrency=0` 같은 값이 남아 있어도 popup이 정상 동작하는지 확인한다.
+- 문제점/리스크 + 완화 방안:
+  - localStorage에 다른 invalid 값이 추가로 남아 있을 수 있다. 완화: 이번 helper가 두 핵심 옵션 모두 범위 보정한다.
+  - 브라우저 시각 확인은 아직 사용자 확인이 필요하다. 완화: build + API 검증 완료 후 사용자에게 popup 재확인을 요청한다.
+  - backend validation error 형식이 바뀌면 메시지 추출 규칙이 일부 제한적일 수 있다. 완화: 배열/문자열 외 형식은 `HTTP status`로 fallback 하게 유지했다.
+- 검증 표:
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `DailyChangeHistoryWindow.tsx` `get_errors` 0건 |
+| 빌드 | ✅ | frontend `npm.cmd run build`, backend 기존 build 상태 유지 |
+| 자동 테스트 | ✅ | 이번 수정 범위는 프런트 payload/에러 처리라 기존 테스트 추가 없음, 기존 실패 신호 없음 |
+| 런타임 통합 | ✅ | `POST /api/news/change/update-custom/preflight`를 `from/to`만 포함한 payload로 호출해 정상 summary 응답 확인. UI는 코드 리뷰 + API 검증으로 대체, 브라우저 시각 확인은 사용자 위임 |
+- 상태:
+  - 수정 및 1차 검증 완료, 사용자 확인 대기.
+
+**작성 시각:** 2026-03-30 13:07 (local)
+
+### Daily Change History Window에 change update 버튼 직접 노출
+
+- 생성/수정 파일:
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DailyChangeHistoryWindow.tsx`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+  - `ai_agent_plan/daily_change_history_window/plan.md`
+  - `ai_agent_plan/daily_change_history_window/agent_log.md`
+- 수행 내용:
+  - Daily Change History Window 헤더에 `Recent Change Update`, `FMP Missing Change Fill` 버튼을 추가했다.
+  - 두 버튼은 Data Control과 같은 backend route를 직접 호출하도록 연결했다.
+  - 창 내부에서 간단한 job 상태 문구를 polling으로 보여주고, job 완료 시 현재 filter 기준으로 자동 refresh 되게 했다.
+  - 관련 frontend prompt와 plan change 항목을 함께 갱신했다.
+- 검증 예정:
+  - 정적 분석: `DailyChangeHistoryWindow.tsx` 에러 0건
+  - frontend build 성공 (`terminal_ui_ver2_finhub npm run build`)
+  - route target 검증 성공: `POST /api/news/change/update-recent-fmp-missing`가 `jobId=60929484-1ece-4dc6-bf59-7c9da7cb4357` 반환
+  - 브라우저 시각 확인은 사용자 확인 대기
+- 상태:
+  - 구현 및 1차 검증 완료, 사용자 확인 대기.
+
 **작성 시각:** 2026-03-30 13:01 (local)
 
 ### Daily Change History filter shorthand + apply 계산 + dual summary 확장
@@ -201,8 +303,12 @@
   - frontend Daily Change History Window의 filter input을 text 기반으로 바꾸고 shorthand 예시를 표시했다.
   - frontend summary 영역을 `Daily Change %`, `Close From Open %` 두 섹션으로 분리했다.
 - 검증 예정:
-  - backend/frontend build
-  - shorthand query와 dual summary 응답 shape API 확인
+  - backend build 성공 (`terminal npm run build`)
+  - frontend build 성공 (`terminal_ui_ver2_finhub npm run build`)
+  - shorthand query 검증 성공: `marketCapMin=1B&turnoverMin=100M` 호출에서 정상 응답 확인
+  - invalid suffix 검증 성공: `marketCapMin=abcQ` 호출에서 `400` 확인
+  - dual summary 검증 성공: `dailyChange.gainers=11`, `closeFromOpen.gainers=12` 확인
+  - 분리 분류 예시 확인: `VC`가 `dailyChangePct < 0`, `closeFromOpenPct > 0`로 반환됨
   - 브라우저 시각 확인은 사용자 확인 대기
 - 상태:
-  - 구현 완료, 검증 진행 중.
+  - 구현 및 1차 검증 완료, 사용자 확인 대기.

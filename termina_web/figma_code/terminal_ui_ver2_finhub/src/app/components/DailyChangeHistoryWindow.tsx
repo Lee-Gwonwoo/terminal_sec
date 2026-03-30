@@ -53,12 +53,39 @@ interface DailyChangeHistoryResponse {
   rows: DailyChangeHistoryRow[];
 }
 
+interface JobStatusResponse {
+  status: "running" | "done" | "failed" | "cancelled";
+  progress: { completed: number; total: number; pct: number };
+  error?: string;
+}
+
+interface CustomChangePreflightResponse {
+  requestedRange: { from: string; to: string };
+  totalRowsInRange: number;
+  rowsWithChangePct: number;
+  rowsExpectedToUpdate: number;
+}
+
+type ChangeActionKey = "recent" | "recentMissing";
+
+type ChangeActionState = {
+  jobId: string;
+  label: string;
+  status: "running" | "done" | "failed" | "cancelled";
+  message: string;
+} | null;
+
 type FilterDraft = {
   selectedDate: string;
   marketCapMin: string;
   marketCapMax: string;
   turnoverMin: string;
   turnoverMax: string;
+};
+
+type CustomRangeDraft = {
+  from: string;
+  to: string;
 };
 
 type VisibleColumnKey = "name" | "date" | "close" | "closeFromOpenPct" | "turnover" | "marketCap" | "industry";
@@ -256,6 +283,48 @@ function SummaryMetricSection({
   );
 }
 
+function readStoredNumberInRange(key: string, fallback: number, min: number, max: number): number {
+  try {
+    const raw = localStorage.getItem(key);
+    const value = Number(raw);
+    if (!Number.isFinite(value)) {
+      return fallback;
+    }
+    if (value < min || value > max) {
+      return fallback;
+    }
+    return value;
+  } catch {
+    return fallback;
+  }
+}
+
+function getStoredChangeUpdateOptions(): { fmpConcurrency: number; fmpRequestIntervalMs: number } {
+  return {
+    fmpConcurrency: readStoredNumberInRange("change-fmp-concurrency", 5, 1, 20),
+    fmpRequestIntervalMs: readStoredNumberInRange("fmp-request-interval-ms", 250, 0, 5000),
+  };
+}
+
+function extractErrorMessage(payload: any, status: number): string {
+  if (typeof payload?.error === "string" && payload.error.trim()) {
+    return payload.error;
+  }
+
+  if (Array.isArray(payload?.error) && payload.error.length > 0) {
+    const firstIssue = payload.error[0];
+    if (typeof firstIssue?.message === "string" && firstIssue.message.trim()) {
+      const path = Array.isArray(firstIssue?.path) && firstIssue.path.length > 0
+        ? `${String(firstIssue.path[0])}: `
+        : "";
+      return `${path}${firstIssue.message}`;
+    }
+    return JSON.stringify(payload.error);
+  }
+
+  return `HTTP ${status}`;
+}
+
 export function DailyChangeHistoryWindow({ onTickerClick }: DailyChangeHistoryWindowProps) {
   const [draftFilter, setDraftFilter] = useState<FilterDraft>(() => readStoredState());
   const [appliedFilter, setAppliedFilter] = useState<FilterDraft>(() => readStoredState());
@@ -265,6 +334,12 @@ export function DailyChangeHistoryWindow({ onTickerClick }: DailyChangeHistoryWi
   const [data, setData] = useState<DailyChangeHistoryResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [changeAction, setChangeAction] = useState<ChangeActionState>(null);
+  const [showCustomChangeModal, setShowCustomChangeModal] = useState(false);
+  const [customRangeDraft, setCustomRangeDraft] = useState<CustomRangeDraft>({ from: "", to: "" });
+  const [customPreflight, setCustomPreflight] = useState<CustomChangePreflightResponse | null>(null);
+  const [customModalLoading, setCustomModalLoading] = useState(false);
+  const [customModalError, setCustomModalError] = useState<string | null>(null);
 
   const loadHistory = useCallback(async (nextFilter: FilterDraft) => {
     setLoading(true);
@@ -320,6 +395,55 @@ export function DailyChangeHistoryWindow({ onTickerClick }: DailyChangeHistoryWi
     }
   }, [appliedFilter, sortDirection, sortKey, visibleColumns]);
 
+  useEffect(() => {
+    if (!changeAction?.jobId || changeAction.status !== "running") {
+      return;
+    }
+
+    const timer = window.setInterval(async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/jobs/${changeAction.jobId}`);
+        const payload = await response.json() as JobStatusResponse;
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        if (payload.status === "running") {
+          setChangeAction((current) => current && current.jobId === changeAction.jobId
+            ? {
+                ...current,
+                status: "running",
+                message: `${current.label}: ${payload.progress.completed}/${payload.progress.total || 0}`,
+              }
+            : current);
+          return;
+        }
+
+        window.clearInterval(timer);
+        const nextMessage = payload.status === "done"
+          ? `${changeAction.label}: completed`
+          : payload.status === "failed"
+            ? `${changeAction.label}: failed${payload.error ? ` - ${payload.error}` : ""}`
+            : `${changeAction.label}: cancelled`;
+        setChangeAction((current) => current && current.jobId === changeAction.jobId
+          ? { ...current, status: payload.status, message: nextMessage }
+          : current);
+        if (payload.status === "done") {
+          void loadHistory(appliedFilter);
+        }
+      } catch (pollError: any) {
+        window.clearInterval(timer);
+        setChangeAction((current) => current && current.jobId === changeAction.jobId
+          ? { ...current, status: "failed", message: `${current.label}: failed - ${pollError?.message || "job poll error"}` }
+          : current);
+      }
+    }, 2500);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [appliedFilter, changeAction, loadHistory]);
+
   const appliedFilterSummary = useMemo(() => {
     const parts: string[] = [];
     if (data?.selectedDate) {
@@ -361,6 +485,125 @@ export function DailyChangeHistoryWindow({ onTickerClick }: DailyChangeHistoryWi
     const cleared = { selectedDate: "", marketCapMin: "", marketCapMax: "", turnoverMin: "", turnoverMax: "" };
     setDraftFilter(cleared);
     await loadHistory(cleared);
+  };
+
+  const handleChangeUpdate = async (action: ChangeActionKey) => {
+    const label = action === "recent"
+      ? "Recent Change Update"
+      : "FMP Recent Missing Change Fill";
+    const url = action === "recent"
+      ? `${API_BASE}/api/news/change/update-recent`
+      : `${API_BASE}/api/news/change/update-recent-fmp-missing`;
+    const body = JSON.stringify(getStoredChangeUpdateOptions());
+
+    setChangeAction({ jobId: "", label, status: "running", message: `${label}: starting...` });
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(extractErrorMessage(payload, response.status));
+      }
+      setChangeAction({
+        jobId: String(payload.jobId),
+        label,
+        status: "running",
+        message: `${label}: queued (${payload.jobId})`,
+      });
+    } catch (startError: any) {
+      setChangeAction({
+        jobId: "",
+        label,
+        status: "failed",
+        message: `${label}: failed - ${startError?.message || "unable to start job"}`,
+      });
+    }
+  };
+
+  const openCustomChangeModal = () => {
+    const seedDate = draftFilter.selectedDate || data?.selectedDate || data?.defaultDate || "";
+    setCustomRangeDraft({ from: seedDate, to: seedDate });
+    setCustomPreflight(null);
+    setCustomModalError(null);
+    setShowCustomChangeModal(true);
+  };
+
+  const runCustomPreflight = async () => {
+    if (!customRangeDraft.from || !customRangeDraft.to) {
+      setCustomModalError("From/To 날짜를 모두 선택해야 한다.");
+      return;
+    }
+    setCustomModalLoading(true);
+    setCustomModalError(null);
+    setCustomPreflight(null);
+    try {
+      const options = getStoredChangeUpdateOptions();
+      const response = await fetch(`${API_BASE}/api/news/change/update-custom/preflight`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          from: customRangeDraft.from,
+          to: customRangeDraft.to,
+          ...options,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(extractErrorMessage(payload, response.status));
+      }
+      setCustomPreflight(payload);
+    } catch (preflightError: any) {
+      setCustomModalError(preflightError?.message || "Failed to calculate custom range scope");
+    } finally {
+      setCustomModalLoading(false);
+    }
+  };
+
+  const startCustomChangeUpdate = async () => {
+    if (!customRangeDraft.from || !customRangeDraft.to) {
+      setCustomModalError("From/To 날짜를 모두 선택해야 한다.");
+      return;
+    }
+    const label = `Custom Change Update (${customRangeDraft.from} ~ ${customRangeDraft.to})`;
+    setCustomModalLoading(true);
+    setCustomModalError(null);
+    setChangeAction({ jobId: "", label, status: "running", message: `${label}: starting...` });
+    try {
+      const options = getStoredChangeUpdateOptions();
+      const response = await fetch(`${API_BASE}/api/news/change/update-custom`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          from: customRangeDraft.from,
+          to: customRangeDraft.to,
+          ...options,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(extractErrorMessage(payload, response.status));
+      }
+      setChangeAction({
+        jobId: String(payload.jobId),
+        label,
+        status: "running",
+        message: `${label}: queued (${payload.jobId})`,
+      });
+      setShowCustomChangeModal(false);
+    } catch (startError: any) {
+      setChangeAction({
+        jobId: "",
+        label,
+        status: "failed",
+        message: `${label}: failed - ${startError?.message || "unable to start job"}`,
+      });
+      setCustomModalError(startError?.message || "Failed to start custom change update");
+    } finally {
+      setCustomModalLoading(false);
+    }
   };
 
   const columnCount = 2
@@ -476,6 +719,35 @@ export function DailyChangeHistoryWindow({ onTickerClick }: DailyChangeHistoryWi
           </div>
         </div>
 
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => void handleChangeUpdate("recent")}
+            disabled={changeAction?.status === "running"}
+            className="rounded-md border border-emerald-300 px-3 py-2 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-900/60 dark:text-emerald-300 dark:hover:bg-emerald-950/40"
+          >
+            Recent Change Update
+          </button>
+          <button
+            onClick={() => void handleChangeUpdate("recentMissing")}
+            disabled={changeAction?.status === "running"}
+            className="rounded-md border border-sky-300 px-3 py-2 text-xs font-medium text-sky-700 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-sky-900/60 dark:text-sky-300 dark:hover:bg-sky-950/40"
+          >
+            FMP Missing Change Fill
+          </button>
+          <button
+            onClick={openCustomChangeModal}
+            disabled={changeAction?.status === "running"}
+            className="rounded-md border border-violet-300 px-3 py-2 text-xs font-medium text-violet-700 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-violet-900/60 dark:text-violet-300 dark:hover:bg-violet-950/40"
+          >
+            Custom Change Update
+          </button>
+          {changeAction ? (
+            <div className="text-xs text-slate-500 dark:text-slate-400">{changeAction.message}</div>
+          ) : (
+            <div className="text-xs text-slate-400 dark:text-slate-500">Change update buttons reuse the same backend jobs as Data Control. Custom opens a date-range popup with preflight.</div>
+          )}
+        </div>
+
         <div className="mt-3 text-xs text-slate-500 dark:text-slate-400">
           {appliedFilterSummary || "Most recent stable OHLC date is applied automatically when date is empty."}
         </div>
@@ -564,6 +836,13 @@ export function DailyChangeHistoryWindow({ onTickerClick }: DailyChangeHistoryWi
                     : row.dailyChangePct < 0
                       ? "text-rose-600 dark:text-rose-300"
                       : "text-slate-700 dark:text-slate-200";
+                const closeFromOpenTone = row.closeFromOpenPct == null
+                  ? "text-amber-600 dark:text-amber-300"
+                  : row.closeFromOpenPct > 0
+                    ? "text-emerald-600 dark:text-emerald-300"
+                    : row.closeFromOpenPct < 0
+                      ? "text-rose-600 dark:text-rose-300"
+                      : "text-slate-700 dark:text-slate-200";
                 return (
                   <tr key={`${row.ticker}-${row.date}`} className="border-t border-slate-100 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/60">
                     <td className="px-3 py-2 font-mono">
@@ -578,7 +857,7 @@ export function DailyChangeHistoryWindow({ onTickerClick }: DailyChangeHistoryWi
                     {visibleColumns.date ? <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{row.date}</td> : null}
                     {visibleColumns.close ? <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{formatPrice(row.close)}</td> : null}
                     <td className={`px-3 py-2 text-right tabular-nums font-medium ${pctTone}`}>{formatPct(row.dailyChangePct)}</td>
-                    {visibleColumns.closeFromOpenPct ? <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{formatPct(row.closeFromOpenPct)}</td> : null}
+                    {visibleColumns.closeFromOpenPct ? <td className={`px-3 py-2 text-right tabular-nums font-medium ${closeFromOpenTone}`}>{formatPct(row.closeFromOpenPct)}</td> : null}
                     {visibleColumns.turnover ? <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{formatTurnover(row.turnover)}</td> : null}
                     {visibleColumns.marketCap ? (
                       <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">
@@ -597,6 +876,86 @@ export function DailyChangeHistoryWindow({ onTickerClick }: DailyChangeHistoryWi
           </table>
         </div>
       </div>
+
+      {showCustomChangeModal ? (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-950/50 px-4">
+          <div className="w-full max-w-lg rounded-xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">Custom Change Update</div>
+                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">기간을 직접 선택한 뒤 preflight로 대상 row 수를 계산하고 실행한다.</div>
+              </div>
+              <button
+                onClick={() => {
+                  if (!customModalLoading) {
+                    setShowCustomChangeModal(false);
+                    setCustomModalError(null);
+                  }
+                }}
+                className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <label className="flex flex-col gap-1 text-xs font-medium text-slate-600 dark:text-slate-300">
+                <span>From</span>
+                <input
+                  type="date"
+                  value={customRangeDraft.from}
+                  max={data?.availableMaxDate ?? undefined}
+                  onChange={(event) => setCustomRangeDraft((current) => ({ ...current, from: event.target.value }))}
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs font-medium text-slate-600 dark:text-slate-300">
+                <span>To</span>
+                <input
+                  type="date"
+                  value={customRangeDraft.to}
+                  max={data?.availableMaxDate ?? undefined}
+                  onChange={(event) => setCustomRangeDraft((current) => ({ ...current, to: event.target.value }))}
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950"
+                />
+              </label>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                onClick={() => void runCustomPreflight()}
+                disabled={customModalLoading}
+                className="rounded-md border border-blue-300 px-3 py-2 text-xs font-medium text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-900/60 dark:text-blue-300 dark:hover:bg-blue-950/40"
+              >
+                {customModalLoading ? "Calculating..." : "Calculate Scope"}
+              </button>
+              <button
+                onClick={() => void startCustomChangeUpdate()}
+                disabled={customModalLoading || !customPreflight}
+                className="rounded-md bg-violet-600 px-3 py-2 text-xs font-medium text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Start Custom Update
+              </button>
+            </div>
+
+            {customModalError ? (
+              <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
+                {customModalError}
+              </div>
+            ) : null}
+
+            {customPreflight ? (
+              <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
+                <div className="font-semibold text-slate-900 dark:text-slate-100">Preflight</div>
+                <div className="mt-2">Range: {customPreflight.requestedRange.from} ~ {customPreflight.requestedRange.to}</div>
+                <div className="mt-1">Total rows in range: {customPreflight.totalRowsInRange}</div>
+                <div className="mt-1">Rows with existing change_pct: {customPreflight.rowsWithChangePct}</div>
+                <div className="mt-1">Rows expected to update: {customPreflight.rowsExpectedToUpdate}</div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -134,6 +134,17 @@
   - market cap / turnover filter는 `1M`, `2.5B` 같은 shorthand number 입력을 허용한다.
   - Daily Change History는 저장된 derived value가 있으면 우선 사용하고, 없으면 `Apply` 시점 응답에서 즉시 계산한 값을 내려준다.
   - summary는 `daily change %` 기준 1세트와 `close from open %` 기준 1세트, 총 2세트로 제공한다.
+- 2026-03-30 window action 확장 반영:
+  - Daily Change History Window 헤더에도 `Recent Change Update`, `FMP Missing Change Fill` 버튼을 직접 노출한다.
+  - 두 버튼은 Data Control과 같은 backend route를 호출하고, 완료 시 현재 창을 자동 refresh 한다.
+  - 같은 헤더에 `Custom Change Update` 버튼도 추가하고, 클릭 시 date-range popup을 띄워 `from/to`를 직접 고르게 한다.
+  - popup 안에서 preflight로 범위 내 전체 row / 기존 change row / 예상 update row를 먼저 계산해 보여준다.
+  - 확인 후 선택 기간 전체를 대상으로 custom change route를 실행한다.
+  - table의 `Close From Open %`는 값의 부호에 따라 `+` 초록, `-` 빨강으로 표시한다.
+- 2026-03-30 custom popup validation fix 반영:
+  - Daily Change History Window는 localStorage에 남아 있는 invalid `change-fmp-concurrency`, `fmp-request-interval-ms` 값을 그대로 보내지 않고 범위 검증 후 fallback default를 사용한다.
+  - custom popup과 recent change 버튼은 같은 sanitized payload helper를 재사용한다.
+  - backend validation error가 구조화된 배열 형태여도 popup에는 첫 번째 핵심 메시지를 사람이 읽기 쉬운 문자열로 보여준다.
 
 ### 계획 중간 필수 확인
 

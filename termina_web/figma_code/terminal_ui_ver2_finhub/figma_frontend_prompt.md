@@ -832,6 +832,11 @@ API:
 - 기본 조회는 `GET /api/default-tickers/daily-change-history`를 사용한다.
 - 날짜 입력이 비어 있으면 backend가 `availableMaxDate`를 기준으로 가장 최근 stable date를 자동 적용한다.
 - 상단에는 단일 `date picker`, `Market Cap Min`, `Market Cap Max`, `Turnover Min`, `Turnover Max`, `Apply`, `Reset`, `Refresh`가 있다.
+- 같은 헤더 영역에 `Recent Change Update`, `FMP Missing Change Fill`, `Custom Change Update` 버튼도 보인다.
+- 세 버튼은 Data Control의 동일 backend job route를 재사용하고, 실행 중에는 간단한 job 상태 문구를 표시한다.
+- `Custom Change Update`를 누르면 date-range popup이 열리고, `From`, `To`를 직접 고를 수 있다.
+- popup 안의 `Calculate Scope`는 `/api/news/change/update-custom/preflight`를 호출해 범위 내 전체 뉴스 row 수, 기존 change 보유 row 수, 실제 업데이트 예상 row 수를 계산해 보여준다.
+- popup 안의 `Start Custom Update`는 선택한 기간 전체를 대상으로 `/api/news/change/update-custom`을 실행한다.
 - market cap / turnover input은 raw number뿐 아니라 `500M`, `1B`, `2.5B` 같은 shorthand 입력도 받는다.
 - filter는 입력 즉시 반영되지 않고, 사용자가 `Apply`를 눌렀을 때만 backend를 다시 호출한다.
 - 마지막으로 적용된 filter는 `daily-change-history-ui-state` localStorage key에 저장된다.
@@ -860,10 +865,12 @@ API:
 - `dailyChangePct = null`이면 daily-change summary에서 `Missing`으로 집계되고 table row도 그대로 남는다.
 - `closeFromOpenPct > 0`이면 close-from-open summary에서 gainers, `< 0`이면 losers, `= 0`이면 flat다.
 - `closeFromOpenPct = null`이면 close-from-open summary에서 `Missing`으로 집계된다.
+- table의 `Close From Open %` cell도 `+`면 초록색, `-`면 빨간색, `null`이면 amber tone으로 표시한다.
 - market cap filter가 하나라도 들어오면 `marketCap = null` row는 제외된다.
 - turnover filter가 하나라도 들어오면 `turnover = null` row는 제외된다.
 - backend는 저장된 derived value가 있으면 우선 사용하고, 없으면 `Apply` 시점 응답에서 즉시 계산한 값을 내려준다. turnover도 같은 규칙을 따른다.
 - ticker cell 클릭 시 상위 `onTickerClick`으로 ticker가 전달된다.
+- change update job이 `done`이 되면 현재 창은 같은 filter로 자동 refresh를 다시 호출한다.
 
 현재 제약:
 
