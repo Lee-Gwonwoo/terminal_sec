@@ -599,6 +599,104 @@ export async function bulkUpdateRecentChange(
   return { updated: computed.length, skipped };
 }
 
+/** Compute standard change metrics only for recent news rows that currently do not have change_pct.
+ *  Scope: last 7 calendar days of news, missing metrics only.
+ *  If FMP fallback is enabled, missing OHLC is pulled from FMP before recompute. */
+export async function bulkUpdateRecentMissingChange(
+  onProgress?: (completed: number, total: number) => void,
+  concurrency = DEFAULT_MERGE_CONCURRENCY,
+  isCancelled?: () => boolean,
+  fmpFallback?: FmpFallbackOptions,
+  onLog?: (msg: string) => void,
+): Promise<{ updated: number; skipped: number }> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 7);
+  const cutoffIso = cutoff.toISOString();
+
+  const rows = await getDb().all<{ id: string; tickers_csv: string; published_at: string }[]>(
+    `SELECT ni.id, ni.tickers_csv, ni.published_at
+     FROM news_items ni
+     LEFT JOIN news_change_metrics ncm
+       ON ncm.news_id = ni.id AND ncm.metric_key = 'change_pct'
+     WHERE ni.published_at >= ?
+       AND ncm.news_id IS NULL
+     ORDER BY ni.published_at DESC`,
+    [cutoffIso],
+  );
+
+  const computed: ComputedMetrics[] = [];
+  const missingItems: Array<{ newsId: string; ticker: string; publishedAt: string }> = [];
+  const invalidMetricNewsIds = new Set<string>();
+  let skipped = 0;
+  let completed = 0;
+  const totalUnits = Math.max(rows.length * 3, 1);
+  const scanPhaseUnits = rows.length;
+  const fallbackPhaseBase = scanPhaseUnits;
+  const writePhaseBase = scanPhaseUnits * 2;
+
+  await poolRun(rows, concurrency, async (row) => {
+    const tickers = row.tickers_csv.split(",").map((ticker) => ticker.trim()).filter(Boolean);
+    const ticker = tickers[0];
+    if (!ticker) {
+      skipped++;
+      invalidMetricNewsIds.add(row.id);
+    } else {
+      const metric = await computeMetricsForItem(row.id, ticker, row.published_at);
+      if (metric) {
+        computed.push(metric);
+      } else {
+        invalidMetricNewsIds.add(row.id);
+        missingItems.push({ newsId: row.id, ticker, publishedAt: row.published_at });
+      }
+    }
+    completed++;
+    if (onProgress && (completed % 50 === 0 || completed === rows.length)) {
+      onProgress(completed, totalUnits);
+    }
+  }, isCancelled);
+
+  if (isCancelled?.()) return { updated: computed.length, skipped };
+
+  if (fmpFallback?.enabled && missingItems.length > 0) {
+    onProgress?.(fallbackPhaseBase, totalUnits);
+    onLog?.(`[change] ${missingItems.length} missing recent items need OHLC, starting FMP fallback...`);
+    try {
+      const fallbackMetrics = await fmpFallbackFetch(missingItems, fmpFallback, onLog, (fallbackDone, fallbackTotal) => {
+        const phaseProgress = fallbackTotal > 0
+          ? Math.floor((fallbackDone / fallbackTotal) * scanPhaseUnits)
+          : scanPhaseUnits;
+        onProgress?.(fallbackPhaseBase + phaseProgress, totalUnits);
+      });
+      computed.push(...fallbackMetrics);
+      for (const metric of fallbackMetrics) {
+        invalidMetricNewsIds.delete(metric.newsId);
+      }
+      skipped += missingItems.length - fallbackMetrics.length;
+      onLog?.(`[change] FMP fallback done: ${fallbackMetrics.length} computed, ${missingItems.length - fallbackMetrics.length} still missing`);
+    } catch (error) {
+      onLog?.(`[change] FMP fallback error: ${error instanceof Error ? error.message : String(error)}`);
+      skipped += missingItems.length;
+    }
+  } else {
+    skipped += missingItems.length;
+  }
+
+  onProgress?.(writePhaseBase, totalUnits);
+
+  if (isCancelled?.()) return { updated: computed.length, skipped };
+
+  await deleteMetricsForNewsIds([...invalidMetricNewsIds]);
+  await batchWriteMetricsWithProgress(computed, (written, total) => {
+    const phaseProgress = total > 0
+      ? Math.floor((written / total) * scanPhaseUnits)
+      : scanPhaseUnits;
+    onProgress?.(writePhaseBase + phaseProgress, totalUnits);
+  });
+
+  onProgress?.(totalUnits, totalUnits);
+  return { updated: computed.length, skipped };
+}
+
 // ---------- Custom Change Update (date range, all metrics) ----------
 
 /** Compute ALL standard change metrics for news published within [from, to].

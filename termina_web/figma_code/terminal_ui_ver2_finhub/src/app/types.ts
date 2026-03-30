@@ -1,6 +1,6 @@
 // Types for the stock news platform
 
-export type WindowType = 'news' | 'watchlist' | 'calendar' | 'finhub-news' | 'investing-news' | 'default-ticker' | 'data-control' | 'case-research' | 'evidence-table' | 'case-description' | 'data-control-how-to-use';
+export type WindowType = 'news' | 'watchlist' | 'calendar' | 'finhub-news' | 'investing-news' | 'default-ticker' | 'daily-change-history' | 'data-control' | 'case-research' | 'evidence-table' | 'case-description' | 'data-control-how-to-use';
 
 export interface CaseDescriptionWindowData {
   caseType: string;

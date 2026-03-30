@@ -38,7 +38,7 @@ import {
   getConfirmedEmptyRange,
 } from "./services/finnhubNewsProvider.js";
 import type { FinnhubMappedItem } from "./services/finnhubNewsProvider.js";
-import { mergeChangeForNewItems, bulkUpdateRecentChange, bulkUpdateCustomChange, type FmpFallbackOptions } from "./services/newsChangeMerger.js";
+import { mergeChangeForNewItems, bulkUpdateRecentChange, bulkUpdateRecentMissingChange, bulkUpdateCustomChange, type FmpFallbackOptions } from "./services/newsChangeMerger.js";
 import { createJob, getJob, getActiveJobs, updateProgress, appendLog, completeJob, failJob, cancelJob, isJobCancelled } from "./services/jobManager.js";
 import { getFmpSecFulltextBackfillRows, getFulltext, getUnextractedNewsIds, deleteFailedFulltextRows, deleteFmpPressReleaseFallbackRows, deleteFmpStockNewsFallbackRows, deleteCompanyNewsFulltextRows, getFulltextStats, upsertProvidedFulltext } from "./services/fulltextRepository.js";
 import { runFulltextUpdate, runFulltextUpdateForNewsIds, runFulltextPlainTextBackfill, runRtprBodyBackfill, runOriginUrlBackfill, runCompanyNewsOriginUrlBackfill, extractAndPersistFulltext } from "./services/fulltextUpdateService.js";
@@ -64,9 +64,12 @@ import {
   ensureDerivedColumns,
   upsertBars,
   getSymbolMaxDate,
+  shouldExcludeCurrentEtDailyBar,
 } from "./services/ohlcWatchlistRepository.js";
+import { getDefaultDailyChangeHistory } from "./services/dailyChangeHistoryRepository.js";
 import { fetchOhlcBars } from "./services/ibkrOhlc1dProvider.js";
-import { computeDerivedForAffectedSymbols } from "./services/ohlcDerivedMetrics.js";
+import { computeDerivedForAffectedSymbols, computeMissingTurnoverForSymbol } from "./services/ohlcDerivedMetrics.js";
+import { clampFmpOhlcConcurrency, clampFmpOhlcIntervalMs, fetchFmpOhlcBatch } from "./services/fmpOhlcProvider.js";
 import type { NewsQuery } from "./types.js";
 import {
   listResearchTabs,
@@ -484,6 +487,91 @@ app.delete("/api/tickers/remove", async (req, res, next) => {
       res.status(400).json({ error: error.message });
       return;
     }
+    next(error);
+  }
+});
+
+app.get("/api/default-tickers/daily-change-history", async (req, res, next) => {
+  try {
+    const parseShorthandNumber = (value: string): number => {
+      const normalized = value.trim().replace(/,/g, "").replace(/\s+/g, "");
+      const match = normalized.match(/^([+-]?(?:\d+(?:\.\d+)?|\.\d+))([kmbt])?$/i);
+      if (!match) {
+        return Number.NaN;
+      }
+      const base = Number(match[1]);
+      if (!Number.isFinite(base)) {
+        return Number.NaN;
+      }
+      const suffix = (match[2] ?? "").toUpperCase();
+      const multiplier = suffix === "K"
+        ? 1_000
+        : suffix === "M"
+          ? 1_000_000
+          : suffix === "B"
+            ? 1_000_000_000
+            : suffix === "T"
+              ? 1_000_000_000_000
+              : 1;
+      return base * multiplier;
+    };
+
+    const date = typeof req.query.date === "string" && req.query.date.trim() ? req.query.date.trim() : undefined;
+    const marketCapMinRaw = typeof req.query.marketCapMin === "string" ? req.query.marketCapMin.trim() : "";
+    const marketCapMaxRaw = typeof req.query.marketCapMax === "string" ? req.query.marketCapMax.trim() : "";
+    const turnoverMinRaw = typeof req.query.turnoverMin === "string" ? req.query.turnoverMin.trim() : "";
+    const turnoverMaxRaw = typeof req.query.turnoverMax === "string" ? req.query.turnoverMax.trim() : "";
+
+    if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      res.status(400).json({ error: "date must be in YYYY-MM-DD format" });
+      return;
+    }
+
+    const marketCapMin = marketCapMinRaw ? parseShorthandNumber(marketCapMinRaw) : undefined;
+    const marketCapMax = marketCapMaxRaw ? parseShorthandNumber(marketCapMaxRaw) : undefined;
+    const turnoverMin = turnoverMinRaw ? parseShorthandNumber(turnoverMinRaw) : undefined;
+    const turnoverMax = turnoverMaxRaw ? parseShorthandNumber(turnoverMaxRaw) : undefined;
+
+    if (marketCapMinRaw && !Number.isFinite(marketCapMin)) {
+      res.status(400).json({ error: "marketCapMin must be a valid number (examples: 1000000, 1M, 2.5B)" });
+      return;
+    }
+
+    if (marketCapMaxRaw && !Number.isFinite(marketCapMax)) {
+      res.status(400).json({ error: "marketCapMax must be a valid number (examples: 50000000000, 50B)" });
+      return;
+    }
+
+    if (turnoverMinRaw && !Number.isFinite(turnoverMin)) {
+      res.status(400).json({ error: "turnoverMin must be a valid number (examples: 100000000, 100M, 1.2B)" });
+      return;
+    }
+
+    if (turnoverMaxRaw && !Number.isFinite(turnoverMax)) {
+      res.status(400).json({ error: "turnoverMax must be a valid number (examples: 5000000000, 5B)" });
+      return;
+    }
+
+    if (marketCapMin != null && marketCapMax != null && marketCapMin > marketCapMax) {
+      res.status(400).json({ error: "marketCapMin must be less than or equal to marketCapMax" });
+      return;
+    }
+
+    if (turnoverMin != null && turnoverMax != null && turnoverMin > turnoverMax) {
+      res.status(400).json({ error: "turnoverMin must be less than or equal to turnoverMax" });
+      return;
+    }
+
+    const result = await getDefaultDailyChangeHistory({
+      selectedDate: date,
+      marketCapMin,
+      marketCapMax,
+      turnoverMin,
+      turnoverMax,
+    });
+
+    res.json(result);
+  } catch (error) {
     next(error);
   }
 });
@@ -3143,6 +3231,69 @@ app.post("/api/news/change/update-recent", async (req, res, next) => {
   }
 });
 
+app.post("/api/news/change/update-recent-fmp-missing", async (req, res, next) => {
+  try {
+    const jobKey = "news_change_recent_fmp_missing";
+    const existingJobId = activePullJobs.get(jobKey);
+    if (existingJobId) {
+      const existingJob = getJob(existingJobId);
+      if (existingJob && existingJob.status === "running") {
+        res.status(409).json({
+          error: `An FMP recent missing change update job is already running (jobId=${existingJobId}). Wait for it to finish or cancel it first.`,
+          existingJobId,
+        });
+        return;
+      }
+      activePullJobs.delete(jobKey);
+    }
+
+    const concurrencyRaw = Number(req.body?.fmpConcurrency ?? req.body?.ibkrConcurrency);
+    const intervalRaw = Number(req.body?.fmpRequestIntervalMs);
+    const fmpFallback: FmpFallbackOptions = {
+      enabled: true,
+      concurrency: clampFmpConcurrency(Number.isFinite(concurrencyRaw) ? concurrencyRaw : 5),
+      requestIntervalMs: clampFmpIntervalMs(Number.isFinite(intervalRaw) ? intervalRaw : 250),
+    };
+    const jobId = createJob(0, {
+      category: "news-update",
+      label: "FMP Recent Change Fill",
+    });
+    activePullJobs.set(jobKey, jobId);
+    appendLog(jobId, `Starting FMP recent missing change update with concurrency=${fmpFallback.concurrency}, interval=${fmpFallback.requestIntervalMs ?? 250}ms`);
+    res.json({ jobId });
+
+    (async () => {
+      try {
+        const result = await bulkUpdateRecentMissingChange((done, total) => {
+          updateProgress(jobId, done, total);
+        }, undefined, () => isJobCancelled(jobId), fmpFallback, (msg) => appendLog(jobId, msg));
+        if (isJobCancelled(jobId)) {
+          activePullJobs.delete(jobKey);
+          return;
+        }
+        await setLastSuccess(jobKey, new Date().toISOString(), {
+          updated: result.updated,
+          skipped: result.skipped,
+          fmpConcurrencyUsed: fmpFallback.concurrency,
+          fmpRequestIntervalMsUsed: fmpFallback.requestIntervalMs ?? 250,
+        });
+        completeJob(jobId, {
+          updated: result.updated,
+          skipped: result.skipped,
+          fmpConcurrencyUsed: fmpFallback.concurrency,
+          fmpRequestIntervalMsUsed: fmpFallback.requestIntervalMs ?? 250,
+        });
+        activePullJobs.delete(jobKey);
+      } catch (err: any) {
+        failJob(jobId, err?.message ?? String(err));
+        activePullJobs.delete(jobKey);
+      }
+    })();
+  } catch (error) {
+    next(error);
+  }
+});
+
 const customChangeSchema = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -3833,10 +3984,269 @@ app.post("/api/ibkr/ohlc1d/update", async (req, res, next) => {
   }
 });
 
+app.post("/api/fmp/ohlc1d/update-recent-missing", async (req, res, next) => {
+  try {
+    if (!config.fmpApiKey) {
+      res.status(400).json({ error: "FMP API key is not configured" });
+      return;
+    }
+
+    const jobKey = "fmp_ohlc_recent_missing";
+    const existingJobId = activePullJobs.get(jobKey);
+    if (existingJobId) {
+      const existingJob = getJob(existingJobId);
+      if (existingJob && existingJob.status === "running") {
+        res.status(409).json({
+          error: `An FMP recent missing OHLC update job is already running (jobId=${existingJobId}). Wait for it to finish or cancel it first.`,
+          existingJobId,
+        });
+        return;
+      }
+      activePullJobs.delete(jobKey);
+    }
+
+    const concurrency = clampFmpOhlcConcurrency(Number(req.body?.concurrency));
+    const requestIntervalMs = clampFmpOhlcIntervalMs(Number(req.body?.requestIntervalMs));
+    const tickers = await getDefaultUniverseTickers();
+    const window = getRecentEligibleFmpOhlcWindow(7);
+    const jobId = createJob(tickers.length, {
+      category: "other",
+      label: "FMP Recent OHLC Fill",
+    });
+    activePullJobs.set(jobKey, jobId);
+    appendLog(jobId, `Starting FMP recent OHLC fill for ${tickers.length} default-universe tickers`);
+    appendLog(jobId, `Window=${window.from}~${window.to}, concurrency=${concurrency}, interval=${requestIntervalMs}ms`);
+    if (window.excludedToday) {
+      appendLog(jobId, `ET current day is excluded before market close; latest allowed date is ${window.to}`);
+    }
+    res.json({ jobId });
+
+    (async () => {
+      try {
+        const groupMap = new Map<string, string[]>();
+        for (const ticker of tickers) {
+          const symbolMaxDate = await getSymbolMaxDate(ticker);
+          const startDate = symbolMaxDate ? nextDay(symbolMaxDate) : window.from;
+          const effectiveStart = startDate > window.from ? startDate : window.from;
+          if (effectiveStart > window.to) {
+            continue;
+          }
+          const existing = groupMap.get(effectiveStart);
+          if (existing) {
+            existing.push(ticker);
+          } else {
+            groupMap.set(effectiveStart, [ticker]);
+          }
+        }
+
+        const groups = [...groupMap.entries()].sort((left, right) => left[0].localeCompare(right[0]));
+        const targetCount = groups.reduce((sum, [, symbols]) => sum + symbols.length, 0);
+        updateProgress(jobId, 0, targetCount);
+
+        let completedTickers = 0;
+        let tickersFetched = 0;
+        let tickersFailed = 0;
+        let totalRowsUpserted = 0;
+        const affectedSymbols = new Map<string, { minDate: string; maxDate: string }>();
+
+        for (const [startDate, symbols] of groups) {
+          if (isJobCancelled(jobId)) {
+            appendLog(jobId, "🛑 Cancelled by user");
+            break;
+          }
+
+          appendLog(jobId, `Fetching FMP OHLC batch start=${startDate}, end=${window.to}, tickers=${symbols.length}`);
+          const batch = await fetchFmpOhlcBatch(symbols, startDate, window.to, {
+            concurrency,
+            requestIntervalMs,
+            shouldCancel: () => isJobCancelled(jobId),
+          });
+
+          for (const symbol of symbols) {
+            if (isJobCancelled(jobId)) {
+              appendLog(jobId, "🛑 Cancelled by user");
+              break;
+            }
+
+            const bars = batch.results.get(symbol) ?? [];
+            if (bars.length > 0) {
+              const upserted = await upsertBars(symbol, bars);
+              totalRowsUpserted += upserted;
+              tickersFetched += 1;
+              const dates = bars.map((bar) => bar.Datetime).sort();
+              affectedSymbols.set(symbol, {
+                minDate: dates[0],
+                maxDate: dates[dates.length - 1],
+              });
+              appendLog(jobId, `${symbol}: ${upserted} bars upserted (${dates[0]}~${dates[dates.length - 1]})`);
+            } else {
+              const message = batch.errors.get(symbol);
+              if (message) {
+                tickersFailed += 1;
+                appendLog(jobId, `${symbol}: FAILED — ${message}`);
+              } else {
+                appendLog(jobId, `${symbol}: no missing recent bars`);
+              }
+            }
+
+            completedTickers += 1;
+            updateProgress(jobId, completedTickers, targetCount);
+          }
+        }
+
+        if (affectedSymbols.size > 0 && !isJobCancelled(jobId)) {
+          appendLog(jobId, `Computing derived metrics for ${affectedSymbols.size} symbols...`);
+          const derived = await computeDerivedForAffectedSymbols(affectedSymbols);
+          appendLog(jobId, `Derived metrics: ${derived.totalUpdated} rows updated`);
+        }
+
+        if (isJobCancelled(jobId)) {
+          activePullJobs.delete(jobKey);
+          return;
+        }
+
+        await setLastSuccess(jobKey, new Date().toISOString(), {
+          tickersRequested: tickers.length,
+          tickersFetched,
+          tickersFailed,
+          totalRowsUpserted,
+          rangeFrom: window.from,
+          rangeTo: window.to,
+          excludedToday: window.excludedToday,
+          concurrency,
+          requestIntervalMs,
+        });
+        completeJob(jobId, {
+          tickersRequested: tickers.length,
+          tickersFetched,
+          tickersFailed,
+          totalRowsUpserted,
+          rangeFrom: window.from,
+          rangeTo: window.to,
+          excludedToday: window.excludedToday,
+          concurrency,
+          requestIntervalMs,
+        });
+        activePullJobs.delete(jobKey);
+      } catch (error) {
+        failJob(jobId, error instanceof Error ? error.message : String(error));
+        activePullJobs.delete(jobKey);
+      }
+    })();
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/ibkr/ohlc1d/turnover/update", async (_req, res, next) => {
+  try {
+    const jobKey = "ibkr_ohlc_turnover";
+    const existingJobId = activePullJobs.get(jobKey);
+    if (existingJobId) {
+      const existingJob = getJob(existingJobId);
+      if (existingJob && existingJob.status === "running") {
+        res.status(409).json({
+          error: `An OHLC turnover update job is already running (jobId=${existingJobId}). Wait for it to finish or cancel it first.`,
+          existingJobId,
+        });
+        return;
+      }
+      activePullJobs.delete(jobKey);
+    }
+
+    const tickers = await getDefaultUniverseTickers();
+    const jobId = createJob(tickers.length, {
+      category: "other",
+      label: "OHLC Turnover Update",
+    });
+    activePullJobs.set(jobKey, jobId);
+    appendLog(jobId, `Starting OHLC turnover update for ${tickers.length} default-universe tickers`);
+    appendLog(jobId, "Rule: only NULL Turnover rows with non-null Open/Close/Volume are updated");
+    res.json({ jobId });
+
+    (async () => {
+      let tickersUpdated = 0;
+      let totalRowsUpdated = 0;
+      let totalExistingRows = 0;
+      let totalUncomputableRows = 0;
+
+      try {
+        for (let index = 0; index < tickers.length; index++) {
+          if (isJobCancelled(jobId)) {
+            appendLog(jobId, "🛑 Cancelled by user");
+            break;
+          }
+
+          const symbol = tickers[index];
+          try {
+            const summary = await computeMissingTurnoverForSymbol(symbol);
+            totalRowsUpdated += summary.updated;
+            totalExistingRows += summary.existing;
+            totalUncomputableRows += summary.uncomputable;
+            if (summary.updated > 0) {
+              tickersUpdated += 1;
+            }
+            appendLog(jobId, `${symbol}: updated=${summary.updated}, existing=${summary.existing}, uncomputable=${summary.uncomputable}`);
+          } catch (error) {
+            appendLog(jobId, `${symbol}: FAILED — ${error instanceof Error ? error.message : String(error)}`);
+          }
+          updateProgress(jobId, index + 1, tickers.length);
+        }
+
+        if (isJobCancelled(jobId)) {
+          activePullJobs.delete(jobKey);
+          return;
+        }
+
+        await setLastSuccess("ibkr_ohlc_turnover", new Date().toISOString(), {
+          tickersRequested: tickers.length,
+          tickersUpdated,
+          totalRowsUpdated,
+          totalExistingRows,
+          totalUncomputableRows,
+        });
+
+        completeJob(jobId, {
+          tickersRequested: tickers.length,
+          tickersUpdated,
+          totalRowsUpdated,
+          totalExistingRows,
+          totalUncomputableRows,
+        });
+        activePullJobs.delete(jobKey);
+      } catch (error) {
+        failJob(jobId, error instanceof Error ? error.message : String(error));
+        activePullJobs.delete(jobKey);
+      }
+    })();
+  } catch (error) {
+    next(error);
+  }
+});
+
 function nextDay(dateStr: string): string {
   const d = new Date(dateStr + "T00:00:00Z");
   d.setUTCDate(d.getUTCDate() + 1);
   return d.toISOString().slice(0, 10);
+}
+
+function prevDay(dateStr: string): string {
+  const d = new Date(dateStr + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function getRecentEligibleFmpOhlcWindow(days = 7): { from: string; to: string; excludedToday: boolean } {
+  const todayEt = getEtDateString(new Date());
+  const excludedToday = shouldExcludeCurrentEtDailyBar(todayEt);
+  const to = excludedToday ? prevDay(todayEt) : todayEt;
+  const fromDate = new Date(`${to}T00:00:00Z`);
+  fromDate.setUTCDate(fromDate.getUTCDate() - Math.max(1, days));
+  return {
+    from: fromDate.toISOString().slice(0, 10),
+    to,
+    excludedToday,
+  };
 }
 
 const alertRuleSchema = z.object({

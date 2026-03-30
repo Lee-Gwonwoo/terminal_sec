@@ -54,19 +54,19 @@ export function DataControlWindow({
 
   // ─── Per-section job state ───
   const [jobIds, setJobIds] = useState<Record<SectionKey, string | null>>({
-    price: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, yahooDesc: null, peersPull: null, ipoDate: null, 'recent': null, custom: null,
+    price: null, fmpRecentOhlc: null, turnover: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, yahooDesc: null, peersPull: null, ipoDate: null, 'recent': null, fmpRecentChange: null, custom: null,
   });
   const [updating, setUpdating] = useState<Record<SectionKey, boolean>>({
-    price: false, calendarBackfill: false, calendarRefresh: false, calendarCustom: false, companyDesc: false, yahooDesc: false, peersPull: false, ipoDate: false, 'recent': false, custom: false,
+    price: false, fmpRecentOhlc: false, turnover: false, calendarBackfill: false, calendarRefresh: false, calendarCustom: false, companyDesc: false, yahooDesc: false, peersPull: false, ipoDate: false, 'recent': false, fmpRecentChange: false, custom: false,
   });
   const [errors, setErrors] = useState<Record<SectionKey, string | null>>({
-    price: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, yahooDesc: null, peersPull: null, ipoDate: null, 'recent': null, custom: null,
+    price: null, fmpRecentOhlc: null, turnover: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, yahooDesc: null, peersPull: null, ipoDate: null, 'recent': null, fmpRecentChange: null, custom: null,
   });
 
   // ─── View Log state (only one section's log at a time) ───
   const [logSection, setLogSection] = useState<SectionKey | null>(null);
   const [jobStatuses, setJobStatuses] = useState<Record<SectionKey, JobStatus | null>>({
-    price: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, yahooDesc: null, peersPull: null, ipoDate: null, 'recent': null, custom: null,
+    price: null, fmpRecentOhlc: null, turnover: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, yahooDesc: null, peersPull: null, ipoDate: null, 'recent': null, fmpRecentChange: null, custom: null,
   });
   const [showCustomPreflightModal, setShowCustomPreflightModal] = useState(false);
   const [customPreflightTitle, setCustomPreflightTitle] = useState('Custom Update Preflight');
@@ -481,6 +481,14 @@ export function DataControlWindow({
         case 'price':
           url = `${API_BASE}/api/ibkr/ohlc1d/update`;
           break;
+        case 'fmpRecentOhlc':
+          url = `${API_BASE}/api/fmp/ohlc1d/update-recent-missing`;
+          headers['Content-Type'] = 'application/json';
+          body = JSON.stringify({ concurrency: fmpConcurrency, requestIntervalMs: fmpRequestIntervalMs });
+          break;
+        case 'turnover':
+          url = `${API_BASE}/api/ibkr/ohlc1d/turnover/update`;
+          break;
         case 'calendarBackfill':
           url = `${API_BASE}/api/ibkr/calendar/update`;
           headers['Content-Type'] = 'application/json';
@@ -535,12 +543,17 @@ export function DataControlWindow({
         case 'recent':
           url = `${API_BASE}/api/news/change/update-recent`;
           headers['Content-Type'] = 'application/json';
-          body = JSON.stringify({ fmpConcurrency: changeFmpConcurrency });
+          body = JSON.stringify({ fmpConcurrency: changeFmpConcurrency, fmpRequestIntervalMs });
+          break;
+        case 'fmpRecentChange':
+          url = `${API_BASE}/api/news/change/update-recent-fmp-missing`;
+          headers['Content-Type'] = 'application/json';
+          body = JSON.stringify({ fmpConcurrency: changeFmpConcurrency, fmpRequestIntervalMs });
           break;
         case 'custom':
           url = `${API_BASE}/api/news/change/update-custom`;
           headers['Content-Type'] = 'application/json';
-          body = JSON.stringify({ from: customChangeFrom, to: customChangeTo, fmpConcurrency: changeFmpConcurrency });
+          body = JSON.stringify({ from: customChangeFrom, to: customChangeTo, fmpConcurrency: changeFmpConcurrency, fmpRequestIntervalMs });
           preflightUrl = `${API_BASE}/api/news/change/update-custom/preflight`;
           preflightTitle = 'News Change Custom Preflight';
           break;
@@ -638,6 +651,20 @@ export function DataControlWindow({
       ),
     },
     {
+      key: 'fmpRecentOhlc',
+      label: 'FMP Recent OHLC Fill',
+      statusKey: 'fmp_ohlc_recent_missing',
+      group: 'IBKR Data',
+      description: `최근 7일 누락 일봉만 FMP로 메웁니다. 장 마감 전 ET 당일은 제외합니다. (concurrency=${fmpConcurrency}, interval=${fmpRequestIntervalMs}ms)`,
+    },
+    {
+      key: 'turnover',
+      label: 'OHLC Turnover Update',
+      statusKey: 'ibkr_ohlc_turnover',
+      group: 'IBKR Data',
+      description: 'OHLC 일봉의 빈 Turnover 값을 계산해 채웁니다. 이미 값이 있는 row는 skip합니다.',
+    },
+    {
       key: 'calendarBackfill',
       label: 'Initial Calendar Backfill',
       statusKey: 'ibkr_calendar',
@@ -710,14 +737,21 @@ export function DataControlWindow({
       label: 'Recent Change% Update',
       statusKey: 'news_change_recent',
       group: 'Change Update',
-      description: '최근 7일 뉴스 change % 재계산. DB에 OHLC가 없으면 IBKR에서 배치로 가져옵니다.',
+      description: `최근 7일 뉴스 change % 전체 재계산. DB에 OHLC가 없으면 FMP fallback을 사용합니다. (concurrency=${changeFmpConcurrency}, interval=${fmpRequestIntervalMs}ms)`,
+    },
+    {
+      key: 'fmpRecentChange',
+      label: 'FMP Recent Missing Change Fill',
+      statusKey: 'news_change_recent_fmp_missing',
+      group: 'Change Update',
+      description: `최근 7일 뉴스 중 change_pct 누락 row만 계산합니다. 필요한 OHLC는 FMP로 보강합니다. (concurrency=${changeFmpConcurrency}, interval=${fmpRequestIntervalMs}ms)`,
     },
     {
       key: 'custom',
       label: 'Custom Change% Update',
       statusKey: 'news_change_custom',
       group: 'Change Update',
-      description: '선택한 날짜 범위 뉴스 change % 재계산. DB에 OHLC가 없으면 IBKR에서 배치로 가져옵니다.',
+      description: `선택한 날짜 범위 뉴스 change % 재계산. DB에 OHLC가 없으면 FMP fallback을 사용합니다. (concurrency=${changeFmpConcurrency}, interval=${fmpRequestIntervalMs}ms)`,
       extra: (
         <div className="flex items-center gap-2 flex-wrap">
           <label className="text-[11px] text-gray-500 dark:text-gray-400">From:</label>

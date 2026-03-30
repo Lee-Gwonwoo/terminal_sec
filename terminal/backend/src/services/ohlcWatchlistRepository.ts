@@ -158,6 +158,7 @@ const DERIVED_COLUMNS: Array<{ name: string; definition: string }> = [
   { name: "Change_7d_Pct", definition: "REAL" },
   { name: "Change_14d_Pct", definition: "REAL" },
   { name: "Change_30d_Pct", definition: "REAL" },
+  { name: "Turnover", definition: "REAL" },
   { name: "Derived_Updated_At", definition: "TEXT" },
 ];
 

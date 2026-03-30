@@ -33,7 +33,15 @@ function mapRow(row: UpdateStatusRow): UpdateStatusParsed {
  * Known source keys — used to ensure the response always contains all expected keys
  * even if no row exists in the DB yet.
  */
-const SOURCE_KEYS = ["tickers_csv", "finhub_news", "ibkr_calendar", "ibkr_ohlc_1d"] as const;
+const SOURCE_KEYS = [
+  "tickers_csv",
+  "finhub_news",
+  "ibkr_calendar",
+  "ibkr_ohlc_1d",
+  "ibkr_ohlc_turnover",
+  "fmp_ohlc_recent_missing",
+  "news_change_recent_fmp_missing",
+] as const;
 
 export async function getUpdateStatus(
   sourceKey: string,

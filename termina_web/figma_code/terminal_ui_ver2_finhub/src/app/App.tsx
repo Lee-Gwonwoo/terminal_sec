@@ -248,6 +248,8 @@ export default function App() {
           title = 'News Feed: Finnhub API';
         } else if (type === 'default-ticker') {
           title = 'Default Ticker';
+        } else if (type === 'daily-change-history') {
+          title = 'Daily Change History';
         } else if (type === 'data-control') {
           title = 'Data Control';
         } else if (type === 'case-research') {

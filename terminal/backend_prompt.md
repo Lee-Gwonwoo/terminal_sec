@@ -15,7 +15,7 @@
 
 - 런타임 뉴스 DB는 `terminal/backend/backend/data/app.db` 이다.
 - Finnhub API 키는 서버 시작 시 필수다. 없으면 서버가 시작되지 않는다.
-- FMP API 키는 선택 사항이다. 없으면 company profile FMP pull만 제한된다.
+- FMP API 키는 선택 사항이다. 없으면 company profile FMP pull, FMP recent OHLC fill, FMP recent missing change fill이 제한된다.
 - RTPR API 키는 선택 사항이다. 없으면 RTPR pull만 제한된다.
 - EODHD 토큰은 `POST /api/news/pull-eodhd` 호출 시 파일에서 읽는다.
 - `GET /api/news`는 `news_items` 단독 조회가 아니라 `news_change_metrics`, `news_fulltext`, `news_ai_analysis`, sentiment snapshot, peers, company description, IPO date, market cap, industry를 join/병합해서 내려준다.
@@ -303,6 +303,7 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - ticker 심볼은 이 테이블 컬럼이 아니므로, raw SQL에서는 `securities`와 JOIN해서 읽는다.
 - `GET /api/news`, `GET /api/tickers`는 내부에서 대표 row를 골라 `companyDescription`, `peers`, `ipoDate`, `marketCap` 형태로 재노출한다.
 - `GET /api/tickers`의 default-universe row는 추가로 `[][][]floatPct[][][]`, `[][][]institutionalPct[][][]`, `[][][]marketCapSource[][][]`, `[][][]floatSource[][][]`, `[][][]institutionalSource[][][]`를 함께 재노출한다.
+- `GET /api/default-tickers/daily-change-history`는 latest market cap + default universe + OHLC 일봉을 묶어 날짜별 change history를 반환하며, turnover min/max filter도 지원한다.
 
 #### `securities`
 
@@ -819,6 +820,15 @@ Control Window / localStorage 공통 설정:
 - 재계산 결과 조건을 만족하지 못한 뉴스는 기존 `news_change_metrics` 표준 8개 metric도 삭제하여 stale 값을 남기지 않는다.
 - 응답 컬럼: `[][][]jobId[][][]`
 
+### `POST /api/news/change/update-recent-fmp-missing`
+
+- 요청 body: `{ "fmpConcurrency": 5, "fmpRequestIntervalMs": 250 }` (둘 다 선택)
+- 최근 7일 뉴스 중 `[][][]change_pct[][][]`가 비어 있는 row만 대상으로 삼는다.
+- 이미 `change_pct`가 있는 뉴스는 skip한다.
+- 필요한 ticker만 FMP 일봉 OHLC를 가져와 DB에 upsert한 뒤 표준 metric을 계산한다.
+- ET `16:00:00` 이전 same-day 뉴스는 기존 recent update와 같은 규칙으로 일부 metric이 계속 비어 있을 수 있다.
+- 응답 컬럼: `[][][]jobId[][][]`
+
 ### `POST /api/news/change/update-custom`
 
 - 요청 body: `{ "from": "YYYY-MM-DD", "to": "YYYY-MM-DD", "fmpConcurrency": 5, "fmpRequestIntervalMs": 250 }`
@@ -864,6 +874,22 @@ Control Window / localStorage 공통 설정:
 ### `POST /api/ibkr/ohlc1d/update`
 
 - 기본 CSV 또는 body의 `csvPath`에서 ticker를 읽는다.
+- 응답 컬럼: `[][][]jobId[][][]`
+
+### `POST /api/ibkr/ohlc1d/turnover/update`
+
+- default universe ticker 전체를 대상으로 `ohlc_1d.Turnover`가 `NULL`인 row만 계산한다.
+- 계산식은 `[][][]Volume[][][] × (([][][]Open[][][] + [][][]Close[][][])/2)` 이다.
+- `Open`, `Close`, `Volume` 중 하나라도 `NULL`이면 그 row는 건너뛰고 job log에 `uncomputable`로만 집계된다.
+- 응답 컬럼: `[][][]jobId[][][]`
+
+### `POST /api/fmp/ohlc1d/update-recent-missing`
+
+- 요청 body: `{ "concurrency": 10, "requestIntervalMs": 25 }` (둘 다 선택)
+- 대상은 canonical default universe ticker 전체다.
+- 각 ticker는 현재 OHLC DB max date 다음 날부터만 요청하므로 이미 있는 recent row는 다시 받지 않는다.
+- 최근 7일 window만 검사하며, ET 장 마감 전에는 current ET day를 자동 제외한다.
+- 적재 후 `computeDerivedForAffectedSymbols`를 호출해 derived metric과 turnover를 함께 갱신한다.
 - 응답 컬럼: `[][][]jobId[][][]`
 
 ### `POST /api/company-profiles/pull-fmp`
@@ -939,6 +965,7 @@ Control Window / localStorage 공통 설정:
 - `NewsWindow`는 `GET /api/news`와 `POST /api/news/pull-eodhd`를 사용한다.
 - `FinnhubNewsWindow`는 뉴스 조회, Finnhub 적재, fulltext, change update, bookmarks, job polling을 사용한다.
 - `DefaultTickerWindow`는 `GET /api/tickers`, `POST /api/tickers/import-default`, `POST /api/tickers/add`, `DELETE /api/tickers/remove`, `POST /api/company-profiles/pull-market-cap`, `POST /api/company-profiles/pull-float`, `POST /api/company-profiles/pull-institutional`, `GET /api/jobs/:jobId`를 사용한다.
+- `DailyChangeHistoryWindow`는 `GET /api/default-tickers/daily-change-history`를 사용한다.
 - `DataControlWindow`는 updates status, jobs, OHLC status/update, IBKR calendar update/update-custom, company profile pull, change update, DB inspect를 사용한다.
 - `CaseResearchWindow`는 `/api/research/*` 전체를 사용해 섹션/페이지 CRUD, reorder, 검색, 자동 저장을 수행한다.
 - `EvidenceTableWindow`는 `GET /api/model2/analyses`, `GET /api/model2/analyses/:analysisId/cases`, `GET /api/model2/analyses/:analysisId/evidence`를 사용한다.
@@ -1918,6 +1945,89 @@ query:
 5. market cap / float / institutional update route는 최근 24시간 이내 값이 있으면 해당 ticker를 자동 skip한다. skip되지 않은 경우에는 같은 `security_id + source` row를 update해 기존 값을 덮어쓴다.
 6. `tickers`는 legacy 호환용 단순 배열이고, 신규 UI는 `rows`를 우선 사용한다.
 
+### `GET /api/default-tickers/daily-change-history`
+
+query:
+
+- `date` optional, `YYYY-MM-DD`
+- `marketCapMin` optional number
+- `marketCapMax` optional number
+- `turnoverMin` optional number
+- `turnoverMax` optional number
+
+지원 입력 형식 예시:
+
+- raw number: `1000000`
+- shorthand: `1M`, `2.5B`, `750M`, `0.8T`
+
+응답:
+
+```json
+{
+  "selectedDate": "2026-03-27",
+  "defaultDate": "2026-03-27",
+  "availableMaxDate": "2026-03-27",
+  "marketCapFilter": {
+    "min": 1000000000,
+    "max": 50000000000
+  },
+  "turnoverFilter": {
+    "min": 100000000,
+    "max": 5000000000
+  },
+  "summary": {
+    "total": 1131,
+    "dailyChange": {
+      "gainers": 29,
+      "losers": 130,
+      "flat": 3,
+      "missing": 969
+    },
+    "closeFromOpen": {
+      "gainers": 210,
+      "losers": 149,
+      "flat": 1,
+      "missing": 771
+    }
+  },
+  "rows": [
+    {
+      "ticker": "AGX",
+      "exchange": "NEW YORK STOCK EXCHANGE, INC.",
+      "name": "Argan, Inc.",
+      "industry": "Engineering & Construction",
+      "date": "2026-03-27",
+      "close": 566.62,
+      "dailyChangePct": 37.91,
+      "closeFromOpenPct": 12.07,
+      "turnover": 145662340.12,
+      "marketCap": 8065530000,
+      "marketCapSource": "fmp",
+      "hasOhlcData": true
+    }
+  ]
+}
+```
+
+운영적 정의:
+
+1. 대상 universe는 canonical default universe다.
+2. `date`를 생략하면 OHLC DB의 stable max date를 자동 사용한다.
+3. `marketCapMin` 또는 `marketCapMax`가 하나라도 들어오면 `marketCap = null` row는 제외된다.
+4. `turnoverMin` 또는 `turnoverMax`가 하나라도 들어오면 `turnover = null` row는 제외된다.
+5. `rows`는 market cap + turnover filter가 적용된 dataset 전체를 반환한다. 선택 날짜 OHLC row가 없으면 row는 유지되며 `[][][]close[][][]`, `[][][]dailyChangePct[][][]`, `[][][]closeFromOpenPct[][][]`, `[][][]turnover[][][]`는 `null`이고 `[][][]hasOhlcData[][][] = false`다.
+6. `summary`는 `rows`와 같은 dataset 기준이며 두 세트가 있다.
+  - `[][][]summary.dailyChange[][][]`: `dailyChangePct` 기준
+  - `[][][]summary.closeFromOpen[][][]`: `closeFromOpenPct` 기준
+  - 각 세트의 `[][][]gainers[][][]`, `[][][]losers[][][]`, `[][][]flat[][][]`, `[][][]missing[][][]` 규칙은 동일하다.
+7. `dailyChangePct`, `closeFromOpenPct`는 저장된 derived column이 있으면 우선 사용하고, 비어 있으면 query/apply 시점에 `prev close`, `open`, `close`로 직접 계산한다.
+8. `turnover`는 `ohlc_1d.Turnover` 저장 컬럼이 있으면 우선 사용하고, 비어 있으면 query/apply 시점에 `[][][]Volume[][][] × (([][][]Open[][][] + [][][]Close[][][])/2)`로 즉시 계산한다.
+9. validation:
+  - `date` format 오류 시 `400`
+  - `marketCapMin > marketCapMax`면 `400`
+  - `turnoverMin > turnoverMax`면 `400`
+  - shorthand parse 실패 시 `400` (`1M`, `2.5B` 같은 형식만 허용)
+
 ### `POST /api/tickers/import-default`
 
 요청 body:
@@ -2471,6 +2581,6 @@ Finnhub `/stock/profile2` API에서 IPO date와 기본 회사 메타데이터를
 - full text는 기본적으로 row가 이미 생성된 뉴스에 대해 자동 재시도하지 않는다.
 - FMP PR에서 과거 잘못 저장된 fallback success row를 다시 처리하려면 `POST /api/news/fulltext/reset-fmp-pr-fallback`으로 먼저 삭제한 뒤, 일반 missing-only `POST /api/news/fulltext/update`를 실행한다.
 - `POST /api/ibkr/calendar/update`는 background job이 아니라 즉시 처리형이다.
-- `GET /api/updates/status`의 기본 key 목록에는 `news_change_recent`, `news_change_custom`가 하드코딩되어 있지 않다. 다만 DB row가 생기면 extra key로 응답에 포함된다.
+- `GET /api/updates/status`의 기본 key 목록에는 `fmp_ohlc_recent_missing`, `news_change_recent_fmp_missing`가 포함된다. `news_change_recent`, `news_change_custom`는 기본 key는 아니지만 DB row가 생기면 extra key로 응답에 포함된다.
 - industry는 DB source of truth가 아니라 최신 `watch lists2*.csv` 파일 기반 lazy cache다.
 - job 상태는 영속 저장이 아니므로 운영 audit 용 로그 저장소로 간주하면 안 된다.

@@ -8,6 +8,7 @@ const WatchlistWindow = lazy(async () => ({ default: (await import('./WatchlistW
 const CalendarWindow = lazy(async () => ({ default: (await import('./CalendarWindow')).CalendarWindow }));
 const FinnhubNewsWindow = lazy(async () => ({ default: (await import('./FinnhubNewsWindow')).FinnhubNewsWindow }));
 const DefaultTickerWindow = lazy(async () => ({ default: (await import('./DefaultTickerWindow')).DefaultTickerWindow }));
+const DailyChangeHistoryWindow = lazy(async () => ({ default: (await import('./DailyChangeHistoryWindow')).DailyChangeHistoryWindow }));
 const DataControlWindow = lazy(async () => ({ default: (await import('./DataControlWindow')).DataControlWindow }));
 const CaseResearchWindow = lazy(async () => ({ default: (await import('./CaseResearchWindow')).CaseResearchWindow }));
 const EvidenceTableWindow = lazy(async () => ({ default: (await import('./EvidenceTableWindow')).EvidenceTableWindow }));
@@ -131,6 +132,8 @@ export function DraggableWindow({
         );
       case 'default-ticker':
         return <DefaultTickerWindow onTickerClick={onTickerClick} />;
+      case 'daily-change-history':
+        return <DailyChangeHistoryWindow onTickerClick={onTickerClick} />;
       case 'data-control':
         return (
           <DataControlWindow

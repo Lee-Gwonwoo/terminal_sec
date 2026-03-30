@@ -7,7 +7,7 @@
 
 - 앱은 React + TypeScript + Vite 기반이다.
 - 창(window) 기반 데스크톱 스타일 UI이며, 각 창은 드래그/리사이즈/최대화/닫기를 지원한다.
-- 실제 API 연동이 살아 있는 주요 창은 `Finnhub News`, `Investing News`, `Default Ticker`, `Data Control`, `AI Research Window`, `Evidence Table`, `Watchlist` 이다.
+- 실제 API 연동이 살아 있는 주요 창은 `Finnhub News`, `Investing News`, `Default Ticker`, `Daily Change History`, `Data Control`, `AI Research Window`, `Evidence Table`, `Watchlist` 이다.
 - `News` 창도 `GET /api/news`, `POST /api/news/pull-eodhd`를 실제로 호출하지만, 현재 운영 기준의 주력 뉴스 창은 아니다.
 - `Watchlist` 창은 backend `watchlists` API와 연결되어 있고, 종목 이름/가격 일부는 프론트의 fallback lookup을 함께 사용한다.
 - `Calendar` 창은 현재 mock data 기반이다.
@@ -90,6 +90,7 @@ Vite dev proxy:
 - `finhub-news`
 - `investing-news`
 - `default-ticker`
+- `daily-change-history`
 - `data-control`
 - `case-research`
 - `evidence-table`
@@ -111,6 +112,7 @@ Vite dev proxy:
 - Investing News
 - Watch List
 - Default Ticker
+- Daily Change History
 - Data Control
 - AI Research Window
 - Evidence Table
@@ -125,6 +127,7 @@ Vite dev proxy:
 
 - `finhub-news` → `News Feed: Finnhub API`
 - `default-ticker` → `Default Ticker`
+- `daily-change-history` → `Daily Change History`
 - `data-control` → `Data Control`
 - `case-research` → `AI Research Window`
 - `evidence-table` → `Evidence Table`
@@ -624,6 +627,8 @@ localStorage 사용:
 ### 섹션
 
 - `IBKR Price Data`
+- `FMP Recent OHLC Fill`
+- `OHLC Turnover Update`
 - `Initial Calendar Backfill`
 - `Refresh Upcoming Calendar`
 - `Custom Calendar Update`
@@ -632,6 +637,7 @@ localStorage 사용:
 - `Peers Data Update`
 - `IPO Date Update`
 - `Recent Change% Update`
+- `FMP Recent Missing Change Fill`
 - `Custom Change% Update`
 
 각 섹션은 아래를 가진다.
@@ -644,12 +650,16 @@ localStorage 사용:
 추가 정보:
 
 - Price 섹션은 `DB Max Date` 표시
+- FMP Recent OHLC Fill 섹션은 최근 7일 누락 일봉만 FMP로 보강하고, 장 마감 전 ET 당일은 제외한다.
+- OHLC Turnover 섹션은 기존 값 skip 규칙으로 turnover 백필 job을 시작한다.
 - Calendar custom 섹션은 `from/to` date input 포함
 - Custom Change 섹션은 `from/to` date input 포함
 
 ### 호출 API
 
 - `POST /api/ibkr/ohlc1d/update`
+- `POST /api/fmp/ohlc1d/update-recent-missing`
+- `POST /api/ibkr/ohlc1d/turnover/update`
 - `POST /api/ibkr/calendar/update`
 - `POST /api/ibkr/calendar/update-custom`
 - `POST /api/company-profiles/pull-fmp`
@@ -657,6 +667,7 @@ localStorage 사용:
 - `POST /api/company-profiles/pull-peers`
 - `POST /api/company-profiles/pull-ipo-date`
 - `POST /api/news/change/update-recent`
+- `POST /api/news/change/update-recent-fmp-missing`
 - `POST /api/news/change/update-custom`
 - `GET /api/jobs/:jobId`
 - `GET /api/db/inspect`
@@ -665,7 +676,14 @@ change update contract:
 
 - `POST /api/news/change/update-recent` → `{ jobId }`
   - body에 `fmpConcurrency`(기본=5), `fmpRequestIntervalMs`(기본=250ms)를 선택적으로 보낼 수 있다.
-  - backend는 먼저 OHLC DB를 읽고, 비어 있는 ticker만 FMP 일봉 OHLC로 보강한 뒤 `news_change_metrics`를 다시 쓴다.
+  - backend는 최근 7일 뉴스 전체를 다시 계산한다. 먼저 OHLC DB를 읽고, 비어 있는 ticker만 FMP 일봉 OHLC로 보강한 뒤 `news_change_metrics`를 다시 쓴다.
+- `POST /api/news/change/update-recent-fmp-missing` → `{ jobId }`
+  - body에 `fmpConcurrency`(기본=5), `fmpRequestIntervalMs`(기본=250ms)를 선택적으로 보낼 수 있다.
+  - 최근 7일 뉴스 중 `change_pct`가 비어 있는 row만 대상으로 하며, 이미 계산된 row는 skip한다.
+- `POST /api/fmp/ohlc1d/update-recent-missing` → `{ jobId }`
+  - body에 `concurrency`(기본=10), `requestIntervalMs`(기본=25ms)를 선택적으로 보낼 수 있다.
+  - default universe ticker별 DB max date 다음 날부터 recent window까지만 요청한다.
+  - ET 장 마감 전에는 current ET day를 자동 제외한다.
 - `POST /api/news/change/update-custom` → `{ jobId }`
   - body는 `{ from, to, fmpConcurrency?, fmpRequestIntervalMs? }`.
   - 동작은 recent와 같고 날짜 범위만 사용자가 지정한다.
@@ -802,6 +820,55 @@ API:
 - filter input 값은 즉시 저장되지만, 실제 row filtering은 `useDeferredValue` 기준으로 한 박자 늦춰 heavy re-render를 줄인다.
 - 헤더는 고정하고, body row만 virtualization 대상으로 유지한다.
 - 데이터/API/job polling semantics는 그대로고, 화면에 동시에 그리는 row 수만 줄인다.
+
+## Daily Change History Window
+
+파일: `src/app/components/DailyChangeHistoryWindow.tsx`
+
+현재 상태:
+
+- 실제 backend API 연동이 있는 정식 창이다.
+- Add Tab Modal에서 직접 선택 가능하고, `WindowType`에도 `daily-change-history`로 등록돼 있다.
+- 기본 조회는 `GET /api/default-tickers/daily-change-history`를 사용한다.
+- 날짜 입력이 비어 있으면 backend가 `availableMaxDate`를 기준으로 가장 최근 stable date를 자동 적용한다.
+- 상단에는 단일 `date picker`, `Market Cap Min`, `Market Cap Max`, `Turnover Min`, `Turnover Max`, `Apply`, `Reset`, `Refresh`가 있다.
+- market cap / turnover input은 raw number뿐 아니라 `500M`, `1B`, `2.5B` 같은 shorthand 입력도 받는다.
+- filter는 입력 즉시 반영되지 않고, 사용자가 `Apply`를 눌렀을 때만 backend를 다시 호출한다.
+- 마지막으로 적용된 filter는 `daily-change-history-ui-state` localStorage key에 저장된다.
+- summary는 filtered dataset 기준으로 두 세트를 보여준다.
+  - `Daily Change %` 기준 `Gainers`, `Losers`, `Flat`, `Missing`, `Total`
+  - `Close From Open %` 기준 `Gainers`, `Losers`, `Flat`, `Missing`, `Total`
+- table은 ticker별 상세 row를 보여주며, `Missing` row도 제거하지 않고 남긴다.
+- column visibility chip으로 `Name`, `Date`, `Close`, `Close From Open %`, `Turnover`, `Market Cap`, `Industry`를 켜고 끌 수 있다.
+- 각 header 클릭으로 asc/desc 정렬이 가능하다. 현재 sort state도 같은 localStorage key에 함께 저장된다.
+
+표 컬럼:
+
+- `[][][]ticker[][][]`
+- `[][][]name[][][]`
+- `[][][]date[][][]`
+- `[][][]close[][][]`
+- `[][][]dailyChangePct[][][]`
+- `[][][]closeFromOpenPct[][][]`
+- `[][][]turnover[][][]`
+- `[][][]marketCap[][][]`
+- `[][][]industry[][][]`
+
+응답/표시 규칙:
+
+- `dailyChangePct > 0`이면 gainers, `< 0`이면 losers, `= 0`이면 flat다.
+- `dailyChangePct = null`이면 daily-change summary에서 `Missing`으로 집계되고 table row도 그대로 남는다.
+- `closeFromOpenPct > 0`이면 close-from-open summary에서 gainers, `< 0`이면 losers, `= 0`이면 flat다.
+- `closeFromOpenPct = null`이면 close-from-open summary에서 `Missing`으로 집계된다.
+- market cap filter가 하나라도 들어오면 `marketCap = null` row는 제외된다.
+- turnover filter가 하나라도 들어오면 `turnover = null` row는 제외된다.
+- backend는 저장된 derived value가 있으면 우선 사용하고, 없으면 `Apply` 시점 응답에서 즉시 계산한 값을 내려준다. turnover도 같은 규칙을 따른다.
+- ticker cell 클릭 시 상위 `onTickerClick`으로 ticker가 전달된다.
+
+현재 제약:
+
+- table row 수가 많을 수 있지만 현재는 일반 scroll table이다. virtualization은 아직 적용하지 않았다.
+- draft filter와 applied filter를 별도 badge로 나누지는 않고, 상단 summary 문구로 현재 적용 상태를 보여준다.
 
 ## Investing News Window
 

@@ -2,6 +2,8 @@ import type { DataControlHowToUseWindowData } from './types';
 
 export type DataControlHowToUseKey =
   | 'price'
+  | 'fmpRecentOhlc'
+  | 'turnover'
   | 'calendarBackfill'
   | 'calendarRefresh'
   | 'calendarCustom'
@@ -10,6 +12,7 @@ export type DataControlHowToUseKey =
   | 'peersPull'
   | 'ipoDate'
   | 'recent'
+  | 'fmpRecentChange'
   | 'custom';
 
 export const dataControlHowToUseRegistry: Record<DataControlHowToUseKey, DataControlHowToUseWindowData> = {
@@ -35,6 +38,52 @@ export const dataControlHowToUseRegistry: Record<DataControlHowToUseKey, DataCon
       'Log에서 updated/failed ticker 수를 확인합니다.',
     ],
     route: '/api/ibkr/ohlc1d/update',
+  },
+  fmpRecentOhlc: {
+    key: 'fmpRecentOhlc',
+    title: 'FMP Recent OHLC Fill',
+    summary: 'default ticker universe 기준으로 최근 구간의 누락 일봉만 FMP EOD API로 메웁니다.',
+    purpose: 'IBKR 전체 가격 업데이트를 돌리지 않고도 최근 뉴스/분석에 필요한 누락 일봉 tail만 빠르게 보수하는 버튼입니다.',
+    whenToRun: [
+      '최근 뉴스 change 계산 전에 일부 ticker만 최신 일봉이 비어 있을 때 실행합니다.',
+      'OHLC DB 전체 백필은 이미 되어 있고 최근 며칠 tail만 보수하고 싶을 때 적합합니다.',
+    ],
+    inputs: [
+      '별도 날짜 입력은 없습니다. 최근 7일 윈도우를 기준으로 default ticker universe 전체를 검사합니다.',
+      '각 ticker는 현재 DB max date 다음 날부터만 요청하므로 이미 있는 row는 다시 받지 않습니다.',
+    ],
+    cautions: [
+      'ET 장 마감 전에는 당일 bar를 받지 않도록 자동 제외합니다.',
+      '최근 누락분 보수 전용이므로 과거 장기 공백을 메우는 용도는 아닙니다.',
+    ],
+    verify: [
+      'Log에서 range, tickersFetched, totalRowsUpserted를 확인합니다.',
+      '완료 후 DB Max Date 또는 개별 ticker 최근 일봉이 채워졌는지 확인합니다.',
+    ],
+    route: '/api/fmp/ohlc1d/update-recent-missing',
+  },
+  turnover: {
+    key: 'turnover',
+    title: 'OHLC Turnover Update',
+    summary: 'default ticker universe 기준으로 OHLC 일봉의 빈 Turnover 값을 계산해 채웁니다.',
+    purpose: 'Daily Change History Window에서 turnover filter와 turnover column을 안정적으로 쓰기 위한 백필 버튼입니다.',
+    whenToRun: [
+      'Daily Change History에서 turnover 값이 많이 비어 있을 때 실행합니다.',
+      'OHLC 1D Price Update로 새 일봉을 적재한 뒤 과거 누락 turnover를 한 번 채우고 싶을 때 실행합니다.',
+    ],
+    inputs: [
+      '별도 날짜 입력은 없습니다. default ticker universe 전체가 대상입니다.',
+      '이미 Turnover 값이 있는 row는 자동으로 skip합니다.',
+    ],
+    cautions: [
+      'Open, Close, Volume 중 하나라도 비어 있으면 그 row는 계산하지 못하고 uncomputable로 남습니다.',
+      'OHLC 1D Price Update와 동시에 돌릴 필요는 없습니다. 먼저 가격 적재를 끝내는 편이 안전합니다.',
+    ],
+    verify: [
+      'Log에서 ticker별 updated / existing / uncomputable 수를 확인합니다.',
+      '실행 후 Daily Change History에서 turnover filter를 넣었을 때 결과가 늘어나는지 확인합니다.',
+    ],
+    route: '/api/ibkr/ohlc1d/turnover/update',
   },
   calendarBackfill: {
     key: 'calendarBackfill',
@@ -219,6 +268,29 @@ export const dataControlHowToUseRegistry: Record<DataControlHowToUseKey, DataCon
       '뉴스 리스트에서 최근 기사 change%가 채워졌는지 확인합니다.',
     ],
     route: '/api/news/change/update-recent',
+  },
+  fmpRecentChange: {
+    key: 'fmpRecentChange',
+    title: 'FMP Recent Missing Change Fill',
+    summary: '최근 7일 뉴스 중 change_pct가 비어 있는 row만 다시 계산하고, 필요한 OHLC는 FMP로 보강합니다.',
+    purpose: '이미 계산된 change는 건드리지 않고 최근 누락분만 빠르게 메우기 위한 버튼입니다.',
+    whenToRun: [
+      '최근 뉴스 목록에서 일부 종목만 change%가 비어 있을 때 실행합니다.',
+      'FMP recent OHLC fill 직후 누락 change만 이어서 계산하고 싶을 때 사용합니다.',
+    ],
+    inputs: [
+      '별도 날짜 입력은 없습니다. 최근 7일 뉴스가 대상입니다.',
+      'Change Update FMP Concurrency 설정이 FMP OHLC fallback 병렬도에 적용됩니다.',
+    ],
+    cautions: [
+      '이미 change_pct가 있는 row는 skip하므로 전체 재계산 용도가 아닙니다.',
+      'ET 장 마감 전에는 당일 일봉이 확정되지 않아 일부 same-day 뉴스는 계속 skip될 수 있습니다.',
+    ],
+    verify: [
+      'Log에서 updated / skipped 수와 FMP fallback 메시지를 확인합니다.',
+      'Recent 뉴스 목록에서 비어 있던 change% row가 채워졌는지 확인합니다.',
+    ],
+    route: '/api/news/change/update-recent-fmp-missing',
   },
   custom: {
     key: 'custom',
