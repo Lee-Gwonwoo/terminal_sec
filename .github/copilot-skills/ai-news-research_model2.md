@@ -7,6 +7,34 @@
 - 기본 운영 모드는 `press_release only`로 둔다.
 - 필요하면 `news`, `company_news`, `market_news`까지 확장할 수 있지만, source가 섞이면 해석 기준과 근거 표도 분리해서 남긴다.
 
+Investing 데이터 확장 규칙:
+
+- `Model_2`는 기본적으로 `press_release only`로 시작하지만, 필요하면 app DB에 적재된 Investing row도 분석 대상으로 확장할 수 있다.
+- 현재 app DB에서 Investing 기사는 `news_items.source = 'INVESTING'` 계열로 저장되며, `[][][]source_type[][][]`은 최소 아래 둘을 구분해 해석한다.
+  - `[][][]investing_stock_market_news[][][]`
+  - `[][][]investing_cryptocurrency_news[][][]`
+- Investing source를 분석할 때는 **title만 보고 분류하지 않는다.** 최소한 아래 3층 텍스트를 함께 본다.
+  - `[][][]title[][][]`: headline
+  - `[][][]body[][][]`: listing/summary 성격의 짧은 본문 또는 teaser
+  - `[][][]full_text[][][]`: `news_fulltext.full_text`에 저장된 기사 본문
+- 현재 코드 기준 `news_items.body`는 Investing category listing에서 긁어온 summary/description 성격일 수 있으므로, 이 값만으로 `case_type`을 확정하지 않는다.
+- `news_fulltext.full_text`가 성공적으로 존재하는 Investing row는 반드시 같이 읽고, `body`와 `full_text` 해석이 다르면 `full_text`를 우선한다.
+- `news_fulltext.full_text`가 없으면 `title + body(summary)`만으로 임시 분류할 수는 있지만, 이 경우 note/log에 `full_text 없음`을 남기고 신뢰도 제한을 적는다.
+- Investing source는 issuer-driven press release보다 commentary/market wrap 비중이 높을 수 있으므로, `press_release` taxonomy를 그대로 덮어쓰지 말고 source를 분리한 note, 부록, 또는 별도 근거 표로 남기는 것을 기본값으로 둔다.
+- `investing_stock_market_news`는 개별 기업 기사와 broader market/macro 기사가 섞일 수 있다. ticker 직접 매핑이 약하면 억지로 company-event case로 넣지 말고 `residual` 또는 별도 macro/theme case 후보로 보낸다.
+- Investing 뉴스를 분석할 때는 **과거 간접 영향 사례 검색 단계**를 추가할 수 있다. 즉 현재 Investing 기사에서 보이는 사건/내러티브가 과거 `company_news` 기사들에서 여러 종목 주가에 실제로 반응을 만든 적이 있는지 app DB에서 검색한다.
+- 이 검색의 목적은 Investing 기사 자체의 한 건 반응률을 보는 것이 아니라, **같은 경제 사건 또는 내러티브가 company_news에서 반복적으로 가격 영향 경로를 만들었는지**를 확인하는 데 있다.
+- 검색 기본 대상은 `[][][]company_news[][][]`다. 필요하면 `news`까지 넓힐 수 있지만, 기본값은 `company_news only`로 둔다.
+- 검색 키는 Investing 기사에서 추출한 핵심 사건 표현을 기준으로 잡는다. 예를 들어 정책 변화, 관세, AI capex, chip export restriction, OPEC, rate cut, FDA class-wide concern 같은 사건 문구를 `title`, `body`, `full_text`에서 뽑아 `company_news` headline/body/full_text에 대해 유사 사례를 찾는다.
+- 이 단계에서는 ticker가 같은지보다 **내러티브가 같은지**를 먼저 본다. 즉 Investing macro/theme 기사와 직접 ticker가 겹치지 않아도, 과거 `company_news`에서 비슷한 사건이 어떤 산업/peer 종목들에 반응을 만들었는지 찾는 용도로 사용한다.
+- 검색 결과는 최소한 아래 질문을 닫는 용도로 쓴다.
+  - 과거 `company_news`에 같은 내러티브가 있었는가?
+  - 그때 직접 또는 간접 영향이 나타난 ticker/industry 묶음이 있었는가?
+  - 그 반응은 `intraday_only`였는가, `delayed_followthrough`였는가, `sustained_repricing`였는가?
+  - 현재 Investing 기사도 같은 transmission path로 해석할 근거가 있는가?
+- 과거 `company_news` 검색에서 유사 사례가 충분히 확인되면, 현재 Investing 기사는 `macro/theme reference`에 그치지 않고 **간접 영향 가능성이 검증된 case 후보**로 메모할 수 있다.
+- 반대로 `company_news`에서 반복 사례가 거의 없거나 가격 반응이 약하면, Investing 기사의 서사는 남기되 `간접 영향 근거 약함`으로 명시한다.
+
 기업 컨텍스트 참조 원칙:
 
 - `Model_2`에서도 뉴스 텍스트와 change 데이터만 보지 않고, 각 ticker의 기업 컨텍스트를 **필수로** 함께 참조한다.
@@ -26,6 +54,16 @@
   - `ipo_date`는 상장 연차에 따른 변동성 차이, 초기 상장 기업과 성숙 기업의 반응 차이를 해석 보정하는 데 사용한다.
   - 동일한 headline 패턴이어도 `description`, `industry`, `ipo_date` 맥락이 다르면 같은 case_type 안에서도 반응 강도 차이가 날 수 있으므로, 대표 사례/반례 해석에 이를 함께 적는다.
 - 데이터가 없거나 비어 있으면 해당 항목은 건너뛰되, 어떤 컨텍스트가 누락됐는지 note 또는 로그에 남긴다.
+
+현재 app DB / API 해석 규칙:
+
+- `news_items`는 `published_at`, `source`, `source_type`, `title`, `body`, `url`, `tickers_csv`, `publisher`, `origin_url`를 담는 기본 뉴스 메타 테이블이다.
+- `news_fulltext`는 기사 full text canonical 저장소다. `Model_2`가 본문까지 읽어야 하는 경우, raw SQL에서는 `news_items`만 읽지 말고 `news_fulltext`를 함께 JOIN한다.
+- `/api/news`는 `news_items`에 기업 컨텍스트(`companyDescription`, `peers`, `ipoDate`, `marketCap`, `industry`)와 change metric을 붙여 주지만, full text 본문 자체를 그대로 내리는 endpoint로 가정하면 안 된다.
+- 따라서 `Model_2`가 full text까지 판단 근거로 써야 할 때는 `/api/news`의 enrichment는 활용하되, 실제 텍스트 판독은 `news_fulltext.full_text` 또는 이를 포함한 별도 query 기준으로 닫는다.
+- `model2_analysis_runs`는 분석 실행 메타(`title`, `note_title`, `source_type`, `source_name`, `since`, `until`, `scope`, aggregate count`)를 저장한다.
+- `model2_evidence_rows`는 기사 원문 보관소가 아니라, 분류 결과와 가격 반응, 기업 메타, `summary`, `body_preview`, denormalized 뉴스 필드를 저장하는 evidence cache다. full text 재판독이 필요하면 항상 `news_items`/`news_fulltext` 원본으로 돌아간다.
+- `model2_case_summaries`는 analysis별 집계 cache다. 유형 count와 impacted count를 빠르게 재조회하기 위한 용도이며, taxonomy 정의의 source of truth 그 자체는 아니다.
 
 핵심 방법:
 
@@ -107,9 +145,13 @@ taxonomy 설계 원칙:
   - `[][][]published_at[][][]`
   - `[][][]source_type[][][]`
   - `[][][]title[][][]`
-  - `[][][]body[][][]`
+  - `[][][]body[][][]` (`news_items.body`; source에 따라 summary/teaser일 수 있음)
   - `[][][]full_text[][][]` (`news_fulltext.full_text`가 있으면 사용)
   - `[][][]tickers_csv[][][]`
+- source별 텍스트 해석 규칙:
+  - `press_release`, `fmp_press_release`: `title + body + full_text`를 함께 본다.
+  - `company_news`, `news`, `market_news`: `title + body`를 기본으로 보고, full text가 있으면 우선 반영한다.
+  - `investing_stock_market_news`, `investing_cryptocurrency_news`: `title + body(summary) + full_text`를 모두 확인하는 것을 기본값으로 둔다. full text가 없으면 `body`를 summary로 명시하고 과신하지 않는다.
 - 가격 반응 입력(`news_change_metrics`):
   - `[][][]change_pct[][][]`: 전일 종가 → 뉴스 기준일 종가
   - `[][][]change_1d_pct[][][]`: 전일 종가 → 1거래일 후 종가
@@ -251,6 +293,8 @@ market cap 반영 원칙:
   - `press_release`는 issuer-driven 이벤트라서 case 유형과 가격 반응 연결이 상대적으로 직접적이다.
   - `company_news`나 `news`는 재서술 기사, commentary, analyst rewrite가 섞여 동일 규칙으로 분류하면 잡음이 커진다.
 - 따라서 먼저 `press_release only + market cap bucket` 기준으로 case taxonomy를 만들고, 나중에 다른 source는 별도 부록 또는 별도 표로 붙인다.
+- Investing source를 확장할 때도 위 기본값은 유지한다. 즉 `press_release` note를 먼저 만들고, Investing는 별도 run / 별도 note / 별도 evidence table로 분리하는 쪽을 우선한다.
+- 특히 `investing_stock_market_news`는 market wrap, macro, sector 기사 비중이 있어서 회사 event taxonomy와 직접 섞으면 의미가 흐려질 수 있다.
 
 사례 분류 절차:
 
@@ -264,6 +308,8 @@ market cap 반영 원칙:
 8. 같은 case type 내부에서 시총 bucket별 `영향 미침 비율`과 반응 타입 비중을 계산한다.
 9. 최종 note는 가능하면 `long -> short -> residual` 큰 순서로 정리하고, 각 묶음 안에서 영향력 순으로 세부 유형을 배치한다.
 10. 전체 비율만 보지 말고, bucket별 반응 편차와 대표 사례/반례를 같이 남긴다.
+11. Investing source를 분석할 때는 각 row마다 `title`, `body(summary)`, `full_text` 중 실제로 무엇을 읽고 분류했는지 누락 여부를 로그나 근거 표에 남긴다.
+12. Investing source를 분석할 때 간접 영향 가능성이 핵심이면, 과거 `company_news`를 검색해 같은 내러티브의 유사 사례와 가격 반응 구조를 별도로 확인한다.
 
 유형 설계와 잔여 유형 운영 규칙:
 
@@ -306,6 +352,8 @@ market cap 반영 원칙:
   - `[][][]title[][][]`
 - 권장 추가 컬럼:
   - `[][][]source_type[][][]`
+  - `[][][]source[][][]`
+  - `[][][]has_full_text[][][]`
   - `[][][]change_pct[][][]`
   - `[][][]change_from_open_pct[][][]`
   - `[][][]change_open_to_high_pct[][][]`
@@ -363,6 +411,8 @@ market cap 반영 원칙:
   - 왜 특정 threshold를 선택했는지
   - 어떤 대표 사례/반례를 보고 규칙을 보정했는지
   - 어떤 row들을 제외했고, 그 제외가 결과에 어떤 영향을 주는지
+  - Investing 기사에 대해 왜 과거 `company_news` 검색이 필요하다고 봤는지, 어떤 키워드/사건축으로 검색했는지
+  - 그 검색 결과가 실제 분류나 간접 영향 판단을 어떻게 바꿨는지
 - 각 로그 항목은 가능하면 아래 형식을 따른다.
   - `판단 대상`
   - `검토한 데이터/패턴`
@@ -375,6 +425,8 @@ market cap 반영 원칙:
 
 - 기간: `[][][]since[][][] ~ [][][]until[][][]`
 - source 범위: 기본적으로 `[][][]press_release only[][][]`, 확장한 경우 다른 source를 명시
+- Investing를 포함한 경우 `[][][]investing_stock_market_news[][][]`, `[][][]investing_cryptocurrency_news[][][]` 중 무엇을 포함했는지와 `title/body/full_text` 중 어떤 텍스트 레이어를 실제 사용했는지
+- Investing를 포함하고 간접 영향 판단을 했으면, 과거 검색 대상이 `[][][]company_news[][][]`였는지, 어떤 검색 키/내러티브 축을 썼는지, 대표 유사 사례가 무엇이었는지
 - `long / short / residual` 상위 분류 정의와 판정 기준
 - taxonomy 크기: 이번 note에서 실제 사용한 `case_type` 개수와 그 이유
 - 각 주요 `case_type`을 어떤 운영적 정의로 설명했는지, 그리고 그 정의가 새 뉴스 판별에 왜 유용한지
@@ -389,6 +441,8 @@ market cap 반영 원칙:
 - case 유형별 `영향 미침 / 영향 안 미침`
 - 대표 사례와 반례
 - 제외된 row 수와 제외 이유 (`market cap unknown`, `change 없음`, `text 없음` 등)
+- `full_text 없음`인 Investing row를 어떻게 처리했는지
+- 과거 `company_news` 검색 결과 간접 영향이 확인됐는지, 약했는지, 없었는지
 - 근거 뉴스 표 파일 경로
 - 근거 표 파일명과 note 제목의 매칭 관계
 - `내부 사고과정 로그(주요 판단 요약)` 섹션에서 실제 분류 기준을 바꾼 핵심 판단들

@@ -78,6 +78,7 @@
 		- `news_items` live schema에는 `[][][]ohlc_ticker[][][]`, `[][][]ohlc_date[][][]`, `[][][]change_1d_pct[][][]`, `[][][]change_from_open_pct[][][]`, `[][][]change_7d_pct[][][]`, `[][][]change_14d_pct[][][]`, `[][][]change_30d_pct[][][]`, `[][][]change_computed_at[][][]`, `[][][]publisher[][][]`, `[][][]origin_url[][][]`가 존재한다. 하지만 `newsChangeMerger`의 canonical 결과는 `news_change_metrics` 쪽을 사용한다.
 		- 실제 조회(`GET /api/news`)는 `news_items`에 `news_change_metrics` 8개 metric_key를 각각 LEFT JOIN + `news_fulltext` + `news_ai_analysis` + `news_sentiment_snapshots` + `company_profiles`/`securities`를 join해서 응답한다.
 		- `GET /api/news`는 company data enrich 단계에서 `[][][]marketCap[][][]`, `[][][]peers[][][]`, `[][][]companyDescription[][][]`, `[][][]ipoDate[][][]`를 대표 ticker 기준으로 보강한다.
+		- `GET /api/news`는 `[][][]hasFullText[][][]` 여부는 내려주지만 `news_fulltext.full_text` 본문 자체를 canonical source처럼 그대로 제공하는 endpoint로 가정하면 안 된다. full text 판독이 필요하면 raw DB에서 `news_fulltext`를 직접 JOIN한다.
 		- `GET /api/news`의 `[][][]industry[][][]`는 `company_profiles` 컬럼이 아니라 `securities.industry` 또는 `industryLookup.ts`의 CSV cache fallback에서 온다. raw DB에서 industry를 볼 때 `company_profiles`만 보면 안 된다.
 		- `GET /api/tickers`의 default-universe row는 `[][][]ipoDate[][][]`, `[][][]marketCap[][][]`뿐 아니라 `[][][]floatPct[][][]`, `[][][]institutionalPct[][][]`, `[][][]marketCapSource[][][]`, `[][][]floatSource[][][]`, `[][][]institutionalSource[][][]`도 함께 반환한다.
 		- `company_profiles`의 핵심 컬럼은 이제 `[][][]description[][][]`, `[][][]ipo_date[][][]`, `[][][]market_cap[][][]`, `[][][]peers_json[][][]`에 더해 `[][][]float_shares[][][]`, `[][][]float_pct[][][]`, `[][][]outstanding_shares[][][]`, `[][][]institutional_pct[][][]`, `[][][]market_cap_source[][][]`, `[][][]float_source[][][]`, `[][][]institutional_source[][][]`까지 포함한다. ticker 심볼은 이 테이블의 컬럼이 아니므로 `securities`와 JOIN해서 해석해야 한다. `POST /api/company-profiles/pull-fmp`, `pull-peers`, `pull-market-cap`, `pull-float`, `pull-institutional`, `pull-ipo-date`, `pull-yahoo`가 이 테이블을 갱신한다.
@@ -88,8 +89,9 @@
 		- `update_status` live source_key 전체 집합은 `company_profiles`, `company_profiles_ipo_date`, `company_profiles_market_cap`, `company_profiles_yahoo`, `finhub_news`, `fmp_press_release`, `fmp_sec_filing`, `ibkr_calendar`, `ibkr_ohlc_1d`, `news_change_7d`, `news_change_custom`, `news_change_recent`, `rtpr_press_release`, `tickers_csv`다.
 		- `news_items.source_type` live 분포는 `press_release=192,899`, `news=18,321`, `company_news=14,354`, `market_news=440`, `IBKR=25`다.
 		- 현재 코드 기준 `news_items.source_type`는 위 live 분포 외에도 `fmp_press_release`, `fmp_stock_news`, `fmp_sec_filing`, `investing_stock_market_news`, `investing_cryptocurrency_news`를 사용할 수 있다.
+		- Investing provider(`investingNewsProvider.ts`)는 category page에서 `title` + description teaser를 `news_items`로 저장하고, 기사 본문이 필요하면 별도 `news_fulltext` 추출 결과를 함께 봐야 한다.
 		- `model2_analysis_runs`는 research page와 연결될 수 있고, `since/until/scope/source_type/source_name` + aggregate count를 저장한다.
-		- `model2_evidence_rows`는 기사 원문 복사본이 아니라 가격반응 점수, 기업 메타, reaction tag, body preview를 함께 저장하는 denormalized evidence cache다.
+		- `model2_evidence_rows`는 기사 원문 복사본이 아니라 가격반응 점수, 기업 메타, reaction tag, `summary`, `body_preview`, denormalized 뉴스 필드를 함께 저장하는 evidence cache다. full text 재판독이 필요하면 `news_items`/`news_fulltext` 원본으로 돌아가야 한다.
 		- `model2_case_summaries`는 analysis별 case count cache이며 maintenance/cleanup 후 재계산될 수 있다.
 		- `/api/news` change 날짜 필드는 분리되어 있다.
 		  - `[][][]ohlc_date[][][]` / `[][][]change_pct_ohlc_date[][][]` = `change_pct.target_date`

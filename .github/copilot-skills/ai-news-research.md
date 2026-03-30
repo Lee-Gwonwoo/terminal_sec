@@ -169,6 +169,9 @@ AI news research 작업에서는 모든 저장소를 동일하게 취급하면 �
   - `company_profiles`는 ticker당 단일 row가 아니라 source별 다중 row다. raw SQL에서는 `securities` JOIN과 대표 row 선택 규칙이 필요하다.
   - `industry`는 `company_profiles` 컬럼이 아니라 `securities.industry` 또는 CSV fallback에서 온다.
   - `change` 계열은 `news_items`의 legacy inline 컬럼보다 `news_change_metrics`를 우선 사용한다.
+  - Investing 기사는 현재 `news_items.source = 'INVESTING'`, `source_type = investing_stock_market_news|investing_cryptocurrency_news` 계열로 저장될 수 있다.
+  - Investing row의 `news_items.body`는 listing summary/teaser 성격일 수 있으므로, 기사 본문까지 판단해야 하는 작업에서는 `news_fulltext.full_text`를 함께 본다.
+  - `/api/news`는 기업 컨텍스트와 change metric enrich에는 유용하지만 full text canonical source로 가정하지 않는다.
 
 #### 2. 2차 보조 DB: OHLC canonical price DB
 
@@ -229,6 +232,7 @@ AI news research 작업에서는 모든 저장소를 동일하게 취급하면 �
 - `industry`를 `company_profiles`에서 찾지 않는다.
 - `news_ai_analysis` 테이블이 존재한다고 해서 실제 AI scoring 데이터가 쌓여 있다고 가정하지 않는다.
 - `news_items`의 일부 legacy change 컬럼만 보고 `Model_1`/`Model_2` 반응률을 판단하지 않는다.
+- Investing 기사에서 `title` 또는 `body` summary만 보고 full text가 있는지 확인하지 않은 채 본문 의미를 단정하지 않는다.
 - `storage/`나 `tmp/` 아래 export를 source DB보다 더 최신이라고 가정하지 않는다.
 
 ### 모델 분류
