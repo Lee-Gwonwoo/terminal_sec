@@ -332,7 +332,7 @@ export function InvestingNewsWindow({
   const displayModeMenuRef = useRef<HTMLDivElement>(null);
 
   // Row context menu
-  const [rowCtxMenu, setRowCtxMenu] = useState<null | { x: number; y: number; newsId: string }>(null);
+  const [rowCtxMenu, setRowCtxMenu] = useState<null | { x: number; y: number; newsId: string; title: string }>(null);
   const rowCtxMenuRef = useRef<HTMLDivElement>(null);
 
   const readJsonResponse = useCallback(async (res: Response) => {
@@ -681,7 +681,7 @@ export function InvestingNewsWindow({
   };
 
   // ─── Fulltext modal ───
-  const handleOpenFulltext = async (newsId: string) => {
+  const handleOpenFulltext = async (newsId: string, fallbackTitle: string = '') => {
     setFulltextLoading(true);
     setShowFulltextModal(true);
     setFulltextData(null);
@@ -693,10 +693,10 @@ export function InvestingNewsWindow({
         return;
       }
       setFulltextData({
-        title: data.title ?? '',
-        text: data.full_text ?? data.plain_text ?? '(no fulltext)',
-        wordCount: data.word_count ?? 0,
-        status: data.extraction_status ?? 'unknown',
+        title: data.title ?? data.newsTitle ?? fallbackTitle,
+        text: data.fullText ?? data.full_text ?? data.plainText ?? data.plain_text ?? '(no fulltext)',
+        wordCount: data.wordCount ?? data.word_count ?? 0,
+        status: data.extractionStatus ?? data.extraction_status ?? 'unknown',
       });
     } catch (err: any) {
       setFulltextData({ title: 'Error', text: err.message, wordCount: 0, status: 'error' });
@@ -869,7 +869,7 @@ export function InvestingNewsWindow({
         }}
         onContextMenu={(e) => {
           e.preventDefault();
-          setRowCtxMenu({ x: e.clientX, y: e.clientY, newsId: item.id });
+          setRowCtxMenu({ x: e.clientX, y: e.clientY, newsId: item.id, title: item.title });
         }}
       >
         {activeColumns.map((col, colIdx) => {
@@ -924,7 +924,7 @@ export function InvestingNewsWindow({
             return (
               <div key={col.id} style={cellStyle} className="px-2 py-2 flex items-start">
                 <button
-                  onClick={(e) => { e.stopPropagation(); handleOpenFulltext(item.id); }}
+                  onClick={(e) => { e.stopPropagation(); handleOpenFulltext(item.id, item.title); }}
                   className={`px-1.5 py-0.5 rounded text-[10px] ${item.hasFulltext ? 'bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 hover:bg-green-100' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 hover:bg-gray-200'}`}
                   title={item.hasFulltext ? 'View full text' : 'Full text not yet extracted'}
                 >
@@ -1452,7 +1452,7 @@ export function InvestingNewsWindow({
         >
           <div className="p-1">
             <button
-              onClick={() => { handleOpenFulltext(rowCtxMenu.newsId); setRowCtxMenu(null); }}
+              onClick={() => { handleOpenFulltext(rowCtxMenu.newsId, rowCtxMenu.title); setRowCtxMenu(null); }}
               className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2"
             >
               <FileText className="w-3 h-3" /> View Full Text

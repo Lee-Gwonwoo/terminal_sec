@@ -94,6 +94,11 @@
   - migration marker를 `update_status`에 저장해 재시작 시 중복 변환 방지
   - cutoff를 두어 2026-03-30 timestamp-fix 이전에 적재된 row만 보정
 
+### PLAN CHANGE #4 (2026-03-30)
+- Investing-hosted 기사 중 일부는 raw `publisher` 값이 `Reuters`, `Chainwire` 등으로 저장되어도 실제 본문은 Investing 페이지에서 추출해야 한다.
+- 따라서 fulltext dispatch는 non-company-news 경로에서 `investing.com` host를 raw publisher보다 우선한다.
+- 기존 DB에 남아 있던 Investing fallback/unavailable fulltext row는 삭제 후 `/api/news/fulltext/update`로 재추출한다.
+
 ### 아키텍처(상위)
 - 수집 입력:
   - `https://www.investing.com/news/stock-market-news`

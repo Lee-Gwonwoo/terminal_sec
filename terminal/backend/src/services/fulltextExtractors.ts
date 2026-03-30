@@ -376,16 +376,22 @@ async function extractInvestingViaBrowser(url: string, body: string | null): Pro
     });
 
     try {
-      await page.goto(url, {
-        waitUntil: "domcontentloaded",
-        timeout: BROWSER_TIMEOUT_MS,
-      });
+      try {
+        await page.goto(url, {
+          waitUntil: "domcontentloaded",
+          timeout: 30_000,
+        });
+      } catch (error: any) {
+        if (!/Timeout/i.test(error?.message ?? "")) {
+          throw error;
+        }
+      }
       await page.waitForURL((currentUrl) => !currentUrl.toString().includes("__cf_chl"), {
-        timeout: 15_000,
+        timeout: 20_000,
       }).catch(() => undefined);
-      await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => undefined);
-      await page.waitForSelector('[data-test="article-body"], .articlePage, article, main', {
-        timeout: 15_000,
+      await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => undefined);
+      await page.waitForSelector('[data-test="article-body"], .articlePage, article, main, body', {
+        timeout: 20_000,
       }).catch(() => undefined);
       await page.waitForTimeout(1500).catch(() => undefined);
 

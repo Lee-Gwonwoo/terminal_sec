@@ -334,3 +334,100 @@
 ### 리스크/메모
 - 이번 migration은 cutoff 이전 적재분만 대상으로 하므로, 이후 별도 import로 오래된 잘못된 Investing row를 다시 넣으면 자동 보정 대상이 아니다.
 - 그런 경우에는 marker를 지운 뒤 재실행하기보다, 별도 수동 backfill route/script를 추가하는 편이 더 안전하다.
+
+---
+
+## 2026-03-30 (9차: Investing 본문 host 우선 분기 + fallback row 재추출)
+
+**작성 시각:** 2026-03-30 09:30 (local)
+
+### 작업 항목
+- Investing-hosted 기사에서 raw `publisher`가 `Reuters`/`Chainwire`여도 `investing.com` host를 우선해 Investing extractor로 분기하도록 수정
+- 기존 DB에 남아 있던 Investing fallback/unavailable fulltext row 삭제
+- `POST /api/news/fulltext/update`로 Investing stock/crypto 본문 재추출 재실행
+- 느린 기사 페이지를 위해 Investing browser extractor timeout 허용 폭 확대
+
+### 변경 파일
+
+| 파일 | 변경 유형 | 내용 |
+|------|-----------|------|
+| `terminal/backend/src/services/fulltextExtractors.ts` | 수정 | non-company-news에서 `investing.com` host를 raw publisher보다 우선하고, Investing browser extractor가 navigation timeout 후에도 DOM 복구를 시도하도록 보강 |
+| `terminal/backend/tests/fulltextExtractors.test.ts` | 수정 | Investing-hosted Reuters label 기사도 `investing-browser`로 가는 회귀 테스트 추가 |
+| `ai_agent_plan/investing_news_window/plan.md` | 수정 | PLAN CHANGE #4 추가 |
+| `ai_agent_plan/investing_news_window/agent_log.md` | 수정 | 현재 작업 기록 추가 |
+
+### 검증
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `get_errors` 기준 extractor/test 에러 0 |
+| 빌드 | ✅ | backend `npm run build` 통과 |
+| 자동 테스트 | ✅ | backend 전체 14 files / 90 tests pass |
+| 런타임 통합 | ✅ | DB fallback row 57건 삭제 후 fulltext 재추출, 최근 Investing row 본문 복구 확인 |
+
+### 런타임 결과 요약
+- 재작업 전 Investing fulltext 분포:
+  - `body-fallback (no-scraper: INVESTING.COM)` 36건
+  - `body-fallback (no-scraper: REUTERS)` 10건
+  - `body-fallback (no-scraper: CHAINWIRE)` 10건
+- fallback/unavailable row 삭제:
+  - 57건 삭제
+- 재추출 후 최근 12건 확인:
+  - `Claude model leak...` → `investing-browser`, `wordCount=396`
+  - `Viridian Therapeutics...` → `investing-browser`, `wordCount=351`
+  - `Top US food supplier Sysco...` → `investing-browser`, `wordCount=470`
+  - `United Therapeutics...` → `investing-browser`, `wordCount=389`
+- 중간 집계 시점 기준 DB 분포:
+  - `investing-browser` 성공 33건
+  - fallback/no-scraper row는 제거됨
+  - 남은 대상은 background fulltext job가 계속 처리 중
+
+### 상태
+- Investing 본문이 summary fallback으로만 남던 주 원인은 제거됨
+- 최근 기사들은 실제 본문으로 복구 확인 완료
+- stock/crypto fulltext retry job 일부는 background에서 계속 진행 중일 수 있음
+- 전체 상태: **확인 대기 (awaiting user confirmation)**
+
+### 리스크/메모
+- Investing 상세 페이지는 응답이 느린 경우가 있어 모든 과거 row가 즉시 끝나지 않을 수 있다. 현재는 timeout 후에도 DOM 복구를 시도하도록 완화했다.
+- background retry job가 남은 과거 기사까지 순차 처리 중일 수 있으므로, 전체 과거 row 최종 숫자는 약간 더 늘어날 수 있다.
+
+---
+
+## 2026-03-30 (10차: Investing Full Text modal 응답 shape 수정)
+
+**작성 시각:** 2026-03-30 09:30 (local)
+
+### 작업 항목
+- 사용자 스크린샷에서 Full Text modal이 `(no fulltext)`로 보이는 현상 분석
+- backend `/api/news/fulltext/:id` 응답이 camelCase(`fullText`, `wordCount`, `extractionStatus`)인데 프런트가 snake_case만 읽고 있던 문제 수정
+- modal header가 비어 보이지 않도록 row title을 fallback title로 전달
+
+### 변경 파일
+
+| 파일 | 변경 유형 | 내용 |
+|------|-----------|------|
+| `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/InvestingNewsWindow.tsx` | 수정 | Full Text modal 응답 매핑에서 `fullText`/`wordCount`/`extractionStatus` camelCase 필드 지원, row title fallback 전달 |
+| `ai_agent_plan/investing_news_window/agent_log.md` | 수정 | 현재 작업 기록 추가 |
+
+### 검증
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `InvestingNewsWindow.tsx` 에러 0 |
+| 빌드 | ✅ | frontend `npm run build` 통과 |
+| 자동 테스트 | 해당 없음 | 프런트 응답 매핑 단건 수정, 기존 backend 테스트는 앞 단계에서 통과 유지 |
+| 런타임 통합 | ✅ | `/api/news/fulltext/:id`가 `fullText` camelCase로 응답함을 확인했고, 프런트 매핑이 해당 shape를 읽도록 수정 |
+
+### 런타임 결과 요약
+- backend 실제 응답 예시:
+  - `fullText`: 본문 문자열
+  - `wordCount`: `396`
+  - `extractionStatus`: `success`
+- 기존 프런트 코드:
+  - `data.full_text ?? data.plain_text ?? '(no fulltext)'`
+- 수정 후 프런트 코드:
+  - `data.fullText ?? data.full_text ?? data.plainText ?? data.plain_text ?? '(no fulltext)'`
+
+### 상태
+- 사용자가 올린 스크린샷의 `(no fulltext)` modal 원인 제거
+- Investing row에 실제 본문이 있는 경우 modal 본문 표시 가능
+- 전체 상태: **확인 대기 (awaiting user confirmation)**
