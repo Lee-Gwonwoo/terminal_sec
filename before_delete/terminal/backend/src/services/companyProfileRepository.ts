@@ -19,6 +19,8 @@ export interface CompanyProfileRow {
   market_cap_source: string | null;
   float_source: string | null;
   institutional_source: string | null;
+  insider_pct: number | null;
+  insider_source: string | null;
   fetched_at: string;
 }
 
@@ -267,6 +269,35 @@ export async function upsertInstitutional(
       `INSERT INTO company_profiles (security_id, source, institutional_pct, institutional_source, fetched_at)
        VALUES (?, ?, ?, ?, ?)`,
       [securityId, source, institutionalPct, institutionalSource, now],
+    );
+  }
+}
+
+/**
+ * Upsert insider ownership percentage for a security.
+ */
+export async function upsertInsider(
+  securityId: number,
+  source: string,
+  insiderPct: number | null,
+  insiderSource: string,
+): Promise<void> {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const existing = await db.get<{ id: number }>(
+    "SELECT id FROM company_profiles WHERE security_id = ? AND source = ?",
+    [securityId, source],
+  );
+  if (existing) {
+    await db.run(
+      `UPDATE company_profiles SET insider_pct = ?, insider_source = ?, fetched_at = ? WHERE id = ?`,
+      [insiderPct, insiderSource, now, existing.id],
+    );
+  } else {
+    await db.run(
+      `INSERT INTO company_profiles (security_id, source, insider_pct, insider_source, fetched_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      [securityId, source, insiderPct, insiderSource, now],
     );
   }
 }

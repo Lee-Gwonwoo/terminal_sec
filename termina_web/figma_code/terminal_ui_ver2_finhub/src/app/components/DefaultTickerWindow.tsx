@@ -23,6 +23,8 @@ interface TickerRow {
   marketCapSource: string | null;
   floatSource: string | null;
   institutionalSource: string | null;
+  insiderPct: number | null;
+  insiderSource: string | null;
 }
 
 interface JobStatus {
@@ -36,7 +38,7 @@ interface JobStatus {
 const ROW_HEIGHT = 37;
 const HEADER_HEIGHT = 37;
 const MIN_LIST_HEIGHT = 200;
-const GRID_TEMPLATE_COLUMNS = "minmax(96px,0.9fr) minmax(180px,1.7fr) minmax(96px,0.8fr) minmax(128px,1.1fr) minmax(96px,0.9fr) minmax(96px,0.8fr) minmax(128px,1fr) minmax(96px,0.8fr) minmax(96px,0.8fr) 48px";
+const GRID_TEMPLATE_COLUMNS = "minmax(96px,0.9fr) minmax(180px,1.7fr) minmax(96px,0.8fr) minmax(128px,1.1fr) minmax(96px,0.9fr) minmax(96px,0.8fr) minmax(128px,1fr) minmax(96px,0.8fr) minmax(96px,0.8fr) minmax(96px,0.8fr) 48px";
 
 interface TickerListRowData {
   rows: TickerRow[];
@@ -60,6 +62,8 @@ function fallbackRowsFromTickers(tickers: string[] | undefined): TickerRow[] {
     marketCapSource: null,
     floatSource: null,
     institutionalSource: null,
+    insiderPct: null,
+    insiderSource: null,
   }));
 }
 
@@ -79,9 +83,21 @@ function normalizeRows(data: any): TickerRow[] {
       marketCapSource: typeof row.marketCapSource === "string" ? row.marketCapSource : null,
       floatSource: typeof row.floatSource === "string" ? row.floatSource : null,
       institutionalSource: typeof row.institutionalSource === "string" ? row.institutionalSource : null,
+      insiderPct: typeof row.insiderPct === "number" ? row.insiderPct : null,
+      insiderSource: typeof row.insiderSource === "string" ? row.insiderSource : null,
     }));
   }
   return fallbackRowsFromTickers(data?.tickers);
+}
+
+async function readJsonResponse(response: Response): Promise<any> {
+  const text = await response.text();
+  if (!text.trim()) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`Invalid JSON response (${response.status} ${response.statusText || "unknown"})`);
+  }
 }
 
 function formatMarketCap(value: number | null): string {
@@ -153,6 +169,9 @@ const TickerListRow = memo(function TickerListRow({ data, index, style }: ListCh
         <div className="px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-200 whitespace-nowrap overflow-hidden">
           {formatPct(row.institutionalPct)}<SourceBadge source={row.institutionalSource} />
         </div>
+        <div className="px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-200 whitespace-nowrap overflow-hidden">
+          {formatPct(row.insiderPct)}<SourceBadge source={row.insiderSource} />
+        </div>
         <div className="px-3 py-2 text-center">
           <button
             onClick={(e) => {
@@ -193,6 +212,10 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
   const [instJobId, setInstJobId] = useState<string | null>(null);
   const [instJob, setInstJob] = useState<JobStatus | null>(null);
   const [showInstLog, setShowInstLog] = useState(false);
+  const [yahooUpdating, setYahooUpdating] = useState(false);
+  const [yahooJobId, setYahooJobId] = useState<string | null>(null);
+  const [yahooJob, setYahooJob] = useState<JobStatus | null>(null);
+  const [showYahooLog, setShowYahooLog] = useState(false);
   const [filterText, setFilterText] = useState("");
   const [sortMode, setSortMode] = useState<"default" | "recent-added">("default");
   const [dataSource, setDataSource] = useState<"db" | "csv" | null>(null);
@@ -210,7 +233,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
       const effectivePath = trimmedCsvPath || DEFAULT_CSV_PATH;
       const url = `${API_BASE}/api/tickers?csvPath=${encodeURIComponent(effectivePath)}`;
       const res = await fetch(url);
-      const data = await res.json();
+      const data = await readJsonResponse(res);
       if (!res.ok) {
         setError(data.error || `HTTP ${res.status}`);
         return;
@@ -240,7 +263,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ csvPath: trimmedCsvPath || DEFAULT_CSV_PATH, ticker: trimmed }),
       });
-      const data = await res.json();
+      const data = await readJsonResponse(res);
       if (!res.ok) {
         setError(data.error || `HTTP ${res.status}`);
         return;
@@ -265,7 +288,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ csvPath: trimmedCsvPath || DEFAULT_CSV_PATH, ticker }),
       });
-      const data = await res.json();
+      const data = await readJsonResponse(res);
       if (!res.ok) {
         setError(data.error || `HTTP ${res.status}`);
         return;
@@ -290,7 +313,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ csvPath: trimmedCsvPath }),
       });
-      const data = await res.json();
+      const data = await readJsonResponse(res);
       if (!res.ok) {
         setError(data.error || `HTTP ${res.status}`);
         return;
@@ -317,7 +340,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });
-      const data = await res.json();
+      const data = await readJsonResponse(res);
       if (!res.ok) {
         setError(data.error || `HTTP ${res.status}`);
         setMarketCapUpdating(false);
@@ -341,7 +364,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });
-      const data = await res.json();
+      const data = await readJsonResponse(res);
       if (!res.ok) {
         setError(data.error || `HTTP ${res.status}`);
         setFloatUpdating(false);
@@ -365,7 +388,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });
-      const data = await res.json();
+      const data = await readJsonResponse(res);
       if (!res.ok) {
         setError(data.error || `HTTP ${res.status}`);
         setInstUpdating(false);
@@ -378,8 +401,33 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
     }
   };
 
+  const handleYahooHoldersUpdate = async () => {
+    if (!isDefaultPath || yahooUpdating) return;
+    setYahooUpdating(true);
+    setError(null);
+    setNotice(null);
+    setYahooJob(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/company-profiles/pull-holders-yahoo`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = await readJsonResponse(res);
+      if (!res.ok) {
+        setError(data.error || `HTTP ${res.status}`);
+        setYahooUpdating(false);
+        return;
+      }
+      setShowYahooLog(true);
+      setYahooJobId(data.jobId ?? null);
+    } catch (err: any) {
+      setError(err.message || "Failed to start Yahoo holders update");
+      setYahooUpdating(false);
+    }
+  };
+
   const handleLostJob = useCallback(async (
-    kind: "Market cap" | "Float" | "Institutional",
+    kind: "Market cap" | "Float" | "Institutional" | "Yahoo holders",
     reset: () => void,
   ) => {
     reset();
@@ -403,7 +451,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
           return;
         }
         if (!res.ok) return;
-        const data = await res.json();
+        const data = await readJsonResponse(res);
         if (cancelled) return;
         setMarketCapJob(data);
         if (data.status === "done") {
@@ -426,7 +474,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [marketCapJobId, loadTickers]);
+  }, [handleLostJob, marketCapJobId, loadTickers]);
 
   useEffect(() => {
     if (!floatJobId) return;
@@ -443,7 +491,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
           return;
         }
         if (!res.ok) return;
-        const data = await res.json();
+        const data = await readJsonResponse(res);
         if (cancelled) return;
         setFloatJob(data);
         if (data.status === "done") {
@@ -483,7 +531,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
           return;
         }
         if (!res.ok) return;
-        const data = await res.json();
+        const data = await readJsonResponse(res);
         if (cancelled) return;
         setInstJob(data);
         if (data.status === "done") {
@@ -507,6 +555,46 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
       window.clearInterval(timer);
     };
   }, [handleLostJob, instJobId, loadTickers]);
+
+  useEffect(() => {
+    if (!yahooJobId) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/jobs/${yahooJobId}`);
+        if (res.status === 404) {
+          await handleLostJob("Yahoo holders", () => {
+            setYahooUpdating(false);
+            setYahooJob(null);
+            setYahooJobId(null);
+          });
+          return;
+        }
+        if (!res.ok) return;
+        const data = await readJsonResponse(res);
+        if (cancelled) return;
+        setYahooJob(data);
+        if (data.status === "done") {
+          setYahooUpdating(false);
+          setNotice(`Yahoo holders update completed. Updated ${data.result?.updated ?? 0} tickers.`);
+          await loadTickers();
+        } else if (data.status === "failed") {
+          setYahooUpdating(false);
+          setError(data.error || "Yahoo holders update failed");
+        } else if (data.status === "cancelled") {
+          setYahooUpdating(false);
+        }
+      } catch {
+        // ignore transient polling errors
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => { void poll(); }, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [handleLostJob, yahooJobId, loadTickers]);
 
   useEffect(() => {
     const container = listContainerRef.current;
@@ -616,6 +704,15 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
               <RefreshCw className={`w-3 h-3 ${instUpdating ? "animate-spin" : ""}`} />
               {instUpdating ? "Inst..." : "Inst"}
             </button>
+            <button
+              onClick={handleYahooHoldersUpdate}
+              disabled={yahooUpdating || loading}
+              className="px-2 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-1"
+              title="Pull institutional + insider holders from Yahoo and refresh the default universe table"
+            >
+              <RefreshCw className={`w-3 h-3 ${yahooUpdating ? "animate-spin" : ""}`} />
+              {yahooUpdating ? "Yahoo..." : "Yahoo Holders"}
+            </button>
           </>
         )}
         {!isDefaultPath && (
@@ -724,6 +821,27 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
           )}
         </div>
       )}
+      {yahooJob && yahooJob.status === "running" && (
+        <div className="mb-2 p-2 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded text-xs text-indigo-700 dark:text-indigo-300">
+          <div className="flex items-center justify-between">
+            <span>Yahoo holders update running: {yahooJob.progress.completed}/{yahooJob.progress.total} ({yahooJob.progress.pct}%)</span>
+            <button
+              onClick={() => setShowYahooLog((v) => !v)}
+              className="px-1.5 py-0.5 text-[10px] bg-indigo-200 dark:bg-indigo-800 text-indigo-700 dark:text-indigo-300 rounded hover:bg-indigo-300 dark:hover:bg-indigo-700 flex items-center gap-0.5"
+            >
+              {showYahooLog ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+              {showYahooLog ? "Hide Log" : "View Log"}
+            </button>
+          </div>
+          {showYahooLog && yahooJob.logs.length > 0 && (
+            <div className="mt-2 max-h-40 overflow-y-auto bg-gray-900 text-gray-200 rounded p-2 font-mono text-[10px] leading-tight">
+              {yahooJob.logs.slice(-100).map((line, i) => (
+                <div key={i} className="whitespace-pre-wrap">{line}</div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="flex items-center gap-2 mb-3">
         <input
@@ -799,6 +917,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
               <div className="text-right font-semibold px-3 py-2">Market Cap</div>
               <div className="text-right font-semibold px-3 py-2">Float %</div>
               <div className="text-right font-semibold px-3 py-2">Inst %</div>
+              <div className="text-right font-semibold px-3 py-2">Insider %</div>
               <div className="text-center font-semibold px-3 py-2">Del</div>
             </div>
             <List

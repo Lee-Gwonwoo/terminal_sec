@@ -322,9 +322,11 @@ export async function initDb(): Promise<void> {
     ["float_pct", "REAL"],
     ["outstanding_shares", "REAL"],
     ["institutional_pct", "REAL"],
+    ["insider_pct", "REAL"],
     ["market_cap_source", "TEXT"],
     ["float_source", "TEXT"],
     ["institutional_source", "TEXT"],
+    ["insider_source", "TEXT"],
   ] as const) {
     try {
       await db.exec(`ALTER TABLE company_profiles ADD COLUMN ${col[0]} ${col[1]}`);

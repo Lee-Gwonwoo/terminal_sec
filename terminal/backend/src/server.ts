@@ -633,9 +633,11 @@ async function getDefaultUniverseRows(): Promise<TickerListRow[]> {
         market_cap: number | null;
         float_pct: number | null;
         institutional_pct: number | null;
+        insider_pct: number | null;
         market_cap_source: string | null;
         float_source: string | null;
         institutional_source: string | null;
+        insider_source: string | null;
       }>>(
         `SELECT s.ticker, s.exchange, s.name, s.sector, s.industry,
           ui.created_at AS added_at,
@@ -668,6 +670,13 @@ async function getDefaultUniverseRows(): Promise<TickerListRow[]> {
                   LIMIT 1
                 ) AS institutional_pct,
                 (
+                  SELECT cp.insider_pct
+                  FROM company_profiles cp
+                  WHERE cp.security_id = s.id AND cp.insider_pct IS NOT NULL
+                  ORDER BY cp.fetched_at DESC
+                  LIMIT 1
+                ) AS insider_pct,
+                (
                   SELECT cp.market_cap_source
                   FROM company_profiles cp
                   WHERE cp.security_id = s.id AND cp.market_cap IS NOT NULL
@@ -687,7 +696,14 @@ async function getDefaultUniverseRows(): Promise<TickerListRow[]> {
                   WHERE cp.security_id = s.id AND cp.institutional_pct IS NOT NULL
                   ORDER BY cp.fetched_at DESC
                   LIMIT 1
-                ) AS institutional_source
+                ) AS institutional_source,
+                (
+                  SELECT cp.insider_source
+                  FROM company_profiles cp
+                  WHERE cp.security_id = s.id AND cp.insider_pct IS NOT NULL
+                  ORDER BY cp.fetched_at DESC
+                  LIMIT 1
+                ) AS insider_source
          FROM ticker_universe_items ui
          JOIN securities s ON s.id = ui.security_id
          WHERE ui.universe_id = ?
@@ -706,9 +722,11 @@ async function getDefaultUniverseRows(): Promise<TickerListRow[]> {
           marketCap: row.market_cap ?? null,
           floatPct: row.float_pct ?? null,
           institutionalPct: row.institutional_pct ?? null,
+          insiderPct: row.insider_pct ?? null,
           marketCapSource: row.market_cap_source ?? null,
           floatSource: row.float_source ?? null,
           institutionalSource: row.institutional_source ?? null,
+          insiderSource: row.insider_source ?? null,
         }));
       }
     }
@@ -4700,6 +4718,209 @@ app.post("/api/company-profiles/pull-fmp", async (req, res) => {
           totalProfiles,
           source: "fmp",
         });
+      } catch (error) {
+        failJob(jobId, error instanceof Error ? error.message : String(error));
+      }
+    })();
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Unknown error" });
+  }
+});
+
+// ── Pull Yahoo Holders (institutional + insider) ───────────────────────────
+app.post("/api/company-profiles/pull-holders-yahoo", async (req, res) => {
+  try {
+    const body = req.body as { tickers?: string[]; maxTickers?: number; tickerConcurrency?: number; skipExisting?: boolean };
+    let tickers = body.tickers;
+    if (!tickers || tickers.length === 0) {
+      tickers = await getDefaultUniverseTickers();
+    }
+    const max = body.maxTickers ?? tickers.length;
+    let target = tickers.slice(0, max);
+    // Use Yahoo-specific concurrency (default to 50 as requested)
+    const tickerConcurrency = clampYahooConcurrency(body.tickerConcurrency ?? 50);
+    const skipExisting = body.skipExisting !== false; // default: true
+
+    let skippedCount = 0;
+    if (skipExisting) {
+      const { getTickersWithRecentInstitutional } = await import("./services/companyProfileRepository.js");
+      const recentSet = await getTickersWithRecentInstitutional(24);
+      const before = target.length;
+      target = target.filter((t) => !recentSet.has(t.toUpperCase()));
+      skippedCount = before - target.length;
+    }
+
+    const jobId = createJob(target.length);
+    appendLog(jobId, `Starting Yahoo holders update: ${target.length} tickers (concurrency=${tickerConcurrency}, skipExisting=${skipExisting}, skipped=${skippedCount})`);
+    res.json({ jobId });
+
+    void (async () => {
+      try {
+        if (target.length === 0) {
+          appendLog(jobId, "No tickers requested — nothing to do");
+          await setLastSuccess("company_profiles_holders_yahoo", new Date().toISOString(), {
+            source: "yahoo-holders",
+            requested: 0,
+            fetched: 0,
+            updated: 0,
+            errors: 0,
+          });
+          completeJob(jobId, { requested: 0, tickersUpdated: 0, tickersFailed: 0, totalRowsUpserted: 0 });
+          return;
+        }
+
+        // Build outstanding shares map from existing DB data (FMP float rows)
+        const outstandingMap = new Map<string, number>();
+        for (const ticker of target) {
+          const row = await getDb().get<{ outstanding_shares: number | null }>(
+            `SELECT cp.outstanding_shares FROM company_profiles cp
+             JOIN securities s ON s.id = cp.security_id
+             WHERE s.ticker = ? AND cp.outstanding_shares IS NOT NULL
+             ORDER BY cp.fetched_at DESC LIMIT 1`,
+            [ticker.toUpperCase()],
+          );
+          if (row?.outstanding_shares) outstandingMap.set(ticker.toUpperCase(), row.outstanding_shares);
+        }
+
+        const missingOutstanding = target.filter((ticker) => !outstandingMap.has(ticker.toUpperCase()));
+        if (missingOutstanding.length > 0) {
+          appendLog(jobId, `Bootstrapping outstanding shares from FMP for ${missingOutstanding.length} tickers before Yahoo holders calc`);
+          const { fetchFmpSharesFloatBatch } = await import("./services/fmpSharesFloatProvider.js");
+          const { upsertFloat } = await import("./services/companyProfileRepository.js");
+          const floatBootstrap = await fetchFmpSharesFloatBatch(missingOutstanding, {
+            shouldCancel: () => isJobCancelled(jobId),
+          });
+
+          for (const [ticker, data] of floatBootstrap.results) {
+            if (data.outstandingShares != null && data.outstandingShares > 0) {
+              outstandingMap.set(ticker.toUpperCase(), data.outstandingShares);
+            }
+            const existingSec = await getDb().get<{ id: number }>(
+              "SELECT id FROM securities WHERE ticker = ? ORDER BY id ASC LIMIT 1",
+              [ticker.toUpperCase()],
+            );
+            if (existingSec) {
+              await upsertFloat(existingSec.id, "fmp", data.floatShares, data.freeFloat, data.outstandingShares, "fmp");
+            }
+          }
+
+          for (const [ticker, message] of floatBootstrap.errors) {
+            appendLog(jobId, `${ticker}: outstanding bootstrap error - ${message}`);
+          }
+        }
+
+        const { fetchYahooOwnershipBatch } = await import("./services/yahooOwnershipProvider.js");
+        const { upsertInstitutional, upsertInsider, upsertCompanyProfile } = await import("./services/companyProfileRepository.js");
+
+        // Adaptive retry strategy:
+        // - Start with `tickerConcurrency` (default 50)
+        // - If some tickers fail, retry only failed tickers with half the concurrency
+        // - Repeat up to 10 attempts, never reducing below 5
+        const maxAttempts = 10;
+        const minConcurrency = 5;
+        let currentConcurrency = tickerConcurrency;
+        let remaining = target.slice();
+        const totalRequested = target.length;
+        let overallFetched = 0;
+        let updated = 0;
+        let finalErrors = new Map<string, string>();
+        const persistedTickers = new Set<string>();
+
+        const persistYahooOwnershipResult = async (ticker: string, data: {
+          holderCount: number;
+          institutionalPct: number | null;
+          insiderPct: number | null;
+          raw: unknown;
+        }) => {
+          const tickerKey = ticker.toUpperCase();
+          if (persistedTickers.has(tickerKey)) return;
+
+          const existingSec = await getDb().get<{ id: number }>(
+            "SELECT id FROM securities WHERE ticker = ? ORDER BY id ASC LIMIT 1",
+            [tickerKey],
+          );
+          if (!existingSec) return;
+
+          try {
+            await upsertCompanyProfile(existingSec.id, "yahoo", null, null, null, null, null, null, JSON.stringify(data.raw ?? {}));
+          } catch {
+            // raw payload persistence is best-effort only
+          }
+
+          if (data.institutionalPct == null) {
+            appendLog(jobId, `${tickerKey}: institutional N/A (missing)`);
+          } else {
+            await upsertInstitutional(existingSec.id, "yahoo", data.institutionalPct, "yahoo");
+            updated++;
+            appendLog(jobId, `${tickerKey}: institutional ${data.institutionalPct.toFixed(2)}% (${data.holderCount} holders)`);
+          }
+
+          if (data.insiderPct != null) {
+            try {
+              await upsertInsider(existingSec.id, "yahoo", data.insiderPct, "yahoo");
+              appendLog(jobId, `${tickerKey}: insider ${data.insiderPct.toFixed(2)}%`);
+            } catch {
+              // ignore insider-only persistence failures and continue
+            }
+          }
+
+          persistedTickers.add(tickerKey);
+          overallFetched++;
+        };
+
+        for (let attempt = 1; attempt <= maxAttempts && remaining.length > 0; attempt++) {
+          appendLog(jobId, `Attempt ${attempt}/${maxAttempts}: fetching ${remaining.length} tickers (concurrency=${currentConcurrency})`);
+          const attemptFetchedBase = overallFetched;
+
+          const { results, errors, cancelled } = await fetchYahooOwnershipBatch(remaining, outstandingMap, {
+            concurrency: currentConcurrency,
+            onProgress: (done, total) => { updateProgress(jobId, attemptFetchedBase + done, totalRequested); },
+            onTickerLog: (msg: string) => { appendLog(jobId, msg); },
+            onResult: persistYahooOwnershipResult,
+            shouldCancel: () => isJobCancelled(jobId),
+          });
+
+          if (cancelled) {
+            appendLog(jobId, `Job cancelled after persisting ${overallFetched} tickers`);
+            return;
+          }
+
+          if (errors.size === 0) {
+            finalErrors = new Map();
+            break;
+          }
+
+          // If not last attempt, retry failed tickers with lower concurrency
+          if (attempt < maxAttempts) {
+            const failedTickers = Array.from(errors.keys());
+            const nextConcurrency = Math.max(minConcurrency, Math.floor(currentConcurrency / 2));
+            if (nextConcurrency < currentConcurrency) {
+              appendLog(jobId, `Retrying ${failedTickers.length} failed tickers with concurrency=${nextConcurrency}`);
+              remaining = failedTickers;
+              currentConcurrency = nextConcurrency;
+              // loop continues
+              continue;
+            }
+          }
+
+          // No more retries — record final errors
+          finalErrors = errors;
+          for (const [ticker, message] of errors) {
+            appendLog(jobId, `${ticker}: error - ${message}`);
+          }
+          break;
+        }
+
+        await setLastSuccess("company_profiles_holders_yahoo", new Date().toISOString(), {
+          source: "yahoo-holders",
+          requested: totalRequested,
+          fetched: overallFetched,
+          updated,
+          errors: finalErrors.size,
+          skippedExisting: skippedCount,
+        });
+
+        completeJob(jobId, { requested: totalRequested, fetched: overallFetched, tickersUpdated: updated, tickersFailed: finalErrors.size, totalRowsUpserted: updated, skippedExisting: skippedCount, source: "yahoo-holders" });
       } catch (error) {
         failJob(jobId, error instanceof Error ? error.message : String(error));
       }

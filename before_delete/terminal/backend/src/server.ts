@@ -3749,6 +3749,154 @@ app.post("/api/company-profiles/pull-float", async (req, res) => {
   }
 });
 
+  // ── Pull Yahoo Holders (institutional + insider) ───────────────────────────
+  app.post("/api/company-profiles/pull-holders-yahoo", async (req, res) => {
+    try {
+      const body = req.body as { tickers?: string[]; maxTickers?: number; tickerConcurrency?: number; skipExisting?: boolean };
+      let tickers = body.tickers;
+      if (!tickers || tickers.length === 0) {
+        tickers = await getDefaultUniverseTickers();
+      }
+      const max = body.maxTickers ?? tickers.length;
+      let target = tickers.slice(0, max);
+      const tickerConcurrency = clampFinnhubCompanyDataConcurrency(body.tickerConcurrency);
+      const skipExisting = body.skipExisting !== false; // default: true
+
+      let skippedCount = 0;
+      if (skipExisting) {
+        const { getTickersWithRecentInstitutional } = await import("./services/companyProfileRepository.js");
+        const recentSet = await getTickersWithRecentInstitutional(24);
+        const before = target.length;
+        target = target.filter((t) => !recentSet.has(t.toUpperCase()));
+        skippedCount = before - target.length;
+      }
+
+      const jobId = createJob(target.length);
+      appendLog(jobId, `Starting Yahoo holders update: ${target.length} tickers (concurrency=${tickerConcurrency}, skipExisting=${skipExisting}, skipped=${skippedCount})`);
+      res.json({ jobId });
+
+      void (async () => {
+        try {
+          if (target.length === 0) {
+            appendLog(jobId, "No tickers requested — nothing to do");
+            await setLastSuccess("company_profiles_holders_yahoo", new Date().toISOString(), {
+              source: "yahoo-holders",
+              requested: 0,
+              fetched: 0,
+              updated: 0,
+              errors: 0,
+            });
+            completeJob(jobId, { requested: 0, tickersUpdated: 0, tickersFailed: 0, totalRowsUpserted: 0 });
+            return;
+          }
+
+          // Build outstanding shares map from existing DB data (FMP float rows)
+          const outstandingMap = new Map<string, number>();
+          for (const ticker of target) {
+            const row = await getDb().get<{ outstanding_shares: number | null }>(
+              `SELECT cp.outstanding_shares FROM company_profiles cp
+               JOIN securities s ON s.id = cp.security_id
+               WHERE s.ticker = ? AND cp.outstanding_shares IS NOT NULL
+               ORDER BY cp.fetched_at DESC LIMIT 1`,
+              [ticker.toUpperCase()],
+            );
+            if (row?.outstanding_shares) outstandingMap.set(ticker.toUpperCase(), row.outstanding_shares);
+          }
+
+          const missingOutstanding = target.filter((ticker) => !outstandingMap.has(ticker.toUpperCase()));
+          if (missingOutstanding.length > 0) {
+            appendLog(jobId, `Bootstrapping outstanding shares from FMP for ${missingOutstanding.length} tickers before Yahoo holders calc`);
+            const { fetchFmpSharesFloatBatch } = await import("./services/fmpSharesFloatProvider.js");
+            const { upsertFloat } = await import("./services/companyProfileRepository.js");
+            const floatBootstrap = await fetchFmpSharesFloatBatch(missingOutstanding, {
+              shouldCancel: () => isJobCancelled(jobId),
+            });
+
+            for (const [ticker, data] of floatBootstrap.results) {
+              if (data.outstandingShares != null && data.outstandingShares > 0) {
+                outstandingMap.set(ticker.toUpperCase(), data.outstandingShares);
+              }
+              const existingSec = await getDb().get<{ id: number }>(
+                "SELECT id FROM securities WHERE ticker = ? ORDER BY id ASC LIMIT 1",
+                [ticker.toUpperCase()],
+              );
+              if (existingSec) {
+                await upsertFloat(existingSec.id, "fmp", data.floatShares, data.freeFloat, data.outstandingShares, "fmp");
+              }
+            }
+
+            for (const [ticker, message] of floatBootstrap.errors) {
+              appendLog(jobId, `${ticker}: outstanding bootstrap error - ${message}`);
+            }
+          }
+
+          const { fetchYahooOwnershipBatch } = await import("./services/yahooOwnershipProvider.js");
+          const { results, errors, cancelled } = await fetchYahooOwnershipBatch(target, outstandingMap, {
+            concurrency: tickerConcurrency,
+            onProgress: (done, total) => { updateProgress(jobId, done, total); },
+            shouldCancel: () => isJobCancelled(jobId),
+          });
+
+          if (cancelled) { appendLog(jobId, `Job cancelled after ${results.size} tickers`); return; }
+
+          let updated = 0;
+          for (const [ticker, data] of results) {
+            const existingSec = await getDb().get<{ id: number }>(
+              "SELECT id FROM securities WHERE ticker = ? ORDER BY id ASC LIMIT 1",
+              [ticker.toUpperCase()],
+            );
+            if (!existingSec) continue;
+
+            const { upsertInstitutional, upsertInsider, upsertCompanyProfile } = await import("./services/companyProfileRepository.js");
+
+            // Save raw yahoo ownership payload into company_profiles.raw_json for source='yahoo'
+            try {
+              await upsertCompanyProfile(existingSec.id, "yahoo", null, null, null, null, null, null, JSON.stringify(data.raw ?? {}));
+            } catch (e) {
+              // swallow — non-critical
+            }
+
+            if (data.institutionalPct == null) {
+              appendLog(jobId, `${ticker}: institutional N/A (missing)`);
+            } else {
+              await upsertInstitutional(existingSec.id, "yahoo", data.institutionalPct, "yahoo");
+              updated++;
+              appendLog(jobId, `${ticker}: institutional ${data.institutionalPct.toFixed(2)}% (${data.holderCount} holders)`);
+            }
+
+            if (data.insiderPct != null) {
+              try {
+                await upsertInsider(existingSec.id, "yahoo", data.insiderPct, "yahoo");
+                appendLog(jobId, `${ticker}: insider ${data.insiderPct.toFixed(2)}%`);
+              } catch (e) {
+                // ignore
+              }
+            }
+          }
+
+          for (const [ticker, message] of errors) {
+            appendLog(jobId, `${ticker}: error - ${message}`);
+          }
+
+          await setLastSuccess("company_profiles_holders_yahoo", new Date().toISOString(), {
+            source: "yahoo-holders",
+            requested: target.length,
+            fetched: results.size,
+            updated,
+            errors: errors.size,
+            skippedExisting: skippedCount,
+          });
+
+          completeJob(jobId, { requested: target.length, fetched: results.size, tickersUpdated: updated, tickersFailed: errors.size, totalRowsUpserted: updated, skippedExisting: skippedCount, source: "yahoo-holders" });
+        } catch (error) {
+          failJob(jobId, error instanceof Error ? error.message : String(error));
+        }
+      })();
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
+  });
+
 // ── Pull Finnhub Institutional Ownership ───────────────────────────────────
 app.post("/api/company-profiles/pull-institutional", async (req, res) => {
   try {

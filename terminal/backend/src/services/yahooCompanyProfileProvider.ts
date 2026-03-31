@@ -15,7 +15,8 @@ const BASE_DELAY_MS = 300;
 const MAX_BACKOFF_MS = 30_000;
 
 const DEFAULT_YAHOO_CONCURRENCY = 5;
-const MAX_YAHOO_CONCURRENCY = 20;
+// Allow up to 50 parallel Yahoo requests when requested (subject to caller choice).
+const MAX_YAHOO_CONCURRENCY = 50;
 const DEFAULT_YAHOO_INTERVAL_MS = 200;
 const MAX_YAHOO_INTERVAL_MS = 5000;
 

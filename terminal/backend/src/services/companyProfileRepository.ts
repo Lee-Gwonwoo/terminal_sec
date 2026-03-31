@@ -19,6 +19,8 @@ export interface CompanyProfileRow {
   market_cap_source: string | null;
   float_source: string | null;
   institutional_source: string | null;
+  insider_pct: number | null;
+  insider_source: string | null;
   fetched_at: string;
 }
 
@@ -242,6 +244,32 @@ export async function upsertFloat(
   }
 }
 
+async function clearInstitutionalOnOtherRows(
+  securityId: number,
+  keepRowId: number,
+): Promise<void> {
+  await getDb().run(
+    `UPDATE company_profiles
+     SET institutional_pct = NULL,
+         institutional_source = NULL
+     WHERE security_id = ? AND id != ? AND institutional_pct IS NOT NULL`,
+    [securityId, keepRowId],
+  );
+}
+
+async function clearInsiderOnOtherRows(
+  securityId: number,
+  keepRowId: number,
+): Promise<void> {
+  await getDb().run(
+    `UPDATE company_profiles
+     SET insider_pct = NULL,
+         insider_source = NULL
+     WHERE security_id = ? AND id != ? AND insider_pct IS NOT NULL`,
+    [securityId, keepRowId],
+  );
+}
+
 /**
  * Upsert institutional ownership percentage for a security.
  */
@@ -253,21 +281,85 @@ export async function upsertInstitutional(
 ): Promise<void> {
   const db = getDb();
   const now = new Date().toISOString();
-  const existing = await db.get<{ id: number }>(
+  // If the target source row already exists (e.g. source='yahoo' description row),
+  // write ownership into that row to avoid UNIQUE(security_id, source) collisions.
+  const sourceRow = await db.get<{ id: number }>(
     "SELECT id FROM company_profiles WHERE security_id = ? AND source = ?",
     [securityId, source],
   );
-  if (existing) {
+  if (sourceRow) {
     await db.run(
       `UPDATE company_profiles SET institutional_pct = ?, institutional_source = ?, fetched_at = ? WHERE id = ?`,
-      [institutionalPct, institutionalSource, now, existing.id],
+      [institutionalPct, institutionalSource, now, sourceRow.id],
     );
-  } else {
+    await clearInstitutionalOnOtherRows(securityId, sourceRow.id);
+    return;
+  }
+
+  // Otherwise maintain a single canonical ownership row and switch its source.
+  const canonical = await db.get<{ id: number }>(
+    `SELECT id FROM company_profiles WHERE security_id = ? AND institutional_pct IS NOT NULL ORDER BY fetched_at DESC LIMIT 1`,
+    [securityId],
+  );
+  if (canonical) {
     await db.run(
+      `UPDATE company_profiles SET institutional_pct = ?, institutional_source = ?, fetched_at = ?, source = ? WHERE id = ?`,
+      [institutionalPct, institutionalSource, now, source, canonical.id],
+    );
+    await clearInstitutionalOnOtherRows(securityId, canonical.id);
+  } else {
+    const result = await db.run(
       `INSERT INTO company_profiles (security_id, source, institutional_pct, institutional_source, fetched_at)
        VALUES (?, ?, ?, ?, ?)`,
       [securityId, source, institutionalPct, institutionalSource, now],
     );
+    await clearInstitutionalOnOtherRows(securityId, result.lastID!);
+  }
+}
+
+/**
+ * Upsert insider ownership percentage for a security.
+ */
+export async function upsertInsider(
+  securityId: number,
+  source: string,
+  insiderPct: number | null,
+  insiderSource: string,
+): Promise<void> {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const sourceRow = await db.get<{ id: number }>(
+    "SELECT id FROM company_profiles WHERE security_id = ? AND source = ?",
+    [securityId, source],
+  );
+  if (sourceRow) {
+    await db.run(
+      `UPDATE company_profiles SET insider_pct = ?, insider_source = ?, fetched_at = ? WHERE id = ?`,
+      [insiderPct, insiderSource, now, sourceRow.id],
+    );
+    await clearInsiderOnOtherRows(securityId, sourceRow.id);
+    return;
+  }
+
+  const canonical = await db.get<{ id: number }>(
+    `SELECT id FROM company_profiles
+     WHERE security_id = ? AND (institutional_pct IS NOT NULL OR insider_pct IS NOT NULL)
+     ORDER BY fetched_at DESC LIMIT 1`,
+    [securityId],
+  );
+  if (canonical) {
+    await db.run(
+      `UPDATE company_profiles SET insider_pct = ?, insider_source = ?, fetched_at = ?, source = ? WHERE id = ?`,
+      [insiderPct, insiderSource, now, source, canonical.id],
+    );
+    await clearInsiderOnOtherRows(securityId, canonical.id);
+  } else {
+    const result = await db.run(
+      `INSERT INTO company_profiles (security_id, source, insider_pct, insider_source, fetched_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      [securityId, source, insiderPct, insiderSource, now],
+    );
+    await clearInsiderOnOtherRows(securityId, result.lastID!);
   }
 }
 

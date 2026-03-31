@@ -256,6 +256,27 @@ Added At 값 확인
   - `최근 추가순` 토글과 현재 정렬 기준 문구 추가
 - legacy row 보정이나 CSV-only audit 저장은 이번 변경 범위에 포함하지 않는다.
 
+### PLAN CHANGE — 2026-03-31
+
+- Default Ticker 화면에서 `Failed to execute 'json' on 'Response': Unexpected end of JSON input` 회귀가 확인됐다.
+- 원인은 2개였다.
+  - backend `getDefaultUniverseRows()`의 row 타입 선언에 `insider_pct`, `insider_source`가 빠져 TS 컴파일이 깨질 수 있었다.
+  - frontend `DefaultTickerWindow.tsx`가 빈 body 응답에도 `response.json()`을 바로 호출해 런타임 예외를 그대로 노출했다.
+- 이번 수정에서는 기능 범위를 넓히지 않고 회귀 안정화만 수행한다.
+  - backend row 타입에 insider 필드 추가
+  - frontend 공통 JSON 파서 추가(빈 응답 안전 처리)
+  - Yahoo 로그 자동 열기 코드를 원래 위치로 복구
+
+### PLAN CHANGE — 2026-03-31 (Yahoo holders partial persist)
+
+- Yahoo holders batch가 attempt 종료 시점에만 DB 저장을 수행해, 중간 cancel이나 worker 중단 시 이미 받은 ticker 결과가 유실될 수 있는 구조가 확인됐다.
+- 추가로 `source='yahoo'` description row가 이미 있는 종목에서 ownership canonical row의 `source`를 `yahoo`로 바꾸는 과정이 `UNIQUE(security_id, source)` 충돌을 만들 수 있었다.
+- 이번 수정에서는 아래를 반영한다.
+  - Yahoo ownership worker가 ticker 1건을 받는 즉시 callback으로 DB upsert 수행
+  - cancel check는 저장 이후로 이동해 "받은 건 저장 후 중단" 보장
+  - ownership upsert는 기존 `source` row가 있으면 그 row에 merge하고, 다른 row의 ownership 필드는 비워 중복 ownership row를 방지
+  - live backend(8080)를 최신 코드로 재기동하고 cancel 런타임 시나리오로 partial persist를 검증
+
 ### 실행 의존성 그래프
 
 Legend: `✅ 사용자 확인 완료` / `⏳ 구현완료, 사용자확인 대기` / `⬜ 미착수` / `🚫 차단`
