@@ -1,5 +1,6 @@
 import { config } from "../config.js";
 import type { OhlcBar } from "./ohlcWatchlistRepository.js";
+import { normalizeFmpSymbol } from "../utils/fmpSymbol.js";
 
 const FMP_BASE = "https://financialmodelingprep.com/stable";
 const MAX_RETRIES = 10;
@@ -84,7 +85,8 @@ async function fetchFmpDailyOhlcWithRetry(
     throw new Error("FMP API key is not configured");
   }
 
-  const url = `${FMP_BASE}/historical-price-eod/full?symbol=${encodeURIComponent(ticker.toUpperCase())}&from=${from}&to=${to}&apikey=${apiKey}`;
+  const providerSymbol = normalizeFmpSymbol(ticker);
+  const url = `${FMP_BASE}/historical-price-eod/full?symbol=${encodeURIComponent(providerSymbol)}&from=${from}&to=${to}&apikey=${apiKey}`;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     await acquireFmpOhlcSlot(intervalMs);

@@ -7,6 +7,7 @@
  */
 
 import { config } from "../config.js";
+import { normalizeFmpSymbol } from "../utils/fmpSymbol.js";
 
 const FMP_BASE = "https://financialmodelingprep.com/stable";
 const MAX_RETRIES = 10;
@@ -45,7 +46,8 @@ async function fetchOne(ticker: string, intervalMs: number): Promise<FmpSharesFl
   const apiKey = config.fmpApiKey;
   if (!apiKey) return null;
 
-  const url = `${FMP_BASE}/shares-float?symbol=${encodeURIComponent(ticker.toUpperCase())}&apikey=${apiKey}`;
+  const providerSymbol = normalizeFmpSymbol(ticker);
+  const url = `${FMP_BASE}/shares-float?symbol=${encodeURIComponent(providerSymbol)}&apikey=${apiKey}`;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     await acquireSlot(intervalMs);

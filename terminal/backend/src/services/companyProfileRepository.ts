@@ -379,14 +379,17 @@ export async function getTickersWithRecentFloat(maxAgeHours = 24): Promise<Set<s
 
 /**
  * Return ticker symbols that already have a non-null institutional_pct fetched within the last `maxAgeHours` hours.
+ * When `source` is provided, only rows with matching institutional_source are considered.
  */
-export async function getTickersWithRecentInstitutional(maxAgeHours = 24): Promise<Set<string>> {
+export async function getTickersWithRecentInstitutional(maxAgeHours = 24, source?: string): Promise<Set<string>> {
   const cutoff = new Date(Date.now() - maxAgeHours * 3600_000).toISOString();
-  const rows = await getDb().all<{ ticker: string }[]>(
-    `SELECT s.ticker FROM company_profiles cp
-     JOIN securities s ON s.id = cp.security_id
-     WHERE cp.institutional_pct IS NOT NULL AND cp.fetched_at >= ?`,
-    [cutoff],
-  );
+  const sql = source
+    ? `SELECT s.ticker FROM company_profiles cp
+       JOIN securities s ON s.id = cp.security_id
+       WHERE cp.institutional_pct IS NOT NULL AND cp.institutional_source = ? AND cp.fetched_at >= ?`
+    : `SELECT s.ticker FROM company_profiles cp
+       JOIN securities s ON s.id = cp.security_id
+       WHERE cp.institutional_pct IS NOT NULL AND cp.fetched_at >= ?`;
+  const rows = await getDb().all<{ ticker: string }[]>(sql, source ? [source, cutoff] : [cutoff]);
   return new Set((rows as { ticker: string }[]).map((r) => r.ticker.toUpperCase()));
 }

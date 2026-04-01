@@ -35,6 +35,7 @@
 - ticker당 source row는 여러 개일 수 있다.
 - ownership(`institutional_pct`, `insider_pct`)은 대표 row 1개에 유지되도록 정리한다.
 - `source='yahoo'` row가 이미 있으면 Yahoo holders 결과를 그 row에 merge한다.
+- Default Ticker에서 재노출하는 `institutional_pct`는 현재 Yahoo holders 값만 사용한다. legacy Finnhub institutional 값은 UI source에서 제외한다.
 
 #### `securities`
 

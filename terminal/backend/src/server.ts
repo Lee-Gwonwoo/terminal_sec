@@ -665,7 +665,7 @@ async function getDefaultUniverseRows(): Promise<TickerListRow[]> {
                 (
                   SELECT cp.institutional_pct
                   FROM company_profiles cp
-                  WHERE cp.security_id = s.id AND cp.institutional_pct IS NOT NULL
+                  WHERE cp.security_id = s.id AND cp.institutional_pct IS NOT NULL AND cp.institutional_source = 'yahoo'
                   ORDER BY cp.fetched_at DESC
                   LIMIT 1
                 ) AS institutional_pct,
@@ -693,7 +693,7 @@ async function getDefaultUniverseRows(): Promise<TickerListRow[]> {
                 (
                   SELECT cp.institutional_source
                   FROM company_profiles cp
-                  WHERE cp.security_id = s.id AND cp.institutional_pct IS NOT NULL
+                  WHERE cp.security_id = s.id AND cp.institutional_pct IS NOT NULL AND cp.institutional_source = 'yahoo'
                   ORDER BY cp.fetched_at DESC
                   LIMIT 1
                 ) AS institutional_source,
@@ -4744,7 +4744,7 @@ app.post("/api/company-profiles/pull-holders-yahoo", async (req, res) => {
     let skippedCount = 0;
     if (skipExisting) {
       const { getTickersWithRecentInstitutional } = await import("./services/companyProfileRepository.js");
-      const recentSet = await getTickersWithRecentInstitutional(24);
+      const recentSet = await getTickersWithRecentInstitutional(24, "yahoo");
       const before = target.length;
       target = target.filter((t) => !recentSet.has(t.toUpperCase()));
       skippedCount = before - target.length;
@@ -5340,105 +5340,9 @@ app.post("/api/company-profiles/pull-float", async (req, res) => {
 
 // ── Pull Finnhub Institutional Ownership ───────────────────────────────────
 app.post("/api/company-profiles/pull-institutional", async (req, res) => {
-  try {
-    const body = req.body as { tickers?: string[]; maxTickers?: number; tickerConcurrency?: number };
-    let tickers = body.tickers;
-    if (!tickers || tickers.length === 0) {
-      tickers = await getDefaultUniverseTickers();
-    }
-    const max = body.maxTickers ?? tickers.length;
-    const target = tickers.slice(0, max);
-    const tickerConcurrency = clampFinnhubCompanyDataConcurrency(body.tickerConcurrency);
-
-    const { getTickersWithRecentInstitutional } = await import("./services/companyProfileRepository.js");
-    const recentSet = await getTickersWithRecentInstitutional(24);
-    const filtered = target.filter((t) => !recentSet.has(t.toUpperCase()));
-    const skippedCount = target.length - filtered.length;
-
-    const jobId = createJob(filtered.length);
-    appendLog(jobId, `Starting Finnhub institutional update: ${filtered.length} tickers (${skippedCount} skipped, concurrency=${tickerConcurrency})`);
-    res.json({ jobId });
-
-    void (async () => {
-      try {
-        // Build outstanding shares map from existing DB data (FMP float rows)
-        const outstandingMap = new Map<string, number>();
-        for (const ticker of filtered) {
-          const row = await getDb().get<{ outstanding_shares: number | null }>(
-            `SELECT cp.outstanding_shares FROM company_profiles cp
-             JOIN securities s ON s.id = cp.security_id
-             WHERE s.ticker = ? AND cp.outstanding_shares IS NOT NULL
-             ORDER BY cp.fetched_at DESC LIMIT 1`,
-            [ticker.toUpperCase()],
-          );
-          if (row?.outstanding_shares) outstandingMap.set(ticker.toUpperCase(), row.outstanding_shares);
-        }
-
-        const missingOutstanding = filtered.filter((ticker) => !outstandingMap.has(ticker.toUpperCase()));
-        if (missingOutstanding.length > 0) {
-          appendLog(jobId, `Bootstrapping outstanding shares from FMP for ${missingOutstanding.length} tickers before institutional calc`);
-          const { fetchFmpSharesFloatBatch } = await import("./services/fmpSharesFloatProvider.js");
-          const { upsertFloat } = await import("./services/companyProfileRepository.js");
-          const floatBootstrap = await fetchFmpSharesFloatBatch(missingOutstanding, {
-            shouldCancel: () => isJobCancelled(jobId),
-          });
-
-          for (const [ticker, data] of floatBootstrap.results) {
-            if (data.outstandingShares != null && data.outstandingShares > 0) {
-              outstandingMap.set(ticker.toUpperCase(), data.outstandingShares);
-            }
-            const existingSec = await getDb().get<{ id: number }>(
-              "SELECT id FROM securities WHERE ticker = ? ORDER BY id ASC LIMIT 1",
-              [ticker.toUpperCase()],
-            );
-            if (existingSec) {
-              await upsertFloat(existingSec.id, "fmp", data.floatShares, data.freeFloat, data.outstandingShares, "fmp");
-            }
-          }
-
-          for (const [ticker, message] of floatBootstrap.errors) {
-            appendLog(jobId, `${ticker}: outstanding bootstrap error - ${message}`);
-          }
-        }
-
-        const { fetchFinnhubOwnershipBatch } = await import("./services/finnhubOwnershipProvider.js");
-        const { results, errors, cancelled } = await fetchFinnhubOwnershipBatch(filtered, outstandingMap, {
-          concurrency: tickerConcurrency,
-          onProgress: (done, total) => { updateProgress(jobId, done, total); },
-          shouldCancel: () => isJobCancelled(jobId),
-        });
-
-        if (cancelled) { appendLog(jobId, `Job cancelled after ${results.size} tickers`); return; }
-
-        let updated = 0;
-        for (const [ticker, data] of results) {
-          const existingSec = await getDb().get<{ id: number }>(
-            "SELECT id FROM securities WHERE ticker = ? ORDER BY id ASC LIMIT 1",
-            [ticker.toUpperCase()],
-          );
-          if (!existingSec) continue;
-          if (data.institutionalPct == null) {
-            appendLog(jobId, `${ticker}: institutional N/A (missing outstanding shares denominator)`);
-            continue;
-          }
-          const { upsertInstitutional } = await import("./services/companyProfileRepository.js");
-          await upsertInstitutional(existingSec.id, "finnhub", data.institutionalPct, "finnhub");
-          updated++;
-          appendLog(jobId, `${ticker}: institutional ${data.institutionalPct.toFixed(2)}% (${data.holderCount} holders)`);
-        }
-
-        for (const [ticker, message] of errors) {
-          appendLog(jobId, `${ticker}: error - ${message}`);
-        }
-
-        completeJob(jobId, { updated, total: filtered.length, skippedRecent: skippedCount, errors: errors.size });
-      } catch (error) {
-        failJob(jobId, error instanceof Error ? error.message : String(error));
-      }
-    })();
-  } catch (err) {
-    res.status(500).json({ error: err instanceof Error ? err.message : "Unknown error" });
-  }
+  res.status(410).json({
+    error: "Finnhub institutional ownership update has been removed. Use /api/company-profiles/pull-holders-yahoo instead.",
+  });
 });
 
 // ── Pull Finnhub IPO Date ──────────────────────────────────────────────────

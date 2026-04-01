@@ -24,6 +24,7 @@
   - Yahoo `majorHoldersBreakdown` fetch
   - per-ticker result callback
   - partial persist friendly batch 처리
+  - institutional / insider는 현재 Yahoo-only canonical path
 
 ### default ticker / universe 계열
 

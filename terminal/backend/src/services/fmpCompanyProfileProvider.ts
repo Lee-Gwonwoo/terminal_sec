@@ -7,6 +7,7 @@
  */
 
 import { config } from "../config.js";
+import { normalizeFmpSymbol } from "../utils/fmpSymbol.js";
 
 const FMP_BASE = "https://financialmodelingprep.com/stable";
 const MAX_RETRIES = 10;
@@ -85,7 +86,8 @@ async function fetchFmpProfileWithRetry(ticker: string, intervalMs: number): Pro
     return null;
   }
 
-  const url = `${FMP_BASE}/profile?symbol=${encodeURIComponent(ticker.toUpperCase())}&apikey=${apiKey}`;
+  const providerSymbol = normalizeFmpSymbol(ticker);
+  const url = `${FMP_BASE}/profile?symbol=${encodeURIComponent(providerSymbol)}&apikey=${apiKey}`;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     await acquireFmpSlot(intervalMs);
@@ -107,7 +109,7 @@ async function fetchFmpProfileWithRetry(ticker: string, intervalMs: number): Pro
       }
       const item = data[0];
       return {
-        symbol: String(item.symbol ?? ticker),
+        symbol: String(item.symbol ?? providerSymbol),
         companyName: String(item.companyName ?? ""),
         description: String(item.description ?? ""),
         ceo: String(item.ceo ?? ""),

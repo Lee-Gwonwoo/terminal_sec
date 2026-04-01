@@ -327,3 +327,15 @@ Track B — frontend display
   - `.github/copilot-skills/repo-context.md`에 현재 DB/key/ownership semantics 반영
   - 빠른 참조용 구조 문서 `terminal/backend/DB_SCHEMA.md`, `terminal/backend/CODE_STRUCTURE.md`, `termina_web/figma_code/terminal_ui_ver2_finhub/FRONTEND_CODE_STRUCTURE.md` 추가
 - 검증은 문서 파일 존재/키워드 교차 확인 + `8080` listener/API 응답 확인으로 마무리한다.
+
+### PLAN CHANGE — 2026-04-01 (Yahoo-only institutional + Finnhub 제거)
+
+- Default Ticker의 `institutionalPct`가 Yahoo/Finnhub 의미가 섞인 상태였고, Yahoo held-percent raw 정규화도 100% 초과 케이스에서 잘못 축소 저장되는 문제가 확인됐다.
+- 사용자는 Finnhub institutional data를 제거하고 Yahoo 값만 그대로 반영하길 요청했다.
+- 이번 변경에서는 아래를 동시에 반영한다.
+  - Yahoo `majorHoldersBreakdown` held-percent 정규화를 수정해 100% 초과 ratio도 올바른 퍼센트로 저장
+  - Default Ticker의 `institutionalPct` / `institutionalSource`는 Yahoo row만 재노출
+  - `POST /api/company-profiles/pull-institutional` route는 제거하고 `410 Gone` 반환
+  - frontend Default Ticker에서 Finnhub `Inst` 버튼과 job polling/log panel 제거
+  - 현재 `app.db`의 Yahoo raw payload를 기준으로 ownership 값을 백필하고, legacy Finnhub institutional 값은 null 처리
+- 검증은 backend build + backend test + webui build + `GET /api/tickers` / removed route runtime 호출로 마무리한다.

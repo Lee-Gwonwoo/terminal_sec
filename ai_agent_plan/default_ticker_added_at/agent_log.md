@@ -124,3 +124,44 @@
 | 런타임 통합 | ✅ | `8080` listener 확인 + `GET /api/model2/analyses` 정상 JSON 응답 확인 |
 - 상태:
   - 문서 동기화 반영 완료, 사용자 확인 대기.
+
+## 2026-04-01
+
+**작성 시각:** 2026-04-01 06:15 (local)
+
+### Yahoo-only institutional 전환 + Finnhub institutional 제거
+
+- 생성/수정 파일:
+  - `terminal/backend/src/services/yahooOwnershipProvider.ts`
+  - `terminal/backend/src/services/companyProfileRepository.ts`
+  - `terminal/backend/src/server.ts`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DefaultTickerWindow.tsx`
+  - `terminal/backend_prompt.md`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+  - `.github/copilot-skills/repo-context.md`
+  - `terminal/backend/DB_SCHEMA.md`
+  - `terminal/backend/CODE_STRUCTURE.md`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/FRONTEND_CODE_STRUCTURE.md`
+  - `ai_agent_plan/default_ticker_added_at/plan.md`
+  - `ai_agent_plan/default_ticker_added_at/agent_log.md`
+- 수행 내용:
+  - Yahoo held-percent 정규화를 수정했다. `institutionsPercentHeld` / `insidersPercentHeld`가 `1.0067`처럼 1보다 큰 ratio로 와도 `100.67%`로 저장되도록 변경했다.
+  - `GET /api/tickers`의 default-universe row는 이제 `institutionalPct`를 Yahoo ownership row만 기준으로 재노출한다. legacy Finnhub institutional 값은 UI source에서 제외된다.
+  - `POST /api/company-profiles/pull-institutional`은 제거하고 `410 Gone` + `pull-holders-yahoo` 사용 안내를 반환하게 바꿨다.
+  - Default Ticker에서 Finnhub `Inst` 버튼, 관련 polling, log panel을 제거하고 ownership 갱신 경로를 Yahoo Holders 하나로 정리했다.
+  - 현재 runtime DB에 대해 one-off 백필을 실행했다. Yahoo row `445`건을 raw payload 기준으로 재계산했고, Finnhub institutional row `24`건은 null 처리했다.
+- 런타임 확인 핵심 결과:
+  - `GET /api/tickers` 실응답에서 `APLS.institutionalPct = 100.67401`, `institutionalSource = 'yahoo'`로 확인됐다.
+  - 샘플 `AAPL`, `TSLA`, `NVDA`, `SMCI`도 모두 `institutionalSource = 'yahoo'`로만 반환됐다.
+  - 백필 후 DB 집계는 `institutional_source='yahoo'`만 남았고, `institutional_pct > 100` row가 `439`건 존재했다. 이는 더 이상 잘리지 않고 그대로 유지된다.
+  - removed route 검증 결과 `POST /api/company-profiles/pull-institutional`은 실제로 `410`을 반환했다.
+- 검증 표:
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 변경 코드 4개 + 문서 diagnostics 0 |
+| 빌드 | ✅ | backend `npm.cmd run build`, webui `npm.cmd run build` 성공 |
+| 자동 테스트 | ✅ | backend `14 files / 90 tests` pass |
+| 런타임 통합 | ✅ | `GET /api/tickers` 실응답에서 Yahoo-only institutional 확인, removed route `410` 확인 |
+- 상태:
+  - Yahoo-only institutional 전환 및 DB 보정 반영 완료, 사용자 확인 대기.

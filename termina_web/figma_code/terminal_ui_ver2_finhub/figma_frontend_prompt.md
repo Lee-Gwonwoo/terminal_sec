@@ -765,12 +765,11 @@ company data job contract:
 - CSV path 직접 수정
 - Reload
 - custom CSV를 default universe에 merge import (`Merge into Default`)
-- default universe 기준 수급/시총/보유율 갱신 버튼 4개
+- default universe 기준 수급/시총/보유율 갱신 버튼 3개
   - `Mkt Cap`: FMP 시가총액 갱신
   - `Float`: FMP float % 갱신
-  - `Inst`: Finnhub institutional % 갱신
   - `Yahoo Holders`: Yahoo institutional % + insider % 갱신
-  - 네 버튼 모두 진행 상황 표시(completed/total, percent) + job polling을 사용한다.
+  - 세 버튼 모두 진행 상황 표시(completed/total, percent) + job polling을 사용한다.
   - 각 job card는 **View Log** 토글을 통해 최대 100줄의 job 로그 패널을 연다. `Yahoo Holders`는 job 시작 시 로그 패널을 자동으로 연다.
   - job 404 감지: 서버 재시작 등으로 job이 사라지면 자동으로 에러 표시 + 상태 리셋
   - 이미 24시간 내 값이 있는 ticker는 서버에서 자동 skip된다. `Yahoo Holders`도 기본적으로 같은 24시간 skip 규칙을 따른다.
@@ -779,8 +778,8 @@ company data job contract:
 - `Recent Added` / `Default Order` 토글로 최근 추가순 정렬을 전환한다.
 - table 표시: `Ticker | Name | Exchange | Industry | Added Date | IPO Date | Market Cap | Float % | Inst % | Insider % | Del`
 - `Market Cap`, `Float %`, `Inst %`, `Insider %` 셀에는 값 옆에 source badge가 붙는다.
-  - 현재 구현 기준 `Market Cap = FMP`, `Float % = Fmp`, `Inst % = Finnhub`
-  - `Yahoo Holders` 실행 후에는 `Inst % = Yahoo`, `Insider % = Yahoo` badge가 보일 수 있다.
+  - 현재 구현 기준 `Market Cap = FMP`, `Float % = Fmp`, `Inst % = Yahoo`, `Insider % = Yahoo`
+  - `Inst %`는 현재 Finnhub 값을 읽지 않고 Yahoo holders 값만 사용한다.
 - ticker 클릭 시 상위 `onTickerClick` 전달
 - 삭제 버튼으로 default universe에서 ticker 제거
 
@@ -794,7 +793,6 @@ API:
 - `POST /api/company-profiles/pull-float`
 - `POST /api/company-profiles/pull-holders-yahoo`
 - `GET /api/jobs/:jobId`
-- `POST /api/company-profiles/pull-institutional`
 
 `GET /api/tickers` 응답에서 프론트가 실제로 쓰는 row 필드:
 
@@ -819,7 +817,7 @@ API:
 - 허용 경로는 backend allowlist에 의해 제한된다
 - UI는 어떤 CSV든 입력 가능해 보이지만, backend가 허용하지 않으면 error banner를 보여준다
 - custom CSV를 merge import해도 기존 default universe ticker는 제거되지 않고, 중복만 skip된다
-- `Mkt Cap`, `Float`, `Inst`, `Yahoo Holders` 버튼은 기본 default path일 때만 보인다. custom CSV view에서는 merge/import가 우선이다.
+- `Mkt Cap`, `Float`, `Yahoo Holders` 버튼은 기본 default path일 때만 보인다. custom CSV view에서는 merge/import가 우선이다.
 - custom CSV view에서는 `Added Date`, 수급/시총/insider 컬럼과 source badge가 대부분 `null`이라 `-`로 보일 수 있다.
 
 성능 메모(2026-03-25 반영):
@@ -1148,7 +1146,6 @@ API:
 - `DELETE /api/watchlists/:id`
 - `POST /api/company-profiles/pull-market-cap`
 - `POST /api/company-profiles/pull-float`
-- `POST /api/company-profiles/pull-institutional`
 - `POST /api/company-profiles/pull-yahoo`
 - `POST /api/company-profiles/pull-peers`
 - `POST /api/company-profiles/pull-ipo-date`

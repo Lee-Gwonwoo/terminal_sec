@@ -56,27 +56,29 @@ export async function fetchYahooOwnership(
   const mh: any = data?.majorHoldersBreakdown ?? data?.majorHolders ?? null;
   if (!mh) return null;
 
-  // typical fields: insidersPercentHeld, institutionsPercentHeld
-  let institutions = mh?.institutionsPercentHeld ?? mh?.institutionsPercent ?? mh?.heldPercentInstitutions ?? null;
-  let insiders = mh?.insidersPercentHeld ?? mh?.insidersPercent ?? mh?.heldPercentInsiders ?? null;
+  // Yahoo held-percent fields are ratio-like numeric values, even when they exceed 1.0.
+  // For example 1.0067 means 100.67%, not 1.0067%.
+  const institutions = mh?.institutionsPercentHeld ?? mh?.institutionsPercent ?? mh?.heldPercentInstitutions ?? null;
+  const insiders = mh?.insidersPercentHeld ?? mh?.insidersPercent ?? mh?.heldPercentInsiders ?? null;
 
-  const normalizePct = (v: unknown): number | null => {
+  const normalizeYahooHeldPercent = (v: unknown): number | null => {
     if (typeof v === "number") {
-      if (v > 0 && v <= 1) return v * 100;
-      if (v > 1 && v <= 100) return v;
+      if (!Number.isFinite(v) || v < 0) return null;
+      return v <= 10 ? v * 100 : v;
     }
     if (typeof v === "string") {
-      const n = Number(String(v).replace(/[^0-9.\-]/g, ""));
-      if (!Number.isNaN(n)) {
-        if (n > 0 && n <= 1) return n * 100;
-        if (n > 1 && n <= 100) return n;
-      }
+      const trimmed = v.trim();
+      if (!trimmed) return null;
+      const n = Number(trimmed.replace(/[^0-9.\-]/g, ""));
+      if (Number.isNaN(n) || n < 0) return null;
+      if (trimmed.includes("%")) return n;
+      return n <= 10 ? n * 100 : n;
     }
     return null;
   };
 
-  const instPct = normalizePct(institutions);
-  const insPct = normalizePct(insiders);
+  const instPct = normalizeYahooHeldPercent(institutions);
+  const insPct = normalizeYahooHeldPercent(insiders);
 
   // try to infer holder count from any array-like field
   let holderCount = 0;

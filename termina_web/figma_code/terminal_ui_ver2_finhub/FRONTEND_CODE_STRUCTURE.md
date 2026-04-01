@@ -19,13 +19,12 @@
   - `DELETE /api/tickers/remove`
   - `POST /api/company-profiles/pull-market-cap`
   - `POST /api/company-profiles/pull-float`
-  - `POST /api/company-profiles/pull-institutional`
   - `POST /api/company-profiles/pull-holders-yahoo`
   - `GET /api/jobs/:jobId`
 
 현재 UI 구조:
 
-- 상단 path / reload / 4개 pull 버튼
+- 상단 path / reload / 3개 pull 버튼
 - job progress + log panel
 - add ticker 입력
 - filter 입력

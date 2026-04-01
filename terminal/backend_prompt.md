@@ -939,9 +939,9 @@ Control Window / localStorage 공통 설정:
 
 응답 컬럼:
 
-- `[][][]jobId[][][]`
+- `[][][]error[][][]`
 
-요청 body 옵션: `[][][]tickers[][][]`, `[][][]maxTickers[][][]`, `[][][]tickerConcurrency[][][]` (기본=1)
+현재 구현 기준 이 route는 제거됐으며 `410 Gone`을 반환한다. institutional ownership 갱신은 `POST /api/company-profiles/pull-holders-yahoo`만 사용한다.
 
 ### `POST /api/company-profiles/pull-ipo-date`
 
@@ -967,7 +967,7 @@ Control Window / localStorage 공통 설정:
 
 - `NewsWindow`는 `GET /api/news`와 `POST /api/news/pull-eodhd`를 사용한다.
 - `FinnhubNewsWindow`는 뉴스 조회, Finnhub 적재, fulltext, change update, bookmarks, job polling을 사용한다.
-- `DefaultTickerWindow`는 `GET /api/tickers`, `POST /api/tickers/import-default`, `POST /api/tickers/add`, `DELETE /api/tickers/remove`, `POST /api/company-profiles/pull-market-cap`, `POST /api/company-profiles/pull-float`, `POST /api/company-profiles/pull-institutional`, `POST /api/company-profiles/pull-holders-yahoo`, `GET /api/jobs/:jobId`를 사용한다.
+- `DefaultTickerWindow`는 `GET /api/tickers`, `POST /api/tickers/import-default`, `POST /api/tickers/add`, `DELETE /api/tickers/remove`, `POST /api/company-profiles/pull-market-cap`, `POST /api/company-profiles/pull-float`, `POST /api/company-profiles/pull-holders-yahoo`, `GET /api/jobs/:jobId`를 사용한다.
 - `DailyChangeHistoryWindow`는 `GET /api/default-tickers/daily-change-history`를 사용한다.
 - `DataControlWindow`는 updates status, jobs, OHLC status/update, IBKR calendar update/update-custom, company profile pull, change update, DB inspect를 사용한다.
 - `CaseResearchWindow`는 `/api/research/*` 전체를 사용해 섹션/페이지 CRUD, reorder, 검색, 자동 저장을 수행한다.
@@ -1944,12 +1944,13 @@ query:
 3. source 필드는 값의 출처를 나타낸다.
   - `[][][]marketCapSource[][][]`: 현재 구현 기준 `fmp`
   - `[][][]floatSource[][][]`: 현재 구현 기준 `fmp`
-  - `[][][]institutionalSource[][][]`: 현재 구현 기준 `finnhub`
+  - `[][][]institutionalSource[][][]`: 현재 구현 기준 `yahoo`
   - `[][][]insiderSource[][][]`: `pull-holders-yahoo` 성공 후 현재 구현 기준 `yahoo`
 4. 다른 CSV path일 때는 CSV를 직접 읽어 `rows`를 만든다. 이 경우 `addedAt`, `marketCap`, `ipoDate`, `floatPct`, `institutionalPct`, `insiderPct`, 각 `*Source`는 CSV 자체에는 없으므로 보통 `null`이다.
-5. market cap / float / institutional / Yahoo holders update route는 기본적으로 최근 24시간 이내 값이 있으면 해당 ticker를 자동 skip한다. skip되지 않은 경우에는 대표 row를 update해 기존 값을 덮어쓴다.
-6. `pull-holders-yahoo`는 ticker별 결과를 즉시 저장하므로, job이 중간에 cancel돼도 이미 받은 ticker 값은 DB에 남는다.
-7. `tickers`는 legacy 호환용 단순 배열이고, 신규 UI는 `rows`를 우선 사용한다.
+5. market cap / float / Yahoo holders update route는 기본적으로 최근 24시간 이내 값이 있으면 해당 ticker를 자동 skip한다. skip되지 않은 경우에는 대표 row를 update해 기존 값을 덮어쓴다.
+6. `institutionalPct`는 현재 Default Ticker 기준 Yahoo holders 값만 재노출한다. legacy Finnhub institutional 값은 UI source로 사용하지 않는다.
+7. `pull-holders-yahoo`는 ticker별 결과를 즉시 저장하므로, job이 중간에 cancel돼도 이미 받은 ticker 값은 DB에 남는다.
+8. `tickers`는 legacy 호환용 단순 배열이고, 신규 UI는 `rows`를 우선 사용한다.
 
 ### `GET /api/default-tickers/daily-change-history`
 
@@ -2488,27 +2489,7 @@ job 완료 result 예시:
 
 ### `POST /api/company-profiles/pull-institutional`
 
-Finnhub `stock/ownership` API에서 institutional ownership 퍼센트를 계산해 `company_profiles`에 저장한다.
-
-요청 body:
-
-```json
-{ "tickers": ["AAPL", "RKLB"], "maxTickers": 100, "tickerConcurrency": 1 }
-```
-
-- `tickers` 생략 시 `ticker_universes/default` 전체를 대상으로 한다.
-- `[][][]tickerConcurrency[][][]`는 1~5 범위다. 기본값은 1이다.
-- **Skip 로직**: 최근 24시간 내 `institutional_pct`가 이미 저장된 ticker는 자동 건너뛴다.
-- 계산에는 같은 ticker의 최신 `[][][]outstanding_shares[][][]` 값이 필요하다. 현재 route는 이 값이 비어 있으면 FMP `shares-float`로 먼저 bootstrap 한 뒤 ownership 계산을 시도한다.
-- 저장 필드: `[][][]institutional_pct[][][]`, `[][][]institutional_source[][][]`, `[][][]fetched_at[][][]`
-- 현재 구현 기준 `[][][]institutional_source[][][] = 'finnhub'`다.
-
-응답:
-
-```json
-{ "jobId": "..." }
-```
-8. background job 로그에는 ticker별 성공/실패와 진행률이 남는다.
+이 route는 제거됐다. 현재 호출하면 `410 Gone`과 함께 `pull-holders-yahoo` 사용 안내를 반환한다.
 
 ### `POST /api/company-profiles/pull-holders-yahoo`
 
@@ -2522,8 +2503,9 @@ Yahoo Finance `majorHoldersBreakdown`를 사용해 institutional % + insider %�
 
 - `tickers` 생략 시 `ticker_universes/default` 전체를 대상으로 한다.
 - `[][][]tickerConcurrency[][][]`는 1~50 범위로 clamp 되며, route 기본값은 `50`이다.
-- `[][][]skipExisting[][][]` 기본값은 `true`다. 최근 24시간 안에 `institutional_pct`가 있는 ticker는 기본적으로 skip한다.
+- `[][][]skipExisting[][][]` 기본값은 `true`다. 최근 24시간 안에 `institutional_source='yahoo'`인 `institutional_pct`가 있는 ticker는 기본적으로 skip한다.
 - 계산에는 최신 `[][][]outstanding_shares[][][]`가 필요하다. 값이 없으면 먼저 FMP shares-float로 bootstrap을 시도한다.
+- Yahoo held-percent raw 값은 0~1 비율뿐 아니라 `1.0067` 같은 100% 초과 ratio도 올 수 있으며, 현재 구현은 이를 퍼센트로 정규화해 그대로 저장한다.
 - 실패가 나오면 concurrency를 절반으로 낮춰 재시도한다. 최대 10회까지 시도하고, 최소 concurrency는 5다.
 - 저장 필드: `[][][]institutional_pct[][][]`, `[][][]institutional_source[][][]='yahoo'`, `[][][]insider_pct[][][]`, `[][][]insider_source[][][]='yahoo'`, `[][][]raw_json[][][]`, `[][][]fetched_at[][][]`
 - 이미 `source='yahoo'` row가 있으면 그 row에 ownership를 merge한다. 다른 row의 ownership 값은 비워서 대표 ownership row를 1개로 유지한다.

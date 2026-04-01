@@ -208,10 +208,6 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
   const [floatJobId, setFloatJobId] = useState<string | null>(null);
   const [floatJob, setFloatJob] = useState<JobStatus | null>(null);
   const [showFloatLog, setShowFloatLog] = useState(false);
-  const [instUpdating, setInstUpdating] = useState(false);
-  const [instJobId, setInstJobId] = useState<string | null>(null);
-  const [instJob, setInstJob] = useState<JobStatus | null>(null);
-  const [showInstLog, setShowInstLog] = useState(false);
   const [yahooUpdating, setYahooUpdating] = useState(false);
   const [yahooJobId, setYahooJobId] = useState<string | null>(null);
   const [yahooJob, setYahooJob] = useState<JobStatus | null>(null);
@@ -377,30 +373,6 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
     }
   };
 
-  const handleInstUpdate = async () => {
-    if (!isDefaultPath || instUpdating) return;
-    setInstUpdating(true);
-    setError(null);
-    setNotice(null);
-    setInstJob(null);
-    try {
-      const res = await fetch(`${API_BASE}/api/company-profiles/pull-institutional`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-      const data = await readJsonResponse(res);
-      if (!res.ok) {
-        setError(data.error || `HTTP ${res.status}`);
-        setInstUpdating(false);
-        return;
-      }
-      setInstJobId(data.jobId ?? null);
-    } catch (err: any) {
-      setError(err.message || "Failed to start institutional update");
-      setInstUpdating(false);
-    }
-  };
-
   const handleYahooHoldersUpdate = async () => {
     if (!isDefaultPath || yahooUpdating) return;
     setYahooUpdating(true);
@@ -427,7 +399,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
   };
 
   const handleLostJob = useCallback(async (
-    kind: "Market cap" | "Float" | "Institutional" | "Yahoo holders",
+    kind: "Market cap" | "Float" | "Yahoo holders",
     reset: () => void,
   ) => {
     reset();
@@ -515,46 +487,6 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
       window.clearInterval(timer);
     };
   }, [floatJobId, loadTickers]);
-
-  useEffect(() => {
-    if (!instJobId) return;
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/jobs/${instJobId}`);
-        if (res.status === 404) {
-          await handleLostJob("Institutional", () => {
-            setInstUpdating(false);
-            setInstJob(null);
-            setInstJobId(null);
-          });
-          return;
-        }
-        if (!res.ok) return;
-        const data = await readJsonResponse(res);
-        if (cancelled) return;
-        setInstJob(data);
-        if (data.status === "done") {
-          setInstUpdating(false);
-          setNotice(`Institutional update completed. Updated ${data.result?.updated ?? 0} tickers.`);
-          await loadTickers();
-        } else if (data.status === "failed") {
-          setInstUpdating(false);
-          setError(data.error || "Institutional update failed");
-        } else if (data.status === "cancelled") {
-          setInstUpdating(false);
-        }
-      } catch {
-        // ignore transient polling errors
-      }
-    };
-    void poll();
-    const timer = window.setInterval(() => { void poll(); }, 2000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [handleLostJob, instJobId, loadTickers]);
 
   useEffect(() => {
     if (!yahooJobId) return;
@@ -696,15 +628,6 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
               {floatUpdating ? "Float..." : "Float"}
             </button>
             <button
-              onClick={handleInstUpdate}
-              disabled={instUpdating || loading}
-              className="px-2 py-1 text-xs bg-cyan-600 text-white rounded hover:bg-cyan-700 disabled:opacity-50 flex items-center gap-1"
-              title="Pull institutional ownership % from Finnhub stock/ownership endpoint"
-            >
-              <RefreshCw className={`w-3 h-3 ${instUpdating ? "animate-spin" : ""}`} />
-              {instUpdating ? "Inst..." : "Inst"}
-            </button>
-            <button
               onClick={handleYahooHoldersUpdate}
               disabled={yahooUpdating || loading}
               className="px-2 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-1"
@@ -793,28 +716,6 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
           {showFloatLog && floatJob.logs.length > 0 && (
             <div className="mt-2 max-h-40 overflow-y-auto bg-gray-900 text-gray-200 rounded p-2 font-mono text-[10px] leading-tight">
               {floatJob.logs.slice(-100).map((line, i) => (
-                <div key={i} className="whitespace-pre-wrap">{line}</div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {instJob && instJob.status === "running" && (
-        <div className="mb-2 p-2 bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800 rounded text-xs text-cyan-700 dark:text-cyan-300">
-          <div className="flex items-center justify-between">
-            <span>Institutional update running: {instJob.progress.completed}/{instJob.progress.total} ({instJob.progress.pct}%)</span>
-            <button
-              onClick={() => setShowInstLog((v) => !v)}
-              className="px-1.5 py-0.5 text-[10px] bg-cyan-200 dark:bg-cyan-800 text-cyan-700 dark:text-cyan-300 rounded hover:bg-cyan-300 dark:hover:bg-cyan-700 flex items-center gap-0.5"
-            >
-              {showInstLog ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-              {showInstLog ? "Hide Log" : "View Log"}
-            </button>
-          </div>
-          {showInstLog && instJob.logs.length > 0 && (
-            <div className="mt-2 max-h-40 overflow-y-auto bg-gray-900 text-gray-200 rounded p-2 font-mono text-[10px] leading-tight">
-              {instJob.logs.slice(-100).map((line, i) => (
                 <div key={i} className="whitespace-pre-wrap">{line}</div>
               ))}
             </div>
