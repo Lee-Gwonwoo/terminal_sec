@@ -7,6 +7,12 @@
 - 현재 분석 중인 뉴스 1건이 주가에 어떤 영향을 줄 가능성이 있는지, 과거의 유사 뉴스와 비교해 판단한다.
 - 같은 ticker의 과거 유사 이슈뿐 아니라, 다른 ticker에서 발생했던 유사 뉴스/이슈도 함께 참조한다.
 
+**Model_1 시작부 분석 데이터 기간 표기 규칙 (최우선)**
+
+- 모든 `Model_1` 산출물은 제목 또는 날짜 헤더 바로 아래, **첫 실질 본문 줄**에 반드시 `분석 데이터 기간: YYYY-MM-DD HH:mm ~ YYYY-MM-DD HH:mm (timezone)`를 적는다.
+- 이 줄은 상단 요약 표, 현재 뉴스 요약, `source check`, `primary/secondary/watch` 표보다 먼저 와야 한다.
+- 사용자가 문서를 펼쳤을 때 **이번에 실제로 분석한 데이터의 날짜/시각 범위**를 즉시 알 수 있어야 하며, 날짜만 적거나 시각이 빠진 출력은 완료본으로 보지 않는다.
+
 작업 절차 (3단계 구조):
 
 `Model_1`은 아래 3단계를 순서대로 수행한다. 각 단계의 역할이 다르므로 단계를 건너뛰거나 합치지 않는다.
@@ -137,11 +143,11 @@
 - 위 Model_1 safe endpoint는 `news_items` / `news_fulltext` / `news_ai_analysis` 기반 projection만 반환하고, current-news용 응답 JSON에는 `[][][]change_*[][][]`, `[][][]ohlc_*[][][]` 필드를 포함하지 않는다.
 - 따라서 **현재 뉴스 목록/상세를 Model_1로 읽는 UI나 agent는 공용 `[][][]/api/news[][][]`가 아니라 `[][][]/api/model1/news[][][]` 계열을 사용**해야 한다. 공용 `[][][]/api/news[][][]`는 일반 운영/모니터링용이며 change 필드를 계속 포함할 수 있다.
 
-**Model_1 분석 기간 표기 규칙 (필수)**
+**Model_1 분석 데이터 기간 표기 규칙 (필수)**
 
 - `Model_1` 산출물에서는 **분석한 기간을 날짜만 쓰지 말고, 시작 시각과 종료 시각까지 포함한 datetime range로 명시**해야 한다.
-- 기본 표기 형식은 `분석 기간: YYYY-MM-DD HH:mm ~ YYYY-MM-DD HH:mm (timezone)` 으로 고정한다. 예: `분석 기간: 2026-03-11 09:30 ~ 2026-03-12 16:00 (America/New_York)`.
-- 날짜 헤더가 이미 있더라도 그것만으로는 부족하다. 상단 요약, 최종 note, research page 중 사용자가 실제로 읽는 본문 시작 구간에 **별도의 `분석 기간:` 줄**을 남긴다.
+- 기본 표기 형식은 `분석 데이터 기간: YYYY-MM-DD HH:mm ~ YYYY-MM-DD HH:mm (timezone)` 으로 고정한다. 예: `분석 데이터 기간: 2026-03-11 09:30 ~ 2026-03-12 16:00 (America/New_York)`.
+- 날짜 헤더가 이미 있더라도 그것만으로는 부족하다. 상단 요약, 최종 note, research page 중 사용자가 실제로 읽는 **첫 본문 시작 구간**에 `분석 데이터 기간:` 줄을 둔다. 이 줄은 가능하면 해당 블록의 첫 줄이어야 한다.
 - 하루치만 분석해도 `2026-03-11`처럼 날짜만 적지 말고 `2026-03-11 09:30 ~ 2026-03-11 16:00`처럼 시각을 끝까지 적는다.
 - 기간 경계는 가능하면 실제 스크리닝/조회에 사용한 `published_at` 필터의 시작·종료 시각과 정확히 일치해야 한다. 날짜만 반올림해서 쓰지 않는다.
 - 타임존 변환이 들어가면, **최종 표시 타임존을 괄호로 명시**하고 필요하면 source 타임존도 짧게 메모한다. 타임존을 확정할 수 없으면 임의 추정하지 말고 `timezone 확인 필요`를 적는다.
@@ -158,13 +164,17 @@
 - `Model_1` 최종 서술에서는 **현재 분석 대상 ticker의 시가총액을 숫자로 직접 명시**해야 한다. 가능하면 `Market Cap 4.64B`처럼 현재 기사 요약 바로 아래에 적고, 이 시총 구간이 왜 같은 사건이라도 반응 크기 해석에 중요한지 한 줄 설명한다.
 - 현재 ticker의 `market_cap` 값이 없으면 추정하지 말고 `market_cap 데이터 없음`이라고 적고, 그래서 small-cap / mid-cap / large-cap 맥락 보정에 한계가 있다고 함께 적는다.
 
-**Model_1 수급 구조 가산점 규칙 (필수)**
+**Model_1 오너쉽 데이터 가산점 규칙 (필수)**
 
+- `Model_1`에서는 `float %`, `institutional ownership %`, `insider ownership %`를 문서 안에서 편의상 **오너쉽 데이터**로 묶어 부른다. `float %`는 엄밀히 ownership 자체라기보다 유통 가능 물량 구조에 가깝지만, Model_1에서는 ownership 맥락과 함께 보는 핵심 보조 데이터이므로 같은 묶음으로 둔다. `short interest %`는 여기에 붙는 **포지셔닝 보조 지표**로 다룬다.
 - `Model_1`에서는 뉴스 사건 자체와 과거 유사사례 분포가 1차 판단 기준이고, **기관보유비중(`institutional ownership %`)이 낮고 유동물량 비중(`float %`)이 높은 구조**는 그 뒤에 붙는 **가산점**으로 사용한다. 특히 `강한 가산점`은 final 후보군 안에서는 단순 참고가 아니라 **최종 등급과 최종 순위 재조정에 직접 반영하는 강화 요인**으로 취급한다.
-- 여기에 `insider ownership %`와 `short interest %`도 함께 본다. 다만 이 둘도 사건 자체를 덮어쓰는 주근거가 아니라, 뉴스 이후 수급 반응의 증폭 가능성 또는 잠김 구조를 해석하는 **보조 수급 지표**로 사용한다.
-- 수급 데이터 조사의 기본 우선순위는 **FMP API 우선 -> Finnhub fallback -> 웹/SEC 보조 source** 로 둔다. 즉 `Model_1`에서는 수급 관련 숫자를 조사할 때 먼저 FMP API에서 확보 가능한 필드를 확인하고, FMP에서 안정적으로 안 나오는 항목만 Finnhub나 다른 보조 source로 보강한다.
+- 여기에 `insider ownership %`와 `short interest %`도 함께 본다. 다만 이 둘도 사건 자체를 덮어쓰는 주근거가 아니라, 뉴스 이후 가격 반응의 증폭 가능성 또는 잠김 구조를 해석하는 **보조 오너쉽/포지셔닝 지표**로 사용한다.
+- 오너쉽 데이터 확인의 기본 우선순위는 **Default Ticker Window에 이미 보이는 값 -> live app DB 대표값 -> 필요한 경우에만 외부 source 보강** 으로 둔다.
+- 여기서 Default Ticker Window 값은 `GET /api/tickers` default-universe row에 노출되는 `marketCap`, `floatPct`, `institutionalPct`, `insiderPct`와 각 `marketCapSource`, `floatSource`, `institutionalSource`, `insiderSource`를 뜻한다. `Model_1` note에서는 가능하면 사용자가 창에서 바로 보는 값과 동일한 숫자/출처를 그대로 사용한다.
+- 따라서 해당 ticker가 default universe 안에 있고 window에 값이 보이면, 굳이 같은 값을 만들기 위해 FMP/Finnhub/Yahoo/web source를 다시 재조회하지 않는다. 외부 source 재조회는 **window/DB 값이 비어 있거나 source 확인이 더 필요한 경우에만** 한다.
+- `short interest %`는 현재 Default Ticker Window 기본 컬럼이 아니므로, 이 항목만 별도 source로 보강해도 된다.
 - `market_cap`, `shareOutstanding`처럼 FMP company/profile 계열에서 직접 받을 수 있는 항목은 가능하면 **FMP API를 우선 source of truth**로 사용한다.
-- `float %`와 `institutional ownership %`는 현재 레포/대화 기준으로 FMP 단일 endpoint만으로 안정적으로 닫히지 않을 수 있으므로, **FMP에서 바로 확보 가능한 수급 필드가 없으면 Finnhub 기준으로 직접 받거나 계산해서 사용**한다. 이 둘은 아래처럼 fallback 계산 규칙을 둔다.
+- `float %`와 `institutional ownership %`는 현재 레포/대화 기준으로 FMP 단일 endpoint만으로 안정적으로 닫히지 않을 수 있으므로, **FMP에서 바로 확보 가능한 오너쉽 데이터 필드가 없으면 Finnhub 기준으로 직접 받거나 계산해서 사용**한다. 이 둘은 아래처럼 fallback 계산 규칙을 둔다.
   - `float %`: 기본은 FMP API 확인 우선, FMP에서 직접 계산 가능한 canonical 값이 없으면 Finnhub `stock/profile2`의 `floatingShare`와 `shareOutstanding`을 사용해 계산한다. fallback 계산식은 `float % = floatingShare / shareOutstanding * 100` 이다.
   - `institutional ownership %`: 기본은 FMP API 확인 우선, FMP에서 안정적인 ownership 숫자를 못 받으면 Finnhub `stock/ownership`의 기관별 `share`를 모두 합산한 뒤, Finnhub `stock/profile2.shareOutstanding`으로 나눠 계산한다. fallback 계산식은 `institutional ownership % estimate = sum(stock/ownership.share) / shareOutstanding * 100` 이다.
   - Finnhub `profile2.shareOutstanding`은 백만 주 단위로 들어올 수 있으므로, fallback 계산 시에는 API 응답 단위를 먼저 맞춘 뒤 계산한다. 예를 들어 현재 구현 검증 기준에서는 `shareOutstanding * 1,000,000`으로 실제 주식 수로 환산한 뒤 분모로 썼다.
@@ -185,7 +195,7 @@
   - `강한 가산점`: `float % >= 80` 이면서 `institutional ownership % <= 35`
   - `중간 가산점`: `float % >= 60` 이면서 `institutional ownership % <= 50`
   - `약한 가산점`: 위 둘 중 하나만 분명하게 유리한 경우
-  - `가산점 없음`: `float % < 40` 이거나 `institutional ownership % >= 80` 이라서 수급상 추가 우위를 주장하기 어려운 경우
+  - `가산점 없음`: `float % < 40` 이거나 `institutional ownership % >= 80` 이라서 오너쉽 데이터상 추가 우위를 주장하기 어려운 경우
 - `insider ownership %`와 `short interest %`는 아래처럼 보조 해석 규칙을 둔다.
   - `insider ownership %`가 높고 `float %`가 지나치게 낮지 않으면 공급 제약 + 경영진 정렬 관점의 **보조 플러스 요인**으로 적을 수 있다.
   - `insider ownership %`가 매우 높아서 `float %`가 낮은 경우는 급등 잠재력과 함께 유동성 왜곡 리스크도 같이 적는다.
@@ -195,30 +205,30 @@
   - `강한 가산점`: 사건 자체와 유사사례 분포가 최소 `B+` 이상으로 방어되는 후보라면, **최종 등급을 최대 한 단계 상향**할 수 있다. 예: `B+ -> A-`, `A- -> A`, `A -> A+`. 또한 비슷한 강도의 경쟁 후보가 있으면 final rank를 한 칸 앞세우는 근거로 쓴다.
   - `중간 가산점`: 동급 후보 사이에서 **우선순위를 앞당기는 실질 가산점**으로 반영한다. 필요하면 `B -> B+`, `B+ -> A-`처럼 경계선 후보를 한 단계 올릴 수 있지만, `강한 가산점`보다 보수적으로 적용한다.
   - `약한 가산점`: 본문 코멘트와 상단 표에는 표시하되, 보통은 동급 내 선호도 조정 정도로만 사용한다.
-  - `가산점 없음`: 수급 구조 때문에 별도 상향 근거를 주지 않는다.
-- 다만 이 가산점만으로 약한 사건이나 부정적 유사사례 분포를 억지 상향하면 안 된다. 즉 **수급 가산점은 독립적인 1차 판정기가 아니라, 이미 의미 있는 뉴스 후보의 최종 평가를 강화하는 조정 규칙**으로 사용한다.
+- `가산점 없음`: 오너쉽 데이터 때문에 별도 상향 근거를 주지 않는다.
+- 다만 이 가산점만으로 약한 사건이나 부정적 유사사례 분포를 억지 상향하면 안 된다. 즉 **오너쉽 가산점은 독립적인 1차 판정기가 아니라, 이미 의미 있는 뉴스 후보의 최종 평가를 강화하는 조정 규칙**으로 사용한다.
 - `Model_1` 최종 서술에서는 해당 ticker의 `float %`, `institutional ownership %`, `insider ownership %`, `short interest %`를 **가능한 한 숫자로 명시**해야 한다. 가능하면 `Float 82.7% (FMP/Finnhub calc)`, `Institutional Ownership Estimate 24.1% (FMP 확인 후 Finnhub ownership sum / shares outstanding fallback)`, `Insider Ownership 11.4%`, `Short Interest 23.8%`처럼 본문 또는 표에 바로 적고, 이 수치들이 왜 가산점 또는 경고 메모로 이어졌는지 짧게 설명한다.
-- 위 수치들 중 일부가 없으면 값을 추정하지 말고 `데이터 없음`으로 적은 뒤, 그 때문에 수급 보조 판단 또는 squeeze/잠김 구조 해석에 한계가 있다고 명시한다.
-- 이 수치들은 현재 `app.db`의 canonical 뉴스 테이블에 항상 들어 있다고 가정하지 않는다. 수급 데이터는 기본적으로 FMP API를 먼저 확인하고, FMP만으로 닫히지 않는 항목은 Finnhub 기반 계산 또는 다른 보조 source로 보강하며, 최종 note에는 실제 사용 source를 함께 적는다.
+- 위 수치들 중 일부가 없으면 값을 추정하지 말고 `데이터 없음`으로 적은 뒤, 그 때문에 오너쉽 데이터 보조 판단 또는 squeeze/잠김 구조 해석에 한계가 있다고 명시한다.
+- 이 수치들은 현재 `app.db`의 canonical 뉴스 테이블에 항상 들어 있다고 가정하지 않는다. 오너쉽 데이터는 기본적으로 Default Ticker Window / live app DB 값을 먼저 확인하고, 거기서 닫히지 않는 항목만 FMP/Finnhub/Yahoo/웹/SEC 보강을 사용하며, 최종 note에는 실제 사용 source를 함께 적는다.
 
-**Model_1 상단 요약 표 수급/등급 표기 규칙 (필수)**
+**Model_1 상단 요약 표 오너쉽 데이터/등급 표기 규칙 (필수)**
 
-- 날짜별 `Current-News 전수 스크리닝 요약` 또는 그에 준하는 **상단 요약 표**를 만들 때는, 가능하면 후보별로 아래 수급 컬럼을 함께 넣는다.
+- 날짜별 `Current-News 전수 스크리닝 요약` 또는 그에 준하는 **상단 요약 표**를 만들 때는, 가능하면 후보별로 아래 오너쉽 데이터 컬럼을 함께 넣는다.
   - `방향` 또는 `Direction`
   - `Float %`
   - `Institutional %` 또는 `Institutional Ownership Estimate %`
   - `Insider %`
-  - `수급 가산점`
+  - `오너쉽 가산점`
   - `최종 등급`
 - 즉 상단 표는 필요하면 기존 `Ticker / mcap / Industry / Headline / 분류 / 근거`만으로 끝내지 말고, 최소한 final 경쟁 후보들에 대해서는 `방향`, `float %`, `institutional %`, `insider %`, `가산점`, `최종 등급`이 보이도록 확장한다.
-- `short interest %`는 표 폭이 너무 넓어지면 상단 표의 필수 컬럼으로 강제하지는 않지만, 자리가 허용되면 추가한다. 대신 본문 수급 구조 섹션에는 계속 적는다.
-- 상단 표에서 수급 데이터가 아직 없는 후보는 `임시 후보`, `수급 미반영` 또는 `provisional`로 명시하고, **최종 등급 칸을 비우거나 `보류`로 둔다.** 수급 보강 전에는 `A+`, `A`, `A-` 같은 확정 등급을 닫지 않는다.
+- `short interest %`는 표 폭이 너무 넓어지면 상단 표의 필수 컬럼으로 강제하지는 않지만, 자리가 허용되면 추가한다. 대신 본문 오너쉽 데이터/포지셔닝 섹션에는 계속 적는다.
+- 상단 표에서 오너쉽 데이터가 아직 없는 후보는 `임시 후보`, `오너쉽 미반영` 또는 `provisional`로 명시하고, **최종 등급 칸을 비우거나 `보류`로 둔다.** 오너쉽 보강 전에는 `A+`, `A`, `A-` 같은 확정 등급을 닫지 않는다.
 - `insider %`가 실제로 확보되지 않았으면 추정하지 말고 `N/A` 또는 `데이터 없음`으로 적는다. 빈 칸으로 숨기지 않는다.
 - 표 안의 숫자는 가능하면 `%`까지 붙인 짧은 형식으로 적는다. 예: `82.7%`, `24.1%`, `N/A`.
-- 상단 표는 raw Markdown에서도 한눈에 스캔되어야 하므로, 컬럼 수가 많아지면 headline/근거 문장을 짧게 줄이고 수급/등급 컬럼을 유지하는 쪽을 우선한다.
+- 상단 표는 raw Markdown에서도 한눈에 스캔되어야 하므로, 컬럼 수가 많아지면 headline/근거 문장을 짧게 줄이고 오너쉽/등급 컬럼을 유지하는 쪽을 우선한다.
 - 여러 날짜 note에서는 **`primary`만 표에 넣고 `secondary`를 본문 아래로 숨기지 않는다.**
   - 권장 구조는 `primary 확정 표` + `secondary/watch 보조 표`의 2단 구성이다.
-  - `secondary`는 가능하면 `방향`, `Float %`, `Institutional %`, `Insider %`, `수급 가산점`, `최종 등급`까지 함께 적는다. 다만 아직 수급/증거 보강이 덜 끝났으면 `보류`, `provisional`, `❔ Pending`으로 표기한다.
+  - `secondary`는 가능하면 `방향`, `Float %`, `Institutional %`, `Insider %`, `오너쉽 가산점`, `최종 등급`까지 함께 적는다. 다만 아직 오너쉽/증거 보강이 덜 끝났으면 `보류`, `provisional`, `❔ Pending`으로 표기한다.
   - `watch`는 상세 분석을 끝내지 않았더라도, 적어도 `Ticker`, `Headline (요약)`, `watch 사유`는 상단 표 또는 표 바로 아래 보조 표에 남겨 사용자가 어떤 이름들이 watch인지 즉시 볼 수 있게 한다.
 
 **Model_1 상단 요약 표 방향 표기 규칙 (필수)**
@@ -237,7 +247,7 @@
 
 **Model_1 상단 요약 표 이모티콘/별점 규칙 (필수)**
 
-- `수급 가산점`은 텍스트만 적지 말고 **별 이모티콘 기반의 시각 점수**를 함께 적는다.
+- `오너쉽 가산점`은 텍스트만 적지 말고 **별 이모티콘 기반의 시각 점수**를 함께 적는다.
 - 기본 표기 형식은 아래처럼 고정한다.
   - `강한 가산점`: `⭐⭐⭐ Strong`
   - `중간 가산점`: `⭐⭐ Medium`
@@ -245,21 +255,21 @@
   - `가산점 없음`: `⚪ None`
   - `데이터 부족`: `❔ Pending`
 - 필요하면 한국어를 같이 붙여 `⭐⭐⭐ 강한 가산점`, `⭐⭐ 중간 가산점`처럼 적을 수 있지만, 적어도 **별/원/물음표 이모티콘 1개 이상**은 반드시 포함한다.
-- 상단 표의 `수급 가산점` 칸은 가능하면 `⭐⭐ Medium`, `⚪ None`처럼 **짧고 고정된 토큰**으로 유지한다. 긴 설명은 본문 수급 구조 섹션에서 푼다.
-- 이 별점은 어디까지나 수급 보조 가산점의 시각 요약이다. 사건 강도나 유사사례 분포를 덮어쓰는 독립 점수처럼 쓰면 안 된다.
+- 상단 표의 `오너쉽 가산점` 칸은 가능하면 `⭐⭐ Medium`, `⚪ None`처럼 **짧고 고정된 토큰**으로 유지한다. 긴 설명은 본문 오너쉽 데이터 섹션에서 푼다.
+- 이 별점은 어디까지나 오너쉽 데이터 보조 가산점의 시각 요약이다. 사건 강도나 유사사례 분포를 덮어쓰는 독립 점수처럼 쓰면 안 된다.
 
 **Model_1 최종 등급 표기 규칙 (필수)**
 
 - final 경쟁 후보들에 대해서는 상단 표와 본문에서 **문자 등급(letter grade)** 을 함께 표기한다.
 - 기본 등급 체계는 `A+`, `A`, `A-`, `B+`, `B`, `B-`, `C`, `보류`를 사용한다.
-- `A+` / `A` / `A-`는 **해당 날짜의 핵심 경쟁 후보들 사이에서 수급 보강 + same-ticker / other-ticker 조사 + 3단계 재판단까지 끝난 뒤**에만 확정한다.
-- `A+`는 같은 날짜 후보 중에서도 사건 강도, 유사사례 분포, 시총 맥락, 수급 보조 가산점까지 종합했을 때 **가장 강한 확신의 top tier**에만 제한적으로 부여한다.
+- `A+` / `A` / `A-`는 **해당 날짜의 핵심 경쟁 후보들 사이에서 오너쉽 보강 + same-ticker / other-ticker 조사 + 3단계 재판단까지 끝난 뒤**에만 확정한다.
+- `A+`는 같은 날짜 후보 중에서도 사건 강도, 유사사례 분포, 시총 맥락, 오너쉽 보조 가산점까지 종합했을 때 **가장 강한 확신의 top tier**에만 제한적으로 부여한다.
 - `A`는 강한 후보지만 `A+`만큼 압도적이지 않거나, 반례/선반영/시총 왜곡 리스크가 일부 남는 경우에 사용한다.
-- `A-`는 primary는 유지하지만 반례, 선반영, 추가 데이터 성격, 사례 부족, 수급 한계 등으로 확신이 한 단계 낮은 경우에 사용한다.
+- `A-`는 primary는 유지하지만 반례, 선반영, 추가 데이터 성격, 사례 부족, 오너쉽 데이터 한계 등으로 확신이 한 단계 낮은 경우에 사용한다.
 - `강한 가산점`이 확인된 후보는, 사건 강도와 유사사례 분포가 이미 positive 또는 방어 가능하다는 전제 아래 **최종 등급을 최대 한 단계 올리는 기본 옵션**으로 검토한다. 즉 강한 가산점은 optional memo가 아니라 final grading 단계에서 먼저 체크하는 항목이다.
-- 등급 상향은 항상 `B+ -> A- -> A -> A+`처럼 **인접 한 단계만** 허용한다. 수급만으로 두 단계 이상 점프시키지 않는다.
+- 등급 상향은 항상 `B+ -> A- -> A -> A+`처럼 **인접 한 단계만** 허용한다. 오너쉽 데이터만으로 두 단계 이상 점프시키지 않는다.
 - `중간 가산점`은 기본적으로 동률 정리와 경계선 후보 상향에 사용하고, `약한 가산점`은 등급 자체보다 rank 미세조정에 우선 사용한다.
-- 수급 데이터 또는 유사사례 조사가 아직 덜 끝난 상태에서는 `A+` 계열 등급 대신 `보류`, `임시 A군`, `provisional` 같은 표현만 허용한다.
+- 오너쉽 데이터 또는 유사사례 조사가 아직 덜 끝난 상태에서는 `A+` 계열 등급 대신 `보류`, `임시 A군`, `provisional` 같은 표현만 허용한다.
 - `Medium-High`, `Medium` 같은 서술형 강도 라벨을 계속 쓸 수는 있지만, 상단 요약 표에는 가능하면 이를 `A-`, `B+`처럼 **문자 등급으로 한 번 더 압축**해 같이 적는다.
 - 본문 3단계 결론에도 가능하면 `최종 등급: A- (Primary)`처럼 **letter grade + importance 라벨**을 같이 적는다.
 - `secondary`도 최종 note에 남기는 경우에는, 본문 3단계 결론에 `최종 등급: B+ (Secondary)`처럼 **letter grade + importance 라벨**을 같이 적는다.
@@ -277,18 +287,18 @@
   - `Float %`
   - `Institutional %`
   - `Insider %`
-  - `수급 가산점`
+  - `오너쉽 가산점`
   - `최종 등급`
   - `근거`
 - 예시:
 
-| Ticker | mcap | 방향 | Float % | Institutional % | Insider % | 수급 가산점 | 최종 등급 | 근거 |
+| Ticker | mcap | 방향 | Float % | Institutional % | Insider % | 오너쉽 가산점 | 최종 등급 | 근거 |
 |--------|------|------|---------|------------------|-----------|-------------|-----------|------|
 | ABCD | 2.4B | 🟢 Long | 82.7% | 24.1% | 11.4% | ⭐⭐⭐ Strong | A | 후기 임상 positive + same-ticker 반응 우세 |
 | EFGH | 5.8B | 🔴 Short | 61.3% | 47.8% | N/A | ⭐⭐ Medium | A- | 희석성 financing으로 하방 해석 우세 |
-| IJKL | 1.1B | ⚪ Unclear | N/A | N/A | N/A | ❔ Pending | 보류 | 수급 데이터 미확보로 provisional |
+| IJKL | 1.1B | ⚪ Unclear | N/A | N/A | N/A | ❔ Pending | 보류 | 오너쉽 데이터 미확보로 provisional |
 
-- 사용자가 “처음 표”, “상단 요약 표”, “날짜별 스크리닝 표”를 빠르게 보고 판단하는 상황을 전제로, 이 표에서는 **방향 + 수급 + 등급을 한 줄에 압축해서 보여주고**, 상세 계산 근거는 아래 개별 ticker 본문으로 내려보낸다.
+- 사용자가 “처음 표”, “상단 요약 표”, “날짜별 스크리닝 표”를 빠르게 보고 판단하는 상황을 전제로, 이 표에서는 **방향 + 오너쉽 + 등급을 한 줄에 압축해서 보여주고**, 상세 계산 근거는 아래 개별 ticker 본문으로 내려보낸다.
 
 **Model_1 ranking 확정 순서 규칙 (필수)**
 
@@ -300,14 +310,14 @@
   - 가능하면 `insider ownership %`, `short interest %`
 - 즉 실무 순서는 기본적으로 아래처럼 고정한다.
   1. `1단계`: 사건 강도 기준으로 후보를 넓게 통과시킨다.
-  2. `수급/시총 보강`: final 경쟁 후보들에 대해 `market_cap`, `float %`, `institutional ownership % estimate`를 먼저 확보한다.
-  3. `임시 순위`: 필요하면 `수급 미반영 임시 상위 후보`까지는 적을 수 있다.
+  2. `오너쉽 데이터/시총 보강`: final 경쟁 후보들에 대해 `market_cap`, `float %`, `institutional ownership % estimate`를 먼저 확보한다.
+  3. `임시 순위`: 필요하면 `오너쉽 미반영 임시 상위 후보`까지는 적을 수 있다.
   4. `2단계`: same-ticker / other-ticker 유사사례를 충분히 모은다.
-  5. `3단계`: 유사사례 분포 + 시총 맥락 + 수급 가산점을 함께 보고 final importance / final ranking을 확정한다.
+  5. `3단계`: 유사사례 분포 + 시총 맥락 + 오너쉽 가산점을 함께 보고 final importance / final ranking을 확정한다.
 - 따라서 문서나 research page에서 `Primary 1`, `Primary 2`, `Top pick`, `최종 rank 1`처럼 **확정형 표현**을 쓰려면, 적어도 해당 경쟁 후보들 사이에서는 `float %`와 `institutional ownership % estimate`가 이미 반영돼 있어야 한다.
-- 반대로 이 수치들이 아직 없는 상태에서는 `스크리닝 통과 후보`, `임시 상위 후보`, `수급 미반영 provisional rank`처럼 **임시 라벨**만 허용한다. 이를 final ranking처럼 쓰면 안 된다.
+- 반대로 이 수치들이 아직 없는 상태에서는 `스크리닝 통과 후보`, `임시 상위 후보`, `오너쉽 미반영 provisional rank`처럼 **임시 라벨**만 허용한다. 이를 final ranking처럼 쓰면 안 된다.
 - `secondary`도 같은 원칙을 따른다. 즉 `secondary 1`, `secondary top`, `차점 확정`처럼 닫으려면 최소한 해당 후보에도 `market_cap`, `float %`, `institutional ownership % estimate`가 먼저 반영돼 있어야 한다.
-- 수급 가산점은 사건 자체를 뒤집는 1차 기준은 아니지만, `강한 가산점`과 `중간 가산점`은 **final ranking 재정렬 요소**로 취급한다. 즉 비슷한 뉴스 강도의 후보 사이 순서를 닫는 tie-breaker를 넘어서, 경계선 등급과 최종 순서를 실제로 조정하는 단계로 final ranking 직전에 반드시 반영한다.
+- 오너쉽 가산점은 사건 자체를 뒤집는 1차 기준은 아니지만, `강한 가산점`과 `중간 가산점`은 **final ranking 재정렬 요소**로 취급한다. 즉 비슷한 뉴스 강도의 후보 사이 순서를 닫는 tie-breaker를 넘어서, 경계선 등급과 최종 순서를 실제로 조정하는 단계로 final ranking 직전에 반드시 반영한다.
 - 만약 source 제약 때문에 `float %` 또는 `institutional ownership % estimate`를 확보하지 못했다면, `final ranking` 대신 `보수적 provisional ranking`으로 남기고, 어떤 source를 시도했고 왜 못 구했는지 함께 적는다.
 
 **1단계: 넓은 스크리닝 (후보 선별)**
@@ -393,7 +403,7 @@
 - 목적: 1단계 판단 + 2단계 증거를 종합해서 **최종 등급**을 확정한다.
 - 허들: **높음**. 증거 기반으로만 판단한다.
 - 이 단계에서는 **대표 사례 중심 수동 인상비평**으로 끝내면 안 된다. 최소한 `same-ticker 분포`, `other-ticker 분포`, `시총 맥락`, `선반영 여부`를 함께 보고 재판단해야 한다.
-- 이 단계에서만 `Primary 1/2/3`, `Top pick`, `최종 importance 순서` 같은 **확정형 ranking**을 닫는다. 1단계나 2단계 중간 메모에서 이미 확정 순서를 적어두고, 나중에 수급 가산점을 덧붙이는 방식은 지양한다.
+- 이 단계에서만 `Primary 1/2/3`, `Top pick`, `최종 importance 순서` 같은 **확정형 ranking**을 닫는다. 1단계나 2단계 중간 메모에서 이미 확정 순서를 적어두고, 나중에 오너쉽 가산점을 덧붙이는 방식은 지양한다.
 - 이 단계에서 할 수 있는 것:
   - 1단계에서 "중요"로 뽑았는데, 과거 유사사례가 전부 무반응이면 → **중요도 하향**
   - 1단계에서 "경계선"으로 애매했는데, 과거 유사사례에서 같은 market cap 구간에서 큰 움직임이 반복됐으면 → **중요도 상향**
@@ -431,22 +441,23 @@
   7. 시가총액 `100B` 이상 ticker는 특별한 사용자 지시가 없는 한 최종 직접 분석 대상에서 제외하고, 필요하면 reference case로만 남긴다.
 - 다시 말해, **대표 사례 2~3개가 강하다고 해서 바로 중요도를 높이지 않는다.** 조사된 사례들의 전체 분포가 정말 그 결론을 지지하는지 먼저 확인한다.
 - 조사 후에도 사례 수가 너무 적거나, 시총/산업/선반영 조건이 현재 뉴스와 너무 다르면 `정확한 판단 불가`, `보수적 분류`, `추가 조사 필요` 중 하나로 남긴다. 억지로 강한 결론을 내리지 않는다.
-- 기술적/수급 데이터가 없어서 선반영 판단을 충분히 못 하는 경우에도, 그 한계를 note에 명시하고 confidence를 한 단계 낮춘다.
+- 기술적/오너쉽 데이터가 없어서 선반영 판단을 충분히 못 하는 경우에도, 그 한계를 note에 명시하고 confidence를 한 단계 낮춘다.
 
 기업 컨텍스트 참조 원칙 (전 단계 공통):
 
 - `Model_1`의 **모든 단계**(1단계 스크리닝, 2단계 유사사례 조사, 3단계 재분류)에서 뉴스 headline/본문만 보지 않고, 해당 ticker의 **기업 컨텍스트**를 함께 참조한다.
 - 현재 live app DB 기준으로 참조 경로를 아래처럼 구분한다.
-  - `Model_1`에서 사용하는 **시가총액/수급 데이터의 기본 source of truth는 repo의 live app DB**다. 즉 기본적으로 `terminal/backend/backend/data/app.db`에 적재된 `company_profiles` 계열 값을 먼저 사용하고, 이미 DB에 있는 값을 두고 매번 외부 API를 다시 조회하는 방식은 기본 플로우로 삼지 않는다.
-  - 특히 현재 레포 기준으로 `market_cap`, `float_pct`, `institutional_pct`와 각 source 컬럼(`market_cap_source`, `float_source`, `institutional_source`)은 같은 `company_profiles` family에 저장된다. 따라서 `Model_1` note에서는 가능하면 **DB에 저장된 최신 값 + source 정보**를 함께 읽어 사용한다.
+  - `Model_1`에서 사용하는 **시가총액/오너쉽 데이터의 기본 source of truth는 repo의 live app DB**다. 즉 기본적으로 `terminal/backend/backend/data/app.db`에 적재된 `company_profiles` 계열 값을 먼저 사용하고, 이미 DB에 있는 값을 두고 매번 외부 API를 다시 조회하는 방식은 기본 플로우로 삼지 않는다.
+  - 특히 default universe 안의 ticker는 먼저 **Default Ticker Window에 실제 표시되는 값**을 본다. 즉 `GET /api/tickers` default-universe row의 `marketCap`, `floatPct`, `institutionalPct`, `insiderPct`와 각 source badge를 1차 참조값으로 사용한다. 이 값들은 backend가 `company_profiles` 대표값을 재노출한 것이므로, note 숫자와 사용자가 보는 UI 숫자를 맞추는 기준이다.
+  - 특히 현재 레포 기준으로 `market_cap`, `float_pct`, `institutional_pct`, `insider_pct`와 각 source 컬럼(`market_cap_source`, `float_source`, `institutional_source`, `insider_source`)은 같은 `company_profiles` family에 저장된다. 따라서 `Model_1` note에서는 가능하면 **DB에 저장된 최신 값 + source 정보**를 함께 읽어 사용한다.
   - raw DB를 직접 읽을 때는 `company_profiles`가 ticker당 단일 row가 아니라 source별 다중 row 구조라는 점을 전제로, `securities`와 JOIN한 뒤 **필드별 최신 non-null 대표값**을 고르는 규칙 또는 `fetched_at DESC` 대표 row 규칙을 먼저 정하고 읽는다.
-  - 현재 repo 문서 기준 구현 source 정책은 `market cap = FMP profile`, `float = FMP shares-float`, `institutional = Finnhub ownership` 저장 방식이다. 따라서 `Model_1`에서 수치를 인용할 때는 가능하면 `DB stored value (source=...)` 형식으로 출처를 같이 남긴다.
+  - 현재 repo 문서 기준 window/source 정책은 `market cap = FMP profile`, `float = FMP shares-float`, `institutional = Finnhub ownership` 기본값 구조다. 추가로 `Yahoo Holders`를 실행한 뒤에는 `institutional = Yahoo`, `insider = Yahoo` badge가 보일 수 있다. 따라서 `Model_1`에서 수치를 인용할 때는 가능하면 `DB stored value (source=...)` 형식으로 출처를 같이 남긴다.
   - DB에 값이 이미 있으면 그것을 우선 사용하고, DB 값이 비어 있거나 대표값 선택이 불가능할 때만 외부 API/web source를 보강 조회한다. 이 경우에도 최종 note에는 `DB 없음으로 보강 조회`라고 명시해, DB 값과 실시간 보강값을 혼동하지 않는다.
   - `[][][]description[][][]`, `[][][]peers[][][]`, `[][][]ipo_date[][][]`, `[][][]market_cap[][][]`는 기본적으로 `company_profiles`에서 온다.
   - 단, `company_profiles`는 ticker당 단일 row가 아니라 `security_id + source` 기준 다중 row 구조이므로, raw DB를 직접 읽을 때는 대표 row 선택 규칙을 먼저 정해야 한다.
   - `[][][]industry[][][]`는 `company_profiles` 컬럼이 아니라 주로 `securities.industry` 또는 `industryLookup.ts`의 CSV cache fallback에서 온다.
   - API 응답을 사용할 때는 `/api/news`가 내려주는 `[][][]companyDescription[][][]`, `[][][]peers[][][]`, `[][][]ipoDate[][][]`, `[][][]marketCap[][][]`, `[][][]industry[][][]`를 우선 source of truth로 본다.
-  - `[][][]float %[][][]`, `[][][]institutional ownership %[][][]`, `[][][]insider ownership %[][][]`, `[][][]short interest %[][][]`는 `Model_1` 수급 보조 가산점용 보조 지표로 취급한다.
+  - `[][][]float %[][][]`, `[][][]institutional ownership %[][][]`, `[][][]insider ownership %[][][]`, `[][][]short interest %[][][]`는 `Model_1` 오너쉽 데이터 가산점 + 포지셔닝 메모용 보조 지표로 취급한다.
   - `[][][]float %[][][]`는 기본적으로 FMP API를 먼저 확인하고, FMP에서 canonical 계산값을 안정적으로 못 닫으면 Finnhub `stock/profile2`의 `floatingShare`, `shareOutstanding` 기반 계산값을 fallback으로 사용한다.
   - `[][][]institutional ownership %[][][]`는 기본적으로 FMP API를 먼저 확인하고, FMP에서 안정적인 ownership 숫자를 못 받으면 Finnhub `stock/ownership`의 기관별 `share` 합계와 Finnhub `stock/profile2.shareOutstanding`을 결합해 계산한 `estimate`를 fallback으로 사용한다.
   - `[][][]insider ownership %[][][]`는 토큰 효율상 기본적으로 GuruFocus 같은 웹 aggregate 단일 숫자를 우선 확인하고, 중요한 케이스만 SEC `DEF 14A` ownership table로 교차검증한다.
@@ -454,7 +465,7 @@
 - 단계별 활용 방식:
   - **1단계 (스크리닝)**: description을 보고 뉴스가 기업의 핵심 사업과 직접 연결되는지 빠르게 판단한다. 핵심 사업과 직접 연결되는 뉴스는 허들을 더 낮게, 부수적 사업 관련이면 좀 더 보수적으로 판단할 수 있다.
   - **2단계 (유사사례 조사)**: peers 목록과 industry를 활용해 other-ticker 검색 범위를 효율적으로 좁힌다. ipo_date를 확인해 유사사례의 상장 연차가 현재 ticker와 비슷한지도 기록한다. same-ticker와 other-ticker를 각각 따로 정리할 수 있을 정도로 증거를 모은다.
-  - **3단계 (재분류)**: 과거 유사사례의 반응을 해석할 때, industry 특성(예: 바이오는 임상 결과에 극단 반응, 유틸리티는 규제 뉴스에 둔감)과 ipo_date 기반 성숙도 차이를 보정 요인으로 반영한다. 이때 `float %`, `institutional ownership %`, `insider ownership %`, `short interest %`를 보조 수급 항목으로 함께 적되, 사건 자체나 유사사례 분포를 덮어쓰는 주근거로 사용하지 않는다.
+  - **3단계 (재분류)**: 과거 유사사례의 반응을 해석할 때, industry 특성(예: 바이오는 임상 결과에 극단 반응, 유틸리티는 규제 뉴스에 둔감)과 ipo_date 기반 성숙도 차이를 보정 요인으로 반영한다. 이때 `float %`, `institutional ownership %`, `insider ownership %`, `short interest %`를 보조 오너쉽/포지셔닝 항목으로 함께 적되, 사건 자체나 유사사례 분포를 덮어쓰는 주근거로 사용하지 않는다.
 - 이 데이터가 DB에 없거나 비어 있을 수 있다. 그 경우 해당 항목은 건너뛰되, 어떤 컨텍스트가 누락됐는지 로그에 남긴다.
 
 운영 원칙:
@@ -479,7 +490,7 @@
 
 - `Model_1`로 최종 주요 이슈와 ticker를 분석할 때는, **현재 뉴스 1건만 요약하고 끝내면 안 된다.** 반드시 과거 유사사례 비교 결과를 같이 적는다.
 - `primary`뿐 아니라 `secondary`로 최종 note에 남긴 ticker도 동일하다. 즉 `secondary`도 현재 뉴스 요약만 적고 끝내지 말고, same-ticker / other-ticker 비교 결과를 함께 적는다.
-- 최종 답변, research note, 날짜별 스크리닝 note의 시작 부분에는 **`분석 기간: YYYY-MM-DD HH:mm ~ YYYY-MM-DD HH:mm (timezone)`** 줄을 반드시 넣는다. 날짜 제목만 있고 시각이 없는 출력은 완료본으로 보지 않는다.
+- 최종 답변, research note, 날짜별 스크리닝 note의 시작 부분에는 **`분석 데이터 기간: YYYY-MM-DD HH:mm ~ YYYY-MM-DD HH:mm (timezone)`** 줄을 반드시 넣는다. 이 줄은 가능하면 제목 바로 아래 첫 본문 줄에 둔다. 날짜 제목만 있고 시각이 없는 출력은 완료본으로 보지 않는다.
 - 최종 현재 뉴스 요약에는 가능하면 `source check`를 함께 적는다. 기본 형식은 `FMP PR / press release / FMP SEC 8-K` 3축이며, 예: `source check: FMP PR 있음, RTPR press release 있음, FMP SEC 8-K 없음`.
 - 또한 `Model_1` 최종 주요 이슈 리스트는 기본적으로 **시가총액 `100B` 미만 ticker만 직접 분석 대상**으로 삼는다. `100B` 이상 ticker는 필요하면 reference case 또는 보류 메모로만 적는다.
 - 최종 답변이나 research note에서 same-ticker 또는 other-ticker 중 한 축이라도 빠져 있으면, 원칙적으로 `Model_1 분석 완료`로 보지 않는다. 각 축에서 우선 `3건 이상` 찾으려고 시도해야 하며, 일반적으로는 `5건 안팎`이면 더 좋다. 한쪽 사례가 0건이거나 3건 미만이면 그 실제 확보 건수와 검색 시도 내역을 적는 방식으로라도 **반드시 섹션을 남긴다.**
@@ -490,7 +501,7 @@
 - 또한 현재 분석 대상 ticker의 `[][][]market_cap[][][]`를 현재 뉴스 요약 섹션에서 반드시 적고, 다른 사례와 비교할 때 기준 cap으로 삼는다.
 - 또한 각 ticker마다 `[][][]float %[][][]`, `[][][]institutional ownership %[][][]`, `[][][]insider ownership %[][][]`, `[][][]short interest %[][][]`를 함께 적고, 그 조합이 왜 `가산점`, `중립`, `가산점 없음`, `squeeze 가능`, `유동성 왜곡 주의` 중 무엇으로 이어지는지 한 줄 설명을 붙인다.
 - 이때 `[][][]float %[][][]`와 `[][][]institutional ownership %[][][]`는 가능하면 source 라벨까지 같이 적는다. 예: `Float 82.7% (FMP 확인 후 Finnhub profile2 calc fallback)`, `Institutional Ownership Estimate 24.1% (FMP 확인 후 Finnhub ownership sum / shares outstanding fallback)`.
-- 여러 ticker를 같은 날짜 구간 안에서 서로 비교해 `Primary 1`, `Primary 2`처럼 순서를 매길 때는, **해당 경쟁 ticker들에 대한 수급 가산점 반영이 끝난 뒤에만** 최종 순서를 쓴다. 수급 보강이 사후에 들어갔다면 기존 ranking을 그대로 두지 말고 순서를 다시 검토한다.
+- 여러 ticker를 같은 날짜 구간 안에서 서로 비교해 `Primary 1`, `Primary 2`처럼 순서를 매길 때는, **해당 경쟁 ticker들에 대한 오너쉽 가산점 반영이 끝난 뒤에만** 최종 순서를 쓴다. 오너쉽 보강이 사후에 들어갔다면 기존 ranking을 그대로 두지 말고 순서를 다시 검토한다.
 - `same-ticker 유사사례`를 적을 때는 가능하면 아래 항목을 함께 남긴다.
   - 유사 뉴스의 `[][][]date[][][]`
   - 유사 뉴스의 `[][][]title[][][]`

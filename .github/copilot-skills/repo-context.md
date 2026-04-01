@@ -59,7 +59,7 @@
 		| `bookmark_items` | 북마크된 뉴스 (7 rows) | PK: `(folder_id, news_id)` |
 		| `confirmed_empty_ranges` | 빈 뉴스 구간 확정 (3,439 rows) | PK: `(ticker, source_type)` |
 		| `securities` | ticker 마스터 (1,700 rows) | UNIQUE: `(ticker, exchange)`. 서버 시작 시 CSV에서 upsert |
-		| `company_profiles` | 기업 프로필 (5,070 rows) | UNIQUE: `(security_id, source)`. company data + float/institutional/source 추적 컬럼을 함께 보관 |
+		| `company_profiles` | 기업 프로필 (5k+ rows) | UNIQUE: `(security_id, source)`. company data + float/institutional/insider/source 추적 컬럼을 함께 보관 |
 		| `ticker_universes` | ticker 유니버스 정의 (1 row) | |
 		| `ticker_universe_items` | 유니버스 소속 ticker (1,698 rows) | |
 		| `calendar_events` | 캘린더 이벤트 (0 rows) | |
@@ -80,13 +80,14 @@
 		- `GET /api/news`는 company data enrich 단계에서 `[][][]marketCap[][][]`, `[][][]peers[][][]`, `[][][]companyDescription[][][]`, `[][][]ipoDate[][][]`를 대표 ticker 기준으로 보강한다.
 		- `GET /api/news`는 `[][][]hasFullText[][][]` 여부는 내려주지만 `news_fulltext.full_text` 본문 자체를 canonical source처럼 그대로 제공하는 endpoint로 가정하면 안 된다. full text 판독이 필요하면 raw DB에서 `news_fulltext`를 직접 JOIN한다.
 		- `GET /api/news`의 `[][][]industry[][][]`는 `company_profiles` 컬럼이 아니라 `securities.industry` 또는 `industryLookup.ts`의 CSV cache fallback에서 온다. raw DB에서 industry를 볼 때 `company_profiles`만 보면 안 된다.
-		- `GET /api/tickers`의 default-universe row는 `[][][]ipoDate[][][]`, `[][][]marketCap[][][]`뿐 아니라 `[][][]floatPct[][][]`, `[][][]institutionalPct[][][]`, `[][][]marketCapSource[][][]`, `[][][]floatSource[][][]`, `[][][]institutionalSource[][][]`도 함께 반환한다.
-		- `company_profiles`의 핵심 컬럼은 이제 `[][][]description[][][]`, `[][][]ipo_date[][][]`, `[][][]market_cap[][][]`, `[][][]peers_json[][][]`에 더해 `[][][]float_shares[][][]`, `[][][]float_pct[][][]`, `[][][]outstanding_shares[][][]`, `[][][]institutional_pct[][][]`, `[][][]market_cap_source[][][]`, `[][][]float_source[][][]`, `[][][]institutional_source[][][]`까지 포함한다. ticker 심볼은 이 테이블의 컬럼이 아니므로 `securities`와 JOIN해서 해석해야 한다. `POST /api/company-profiles/pull-fmp`, `pull-peers`, `pull-market-cap`, `pull-float`, `pull-institutional`, `pull-ipo-date`, `pull-yahoo`가 이 테이블을 갱신한다.
+		- `GET /api/tickers`의 default-universe row는 `[][][]addedAt[][][]`, `[][][]ipoDate[][][]`, `[][][]marketCap[][][]`뿐 아니라 `[][][]floatPct[][][]`, `[][][]institutionalPct[][][]`, `[][][]insiderPct[][][]`, `[][][]marketCapSource[][][]`, `[][][]floatSource[][][]`, `[][][]institutionalSource[][][]`, `[][][]insiderSource[][][]`도 함께 반환한다.
+		- `company_profiles`의 핵심 컬럼은 이제 `[][][]description[][][]`, `[][][]ipo_date[][][]`, `[][][]market_cap[][][]`, `[][][]peers_json[][][]`에 더해 `[][][]float_shares[][][]`, `[][][]float_pct[][][]`, `[][][]outstanding_shares[][][]`, `[][][]institutional_pct[][][]`, `[][][]institutional_source[][][]`, `[][][]insider_pct[][][]`, `[][][]insider_source[][][]`, `[][][]market_cap_source[][][]`, `[][][]float_source[][][]`까지 포함한다. ticker 심볼은 이 테이블의 컬럼이 아니므로 `securities`와 JOIN해서 해석해야 한다. `POST /api/company-profiles/pull-fmp`, `pull-peers`, `pull-market-cap`, `pull-float`, `pull-institutional`, `pull-holders-yahoo`, `pull-ipo-date`, `pull-yahoo`가 이 테이블을 갱신한다.
+		- ownership(`institutional_pct`, `insider_pct`)은 한 종목당 대표 row 1개에 유지되도록 정리한다. `source='yahoo'` row가 이미 있으면 그 row에 merge하고, 다른 row의 ownership 값은 비운다.
 		- `company_profiles`는 ticker당 단일 row가 아니라 source별 다중 row 구조다. raw SQL로 읽을 때는 `security_id + source` 또는 `fetched_at DESC` 기준 대표 row 선택 규칙을 먼저 정한다.
-		- 현재 구현 기준 `market cap`은 FMP profile, `float`는 FMP shares-float, `institutional`은 Finnhub ownership 기반으로 저장한다.
+		- 현재 구현 기준 `market cap`은 FMP profile, `float`는 FMP shares-float, `institutional`은 Finnhub 또는 Yahoo holders, `insider`는 Yahoo holders 기반으로 저장한다.
 		- Finnhub company data 경로(`pull-peers`, `pull-ipo-date`, `pull-institutional`)는 전역 throttle을 공유한다. 기본값은 `[][][]tickerConcurrency[][][]=1`이며, 서로 다른 Finnhub company-data job이 동시에 돌아도 실제 요청은 직렬화된다.
 		- `pull-market-cap`은 더 이상 Finnhub profile2가 아니라 FMP profile batch 경로를 사용한다. 현재 기본 concurrency는 `5`, clamp 범위는 `1..20`이다.
-		- `update_status` live source_key 전체 집합은 `company_profiles`, `company_profiles_ipo_date`, `company_profiles_market_cap`, `company_profiles_yahoo`, `finhub_news`, `fmp_press_release`, `fmp_sec_filing`, `ibkr_calendar`, `ibkr_ohlc_1d`, `news_change_7d`, `news_change_custom`, `news_change_recent`, `rtpr_press_release`, `tickers_csv`다.
+		- `update_status` live source_key 전체 집합은 `company_profiles`, `company_profiles_ipo_date`, `company_profiles_market_cap`, `company_profiles_yahoo`, `company_profiles_holders_yahoo`, `finhub_news`, `fmp_press_release`, `fmp_sec_filing`, `ibkr_calendar`, `ibkr_ohlc_1d`, `news_change_7d`, `news_change_custom`, `news_change_recent`, `rtpr_press_release`, `tickers_csv`다.
 		- `news_items.source_type` live 분포는 `press_release=192,899`, `news=18,321`, `company_news=14,354`, `market_news=440`, `IBKR=25`다.
 		- 현재 코드 기준 `news_items.source_type`는 위 live 분포 외에도 `fmp_press_release`, `fmp_stock_news`, `fmp_sec_filing`, `investing_stock_market_news`, `investing_cryptocurrency_news`를 사용할 수 있다.
 		- Investing provider(`investingNewsProvider.ts`)는 category page에서 `title` + description teaser를 `news_items`로 저장하고, 기사 본문이 필요하면 별도 `news_fulltext` 추출 결과를 함께 봐야 한다.

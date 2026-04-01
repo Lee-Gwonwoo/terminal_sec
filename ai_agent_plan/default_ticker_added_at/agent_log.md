@@ -89,3 +89,38 @@
 | 런타임 통합 | ✅ | `8091`에서 cancel 시나리오 검증: 20개 중 19개 Yahoo ownership 저장 확인. `8080 /healthz` 200 확인 후 live backend 재기동 |
 - 상태:
   - partial persist 수정 반영 완료, 사용자 확인 대기.
+
+## 2026-03-31
+
+**작성 시각:** 2026-03-31 19:06 (local)
+
+### DB 구조 / backend / frontend 문서 동기화
+
+- 생성/수정 파일:
+  - `terminal/backend_prompt.md`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+  - `.github/copilot-skills/repo-context.md`
+  - `terminal/backend/DB_SCHEMA.md`
+  - `terminal/backend/CODE_STRUCTURE.md`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/FRONTEND_CODE_STRUCTURE.md`
+  - `ai_agent_plan/default_ticker_added_at/plan.md`
+  - `ai_agent_plan/default_ticker_added_at/agent_log.md`
+- 수행 내용:
+  - backend prompt 문서에 `company_profiles` ownership/insider 필드, `GET /api/tickers` default-universe row shape, `POST /api/company-profiles/pull-holders-yahoo`, `company_profiles_holders_yahoo` update_status key를 현재 코드 기준으로 반영했다.
+  - frontend prompt 문서에 Default Ticker의 `Yahoo Holders` 버튼, `Added Date`, `Insider %`, `GET /api/jobs/:jobId` polling, source badge 사용 방식을 반영했다.
+  - repo-context 문서에 현재 app DB 구조, `company_profiles` representative ownership row 규칙, Default Ticker 반환 필드, 관련 route 목록을 반영했다.
+  - 빠른 참조용으로 backend DB 요약/백엔드 구조/프론트 구조 문서를 새로 추가했다.
+- 확인한 핵심 포인트:
+  - 새 구조 문서 3개가 실제 경로에 생성되어 있다.
+  - 기존 프롬프트 문서와 repo-context 문서에서 `pull-holders-yahoo`, `insiderPct`, `insiderSource`, `company_profiles_holders_yahoo`, `Added Date`, `GET /api/jobs/:jobId` 키워드가 현재 구현과 맞게 반영된 것을 확인했다.
+  - `8080`은 실제 listen 중이며, `GET /api/model2/analyses` 응답도 정상 반환돼 문서가 가리키는 live backend가 동작 중임을 재확인했다.
+- 검증 표:
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `backend_prompt.md`, `figma_frontend_prompt.md`, `repo-context.md`, 새 구조 문서 3개 모두 diagnostics 0 |
+| 빌드 | ✅ | 문서-only 변경으로 빌드 대상 코드 diff 없음 |
+| 자동 테스트 | ✅ | 문서-only 변경으로 테스트 대상 코드 diff 없음 |
+| 런타임 통합 | ✅ | `8080` listener 확인 + `GET /api/model2/analyses` 정상 JSON 응답 확인 |
+- 상태:
+  - 문서 동기화 반영 완료, 사용자 확인 대기.

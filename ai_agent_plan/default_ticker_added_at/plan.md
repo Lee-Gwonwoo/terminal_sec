@@ -313,3 +313,17 @@ Track B — frontend display
 | 결정 | 차단 대상 | 선택지 |
 |------|-----------|--------|
 | D3 | Step 4 | `-` 표시 / 별도 audit |
+
+### PLAN CHANGE — 2026-03-31 (DB / backend / frontend 문서 동기화)
+
+- 사용자가 현재 DB 구조와 backend/frontend 코드 구조를 레포 문서에 반영해 달라고 요청했다.
+- 현재 구현과 문서 사이의 핵심 불일치는 아래였다.
+  - `company_profiles`의 ownership/insider 필드와 representative row 규칙이 backend/frontend/repo 문서에 완전히 반영되지 않음
+  - Default Ticker의 `Added Date`, `Insider %`, `Yahoo Holders`, `GET /api/jobs/:jobId` polling 구조가 프롬프트 문서 기준으로 일부 누락됨
+  - 레포 차원의 빠른 참조용 DB/code structure 요약 문서가 없음
+- 이번 변경에서는 동작을 바꾸지 않고 문서만 현재 코드 기준으로 동기화한다.
+  - `terminal/backend_prompt.md`에 현재 `company_profiles`, `/api/tickers`, `pull-holders-yahoo`, `update_status` 구조 반영
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`에 Default Ticker 현재 UI/API/job polling 구조 반영
+  - `.github/copilot-skills/repo-context.md`에 현재 DB/key/ownership semantics 반영
+  - 빠른 참조용 구조 문서 `terminal/backend/DB_SCHEMA.md`, `terminal/backend/CODE_STRUCTURE.md`, `termina_web/figma_code/terminal_ui_ver2_finhub/FRONTEND_CODE_STRUCTURE.md` 추가
+- 검증은 문서 파일 존재/키워드 교차 확인 + `8080` listener/API 응답 확인으로 마무리한다.
