@@ -167,18 +167,21 @@ export default function App() {
   // ─── Persist workspace on change ───
   useEffect(() => {
     if (!workspaceHydrated) return;
-    try {
-      localStorage.setItem('terminal-workspace-v1', JSON.stringify({
-        version: 1,
-        activeTabId,
-        isDarkMode,
-        fontScale,
-        newsTitleFontSize,
-        newsSummaryFontSize,
-        linkedTicker,
-        tabs: tabs.map(t => ({ id: t.id, name: t.name, windows: t.windows })),
-      }));
-    } catch { /* quota */ }
+    const timer = globalThis.setTimeout(() => {
+      try {
+        localStorage.setItem('terminal-workspace-v1', JSON.stringify({
+          version: 1,
+          activeTabId,
+          isDarkMode,
+          fontScale,
+          newsTitleFontSize,
+          newsSummaryFontSize,
+          linkedTicker,
+          tabs: tabs.map(t => ({ id: t.id, name: t.name, windows: t.windows })),
+        }));
+      } catch { /* quota */ }
+    }, 200);
+    return () => globalThis.clearTimeout(timer);
   }, [workspaceHydrated, tabs, activeTabId, isDarkMode, fontScale, newsTitleFontSize, newsSummaryFontSize, linkedTicker]);
 
   useEffect(() => {
@@ -484,31 +487,28 @@ export default function App() {
             </div>
           </div>
         )}
-        {tabs.map(tab =>
-          tab.windows.map((window) => (
-            <DraggableWindow
-              key={window.id}
-              window={window}
-              style={tab.id !== activeTabId ? { display: 'none' } : undefined}
-              onClose={() => handleCloseWindow(window.id)}
-              onTickerClick={(ticker) =>
-                handleTickerClick(ticker, window.linkId)
-              }
-              initialTicker={
-                window.linkId
-                  ? linkedTicker[window.linkId]
-                  : undefined
-              }
-              fontScale={fontScale}
-              onFontScaleChange={setFontScale}
-              newsTitleFontSize={newsTitleFontSize}
-              onNewsTitleFontSizeChange={setNewsTitleFontSize}
-              newsSummaryFontSize={newsSummaryFontSize}
-              onNewsSummaryFontSizeChange={setNewsSummaryFontSize}
-              onPositionChange={handlePositionChange}
-            />
-          ))
-        )}
+        {activeTab?.windows.map((window) => (
+          <DraggableWindow
+            key={window.id}
+            window={window}
+            onClose={() => handleCloseWindow(window.id)}
+            onTickerClick={(ticker) =>
+              handleTickerClick(ticker, window.linkId)
+            }
+            initialTicker={
+              window.linkId
+                ? linkedTicker[window.linkId]
+                : undefined
+            }
+            fontScale={fontScale}
+            onFontScaleChange={setFontScale}
+            newsTitleFontSize={newsTitleFontSize}
+            onNewsTitleFontSizeChange={setNewsTitleFontSize}
+            newsSummaryFontSize={newsSummaryFontSize}
+            onNewsSummaryFontSizeChange={setNewsSummaryFontSize}
+            onPositionChange={handlePositionChange}
+          />
+        ))}
       </div>
 
       {/* Add Tab Modal */}

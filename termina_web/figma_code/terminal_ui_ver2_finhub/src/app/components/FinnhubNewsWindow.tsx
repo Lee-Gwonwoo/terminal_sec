@@ -24,6 +24,7 @@ const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'S
 const STICKY_DATE_HEADER_HEIGHT = 32;
 const ROW_HEIGHT_TITLE_ONLY = 96;
 const ROW_HEIGHT_WITH_ABSTRACT = 148;
+const NEWS_PAGE_SIZE = 200;
 
 // ─── Display mode ───
 type DisplayMode = 'title-only' | 'title-abstract';
@@ -651,7 +652,7 @@ export function FinnhubNewsWindow({
   const [showLogPanel, setShowLogPanel] = useState(false);
   const [jobStatuses, setJobStatuses] = useState<Record<string, TrackedJobStatus>>({});
   const [activeJobs, setActiveJobs] = useState<ActiveTrackedJob[]>([]);
-  const logEndRef = useRef<HTMLDivElement>(null);
+  const logScrollRef = useRef<HTMLDivElement>(null);
   const fetchAbortRef = useRef<AbortController | null>(null);
   const tickerQueryRef = useRef(tickerQuery);
   tickerQueryRef.current = tickerQuery;
@@ -873,7 +874,7 @@ export function FinnhubNewsWindow({
       if (toDate) {
         params.set('to', toDate);
       }
-      params.set('limit', '500');
+      params.set('limit', String(NEWS_PAGE_SIZE));
 
       const res = await fetch(`${newsApiBase}?${params.toString()}`, { signal: controller.signal });
       const data = await res.json();
@@ -924,7 +925,7 @@ export function FinnhubNewsWindow({
       if (toDate) {
         params.set('to', toDate);
       }
-      params.set('limit', '500');
+      params.set('limit', String(NEWS_PAGE_SIZE));
       params.set('cursor', nextCursor);
 
       const res = await fetch(`${newsApiBase}?${params.toString()}`);
@@ -1602,11 +1603,19 @@ export function FinnhubNewsWindow({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedJobId]);
 
-  // Auto-scroll log panel to bottom
+  // Auto-scroll only the log panel itself so the outer page/window position stays stable
   useEffect(() => {
-    if (showLogPanel && logEndRef.current) {
-      logEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
+    if (!showLogPanel) return;
+    const logElement = logScrollRef.current;
+    if (!logElement) return;
+
+    const scrollToBottom = () => {
+      logElement.scrollTop = logElement.scrollHeight;
+    };
+
+    scrollToBottom();
+    const frameId = globalThis.requestAnimationFrame(scrollToBottom);
+    return () => globalThis.cancelAnimationFrame(frameId);
   }, [selectedJobStatus?.logs?.length, showLogPanel]);
 
   // ESC key closes log panel
@@ -2997,7 +3006,7 @@ export function FinnhubNewsWindow({
             />
           </div>
           {/* Log lines */}
-          <div className="flex-1 overflow-y-auto px-3 py-2 font-mono text-[11px] leading-relaxed text-gray-600 dark:text-gray-300 bg-gray-50/50 dark:bg-gray-900">
+          <div ref={logScrollRef} className="flex-1 overflow-y-auto px-3 py-2 font-mono text-[11px] leading-relaxed text-gray-600 dark:text-gray-300 bg-gray-50/50 dark:bg-gray-900">
             {selectedJobStatus.logs.map((line, i) => (
               <div key={i} className={`whitespace-pre-wrap py-0.5 ${line.includes('⚠') ? 'text-amber-600 dark:text-amber-400' : ''}`}>
                 {line}
@@ -3008,7 +3017,6 @@ export function FinnhubNewsWindow({
                 Error: {selectedJobStatus.error}
               </div>
             )}
-            <div ref={logEndRef} />
           </div>
           {/* Result summary when done */}
           {selectedJobStatus.status === 'done' && selectedJobStatus.result && (

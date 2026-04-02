@@ -137,6 +137,24 @@ function SourceBadge({ source }: { source: string | null }) {
   );
 }
 
+function getJobSummary(kind: string, job: JobStatus): string {
+  const updated = Number(job.result?.updated ?? 0);
+  const total = Number(job.result?.total ?? job.progress.total ?? 0);
+  const skippedRecent = Number(job.result?.skippedRecent ?? 0);
+  const errors = Number(job.result?.errors ?? 0);
+
+  if (job.status === "running") {
+    return `${kind} update running: ${job.progress.completed}/${job.progress.total} (${job.progress.pct}%)`;
+  }
+  if (job.status === "done") {
+    return `${kind} update done: updated ${updated}, errors ${errors}, skipped recent ${skippedRecent}, fetched ${total}`;
+  }
+  if (job.status === "failed") {
+    return `${kind} update failed${job.error ? `: ${job.error}` : ""}`;
+  }
+  return `${kind} update cancelled`;
+}
+
 const TickerListRow = memo(function TickerListRow({ data, index, style }: ListChildComponentProps<TickerListRowData>) {
   const row = data.rows[index];
   return (
@@ -587,6 +605,10 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
     },
   }), [displayedRows, removing, onTickerClick, handleRemove]);
 
+  const showMarketCapCard = marketCapJob !== null;
+  const showFloatCard = floatJob !== null;
+  const showYahooCard = yahooJob !== null;
+
   return (
     <div className="h-full flex flex-col p-3 text-sm">
       <div className="flex items-center gap-2 mb-1">
@@ -679,10 +701,10 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
         </div>
       )}
 
-      {marketCapJob && marketCapJob.status === "running" && (
+      {showMarketCapCard && marketCapJob && (
         <div className="mb-2 p-2 bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800 rounded text-xs text-violet-700 dark:text-violet-300">
           <div className="flex items-center justify-between">
-            <span>Market cap update running: {marketCapJob.progress.completed}/{marketCapJob.progress.total} ({marketCapJob.progress.pct}%)</span>
+            <span>{getJobSummary("Market cap", marketCapJob)}</span>
             <button
               onClick={() => setShowLog((v) => !v)}
               className="px-1.5 py-0.5 text-[10px] bg-violet-200 dark:bg-violet-800 text-violet-700 dark:text-violet-300 rounded hover:bg-violet-300 dark:hover:bg-violet-700 flex items-center gap-0.5"
@@ -701,10 +723,10 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
         </div>
       )}
 
-      {floatJob && floatJob.status === "running" && (
+      {showFloatCard && floatJob && (
         <div className="mb-2 p-2 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded text-xs text-orange-700 dark:text-orange-300">
           <div className="flex items-center justify-between">
-            <span>Float update running: {floatJob.progress.completed}/{floatJob.progress.total} ({floatJob.progress.pct}%)</span>
+            <span>{getJobSummary("Float", floatJob)}</span>
             <button
               onClick={() => setShowFloatLog((v) => !v)}
               className="px-1.5 py-0.5 text-[10px] bg-orange-200 dark:bg-orange-800 text-orange-700 dark:text-orange-300 rounded hover:bg-orange-300 dark:hover:bg-orange-700 flex items-center gap-0.5"
@@ -722,10 +744,10 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
           )}
         </div>
       )}
-      {yahooJob && yahooJob.status === "running" && (
+      {showYahooCard && yahooJob && (
         <div className="mb-2 p-2 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded text-xs text-indigo-700 dark:text-indigo-300">
           <div className="flex items-center justify-between">
-            <span>Yahoo holders update running: {yahooJob.progress.completed}/{yahooJob.progress.total} ({yahooJob.progress.pct}%)</span>
+            <span>{getJobSummary("Yahoo holders", yahooJob)}</span>
             <button
               onClick={() => setShowYahooLog((v) => !v)}
               className="px-1.5 py-0.5 text-[10px] bg-indigo-200 dark:bg-indigo-800 text-indigo-700 dark:text-indigo-300 rounded hover:bg-indigo-300 dark:hover:bg-indigo-700 flex items-center gap-0.5"

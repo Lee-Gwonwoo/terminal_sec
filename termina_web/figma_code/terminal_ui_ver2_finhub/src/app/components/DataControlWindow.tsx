@@ -73,7 +73,7 @@ export function DataControlWindow({
   const [customPreflightData, setCustomPreflightData] = useState<any | null>(null);
   const [pendingCustomExecute, setPendingCustomExecute] = useState<(() => void) | null>(null);
   const [howToContextMenu, setHowToContextMenu] = useState<{ x: number; y: number; key: SectionKey } | null>(null);
-  const logEndRef = useRef<HTMLDivElement>(null);
+  const logScrollRef = useRef<HTMLDivElement>(null);
   const howToContextMenuRef = useRef<HTMLDivElement>(null);
 
   // ─── App DB inspection state ───
@@ -417,11 +417,19 @@ export function DataControlWindow({
     return () => { cancelled = true; clearInterval(timer); };
   }, [jobIds]);
 
-  // ─── Auto-scroll log ───
+  // ─── Auto-scroll only the log overlay content ───
   useEffect(() => {
-    if (logSection && logEndRef.current) {
-      logEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
+    if (!logSection) return;
+    const logElement = logScrollRef.current;
+    if (!logElement) return;
+
+    const scrollToBottom = () => {
+      logElement.scrollTop = logElement.scrollHeight;
+    };
+
+    scrollToBottom();
+    const frameId = globalThis.requestAnimationFrame(scrollToBottom);
+    return () => globalThis.cancelAnimationFrame(frameId);
   }, [logSection, jobStatuses]);
 
   // ─── ESC closes log ───
@@ -1737,7 +1745,7 @@ export function DataControlWindow({
             />
           </div>
           {/* Log lines */}
-          <div className="flex-1 overflow-y-auto px-3 py-2 font-mono text-[11px] leading-relaxed text-gray-600 dark:text-gray-300 bg-gray-50/50 dark:bg-gray-900">
+          <div ref={logScrollRef} className="flex-1 overflow-y-auto px-3 py-2 font-mono text-[11px] leading-relaxed text-gray-600 dark:text-gray-300 bg-gray-50/50 dark:bg-gray-900">
             {activeLog.logs.map((line, i) => (
               <div key={i} className={`whitespace-pre-wrap py-0.5 ${line.includes('FAILED') ? 'text-red-500' : line.includes('⚠') ? 'text-amber-600 dark:text-amber-400' : ''}`}>
                 {line}
@@ -1748,7 +1756,6 @@ export function DataControlWindow({
                 Error: {activeLog.error}
               </div>
             )}
-            <div ref={logEndRef} />
           </div>
           {/* Result summary */}
           {activeLog.status === 'done' && activeLog.result && (

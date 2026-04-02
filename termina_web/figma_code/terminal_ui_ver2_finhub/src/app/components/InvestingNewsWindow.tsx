@@ -13,6 +13,7 @@ const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'S
 const STICKY_DATE_HEADER_HEIGHT = 32;
 const ROW_HEIGHT_TITLE_ONLY = 96;
 const ROW_HEIGHT_WITH_ABSTRACT = 148;
+const NEWS_PAGE_SIZE = 200;
 
 // ─── Display mode ───
 type DisplayMode = 'title-only' | 'title-abstract';
@@ -320,7 +321,7 @@ export function InvestingNewsWindow({
   const [showLogPanel, setShowLogPanel] = useState(false);
   const [jobStatuses, setJobStatuses] = useState<Record<string, TrackedJobStatus>>({});
   const [activeJobs, setActiveJobs] = useState<ActiveTrackedJob[]>([]);
-  const logEndRef = useRef<HTMLDivElement>(null);
+  const logScrollRef = useRef<HTMLDivElement>(null);
   const fetchAbortRef = useRef<AbortController | null>(null);
   const searchQueryRef = useRef(searchQuery);
   searchQueryRef.current = searchQuery;
@@ -432,7 +433,7 @@ export function InvestingNewsWindow({
       if (toDate) {
         params.set('to', toDate);
       }
-      params.set('limit', '500');
+      params.set('limit', String(NEWS_PAGE_SIZE));
 
       const res = await fetch(`${API_BASE}/api/news?${params.toString()}`, { signal: controller.signal });
       const data = await res.json();
@@ -463,7 +464,7 @@ export function InvestingNewsWindow({
       if (searchQueryRef.current) params.set('keyword', searchQueryRef.current);
       if (fromDate) params.set('from', fromDate);
       if (toDate) params.set('to', toDate);
-      params.set('limit', '500');
+      params.set('limit', String(NEWS_PAGE_SIZE));
       params.set('cursor', nextCursor);
 
       const res = await fetch(`${API_BASE}/api/news?${params.toString()}`);
@@ -833,12 +834,20 @@ export function InvestingNewsWindow({
     return () => document.removeEventListener('mousedown', handler);
   }, [showDisplayModeMenu]);
 
-  // ─── Scroll to sticky date on log panel toggle ───
+  // ─── Keep log panel pinned to the newest line without moving the outer page ───
   useEffect(() => {
-    if (logEndRef.current) {
-      logEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [selectedJobStatus?.logs.length]);
+    if (!showLogPanel) return;
+    const logElement = logScrollRef.current;
+    if (!logElement) return;
+
+    const scrollToBottom = () => {
+      logElement.scrollTop = logElement.scrollHeight;
+    };
+
+    scrollToBottom();
+    const frameId = globalThis.requestAnimationFrame(scrollToBottom);
+    return () => globalThis.cancelAnimationFrame(frameId);
+  }, [selectedJobStatus?.logs.length, showLogPanel]);
 
   // ─── Total width for horizontal scroll ───
   const totalWidth = useMemo(() => activeColWidths.reduce((sum, w) => sum + w, 0), [activeColWidths]);
@@ -1265,11 +1274,10 @@ export function InvestingNewsWindow({
               <div className="bg-blue-500 h-1.5 rounded-full transition-all" style={{ width: `${selectedJobStatus.progress.pct}%` }} />
             </div>
           )}
-          <div className="text-[10px] font-mono text-gray-600 dark:text-gray-400 space-y-0.5 max-h-[140px] overflow-y-auto">
+          <div ref={logScrollRef} className="text-[10px] font-mono text-gray-600 dark:text-gray-400 space-y-0.5 max-h-[140px] overflow-y-auto">
             {selectedJobStatus.logs.map((log, i) => (
               <div key={i}>{log}</div>
             ))}
-            <div ref={logEndRef} />
           </div>
         </div>
       )}

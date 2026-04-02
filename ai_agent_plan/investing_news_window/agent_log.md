@@ -431,3 +431,53 @@
 - 사용자가 올린 스크린샷의 `(no fulltext)` modal 원인 제거
 - Investing row에 실제 본문이 있는 경우 modal 본문 표시 가능
 - 전체 상태: **확인 대기 (awaiting user confirmation)**
+
+---
+
+## 2026-04-01 (11차: View Log 클릭 시 창이 위로 튀는 현상 수정)
+
+**작성 시각:** 2026-04-01 08:08 (local)
+
+### 작업 항목
+- 사용자 보고: Investing 창에서 `View Log` 클릭 시 창이 갑자기 위로 올라가는 현상 분석
+- root cause 확인: 마지막 로그 줄에 `scrollIntoView()`를 호출해 내부 로그 영역이 아니라 outer document/workspace scroll까지 같이 움직이던 문제 수정
+- 동일 패턴이 있던 `FinnhubNewsWindow`, `DataControlWindow`도 함께 보정
+
+### 변경 파일
+
+| 파일 | 변경 유형 | 내용 |
+|------|-----------|------|
+| `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/InvestingNewsWindow.tsx` | 수정 | `View Log` 자동 스크롤을 `scrollIntoView()`에서 내부 로그 컨테이너 `scrollTop = scrollHeight` 방식으로 변경 |
+| `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 수정 | 동일 root cause 방지를 위해 log panel 자동 스크롤 방식을 내부 컨테이너 기준으로 통일 |
+| `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx` | 수정 | 동일 root cause 방지를 위해 bottom overlay log panel 자동 스크롤 방식 통일 |
+| `ai_agent_plan/investing_news_window/plan.md` | 수정 | PLAN CHANGE #5 및 검증 항목 추가 |
+| `ai_agent_plan/investing_news_window/agent_log.md` | 수정 | 현재 작업 기록 추가 |
+
+### 검증
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `InvestingNewsWindow.tsx`, `FinnhubNewsWindow.tsx`, `DataControlWindow.tsx` `get_errors` 0 |
+| 빌드 | ✅ | frontend `npm run build`, backend `npm run build` 통과 (`BACKEND_BUILD_OK` 확인) |
+| 자동 테스트 | ✅ | `terminal` 기준 `npm run test` → backend 14 files / 90 tests pass |
+| 런타임 통합 | ✅ | backend dev(8080) + 임시 frontend dev(4173) + Playwright로 Investing 창에서 `View Log` 클릭 전후 `scrollY`가 `0 → 0` 유지됨을 확인 |
+
+### 런타임 결과 요약
+- 기존 원인:
+  - 마지막 로그 anchor에 `scrollIntoView({ behavior: 'smooth' })` 호출
+  - 브라우저가 내부 로그 영역뿐 아니라 상위 스크롤 컨테이너까지 조정하면서 창이 위로 튄 것처럼 보임
+- 수정 후 동작:
+  - 로그 panel 내부 `overflow-y-auto` 요소에만 `scrollTop = scrollHeight` 적용
+  - outer document scroll은 유지
+- Playwright 검증 결과:
+  - `before.scrollY = 0`
+  - `after.scrollY = 0`
+  - `logPanelOpen = true`
+
+### 상태
+- Investing 창 `View Log` 클릭 시 외부 스크롤 점프 원인 제거
+- 같은 패턴을 쓰던 Finnhub/Data Control log panel도 함께 안정화
+- 전체 상태: **확인 대기 (awaiting user confirmation)**
+
+### 리스크/메모
+- 이번 수정은 로그 auto-scroll 방식만 바꾸므로 job log 내용/진행률/취소 동작에는 영향을 주지 않아야 한다.
+- 브라우저별 smooth scroll 구현 차이 영향을 줄이기 위해 `scrollIntoView()`를 제거했다.

@@ -651,7 +651,7 @@ async function getDefaultUniverseRows(): Promise<TickerListRow[]> {
                 (
                   SELECT cp.market_cap
                   FROM company_profiles cp
-                  WHERE cp.security_id = s.id
+                  WHERE cp.security_id = s.id AND cp.market_cap IS NOT NULL
                   ORDER BY cp.fetched_at DESC
                   LIMIT 1
                 ) AS market_cap,

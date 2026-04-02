@@ -99,6 +99,14 @@
 - 따라서 fulltext dispatch는 non-company-news 경로에서 `investing.com` host를 raw publisher보다 우선한다.
 - 기존 DB에 남아 있던 Investing fallback/unavailable fulltext row는 삭제 후 `/api/news/fulltext/update`로 재추출한다.
 
+### PLAN CHANGE #5 (2026-04-01)
+- Investing 창에서 `View Log`를 열 때 마지막 로그 줄에 `scrollIntoView()`를 호출하면, 내부 로그 영역뿐 아니라 바깥 문서 스크롤까지 같이 움직일 수 있다.
+- 이 현상은 draggable window 자체가 이동한 것이 아니라, outer document/workspace가 위로 스크롤되면서 창이 갑자기 위로 튄 것처럼 보이는 문제다.
+- 따라서 현재 구현 기준은 다음으로 조정한다.
+  - job log panel 자동 스크롤은 `scrollIntoView()` 대신 내부 `overflow-y-auto` 컨테이너의 `scrollTop = scrollHeight`만 사용
+  - 같은 패턴을 쓰던 `InvestingNewsWindow`, `FinnhubNewsWindow`, `DataControlWindow`를 함께 보정
+  - Step 4/5 런타임 검증에 `View Log` 클릭 전후 outer document scroll 값 유지 확인을 추가
+
 ### 아키텍처(상위)
 - 수집 입력:
   - `https://www.investing.com/news/stock-market-news`
@@ -287,7 +295,7 @@
   설명: 데이터 fetch, update, full text, job log polling을 Investing source 기준으로 맞춘다.
   완료 조건(눈으로 확인): update 후 리스트가 다시 로드되고 full text가 열린다.
   사람 검증(비개발자): 버튼 클릭 후 job이 뜨고 목록이 갱신된다.
-  흔한 문제/주의: Investing 기사에 ticker가 비어 있어도 row renderer가 깨지지 않도록 확인해야 한다.
+  흔한 문제/주의: Investing 기사에 ticker가 비어 있어도 row renderer가 깨지지 않아야 하고, `View Log` auto-scroll이 outer document를 움직이지 않도록 내부 로그 컨테이너만 스크롤해야 한다.
 
 검증 훅:
 ```text
@@ -295,6 +303,7 @@
 - category filter 변경 후 목록 재조회
 - Recent Stock Market / Recent Crypto / Custom Stock Market / Custom Crypto 실행
 - 기사 row 클릭 후 full text modal 확인
+- View Log 클릭 전후 outer document scroll 값 유지 확인
 ```
 사용자 확인 필요: **예**
 
@@ -328,6 +337,7 @@
 - terminal: test
 - backend dev + webui dev 상태에서 Investing 창 열기
 - POST /api/news/pull-investing 호출 후 GET /api/news?source_names=INVESTING 확인
+- Investing View Log 클릭 전후 outer document scroll 값 유지 확인
 ```
 사용자 확인 필요: **예**
 

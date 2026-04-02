@@ -339,3 +339,13 @@ Track B — frontend display
   - frontend Default Ticker에서 Finnhub `Inst` 버튼과 job polling/log panel 제거
   - 현재 `app.db`의 Yahoo raw payload를 기준으로 ownership 값을 백필하고, legacy Finnhub institutional 값은 null 처리
 - 검증은 backend build + backend test + webui build + `GET /api/tickers` / removed route runtime 호출로 마무리한다.
+
+### PLAN CHANGE — 2026-04-01 (요약 문서 제거 + canonical 문서 일원화)
+
+- 사용자는 추가로 생성한 `CODE_STRUCTURE.md`, `DB_SCHEMA.md`, `FRONTEND_CODE_STRUCTURE.md` 3개를 제거하고, 현재 구조 설명은 기존 canonical 문서에만 남기길 요청했다.
+- 현재 상태를 재점검한 결과 아래 문서가 이미 source of truth 역할을 수행하고 있었다.
+  - backend 구조/동작: `terminal/backend_prompt.md`
+  - frontend 구조/동작: `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+  - repo DB/저장 구조: `.github/copilot-skills/repo-context.md`
+- 이번 변경에서는 중복 요약 문서 3개를 제거하고, canonical 문서만 유지한다.
+- 검증은 파일 삭제 확인 + stale reference 탐색 + 문서 diagnostics 확인으로 마무리한다.

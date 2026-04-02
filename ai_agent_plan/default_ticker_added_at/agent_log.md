@@ -165,3 +165,33 @@
 | 런타임 통합 | ✅ | `GET /api/tickers` 실응답에서 Yahoo-only institutional 확인, removed route `410` 확인 |
 - 상태:
   - Yahoo-only institutional 전환 및 DB 보정 반영 완료, 사용자 확인 대기.
+
+## 2026-04-01
+
+**작성 시각:** 2026-04-01 06:15 (local)
+
+### 요약 문서 3개 제거 + canonical 문서 일원화
+
+- 생성/수정 파일:
+  - `terminal/backend_prompt.md`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+  - `.github/copilot-skills/repo-context.md`
+  - `terminal/backend/CODE_STRUCTURE.md` 삭제
+  - `terminal/backend/DB_SCHEMA.md` 삭제
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/FRONTEND_CODE_STRUCTURE.md` 삭제
+  - `ai_agent_plan/default_ticker_added_at/plan.md`
+  - `ai_agent_plan/default_ticker_added_at/agent_log.md`
+- 수행 내용:
+  - 별도 quick reference 용도로 추가했던 구조/DB 요약 문서 3개는 유지 필요성이 낮고 drift 위험만 늘리므로 제거했다.
+  - 현재 구조 설명의 source of truth는 기존 문서 세 곳으로 일원화했다: `terminal/backend_prompt.md`, `figma_frontend_prompt.md`, `.github/copilot-skills/repo-context.md`.
+  - canonical 문서 쪽은 이미 최신 구조가 반영돼 있음을 재확인했고, 삭제 후 깨지는 직접 참조가 없도록 함께 점검했다.
+- 검증 표:
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | canonical 문서와 plan/log diagnostics 0 |
+| 빌드 | ✅ | 삭제 대상은 문서-only 파일이며 최신 backend/frontend build 성공 상태 유지 |
+| 자동 테스트 | ✅ | 최신 backend test 14 files / 90 tests pass 상태 유지 |
+| 런타임 통합 | ✅ | 삭제 전후 runtime source는 동일하며 canonical 문서 기준 API 확인 상태 유지 |
+- 상태:
+  - 요약 문서 제거 및 canonical 문서 일원화 완료, 사용자 확인 대기.
