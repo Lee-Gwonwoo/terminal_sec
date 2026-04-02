@@ -1,6 +1,7 @@
 import React, { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronUp, Plus, RefreshCw, Search, X } from "lucide-react";
 import { FixedSizeList as List, type ListChildComponentProps } from "react-window";
+import { getCompanyTickerDataAttrs } from "../companyDescription";
 
 const API_BASE = "";
 const DEFAULT_CSV_PATH = "tradigview_screener/original_data/watch lists2_2026-02-22.csv";
@@ -220,6 +221,7 @@ const TickerListRow = memo(function TickerListRow({ data, index, style }: ListCh
         <div className="px-3 py-2 min-w-0">
           <button
             onClick={() => data.onTickerClick?.(row.ticker)}
+            {...getCompanyTickerDataAttrs(row.ticker)}
             className={`font-mono text-left text-blue-600 dark:text-blue-400 hover:underline ${data.removing === row.ticker ? "opacity-40" : ""}`}
             title={row.ticker}
             disabled={data.removing === row.ticker}
@@ -285,6 +287,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
   const [yahooJob, setYahooJob] = useState<JobStatus | null>(null);
   const [showYahooLog, setShowYahooLog] = useState(false);
   const [filterText, setFilterText] = useState("");
+  const [tickerFilterText, setTickerFilterText] = useState("");
   const [sortState, setSortState] = useState<SortState>({ key: null, direction: null });
   const [dataSource, setDataSource] = useState<"db" | "csv" | null>(null);
   const [listHeight, setListHeight] = useState(MIN_LIST_HEIGHT);
@@ -292,6 +295,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
   const trimmedCsvPath = csvPath.trim();
   const isDefaultPath = trimmedCsvPath === DEFAULT_CSV_PATH;
   const deferredFilterText = useDeferredValue(filterText);
+  const deferredTickerFilterText = useDeferredValue(tickerFilterText);
 
   const loadTickers = useCallback(async () => {
     setLoading(true);
@@ -619,17 +623,20 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
   }, []);
 
   const filteredRows = useMemo(() => {
+    const tickerNeedle = deferredTickerFilterText.trim().toUpperCase();
     const needle = deferredFilterText.trim().toUpperCase();
-    if (!needle) return rows;
+    if (!tickerNeedle && !needle) return rows;
     return rows.filter((row) =>
-      row.ticker.includes(needle)
-      || (row.name ?? "").toUpperCase().includes(needle)
-      || (row.industry ?? "").toUpperCase().includes(needle)
-      || formatAddedDate(row.addedAt).toUpperCase().includes(needle)
-      || (row.ipoDate ?? "").toUpperCase().includes(needle)
-      || (row.exchange ?? "").toUpperCase().includes(needle),
+      (!tickerNeedle || row.ticker.includes(tickerNeedle))
+      && (!needle
+        || row.ticker.includes(needle)
+        || (row.name ?? "").toUpperCase().includes(needle)
+        || (row.industry ?? "").toUpperCase().includes(needle)
+        || formatAddedDate(row.addedAt).toUpperCase().includes(needle)
+        || (row.ipoDate ?? "").toUpperCase().includes(needle)
+        || (row.exchange ?? "").toUpperCase().includes(needle)),
     );
-  }, [rows, deferredFilterText]);
+  }, [rows, deferredFilterText, deferredTickerFilterText]);
 
   const displayedRows = useMemo(() => {
     if (!sortState.key || !sortState.direction) {
@@ -877,6 +884,13 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
       </div>
 
       <div className="flex items-center gap-2 mb-2">
+        <input
+          type="text"
+          value={tickerFilterText}
+          onChange={(e) => setTickerFilterText(e.target.value.toUpperCase())}
+          className="w-40 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+          placeholder="Ticker only"
+        />
         <Search className="w-3 h-3 text-gray-400" />
         <input
           type="text"
@@ -904,6 +918,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
 
       <div className="mb-2 text-[11px] text-gray-500 dark:text-gray-400">
         정렬 기준: {getSortLabel(sortState)}
+        {deferredTickerFilterText ? ` · ticker filter: ${deferredTickerFilterText}` : ""}
         {dataSource === "csv" ? " · CSV-only 경로는 Added Date가 없어 '-'로 표시됩니다." : ""}
       </div>
 

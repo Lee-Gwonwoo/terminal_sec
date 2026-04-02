@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, ArrowDownAZ, ArrowUpAZ, Calendar, Filter, RefreshCw } from "lucide-react";
+import { getCompanyTickerDataAttrs } from '../companyDescription';
 
 const API_BASE = "";
 const STORAGE_KEY = "daily-change-history-ui-state";
@@ -848,6 +849,7 @@ export function DailyChangeHistoryWindow({ onTickerClick }: DailyChangeHistoryWi
                     <td className="px-3 py-2 font-mono">
                       <button
                         onClick={() => onTickerClick?.(row.ticker)}
+                        {...getCompanyTickerDataAttrs(row.ticker)}
                         className="text-blue-600 hover:underline dark:text-blue-400"
                       >
                         {row.ticker}

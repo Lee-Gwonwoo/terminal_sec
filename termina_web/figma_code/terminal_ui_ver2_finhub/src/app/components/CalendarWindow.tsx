@@ -11,6 +11,7 @@ import {
 import DatePicker from 'react-datepicker';
 import { mockCalendarData } from '../mockData';
 import { CalendarEvent } from '../types';
+import { getCompanyTickerDataAttrs } from '../companyDescription';
 
 interface CalendarWindowProps {
   onTickerClick?: (ticker: string) => void;
@@ -762,6 +763,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                       <td key={col.key} className="px-3 py-2 text-sm">
                         <button
                           onClick={() => onTickerClick?.(value as string)}
+                          {...getCompanyTickerDataAttrs(value as string)}
                           className="px-2 py-0.5 text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-200 dark:hover:bg-blue-800 font-medium"
                         >
                           {value as string}

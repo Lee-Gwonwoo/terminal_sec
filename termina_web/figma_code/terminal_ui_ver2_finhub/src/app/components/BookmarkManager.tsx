@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { X, FolderOpen, Trash2, Edit2, Check, GripVertical, Plus } from 'lucide-react';
+import { dispatchOpenCompanyDescription, getCompanyTickerDataAttrs } from '../companyDescription';
 
 const API_BASE = "";
 
@@ -377,7 +378,21 @@ export function BookmarkManager({ open, onClose, folders, onFoldersChanged }: Pr
                     <GripVertical className="w-3 h-3 text-gray-300 shrink-0" />
                     <div className="flex-1 min-w-0">
                       <div className="text-xs truncate" title={item.title}>
-                        {item.ticker && <span className="font-medium text-blue-600 dark:text-blue-400 mr-1">{item.ticker}</span>}
+                        {item.ticker && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (item.ticker) {
+                                dispatchOpenCompanyDescription(item.ticker);
+                              }
+                            }}
+                            {...getCompanyTickerDataAttrs(item.ticker)}
+                            className="mr-1 font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                          >
+                            {item.ticker}
+                          </button>
+                        )}
                         {item.title || item.news_id}
                       </div>
                       <div className="text-[10px] text-gray-400">

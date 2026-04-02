@@ -764,6 +764,7 @@ company data job contract:
 
 - CSV path 직접 수정
 - Reload
+- ticker 전용 검색 input(`Ticker only`)이 별도로 있다. 이 입력은 ticker 컬럼만 필터링한다.
 - custom CSV를 default universe에 merge import (`Merge into Default`)
 - default universe 기준 수급/시총/보유율 갱신 버튼 3개
   - `Mkt Cap`: FMP 시가총액 갱신
@@ -775,6 +776,7 @@ company data job contract:
   - 이미 24시간 내 값이 있는 ticker는 서버에서 자동 skip된다. `Yahoo Holders`도 기본적으로 같은 24시간 skip 규칙을 따른다.
 - ticker 추가
 - filter 입력
+- 일반 filter 입력은 ticker/name/exchange/industry/added date/ipo date를 함께 찾는다.
 - `Recent Added` / `Default Order` 버튼은 빠른 preset이다. `Recent Added`를 누르면 `Added Date desc`, 다시 누르면 기본 universe 순서로 돌아간다.
 - table header 클릭으로 컬럼 정렬이 가능하다. 대상 컬럼: `Ticker`, `Name`, `Exchange`, `Industry`, `Added Date`, `IPO Date`, `Market Cap`, `Float %`, `Inst %`, `Insider %`.
 - 각 header는 `asc → desc → 기본 순서 해제` 순서로 순환한다.
@@ -784,6 +786,8 @@ company data job contract:
   - 현재 구현 기준 `Market Cap = FMP`, `Float % = Fmp`, `Inst % = Yahoo`, `Insider % = Yahoo`
   - `Inst %`는 현재 Finnhub 값을 읽지 않고 Yahoo holders 값만 사용한다.
 - ticker 클릭 시 상위 `onTickerClick` 전달
+- ticker가 있는 창에서는 ticker 클릭 시 `Company Description` window가 열린다. linked ticker 동작이 있는 창은 기존 연동도 유지한다.
+- ticker에 마우스를 3초 이상 올리면 hover preview가 뜨고, 마우스를 다시 빼면 preview는 즉시 사라진다.
 - 삭제 버튼으로 default universe에서 ticker 제거
 - 이미 default universe에 있는 ticker를 다시 Add하면 backend가 `409`를 반환하고, UI는 error banner로 `already exists in default universe`를 보여준다.
 

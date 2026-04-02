@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { TrendingUp, TrendingDown, Plus, ChevronDown, Pencil, Trash2, RefreshCw, Check, Copy, X } from 'lucide-react';
 import { WatchlistItem } from '../types';
+import { getCompanyTickerDataAttrs } from '../companyDescription';
 
 const API_BASE = '';
 
@@ -478,7 +479,19 @@ export function WatchlistWindow({ onTickerClick }: WatchlistWindowProps) {
   const renderCell = (colId: string, item: WatchlistItem) => {
     switch (colId) {
       case 'ticker':
-        return <span className="font-medium text-blue-600 dark:text-blue-400">{item.ticker}</span>;
+        return (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onTickerClick?.(item.ticker);
+            }}
+            {...getCompanyTickerDataAttrs(item.ticker)}
+            className="font-medium text-blue-600 dark:text-blue-400 hover:underline"
+          >
+            {item.ticker}
+          </button>
+        );
       case 'name':
         return <span className="text-gray-600 dark:text-gray-400 truncate block">{item.name}</span>;
       case 'mktcap':

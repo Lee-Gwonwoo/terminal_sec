@@ -4,6 +4,9 @@ import { TabData, WindowInstance, WindowType } from "./types";
 import { AddTabModal } from "./components/AddTabModal";
 import { DraggableWindow } from "./components/DraggableWindow";
 import type { CaseDescriptionWindowData, DataControlHowToUseWindowData } from "./types";
+import type { CompanyDescriptionWindowData } from "./companyDescription";
+import { CompanyDescriptionHoverPreview } from "./components/CompanyDescriptionHoverPreview";
+import { OPEN_COMPANY_DESCRIPTION_EVENT, normalizeTickerSymbol } from "./companyDescription";
 
 function clampNumber(value: unknown, fallback: number, min: number, max: number) {
   if (typeof value !== "number" || Number.isNaN(value)) return fallback;
@@ -34,6 +37,51 @@ export default function App() {
   const [dragTabId, setDragTabId] = useState<string | null>(null);
   const [dragOverTabId, setDragOverTabId] = useState<string | null>(null);
   const [workspaceHydrated, setWorkspaceHydrated] = useState(false);
+  const [hoverPreview, setHoverPreview] = useState<{ ticker: string; x: number; y: number } | null>(null);
+
+  const openCompanyDescriptionWindow = React.useCallback((ticker: string) => {
+    const normalizedTicker = normalizeTickerSymbol(ticker);
+    if (!normalizedTicker) {
+      return;
+    }
+
+    setTabs(prevTabs => prevTabs.map(tab => {
+      if (tab.id !== activeTabId) {
+        return tab;
+      }
+
+      const existing = tab.windows.find((window) => window.type === 'company-description' && window.data && 'ticker' in window.data && window.data.ticker === normalizedTicker);
+      if (existing) {
+        return {
+          ...tab,
+          windows: tab.windows.map((window) => window.id === existing.id ? {
+            ...window,
+            title: `Company Description: ${normalizedTicker}`,
+            data: { ticker: normalizedTicker },
+          } : window),
+        };
+      }
+
+      const nextIndex = tab.windows.length;
+      const newWindow: WindowInstance = {
+        id: `${Date.now()}-company-description-${normalizedTicker}`,
+        type: 'company-description',
+        title: `Company Description: ${normalizedTicker}`,
+        data: { ticker: normalizedTicker },
+        position: {
+          top: 84 + nextIndex * 18,
+          left: 110 + nextIndex * 18,
+          width: 640,
+          height: 520,
+        },
+      };
+
+      return {
+        ...tab,
+        windows: [...tab.windows, newWindow],
+      };
+    }));
+  }, [activeTabId]);
 
   useEffect(() => {
     const handleOpenCaseDescription = (event: Event) => {
@@ -79,6 +127,14 @@ export default function App() {
           windows: [...tab.windows, newWindow],
         };
       }));
+    };
+
+    const handleOpenCompanyDescription = (event: Event) => {
+      const customEvent = event as CustomEvent<CompanyDescriptionWindowData>;
+      if (!customEvent.detail?.ticker) {
+        return;
+      }
+      openCompanyDescriptionWindow(customEvent.detail.ticker);
     };
 
     const handleOpenDataControlHowToUse = (event: Event) => {
@@ -133,12 +189,101 @@ export default function App() {
     };
 
     window.addEventListener('open-case-description', handleOpenCaseDescription as EventListener);
+    window.addEventListener(OPEN_COMPANY_DESCRIPTION_EVENT, handleOpenCompanyDescription as EventListener);
     window.addEventListener('open-data-control-how-to-use', handleOpenDataControlHowToUse as EventListener);
     return () => {
       window.removeEventListener('open-case-description', handleOpenCaseDescription as EventListener);
+      window.removeEventListener(OPEN_COMPANY_DESCRIPTION_EVENT, handleOpenCompanyDescription as EventListener);
       window.removeEventListener('open-data-control-how-to-use', handleOpenDataControlHowToUse as EventListener);
     };
-  }, [activeTabId]);
+  }, [activeTabId, openCompanyDescriptionWindow]);
+
+  useEffect(() => {
+    let hoverTimer: number | null = null;
+    let activeElement: HTMLElement | null = null;
+    let activeTicker = '';
+    let pointerX = 0;
+    let pointerY = 0;
+
+    const clearHoverTimer = () => {
+      if (hoverTimer != null) {
+        window.clearTimeout(hoverTimer);
+        hoverTimer = null;
+      }
+    };
+
+    const clearHoverPreview = () => {
+      clearHoverTimer();
+      activeElement = null;
+      activeTicker = '';
+      setHoverPreview(null);
+    };
+
+    const schedulePreview = (element: HTMLElement, ticker: string) => {
+      clearHoverTimer();
+      activeElement = element;
+      activeTicker = ticker;
+      hoverTimer = window.setTimeout(() => {
+        if (activeElement === element && activeTicker === ticker) {
+          setHoverPreview({ ticker, x: pointerX, y: pointerY });
+        }
+      }, 3000);
+    };
+
+    const handlePointerOver = (event: PointerEvent) => {
+      const target = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-company-ticker]');
+      if (!target) {
+        return;
+      }
+      const ticker = normalizeTickerSymbol(target.dataset.companyTicker ?? '');
+      if (!ticker) {
+        return;
+      }
+      pointerX = event.clientX;
+      pointerY = event.clientY;
+      if (target === activeElement && ticker === activeTicker) {
+        return;
+      }
+      schedulePreview(target, ticker);
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const target = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-company-ticker]');
+      if (!target) {
+        return;
+      }
+      const ticker = normalizeTickerSymbol(target.dataset.companyTicker ?? '');
+      if (!ticker) {
+        return;
+      }
+      pointerX = event.clientX;
+      pointerY = event.clientY;
+      setHoverPreview((current) => current && current.ticker === ticker ? { ticker, x: pointerX, y: pointerY } : current);
+    };
+
+    const handlePointerOut = (event: PointerEvent) => {
+      const target = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-company-ticker]');
+      if (!target || target !== activeElement) {
+        return;
+      }
+      const relatedTarget = event.relatedTarget as HTMLElement | null;
+      if (relatedTarget && target.contains(relatedTarget)) {
+        return;
+      }
+      clearHoverPreview();
+    };
+
+    document.addEventListener('pointerover', handlePointerOver);
+    document.addEventListener('pointermove', handlePointerMove);
+    document.addEventListener('pointerout', handlePointerOut);
+
+    return () => {
+      document.removeEventListener('pointerover', handlePointerOver);
+      document.removeEventListener('pointermove', handlePointerMove);
+      document.removeEventListener('pointerout', handlePointerOut);
+      clearHoverTimer();
+    };
+  }, []);
 
   // ─── Restore workspace from localStorage ───
   useEffect(() => {
@@ -355,9 +500,14 @@ export default function App() {
     ticker: string,
     linkId?: number,
   ) => {
-    if (linkId) {
-      setLinkedTicker({ ...linkedTicker, [linkId]: ticker });
+    const normalizedTicker = normalizeTickerSymbol(ticker);
+    if (!normalizedTicker) {
+      return;
     }
+    if (linkId) {
+      setLinkedTicker({ ...linkedTicker, [linkId]: normalizedTicker });
+    }
+    openCompanyDescriptionWindow(normalizedTicker);
   };
 
   const handleTabContextMenu = (
@@ -517,6 +667,9 @@ export default function App() {
         onClose={() => setShowAddTabModal(false)}
         onStart={handleStartTab}
       />
+      {hoverPreview && (
+        <CompanyDescriptionHoverPreview ticker={hoverPreview.ticker} x={hoverPreview.x} y={hoverPreview.y} />
+      )}
     </div>
   );
 }

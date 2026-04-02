@@ -3,6 +3,7 @@ import { Search, Save, FolderOpen, Filter, ChevronDown, ArrowUp, ArrowDown, Grip
 import type { DataControlHowToUseWindowData } from '../types';
 import { VariableSizeList as List } from 'react-window';
 import { BookmarkManager } from './BookmarkManager';
+import { getCompanyTickerDataAttrs } from '../companyDescription';
 
 const API_BASE = "";
 const ET_TIME_ZONE = 'America/New_York';
@@ -1872,6 +1873,7 @@ export function FinnhubNewsWindow({
           <span
             className="inline-block px-1.5 py-0.5 text-[11px] font-medium bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900/60 truncate"
             onClick={(e) => { e.stopPropagation(); setSearchQuery(newsItem.ticker); onTickerClick?.(newsItem.ticker); fetchNews(newsItem.ticker); }}
+            {...getCompanyTickerDataAttrs(newsItem.ticker)}
             title={`Click to filter by ${newsItem.ticker}`}
           >
             {newsItem.ticker}
@@ -1891,6 +1893,7 @@ export function FinnhubNewsWindow({
                 <span
                   className="inline-block px-1.5 py-0.5 text-[10px] font-medium bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900/60 shrink-0"
                   onClick={(e) => { e.stopPropagation(); onTickerClick?.(newsItem.ticker); }}
+                  {...getCompanyTickerDataAttrs(newsItem.ticker)}
                 >
                   {newsItem.ticker}
                 </span>

@@ -5,6 +5,7 @@ import { filterNewsByQuery, groupNewsByDate } from '../mockData';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import { VariableSizeList as List } from 'react-window';
+import { getCompanyTickerDataAttrs } from '../companyDescription';
 
 const STICKY_DATE_HEADER_HEIGHT = 36;
 
@@ -486,6 +487,7 @@ export function NewsWindow({ onTickerClick, initialTicker }: NewsWindowProps) {
               <button
                 key={ticker}
                 onClick={() => onTickerClick?.(ticker)}
+                {...getCompanyTickerDataAttrs(ticker)}
                 className="px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-200 dark:hover:bg-blue-800 shrink-0"
               >
                 {ticker}

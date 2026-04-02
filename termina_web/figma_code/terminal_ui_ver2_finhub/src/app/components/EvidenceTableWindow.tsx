@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CalendarRange, ChevronDown, ExternalLink, RefreshCw, Search, Trash2, TrendingUp } from 'lucide-react';
 import { getModel2CaseDescription } from '../model2CaseDescriptions';
 import type { CaseDescriptionWindowData } from '../types';
+import { getCompanyTickerDataAttrs } from '../companyDescription';
 
 const API_BASE = '';
 
@@ -96,7 +97,11 @@ function reactionTagClass(value: string): string {
   return 'text-blue-600 dark:text-blue-400';
 }
 
-export function EvidenceTableWindow() {
+interface EvidenceTableWindowProps {
+  onTickerClick?: (ticker: string) => void;
+}
+
+export function EvidenceTableWindow({ onTickerClick }: EvidenceTableWindowProps) {
   const [analyses, setAnalyses] = useState<AnalysisRun[]>([]);
   const [selectedAnalysisId, setSelectedAnalysisId] = useState<string>('');
   const [cases, setCases] = useState<CaseSummary[]>([]);
@@ -625,7 +630,18 @@ export function EvidenceTableWindow() {
                 <tr key={item.id} className="border-b border-slate-200 align-top hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900/60">
                   <td className="px-3 py-3 text-slate-600 dark:text-slate-300">{published.date}</td>
                   <td className="px-3 py-3 text-slate-500 dark:text-slate-400">{published.time}</td>
-                  <td className="px-3 py-3 font-semibold text-blue-600 dark:text-blue-400">{item.ticker ?? '-'}</td>
+                  <td className="px-3 py-3 font-semibold text-blue-600 dark:text-blue-400">
+                    {item.ticker ? (
+                      <button
+                        type="button"
+                        onClick={() => onTickerClick?.(item.ticker ?? '')}
+                        {...getCompanyTickerDataAttrs(item.ticker)}
+                        className="hover:underline"
+                      >
+                        {item.ticker}
+                      </button>
+                    ) : '-'}
+                  </td>
                   <td className="px-3 py-3">
                     <div className="flex flex-col gap-1">
                       <span className={`inline-flex w-fit rounded-full px-2 py-0.5 text-[10px] font-semibold ${topLevelBadgeClass(item.topLevel)}`}>{item.topLevel}</span>
