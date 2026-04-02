@@ -775,13 +775,17 @@ company data job contract:
   - 이미 24시간 내 값이 있는 ticker는 서버에서 자동 skip된다. `Yahoo Holders`도 기본적으로 같은 24시간 skip 규칙을 따른다.
 - ticker 추가
 - filter 입력
-- `Recent Added` / `Default Order` 토글로 최근 추가순 정렬을 전환한다.
+- `Recent Added` / `Default Order` 버튼은 빠른 preset이다. `Recent Added`를 누르면 `Added Date desc`, 다시 누르면 기본 universe 순서로 돌아간다.
+- table header 클릭으로 컬럼 정렬이 가능하다. 대상 컬럼: `Ticker`, `Name`, `Exchange`, `Industry`, `Added Date`, `IPO Date`, `Market Cap`, `Float %`, `Inst %`, `Insider %`.
+- 각 header는 `asc → desc → 기본 순서 해제` 순서로 순환한다.
+- 정렬 기준 문구는 header sort state를 그대로 반영한다. 정렬이 해제되면 `기본 universe 순서`로 표시한다.
 - table 표시: `Ticker | Name | Exchange | Industry | Added Date | IPO Date | Market Cap | Float % | Inst % | Insider % | Del`
 - `Market Cap`, `Float %`, `Inst %`, `Insider %` 셀에는 값 옆에 source badge가 붙는다.
   - 현재 구현 기준 `Market Cap = FMP`, `Float % = Fmp`, `Inst % = Yahoo`, `Insider % = Yahoo`
   - `Inst %`는 현재 Finnhub 값을 읽지 않고 Yahoo holders 값만 사용한다.
 - ticker 클릭 시 상위 `onTickerClick` 전달
 - 삭제 버튼으로 default universe에서 ticker 제거
+- 이미 default universe에 있는 ticker를 다시 Add하면 backend가 `409`를 반환하고, UI는 error banner로 `already exists in default universe`를 보여준다.
 
 API:
 

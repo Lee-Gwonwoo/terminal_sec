@@ -111,11 +111,12 @@ export async function upsertUniverse(
   return result.lastID!;
 }
 
-export async function addUniverseItem(universeId: number, securityId: number, sortOrder: number): Promise<void> {
-  await getDb().run(
+export async function addUniverseItem(universeId: number, securityId: number, sortOrder: number): Promise<boolean> {
+  const result = await getDb().run(
     `INSERT OR IGNORE INTO ticker_universe_items (universe_id, security_id, sort_order) VALUES (?, ?, ?)`,
     [universeId, securityId, sortOrder],
   );
+  return (result.changes ?? 0) > 0;
 }
 
 export async function listUniverseItems(universeId: number): Promise<SecurityRow[]> {

@@ -413,7 +413,11 @@ app.post("/api/tickers/add", async (req, res, next) => {
         return;
       }
       const currentCount = await countUniverseItems(def.id);
-      await addUniverseItem(def.id, secId, currentCount + 1);
+      const inserted = await addUniverseItem(def.id, secId, currentCount + 1);
+      if (!inserted) {
+        res.status(409).json({ error: `Ticker "${normalizedTicker}" already exists in default universe` });
+        return;
+      }
       // Best-effort CSV backup (ignore if already exists)
       try { await appendTickerToCsv(effectiveCsvPath, normalizedTicker); } catch { /* already in CSV or file locked */ }
       const rows = await getDefaultUniverseRows();

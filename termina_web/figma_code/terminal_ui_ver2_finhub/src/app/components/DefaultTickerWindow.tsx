@@ -1,5 +1,5 @@
 import React, { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, ChevronDown, ChevronUp, Plus, RefreshCw, Search, X } from "lucide-react";
+import { AlertCircle, ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronUp, Plus, RefreshCw, Search, X } from "lucide-react";
 import { FixedSizeList as List, type ListChildComponentProps } from "react-window";
 
 const API_BASE = "";
@@ -39,6 +39,14 @@ const ROW_HEIGHT = 37;
 const HEADER_HEIGHT = 37;
 const MIN_LIST_HEIGHT = 200;
 const GRID_TEMPLATE_COLUMNS = "minmax(96px,0.9fr) minmax(180px,1.7fr) minmax(96px,0.8fr) minmax(128px,1.1fr) minmax(96px,0.9fr) minmax(96px,0.8fr) minmax(128px,1fr) minmax(96px,0.8fr) minmax(96px,0.8fr) minmax(96px,0.8fr) 48px";
+
+type SortKey = "ticker" | "name" | "exchange" | "industry" | "addedAt" | "ipoDate" | "marketCap" | "floatPct" | "institutionalPct" | "insiderPct";
+type SortDirection = "asc" | "desc" | null;
+
+interface SortState {
+  key: SortKey | null;
+  direction: SortDirection;
+}
 
 interface TickerListRowData {
   rows: TickerRow[];
@@ -120,6 +128,52 @@ function formatAddedDate(value: string | null): string {
   if (!trimmed) return "-";
   const match = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
   return match ? match[1] : trimmed;
+}
+
+function getSortValue(row: TickerRow, key: SortKey): string | number | null {
+  switch (key) {
+    case "ticker":
+      return row.ticker;
+    case "name":
+      return row.name;
+    case "exchange":
+      return row.exchange;
+    case "industry":
+      return row.industry;
+    case "addedAt":
+      return row.addedAt;
+    case "ipoDate":
+      return row.ipoDate;
+    case "marketCap":
+      return row.marketCap;
+    case "floatPct":
+      return row.floatPct;
+    case "institutionalPct":
+      return row.institutionalPct;
+    case "insiderPct":
+      return row.insiderPct;
+  }
+}
+
+function getSortLabel(sortState: SortState): string {
+  if (!sortState.key || !sortState.direction) {
+    return "기본 universe 순서";
+  }
+
+  const labels: Record<SortKey, string> = {
+    ticker: "Ticker",
+    name: "Name",
+    exchange: "Exchange",
+    industry: "Industry",
+    addedAt: "Added Date",
+    ipoDate: "IPO Date",
+    marketCap: "Market Cap",
+    floatPct: "Float %",
+    institutionalPct: "Inst %",
+    insiderPct: "Insider %",
+  };
+
+  return `${labels[sortState.key]} ${sortState.direction === "asc" ? "asc" : "desc"}`;
 }
 
 function SourceBadge({ source }: { source: string | null }) {
@@ -231,7 +285,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
   const [yahooJob, setYahooJob] = useState<JobStatus | null>(null);
   const [showYahooLog, setShowYahooLog] = useState(false);
   const [filterText, setFilterText] = useState("");
-  const [sortMode, setSortMode] = useState<"default" | "recent-added">("default");
+  const [sortState, setSortState] = useState<SortState>({ key: null, direction: null });
   const [dataSource, setDataSource] = useState<"db" | "csv" | null>(null);
   const [listHeight, setListHeight] = useState(MIN_LIST_HEIGHT);
   const listContainerRef = useRef<HTMLDivElement>(null);
@@ -578,23 +632,60 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
   }, [rows, deferredFilterText]);
 
   const displayedRows = useMemo(() => {
-    if (sortMode === "default") {
+    if (!sortState.key || !sortState.direction) {
       return filteredRows;
     }
+
     return filteredRows
       .map((row, index) => ({ row, index }))
       .sort((left, right) => {
-        const leftKey = left.row.addedAt ?? "";
-        const rightKey = right.row.addedAt ?? "";
-        if (leftKey && rightKey && leftKey !== rightKey) {
-          return rightKey.localeCompare(leftKey);
+        const leftValue = getSortValue(left.row, sortState.key);
+        const rightValue = getSortValue(right.row, sortState.key);
+
+        if (leftValue == null && rightValue == null) {
+          return left.index - right.index;
         }
-        if (leftKey && !rightKey) return -1;
-        if (!leftKey && rightKey) return 1;
+        if (leftValue == null) return 1;
+        if (rightValue == null) return -1;
+
+        let comparison = 0;
+        if (typeof leftValue === "number" && typeof rightValue === "number") {
+          comparison = leftValue - rightValue;
+        } else {
+          comparison = String(leftValue).localeCompare(String(rightValue), undefined, { sensitivity: "base" });
+        }
+
+        if (comparison !== 0) {
+          return sortState.direction === "asc" ? comparison : -comparison;
+        }
+
         return left.index - right.index;
       })
       .map(({ row }) => row);
-  }, [filteredRows, sortMode]);
+  }, [filteredRows, sortState]);
+
+  const handleHeaderSort = useCallback((key: SortKey) => {
+    setSortState((current) => {
+      if (current.key !== key) {
+        return { key, direction: "asc" };
+      }
+      if (current.direction === "asc") {
+        return { key, direction: "desc" };
+      }
+      return { key: null, direction: null };
+    });
+  }, []);
+
+  const activeRecentAdded = sortState.key === "addedAt" && sortState.direction === "desc";
+
+  const renderSortIcon = useCallback((key: SortKey) => {
+    if (sortState.key !== key || !sortState.direction) {
+      return <ArrowUpDown className="w-3 h-3 text-gray-400" />;
+    }
+    return sortState.direction === "asc"
+      ? <ArrowUp className="w-3 h-3 text-blue-500" />
+      : <ArrowDown className="w-3 h-3 text-blue-500" />;
+  }, [sortState]);
 
   const listData = useMemo<TickerListRowData>(() => ({
     rows: displayedRows,
@@ -796,15 +887,15 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
         />
         <button
           type="button"
-          onClick={() => setSortMode((mode) => (mode === "default" ? "recent-added" : "default"))}
+          onClick={() => setSortState(activeRecentAdded ? { key: null, direction: null } : { key: "addedAt", direction: "desc" })}
           className={`px-2 py-1 text-[11px] rounded border ${
-            sortMode === "recent-added"
+            activeRecentAdded
               ? "border-blue-500 bg-blue-50 text-blue-600 dark:border-blue-400 dark:bg-blue-900/30 dark:text-blue-300"
               : "border-gray-300 text-gray-500 dark:border-gray-600 dark:text-gray-400"
           }`}
-          title="Toggle between default order and recently added order"
+          title="Quick toggle between default universe order and recently added order"
         >
-          {sortMode === "recent-added" ? "Recent Added" : "Default Order"}
+          {activeRecentAdded ? "Default Order" : "Recent Added"}
         </button>
         <span className="text-xs text-gray-400">
           {displayedRows.length}/{rows.length}
@@ -812,7 +903,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
       </div>
 
       <div className="mb-2 text-[11px] text-gray-500 dark:text-gray-400">
-        정렬 기준: {sortMode === "recent-added" ? "최근 추가순 (added date desc)" : "기본 universe 순서"}
+        정렬 기준: {getSortLabel(sortState)}
         {dataSource === "csv" ? " · CSV-only 경로는 Added Date가 없어 '-'로 표시됩니다." : ""}
       </div>
 
@@ -831,16 +922,16 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
               className="grid sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700"
               style={{ gridTemplateColumns: GRID_TEMPLATE_COLUMNS, height: HEADER_HEIGHT }}
             >
-              <div className="text-left font-semibold px-3 py-2">Ticker</div>
-              <div className="text-left font-semibold px-3 py-2">Name</div>
-              <div className="text-left font-semibold px-3 py-2">Exchange</div>
-              <div className="text-left font-semibold px-3 py-2">Industry</div>
-              <div className="text-left font-semibold px-3 py-2">Added Date</div>
-              <div className="text-left font-semibold px-3 py-2">IPO Date</div>
-              <div className="text-right font-semibold px-3 py-2">Market Cap</div>
-              <div className="text-right font-semibold px-3 py-2">Float %</div>
-              <div className="text-right font-semibold px-3 py-2">Inst %</div>
-              <div className="text-right font-semibold px-3 py-2">Insider %</div>
+              <button type="button" onClick={() => handleHeaderSort("ticker")} className="flex items-center gap-1 px-3 py-2 font-semibold text-left hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors">Ticker {renderSortIcon("ticker")}</button>
+              <button type="button" onClick={() => handleHeaderSort("name")} className="flex items-center gap-1 px-3 py-2 font-semibold text-left hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors">Name {renderSortIcon("name")}</button>
+              <button type="button" onClick={() => handleHeaderSort("exchange")} className="flex items-center gap-1 px-3 py-2 font-semibold text-left hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors">Exchange {renderSortIcon("exchange")}</button>
+              <button type="button" onClick={() => handleHeaderSort("industry")} className="flex items-center gap-1 px-3 py-2 font-semibold text-left hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors">Industry {renderSortIcon("industry")}</button>
+              <button type="button" onClick={() => handleHeaderSort("addedAt")} className="flex items-center gap-1 px-3 py-2 font-semibold text-left hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors">Added Date {renderSortIcon("addedAt")}</button>
+              <button type="button" onClick={() => handleHeaderSort("ipoDate")} className="flex items-center gap-1 px-3 py-2 font-semibold text-left hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors">IPO Date {renderSortIcon("ipoDate")}</button>
+              <button type="button" onClick={() => handleHeaderSort("marketCap")} className="flex items-center justify-end gap-1 px-3 py-2 font-semibold text-right hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors">Market Cap {renderSortIcon("marketCap")}</button>
+              <button type="button" onClick={() => handleHeaderSort("floatPct")} className="flex items-center justify-end gap-1 px-3 py-2 font-semibold text-right hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors">Float % {renderSortIcon("floatPct")}</button>
+              <button type="button" onClick={() => handleHeaderSort("institutionalPct")} className="flex items-center justify-end gap-1 px-3 py-2 font-semibold text-right hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors">Inst % {renderSortIcon("institutionalPct")}</button>
+              <button type="button" onClick={() => handleHeaderSort("insiderPct")} className="flex items-center justify-end gap-1 px-3 py-2 font-semibold text-right hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors">Insider % {renderSortIcon("insiderPct")}</button>
               <div className="text-center font-semibold px-3 py-2">Del</div>
             </div>
             <List

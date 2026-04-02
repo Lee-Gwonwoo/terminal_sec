@@ -2079,6 +2079,12 @@ query:
 { "csvPath": "...", "tickerAdded": "TSLA", "tickers": ["..."] }
 ```
 
+운영 규칙:
+
+1. 기본 default path(`ticker_universes/default`)에 이미 있는 ticker를 다시 추가하면 더 이상 silent no-op로 통과시키지 않는다.
+2. 중복 ticker는 `409` + `Ticker "<SYMBOL>" already exists in default universe`로 명시적으로 반환한다.
+3. 성공일 때만 DB universe append + legacy CSV backup sync를 수행한다.
+
 보안/쓰기 정책:
 
 - `tradigview_screener/original_data/` 하위 `.csv`만 허용
