@@ -264,18 +264,21 @@
 
 ### 현재 UI 락 규칙 기준표
 
-| 구분 | 현재 코드 기준 state | backend job category | 같은 category 중복 허용 | 다른 category와 동시작업 |
+| 구분 | 현재 코드 기준 state | backend job key | 같은 scope 중복 허용 | 다른 scope / category와 동시작업 |
 |-----------|------|------|------|------|
-| Update 계열 | `updating` | `news-update` | 아니오 | 예 |
-| Full Text 계열 | `ftUpdating` | `news-fulltext` | 아니오 | 예 |
-| View Log | `selectedJobId` | 둘 다 조회 | 해당 없음 | 예 |
+| Finnhub / FMP / RTPR / Change Update | `updating` | `news-update + finnhub-news` | 아니오 | 예 |
+| Investing Update | `updating` | `news-update + investing-news` | 아니오 | 예 |
+| Finnhub / FMP / RTPR Full Text | `ftUpdating` | `news-fulltext + finnhub-news` | 아니오 | 예 |
+| Investing Full Text | `ftUpdating` | `news-fulltext + investing-news` | 아니오 | 예 |
+| View Log | `selectedJobId` | 현재 창 scope의 `news-update` + `news-fulltext` | 해당 없음 | 예 |
 
 운영적 정의:
 
-- `Pulling...`은 `news-update` job이 running일 때만 표시된다.
-- `Extracting...`은 `news-fulltext` job이 running일 때만 표시된다.
-- 둘은 job id와 polling effect가 분리되므로, 예를 들어 `FMP PR Full Text` 실행 중에도 `Recent Update`를 시작할 수 있다.
-- 다만 같은 category 안의 실제 sourceType 중복은 backend route-level `409 existingJobId` guard가 막는다.
+- `Pulling...`은 현재 창 scope의 `news-update` job이 running일 때만 표시된다.
+- `Extracting...`은 현재 창 scope의 `news-fulltext` job이 running일 때만 표시된다.
+- `/api/jobs/active`, `/api/jobs/:jobId`는 이제 `scope`를 함께 반환하므로, 창은 자기 scope job만 polling/auto-select/disabled 상태에 반영한다.
+- 둘은 job id와 polling effect가 분리되므로, 예를 들어 Investing update 실행 중에도 Finnhub 창의 `Recent FMP PR`를 시작할 수 있다.
+- 다만 같은 scope 안의 실제 sourceType 중복은 backend route-level `409 existingJobId` guard가 막는다.
 
 - `5-1` 목적: 성능 튜닝 과정에서 타입/구문 오류가 새로 생기지 않았는지 확인한다.
   설명: 수정한 backend/frontend 파일 diagnostics 0개를 목표로 한다.
@@ -540,3 +543,11 @@ Step 1 -> Step 2 -> Step 3 -> Step 4 -> Step 5
 - GET /api/news?source_names=FINNHUB,RTPR,FMP&source_type=press_release&limit=500
 ```
 사용자 확인 필요: **예**
+
+### PLAN CHANGE — 2026-04-09 09:27
+- 변경 내용: 뉴스 창 background job 추적 기준을 `category-only`에서 `category + scope`로 확장하고, Finnhub 창과 Investing 창이 서로의 running job을 자기 job처럼 채택하지 않도록 수정한다.
+- 변경 이유: backend route key는 이미 분리돼 있었지만, 프론트가 `/api/jobs/active`의 최신 `news-update` job을 전역으로 받아 `updating=true`를 세우면서 Investing update가 Finnhub `FMP PR Pull`까지 잠그는 교차 락이 발생했다.
+- 영향:
+  - backend job status 응답에 `scope`가 추가된다.
+  - `finnhub-news`와 `investing-news`는 서로의 `Update`, `Full Text`, `View Log` 상태를 더 이상 잠그지 않는다.
+  - 같은 창 내부의 `news-update` / `news-fulltext` 분리와 sourceType 중복 guard는 그대로 유지된다.

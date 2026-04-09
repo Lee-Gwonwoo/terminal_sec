@@ -601,3 +601,52 @@
 *** Delete File: c:\github_coding\terminal_sec\terminal\backend\tmp_test_finnhub_publishers.mjs
 *** Delete File: c:\github_coding\terminal_sec\terminal\backend\tmp_verify_publisher_fix.mjs
 *** Delete File: c:\github_coding\terminal_sec\terminal\backend\tmp_read_publisher_fix.mjs
+
+## 2026-04-09
+
+### Finnhub / Investing 교차 UI 락 해제 + job scope 분리
+- 사용자 요청:
+  - `FMP PR` 버튼과 `Investing` 버튼이 서로 다른 소스인데 동시에 작업이 안 되는 원인 확인
+  - workaround가 아니라 제대로 된 수정 적용
+- 사전 확인:
+  - active background job이 남아 있는 상태에서 backend 소스를 수정하면 dev server restart로 메모리 job state가 사라지므로, 기존 running job 종료 후 패치 진행
+  - 원인은 backend route key 충돌이 아니라 프론트가 `/api/jobs/active`의 최신 `news-update` job을 scope 구분 없이 자기 job으로 채택해 `updating=true`를 세우는 구조였음
+  - 그 결과 Investing update가 running일 때 Finnhub 창의 `Recent FMP PR`, `FMP Stock Pull`, `RTPR Pull`까지 같이 잠길 수 있었음
+- 변경 파일:
+  - `terminal/backend/src/services/jobManager.ts`
+  - `terminal/backend/src/server.ts`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/InvestingNewsWindow.tsx`
+  - `terminal/backend_prompt.md`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+  - `ai_agent_plan/__fmp_pr_fulltext_fix/plan.md`
+  - `ai_agent_plan/__fmp_pr_fulltext_fix/agent_log.md`
+- 구현 결과:
+  - backend job manager에 `scope`를 추가하고 기본값은 `other`로 둠
+  - server가 Finnhub 계열 job에는 `finnhub-news`, Investing 계열 job에는 `investing-news` scope를 부여하도록 수정함
+  - `/api/jobs/active`, `/api/jobs/:jobId` 응답에 `scope`를 포함시킴
+  - Finnhub / Investing 창은 이제 자기 scope와 일치하는 running job만 `activeJobs`, `currentJobId`, `updating`, `ftUpdating` 계산에 사용함
+  - fulltext 요청 payload에도 `scope`를 포함시켜 update뿐 아니라 fulltext / View Log도 창별로 분리함
+  - 같은 창 내부에서는 기존처럼 `news-update`와 `news-fulltext`를 분리해서 동시에 사용할 수 있고, 동일 sourceType 중복은 backend `409 existingJobId` guard가 계속 막음
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 변경한 backend/frontend 파일 diagnostics 0건 확인 |
+| frontend build | ✅ | `terminal`에서 web UI build 성공 |
+| backend build | ✅ | `terminal/backend` build 재실행 후 `BUILD_OK` 확인 |
+| 자동 테스트 | ✅ | `terminal` test 14 files / 90 tests pass |
+| API health | ✅ | `GET /healthz` -> `{"ok":true}` |
+| 런타임 통합 | ✅ | Investing update 실행 중 Finnhub `Recent FMP PR` 메뉴 사용 가능, Finnhub `View Log`가 Investing job을 채택하지 않음 확인 |
+| 정리(cleanup) | ✅ | 임시 검증용 Investing job cancel 후 active jobs `NO_JOBS` 확인 |
+
+- 추가 런타임 확인:
+  - browser에서 `News Feed: Finnhub API`와 `Investing News` 창을 동시에 띄운 뒤 Investing update를 시작함
+  - Investing 창은 `Pulling...` 상태로 정상 진행됐고, 같은 시점에 Finnhub 창의 `More update options` 안 `Recent FMP PR`는 계속 선택 가능했음
+  - backend `/api/jobs/active` 실응답에서 Investing job의 `scope='investing-news'`를 확인함
+- 잔여 리스크:
+  - scope 없는 legacy job payload는 `other`로 내려오므로, 뉴스 창은 이를 자동 추적하지 않음
+  - background job 상태가 메모리 기반인 점은 그대로라서, backend restart 중 running job은 여전히 유지되지 않음
+
+- 상태: 구현 및 검증 완료, 사용자 확인 대기 (awaiting user confirmation)
+
+**작성 시각:** 2026-04-09 09:27 (local)

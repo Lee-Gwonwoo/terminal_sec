@@ -214,10 +214,12 @@ export function InvestingNewsWindow({
   const [fulltextLoading, setFulltextLoading] = useState(false);
 
   type JobCategory = 'news-update' | 'news-fulltext';
+  const NEWS_JOB_SCOPE = 'investing-news';
   type TrackedJobStatus = {
     id: string;
     category?: JobCategory | string;
     label?: string;
+    scope?: string;
     status: 'running' | 'done' | 'failed' | 'cancelled';
     progress: { completed: number; total: number; pct: number };
     logs: string[];
@@ -230,6 +232,7 @@ export function InvestingNewsWindow({
     id: string;
     category?: JobCategory | string;
     label?: string;
+    scope?: string;
     status: string;
     progress: { completed: number; total: number; pct: number };
     createdAt: string;
@@ -535,13 +538,30 @@ export function InvestingNewsWindow({
         if (!res.ok) return;
         const jobs: ActiveTrackedJob[] = await res.json();
         if (cancelled) return;
-        setActiveJobs(jobs);
+        const scopedJobs = jobs.filter(
+          (job) => job.scope === NEWS_JOB_SCOPE && (job.category === 'news-update' || job.category === 'news-fulltext')
+        );
+        setActiveJobs(scopedJobs);
+
+        const sortedJobs = [...scopedJobs].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        const latestPullJob = sortedJobs.find((job) => job.category === 'news-update') ?? null;
+        const latestFulltextJob = sortedJobs.find((job) => job.category === 'news-fulltext') ?? null;
+
+        setUpdating(Boolean(latestPullJob));
+        setFtUpdating(Boolean(latestFulltextJob));
+        setPullJobId(latestPullJob?.id ?? null);
+        setFtJobId(latestFulltextJob?.id ?? null);
+
+        const hasSelectedActiveJob = selectedJobId ? scopedJobs.some((job) => job.id === selectedJobId) : false;
+        if (!hasSelectedActiveJob && sortedJobs.length > 0) {
+          setSelectedJobId(sortedJobs[0].id);
+        }
       } catch { /* ignore */ }
     };
     pollActiveJobs();
     const interval = setInterval(pollActiveJobs, 5000);
     return () => { cancelled = true; clearInterval(interval); };
-  }, []);
+  }, [selectedJobId]);
 
   // ─── Poll selected job ───
   useEffect(() => {
@@ -553,6 +573,7 @@ export function InvestingNewsWindow({
         if (!res.ok || cancelled) return;
         const data: TrackedJobStatus = await res.json();
         if (cancelled) return;
+        if (data.scope && data.scope !== NEWS_JOB_SCOPE) return;
         const category = (data.category ?? 'news-update') as JobCategory;
         syncJobState(selectedJobId, category, data);
       } catch { /* ignore */ }
@@ -661,8 +682,8 @@ export function InvestingNewsWindow({
     setError(null);
     try {
       const payload = sourceType === 'all'
-        ? { sourceName: 'INVESTING', concurrency: 10 }
-        : { sourceType, sourceName: 'INVESTING', concurrency: 10 };
+        ? { sourceName: 'INVESTING', concurrency: 10, scope: NEWS_JOB_SCOPE }
+        : { sourceType, sourceName: 'INVESTING', concurrency: 10, scope: NEWS_JOB_SCOPE };
       const res = await fetch(`${API_BASE}/api/news/fulltext/update`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

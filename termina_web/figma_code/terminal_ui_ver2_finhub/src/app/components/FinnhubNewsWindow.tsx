@@ -510,10 +510,12 @@ export function FinnhubNewsWindow({
   const [fulltextLoading, setFulltextLoading] = useState(false);
 
   type JobCategory = 'news-update' | 'news-fulltext';
+  const NEWS_JOB_SCOPE = 'finnhub-news';
   type TrackedJobStatus = {
     id: string;
     category?: JobCategory | string;
     label?: string;
+    scope?: string;
     status: 'running' | 'done' | 'failed' | 'cancelled';
     progress: { completed: number; total: number; pct: number };
     logs: string[];
@@ -526,6 +528,7 @@ export function FinnhubNewsWindow({
     id: string;
     category?: JobCategory | string;
     label?: string;
+    scope?: string;
     status: string;
     progress: { completed: number; total: number; pct: number };
     createdAt: string;
@@ -1436,14 +1439,14 @@ export function FinnhubNewsWindow({
         ? `${API_BASE}/api/news/fulltext/backfill-rtpr`
         : `${API_BASE}/api/news/fulltext/update`;
       const payload = sourceType === 'rtpr'
-        ? { concurrency }
+        ? { concurrency, scope: NEWS_JOB_SCOPE }
         : sourceType === 'fmp_press_release'
-          ? { sourceType: 'fmp_press_release', sourceName: 'FMP', concurrency }
+          ? { sourceType: 'fmp_press_release', sourceName: 'FMP', concurrency, scope: NEWS_JOB_SCOPE }
         : sourceType === 'fmp_stock_news'
-          ? { sourceType: 'fmp_stock_news', sourceName: 'FMP', concurrency }
+          ? { sourceType: 'fmp_stock_news', sourceName: 'FMP', concurrency, scope: NEWS_JOB_SCOPE }
         : sourceType === 'fmp_sec_filing'
-          ? { sourceType: 'fmp_sec_filing', sourceName: 'FMP', concurrency }
-        : { sourceType, concurrency };
+          ? { sourceType: 'fmp_sec_filing', sourceName: 'FMP', concurrency, scope: NEWS_JOB_SCOPE }
+        : { sourceType, concurrency, scope: NEWS_JOB_SCOPE };
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1537,6 +1540,7 @@ export function FinnhubNewsWindow({
         if (!res.ok) return;
         const data = await res.json();
         if (cancelled) return;
+        if (data.scope && data.scope !== NEWS_JOB_SCOPE) return;
         syncJobState(pullJobId, 'news-update', data);
       } catch {
         // Ignore transient fetch errors; will retry next interval
@@ -1557,6 +1561,7 @@ export function FinnhubNewsWindow({
         if (!res.ok) return;
         const data = await res.json();
         if (cancelled) return;
+        if (data.scope && data.scope !== NEWS_JOB_SCOPE) return;
         syncJobState(ftJobId, 'news-fulltext', data);
       } catch {
         // Ignore transient fetch errors; will retry next interval
@@ -1577,7 +1582,9 @@ export function FinnhubNewsWindow({
         if (!res.ok || cancelled) return;
         const jobs: ActiveTrackedJob[] = await res.json();
         if (cancelled) return;
-        const trackedJobs = jobs.filter((job) => job.category === 'news-update' || job.category === 'news-fulltext');
+        const trackedJobs = jobs.filter(
+          (job) => job.scope === NEWS_JOB_SCOPE && (job.category === 'news-update' || job.category === 'news-fulltext')
+        );
         setActiveJobs(trackedJobs);
 
         const sortedJobs = [...trackedJobs].sort((a, b) => b.createdAt.localeCompare(a.createdAt));

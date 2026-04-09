@@ -22,10 +22,12 @@ export interface JobProgress {
 }
 
 export type JobCategory = "news-update" | "news-fulltext" | "other";
+export type JobScope = "finnhub-news" | "investing-news" | "other";
 
 export interface JobMetadata {
   category?: JobCategory;
   label?: string;
+  scope?: JobScope;
 }
 
 export interface JobState {
@@ -39,6 +41,7 @@ export interface JobState {
   updatedAt: string;
   category: JobCategory;
   label?: string;
+  scope: JobScope;
 }
 
 // ─── In-memory store ───
@@ -75,6 +78,7 @@ export function createJob(total: number, metadata?: JobMetadata): string {
     updatedAt: now,
     category: metadata?.category ?? "other",
     label: metadata?.label,
+    scope: metadata?.scope ?? "other",
   });
   return id;
 }

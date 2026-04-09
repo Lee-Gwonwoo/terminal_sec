@@ -22,7 +22,7 @@
 - `POST /api/news/pull-investing`가 존재하며 Investing.com의 stock market / cryptocurrency category를 `news_items`에 적재한다.
 - `news_change_metrics`는 `CREATE TABLE IF NOT EXISTS`로 유지되는 영구 테이블이며, change update 작업이 metric 단위로 UPSERT 한다.
 - background job 상태와 로그는 메모리 기반이라 서버 재시작 시 유지되지 않는다.
-- `GET /api/jobs/active`, `GET /api/jobs/:jobId`는 뉴스 창 관련 장시간 작업에 대해 `category`와 `label`을 포함한다. 현재 핵심 category는 `news-update`, `news-fulltext`다.
+- `GET /api/jobs/active`, `GET /api/jobs/:jobId`는 뉴스 창 관련 장시간 작업에 대해 `category`, `scope`, `label`을 포함한다. 현재 핵심 category는 `news-update`, `news-fulltext`이고, scope는 `finnhub-news`, `investing-news`, fallback `other`를 사용한다.
 - default ticker universe는 서버 시작 시 CSV를 읽어 `securities`, `ticker_universes`, `ticker_universe_items`를 upsert하며, 이후 기본 경로 조회/수정은 DB-primary로 동작하고 CSV는 backup sync 성격이다.
 - case research 노트는 같은 `app.db`의 `research_tabs`, `research_pages` 테이블에 저장된다.
 - Model 2 evidence browser의 source of truth도 같은 `app.db`이며, `model2_analysis_runs`, `model2_case_summaries`, `model2_evidence_rows`를 사용한다.
@@ -210,19 +210,21 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 ### 뉴스 창 UI 락 규칙 기준표
 
-현재 뉴스 창이 의존하는 backend job category 기준은 아래와 같다.
+현재 뉴스 창이 의존하는 backend job 키 기준은 `category + scope` 조합이다.
 
-| UI 작업 | backend endpoint 예시 | job category | 중복 차단 범위 | 동시에 가능한 작업 |
-|-----------|------|------|------|------|
-| 일반 Update / FMP PR Pull / FMP Stock Pull / FMP SEC Pull / RTPR Pull / Change Update | `/api/news/pull-finhub`, `/api/news/pull-fmp-press-release`, `/api/news/pull-fmp-stock-news`, `/api/news/pull-fmp-sec-filing`, `/api/news/pull-rtpr`, `/api/news/change/update-*` | `news-update` | 같은 pull 계열 UI만 차단 | `news-fulltext` 계열과 병행 가능 |
-| Full Text / FMP PR Only / FMP Stock Only / FMP SEC Only / RTPR Body Backfill | `/api/news/fulltext/update`, `/api/news/fulltext/backfill-rtpr` | `news-fulltext` | 같은 fulltext UI만 차단 | `news-update` 계열과 병행 가능 |
+| UI 작업 | backend endpoint 예시 | job category | job scope | 중복 차단 범위 | 동시에 가능한 작업 |
+|-----------|------|------|------|------|------|
+| Finnhub / FMP / RTPR / Change Update | `/api/news/pull-finhub`, `/api/news/pull-fmp-press-release`, `/api/news/pull-fmp-stock-news`, `/api/news/pull-fmp-sec-filing`, `/api/news/pull-rtpr`, `/api/news/change/update-*` | `news-update` | `finnhub-news` | 같은 scope의 update 계열 UI만 차단 | `investing-news` update, 모든 `news-fulltext`와 병행 가능 |
+| Investing Update | `/api/news/pull-investing` | `news-update` | `investing-news` | 같은 scope의 update 계열 UI만 차단 | `finnhub-news` update, 모든 `news-fulltext`와 병행 가능 |
+| Finnhub / FMP / RTPR Full Text | `/api/news/fulltext/update`, `/api/news/fulltext/backfill-rtpr` | `news-fulltext` | `finnhub-news` | 같은 scope의 fulltext UI만 차단 | 모든 `news-update`, `investing-news` fulltext와 병행 가능 |
+| Investing Full Text | `/api/news/fulltext/update` | `news-fulltext` | `investing-news` | 같은 scope의 fulltext UI만 차단 | 모든 `news-update`, `finnhub-news` fulltext와 병행 가능 |
 
 운영적 정의:
 
-- `news-update` running 중에는 프론트의 `Update` 계열 버튼만 비활성화된다.
-- `news-fulltext` running 중에는 프론트의 `Full Text` 계열 버튼만 비활성화된다.
-- 두 category는 job id와 polling을 분리해서 추적하므로, 예를 들어 `FMP PR Full Text` 실행 중에도 일반 `Update`는 시작할 수 있다.
-- backend 자체는 fulltext global lock을 두지 않는다. UI는 같은 category의 중복 클릭만 막고, 실제 동일 sourceType pull 중복은 route-level `409 existingJobId` guard로 막는다.
+- 프론트는 같은 `category + scope`의 running job만 보고 `updating` / `ftUpdating`을 계산한다.
+- 따라서 Investing update가 running이어도 Finnhub 창의 `FMP PR Pull`, `FMP Stock Pull`, `RTPR Pull` 버튼은 잠기지 않는다.
+- `View Log` 역시 창별 scope 안의 running job만 자동 선택하고 dropdown 후보로 보여 준다.
+- backend 자체는 fulltext global lock을 두지 않는다. UI는 같은 scope 내부의 중복 클릭만 막고, 실제 동일 sourceType pull 중복은 route-level `409 existingJobId` guard로 막는다.
 
 #### `news_sentiment_snapshots`
 
@@ -740,6 +742,7 @@ Investing.com 기사 수집 job을 시작한다. backend는 stock market / crypt
 - `requestIntervalMs`: category/page fetch 간격
 - `fulltextConcurrency`: 새 row가 생겼을 때 후속 fulltext worker 수
 - job category: `news-update`
+- job scope: `investing-news`
 - 저장 규칙:
   - stock market category는 `source='INVESTING'`, `source_type='investing_stock_market_news'`
   - crypto category는 `source='INVESTING'`, `source_type='investing_cryptocurrency_news'`
@@ -1835,7 +1838,7 @@ publisher 동작 주의:
 
 - change update는 background job으로 실행되지만, 현재 endpoint 레벨 duplicate guard는 없다.
 - 즉 backend contract만 보면 recent/custom change job을 연속 호출해 복수 running job을 만들 수 있다.
-- 현재 프론트는 전역 `updating` lock 때문에 사용자가 보통 동시에 두 change job을 시작하지 못한다.
+- 현재 프론트는 `finnhub-news` scope 안의 `updating` lock 때문에 같은 창에서 두 change job을 동시에 시작하지 못한다.
 
 ### `POST /api/news/change/update-custom`
 
@@ -1853,7 +1856,7 @@ publisher 동작 주의:
 현재 job/중복 규칙:
 
 - `update-recent`와 동일하게 background job이지만 duplicate guard는 없다.
-- 향후 프론트 전역 lock을 해체할 경우 backend 측 logical job key 표준화가 필요하다.
+- 직접 API 호출이나 다른 클라이언트에서는 여전히 복수 running job을 만들 수 있으므로, 필요하면 backend 측 logical job key 표준화가 추가로 필요하다.
 
 ## Job API
 
@@ -1864,6 +1867,9 @@ publisher 동작 주의:
 응답 출력 컬럼:
 
 - `[][][]id[][][]`
+- `[][][]category[][][]`
+- `[][][]scope[][][]`
+- `[][][]label[][][]`
 - `[][][]status[][][]`
 - `[][][]progress[][][]`
   - `[][][]completed[][][]`
@@ -1876,7 +1882,8 @@ publisher 동작 주의:
 
 - `status='running'`인 job만 포함한다.
 - 완료(`done`), 실패(`failed`), 취소(`cancelled`)된 job은 이 목록에서 빠진다.
-- 따라서 프론트가 `activeJobs` dropdown으로 선택할 수 있는 것은 현재 시점 running job뿐이다.
+- `scope`는 현재 `finnhub-news`, `investing-news`, `other` 중 하나다.
+- 따라서 프론트가 `activeJobs` dropdown으로 선택할 수 있는 것은 현재 시점 running job뿐이고, 각 창은 이 목록에서 자기 scope에 맞는 job만 추린다.
 - job manager 자체는 여러 running job을 동시에 저장할 수 있다.
 
 ### `GET /api/jobs/:jobId`
@@ -1884,6 +1891,9 @@ publisher 동작 주의:
 응답 출력 컬럼:
 
 - `[][][]id[][][]`
+- `[][][]category[][][]`
+- `[][][]scope[][][]`
+- `[][][]label[][][]`
 - `[][][]status[][][]` (`running | done | failed`)
 - `[][][]progress[][][]`
   - `[][][]completed[][][]`
@@ -1900,8 +1910,8 @@ publisher 동작 주의:
 - 메모리 기반이므로 서버 재시작 시 사라진다.
 - 30분 cleanup 정책이 적용된다.
 - `status=running` 동안 `[][][]progress.pct[][][]`는 최대 99까지만 올라간다. `100`은 `completeJob()`으로 최종 완료 처리된 뒤에만 노출된다.
-- 현재 프론트 `FinnhubNewsWindow`는 `GET /api/jobs/active` 결과가 2개 이상일 때 선택 dropdown을 띄워 여러 running job 중 하나를 수동으로 볼 수 있다.
-- 단, 프론트 update 버튼 대부분은 전역 `updating` lock으로 묶여 있어 실제 사용자가 여러 job을 쉽게 동시에 만들지는 못한다.
+- 현재 프론트 `FinnhubNewsWindow`, `InvestingNewsWindow`는 `GET /api/jobs/active` 결과에서 자기 scope job만 유지하고, 그 안에서 running job이 2개 이상일 때 선택 dropdown을 띄운다.
+- 따라서 foreign scope job은 같은 창의 `View Log` 대상이 아니고, 버튼 disable 상태에도 반영되지 않는다.
 
 ## Ticker CSV API
 
