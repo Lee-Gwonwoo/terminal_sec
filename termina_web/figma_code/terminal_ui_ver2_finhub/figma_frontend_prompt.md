@@ -335,7 +335,16 @@ Finnhub 뉴스 적재는 직접 API response를 표에 그리지 않고, backend
 관련 API:
 
 - `GET /api/news/pull-finhub/preflight?sourceType=...`
+- `POST /api/news/pull-finhub/preflight-custom`
 - `POST /api/news/pull-finhub`
+- `POST /api/news/pull-rtpr/preflight-custom`
+- `POST /api/news/pull-rtpr`
+- `POST /api/news/pull-fmp-press-release/preflight-custom`
+- `POST /api/news/pull-fmp-press-release`
+- `POST /api/news/pull-fmp-stock-news/preflight-custom`
+- `POST /api/news/pull-fmp-stock-news`
+- `POST /api/news/pull-fmp-sec-filing/preflight-custom`
+- `POST /api/news/pull-fmp-sec-filing`
 - `GET /api/jobs/active`
 - `GET /api/jobs/:jobId`
 
@@ -358,6 +367,29 @@ Recent Update 섹션 바로 아래에 automatic recent retry 정책 설명이 �
 - 강제 재조회가 필요하면 `Custom Update` 사용
 
 custom update는 별도 날짜 선택 modal에서 `from/to`를 입력한 뒤 시작한다.
+
+#### Custom Preflight 흐름
+
+Custom Update를 시작하면 소스 타입에 따라 **preflight → modal → Continue → 실제 job** 순서로 진행한다.
+
+dispatch 라우팅 (`handleCustomPreflightStart`):
+
+| sourceType | preflight endpoint | 결과 |
+|-----------|-------------------|------|
+| `company_news` / `press_release` / `all` | `POST /api/news/pull-finhub/preflight-custom` | gap-only 요약 modal → Continue로 실행 |
+| `fmp_press_release` | `POST /api/news/pull-fmp-press-release/preflight-custom` | gap-only 요약 modal → Continue로 실행 |
+| `fmp_stock_news` | `POST /api/news/pull-fmp-stock-news/preflight-custom` | gap-only 요약 modal → Continue로 실행 |
+| `fmp_sec_filing` | `POST /api/news/pull-fmp-sec-filing/preflight-custom` | summary-only modal → Continue로 실행 |
+| `market_news` | (preflight 없음) | 직접 실행 |
+
+PTPR Press Release의 Custom은 `POST /api/news/pull-rtpr/preflight-custom`을 사용한다 (fully-covered-skip 모드).
+
+`openCustomPreflight()` 흐름:
+
+1. POST로 preflight endpoint를 호출한다.
+2. 성공이면 응답 데이터를 modal에 표시한다 (fullyCoveredTickers, tickersWithMissingGaps, totalMissingDays 등).
+3. 사용자가 modal에서 **Continue**를 클릭하면 실제 pull job을 시작한다.
+4. preflight 호출 실패 또는 non-OK 응답이면 modal을 건너뛰고 즉시 실행한다 (fallback).
 
 - `Recent Update (Company News)`와 `Custom Update (Company News)`는 backend에서 pull 완료 후, 이번에 새로 insert된 company news row만 대상으로 `news-fulltext` job을 자동으로 이어서 시작한다.
 - 따라서 사용자가 같은 시점에 `Full Text > Company News Only`를 다시 눌러야만 방금 받은 row가 추출되는 구조는 아니다. 자동 후속 fulltext job은 `GET /api/jobs/active` / `GET /api/jobs/:jobId`에 별도 `news-fulltext` job으로 나타난다.
@@ -655,8 +687,8 @@ localStorage 사용:
 - Price 섹션은 `DB Max Date` 표시
 - FMP Recent OHLC Fill 섹션은 최근 7일 누락 일봉만 FMP로 보강하고, 장 마감 전 ET 당일은 제외한다.
 - OHLC Turnover 섹션은 기존 값 skip 규칙으로 turnover 백필 job을 시작한다.
-- Calendar custom 섹션은 `from/to` date input 포함
-- Custom Change 섹션은 `from/to` date input 포함
+- Calendar custom 섹션은 `from/to` date input 포함. **Custom Update를 시작하면 먼저 `POST /api/ibkr/calendar/update-custom/preflight`로 범위 내 기존 event 수/event 날짜 수를 확인한 뒤 modal을 띄운다. Continue를 클릭하면 실제 `POST /api/ibkr/calendar/update-custom`을 호출한다.**
+- Custom Change 섹션은 `from/to` date input 포함. **Custom Update를 시작하면 먼저 `POST /api/news/change/update-custom/preflight`로 범위 내 전체 row 수, 기존 change 보유 row 수, 예상 update row 수를 확인한 뒤 modal을 띄운다. Continue를 클릭하면 실제 `POST /api/news/change/update-custom`을 호출한다.**
 
 ### 호출 API
 
@@ -664,6 +696,7 @@ localStorage 사용:
 - `POST /api/fmp/ohlc1d/update-recent-missing`
 - `POST /api/ibkr/ohlc1d/turnover/update`
 - `POST /api/ibkr/calendar/update`
+- `POST /api/ibkr/calendar/update-custom/preflight`
 - `POST /api/ibkr/calendar/update-custom`
 - `POST /api/company-profiles/pull-fmp`
 - `POST /api/company-profiles/pull-yahoo`
@@ -671,6 +704,7 @@ localStorage 사용:
 - `POST /api/company-profiles/pull-ipo-date`
 - `POST /api/news/change/update-recent`
 - `POST /api/news/change/update-recent-fmp-missing`
+- `POST /api/news/change/update-custom/preflight`
 - `POST /api/news/change/update-custom`
 - `GET /api/jobs/:jobId`
 - `GET /api/db/inspect`
@@ -1132,9 +1166,20 @@ API:
 
 - `GET /api/news`
 - `POST /api/news/pull-finhub`
+- `POST /api/news/pull-finhub/preflight-custom`
 - `POST /api/news/pull-investing`
+- `POST /api/news/pull-investing/preflight-custom`
 - `GET /api/news/pull-finhub/preflight`
+- `POST /api/news/pull-rtpr`
+- `POST /api/news/pull-rtpr/preflight-custom`
+- `POST /api/news/pull-fmp-press-release`
+- `POST /api/news/pull-fmp-press-release/preflight-custom`
+- `POST /api/news/pull-fmp-stock-news`
+- `POST /api/news/pull-fmp-stock-news/preflight-custom`
+- `POST /api/news/pull-fmp-sec-filing`
+- `POST /api/news/pull-fmp-sec-filing/preflight-custom`
 - `POST /api/news/change/update-recent`
+- `POST /api/news/change/update-custom/preflight`
 - `POST /api/news/change/update-custom`
 - `GET /api/news/fulltext/:newsId`
 - `POST /api/news/fulltext/update`
@@ -1146,6 +1191,8 @@ API:
 - `GET /api/ibkr/ohlc1d/status`
 - `POST /api/ibkr/ohlc1d/update`
 - `POST /api/ibkr/calendar/update`
+- `POST /api/ibkr/calendar/update-custom/preflight`
+- `POST /api/ibkr/calendar/update-custom`
 - `GET /api/jobs/:jobId`
 - `GET /api/tickers`
 - `POST /api/tickers/import-default`

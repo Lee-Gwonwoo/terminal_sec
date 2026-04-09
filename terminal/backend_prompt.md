@@ -447,12 +447,18 @@ SEC filing companion table.
 ### 뉴스 적재 / 후처리
 
 - `GET /api/news/pull-finhub/preflight`
+- `POST /api/news/pull-finhub/preflight-custom`
 - `POST /api/news/pull-finhub`
 - `POST /api/news/pull-eodhd`
+- `POST /api/news/pull-rtpr/preflight-custom`
 - `POST /api/news/pull-rtpr`
+- `POST /api/news/pull-investing/preflight-custom`
 - `POST /api/news/pull-investing`
+- `POST /api/news/pull-fmp-press-release/preflight-custom`
 - `POST /api/news/pull-fmp-press-release`
+- `POST /api/news/pull-fmp-stock-news/preflight-custom`
 - `POST /api/news/pull-fmp-stock-news`
+- `POST /api/news/pull-fmp-sec-filing/preflight-custom`
 - `POST /api/news/pull-fmp-sec-filing`
 - `POST /api/news/fulltext/update`
 - `POST /api/news/fulltext/backfill-plaintext`
@@ -463,6 +469,7 @@ SEC filing companion table.
 - `POST /api/news/fulltext/reset-fmp-stock-fallback`
 - `POST /api/news/fulltext/reset-company-news`
 - `POST /api/news/change/update-recent`
+- `POST /api/news/change/update-custom/preflight`
 - `POST /api/news/change/update-custom`
 - `POST /api/news/sentiment/update`
 
@@ -492,6 +499,7 @@ SEC filing companion table.
 - `GET /api/calendar/events/export.csv`
 - `GET /api/calendar/events/:id`
 - `POST /api/ibkr/calendar/update`
+- `POST /api/ibkr/calendar/update-custom/preflight`
 - `POST /api/ibkr/calendar/update-custom`
 - `GET /api/ibkr/ohlc1d/status`
 - `POST /api/ibkr/ohlc1d/update`
@@ -596,6 +604,9 @@ SEC filing companion table.
 - `mode`: `7d | recent | custom`
 - `sourceType`: `all | company_news | press_release | market_news`
 - `custom`일 때만 `from/to` 사용
+- `custom` + `sourceType=company_news` 또는 `press_release`일 때: **gap-only** 실행 — ticker별 envelope 기반 missing gap만 fetch. job log에 `[custom preflight]` 요약이 출력된다.
+- `custom` + `sourceType=all`일 때: `company_news`와 `press_release` 각각 gap-only로 실행하고, `market_news`는 gap 계산 없이 전체 범위로 실행한다.
+- `custom` + `sourceType=market_news`일 때: gap 계산 없이 전체 범위로 fetch한다 (ticker별 뉴스가 아니므로 envelope 개념이 없다).
 - 즉시 `jobId`를 반환하고 background에서 적재한다.
 
 응답 컬럼:
@@ -609,6 +620,83 @@ SEC filing companion table.
 - `[][][]totalTickers[][][]`
 - `[][][]fallbackCount[][][]`
 - `[][][]fallbackTickers[][][]`
+
+### Custom Preflight & Gap-Only 실행 개념
+
+custom mode로 뉴스를 수집할 때, backend는 "이미 DB에 데이터가 있는 구간"을 ticker별로 계산해 불필요한 재조회를 줄인다. 이 과정을 **preflight** 라고 부르며, 실제 pull job을 시작하기 전에 요약 정보를 프론트에 반환한다.
+
+#### GapExecutionMode 타입
+
+```typescript
+type GapExecutionMode = "gap-only" | "fully-covered-skip" | "summary-only";
+```
+
+| 모드 | 의미 | 적용 라우트 |
+|------|------|------------|
+| `gap-only` | ticker별 envelope 바깥의 missing gap만 실제 fetch | Finnhub co/pr, FMP PR, FMP Stock |
+| `fully-covered-skip` | 전체 범위가 이미 covered면 skip, gap이 하나라도 있으면 전체 범위로 fetch | RTPR |
+| `summary-only` | gap 계산 없이 기존 데이터 요약 수치만 반환, 실행은 전체 범위 기준 | FMP SEC, Investing, Change, Calendar |
+
+#### Envelope 기반 Coverage 계산
+
+`getTickerNewsCoverage()` (newsRepository.ts)는 ticker별 뉴스 데이터의 **min/max 날짜 envelope**을 반환한다.
+
+```sql
+SELECT tickers_csv,
+       MIN(substr(published_at, 1, 10)) AS min_date,
+       MAX(substr(published_at, 1, 10)) AS max_date
+FROM news_items
+WHERE source = ? AND source_type = ?
+  AND published_at >= ? AND published_at <= ?
+GROUP BY tickers_csv
+```
+
+반환: `Map<ticker, { coveredRanges: [{ from: min_date, to: max_date }] }>`
+
+핵심 설계 의도: envelope 안쪽의 빈 날짜는 "뉴스가 없었기 때문"이지 "조회 안 했기 때문"이 아니므로, 다시 조회하지 않는다.
+
+#### Gap 계산 (`buildMissingRangesFromEnvelope`)
+
+요청 범위 `[from, to]`와 coverage envelope `[envFrom, envTo]`로부터 gap은 **최대 2개**만 생긴다:
+
+1. **앞쪽 gap**: `from < envFrom`이면 `[from, envFrom - 1일]`
+2. **뒤쪽 gap**: `envTo < to`이면 `[envTo + 1일, to]`
+
+coverage가 전혀 없으면 `[from, to]` 전체가 missing이다.
+
+예시: 요청 범위 `2026-01-01 ~ 2026-03-29`, AAPL coverage `2026-01-15 ~ 2026-03-10`
+→ gap 1: `2026-01-01 ~ 2026-01-14`, gap 2: `2026-03-11 ~ 2026-03-29`
+→ 중간 구간 `01-15 ~ 03-10`은 재조회하지 않는다.
+
+#### Preflight 응답 공통 필드
+
+`summarizeTickerGapPlans()`가 반환하는 공통 구조:
+
+- `[][][]source[][][]`
+- `[][][]sourceType[][][]`
+- `[][][]requestedRange[][][]` (`{ from, to }`)
+- `[][][]executionMode[][][]`
+- `[][][]totalTickers[][][]`
+- `[][][]fullyCoveredTickers[][][]`
+- `[][][]tickersWithMissingGaps[][][]`
+- `[][][]totalMissingRanges[][][]`
+- `[][][]totalMissingDays[][][]`
+- `[][][]examples[][][]` (최대 10개 ticker의 `coveredRanges`, `missingRanges`, `missingDayCount`, `fullyCovered`)
+
+#### Preflight-Custom 라우트 매트릭스
+
+| 라우트 | executionMode | 요청 body | 응답 형태 |
+|--------|---------------|-----------|-----------|
+| `POST /api/news/pull-finhub/preflight-custom` | gap-only (co/pr) / summary-only (market) | pullFinnhub body + `mode` 강제 custom | sourceType=all이면 `bySourceType` 분리, market_news는 `supported: false` |
+| `POST /api/news/pull-rtpr/preflight-custom` | fully-covered-skip | `{ from, to, tickerConcurrency? }` | 공통 gap summary |
+| `POST /api/news/pull-fmp-press-release/preflight-custom` | gap-only | `{ from, to, tickerConcurrency?, requestIntervalMs?, pageLimit?, maxPages? }` | 공통 gap summary |
+| `POST /api/news/pull-fmp-stock-news/preflight-custom` | gap-only | `{ from, to, tickerConcurrency?, fulltextConcurrency?, requestIntervalMs?, pageLimit?, maxPages? }` | 공통 gap summary |
+| `POST /api/news/pull-fmp-sec-filing/preflight-custom` | summary-only | `{ from, to, tickerConcurrency?, requestIntervalMs?, maxPages? }` | `{ ..., existingItemsInRange }` |
+| `POST /api/news/pull-investing/preflight-custom` | summary-only | `{ from, to, category?, maxPages?, requestIntervalMs?, fulltextConcurrency? }` | `{ ..., categories: [{ category, existingItemsInRange }] }` |
+| `POST /api/news/change/update-custom/preflight` | summary-only | `{ from, to }` | `{ ..., totalRowsInRange, rowsWithChangePct, rowsExpectedToUpdate }` |
+| `POST /api/ibkr/calendar/update-custom/preflight` | summary-only | `{ from, to }` | `{ ..., totalTickers, existingEventsInRange, existingEventDays }` |
+
+모든 preflight-custom 라우트는 `from` 필수(`YYYY-MM-DD`), `to` 생략 시 오늘 날짜 기본값을 사용한다.
 
 ### `POST /api/news/pull-eodhd`
 
@@ -625,6 +713,34 @@ SEC filing companion table.
 - `[][][]fetched[][][]`
 - `[][][]inserted[][][]`
 - `[][][]truncated[][][]`
+
+### `POST /api/news/pull-rtpr`
+
+RTPR(Real-Time Press Release) API에서 press release를 수집한다.
+
+요청 body:
+
+```json
+{
+  "mode": "recent",
+  "from": "2026-03-01",
+  "to": "2026-03-20",
+  "tickerConcurrency": 5
+}
+```
+
+- `mode`: `recent | custom`
+- `recent`: 최신 press release를 ticker별로 가져온다.
+- `custom`: `from/to` 범위로 수집. **fully-covered-skip** 실행 — RTPR provider는 from/to 원격 조회를 직접 지원하지 않으므로 per-range gap fetch가 불가능하다. 이미 fully covered면 ticker를 skip하고, gap이 하나라도 있으면 ticker별 custom 조회를 전체 범위로 실행한다.
+- `tickerConcurrency`: ticker worker 수 (기본 5)
+- job key: `rtpr`
+- job scope: `finnhub-news`
+- 저장 규칙: `source='RTPR'`, `source_type='press_release'`
+- 중복 실행 guard: backend가 `409 + existingJobId`로 동일 라우트 중복 실행을 막는다.
+
+응답 컬럼:
+
+- `[][][]jobId[][][]`
 
 ### `POST /api/news/pull-fmp-press-release`
 
@@ -647,7 +763,7 @@ FMP press release를 수집한다.
 
 - `mode`: `recent | custom`
 - `recent`: DB의 마지막 `fmp_press_release` anchor 이후부터 수집
-- `custom`: `from/to` 범위로 수집
+- `custom`: `from/to` 범위로 수집. **gap-only** 실행 — `buildTickerGapPlans()`로 ticker별 envelope을 계산해 missing gap 구간만 실제 fetch한다. fully covered ticker는 skip된다. job log에 `[custom preflight] fullyCovered=X, missingTickers=Y, missingRanges=Z`가 출력된다.
 - `tickerConcurrency`: ticker worker 수 (기본 10)
 - `requestIntervalMs`: FMP API 호출 간격 (기본 25ms)
 - `pageLimit`: page당 최대 row 수 (기본 100)
@@ -680,7 +796,7 @@ FMP stock news를 수집한다. primary endpoint는 `stable/news/stock?symbols=T
 
 - `mode`: `recent | custom`
 - `recent`: DB의 마지막 `fmp_stock_news` anchor 이후부터 ticker별 incremental pull을 시도한다. anchor가 없는 ticker는 7일 fallback 구간으로 시작한다.
-- `custom`: `from/to` 범위로 수집
+- `custom`: `from/to` 범위로 수집. **gap-only** 실행 — FMP PR과 동일하게 ticker별 envelope 기반 missing gap만 fetch한다.
 - `tickerConcurrency`: ticker worker 수 (기본 10)
 - `fulltextConcurrency`: pull 마지막에 새 row 대상으로 바로 도는 inline fulltext worker 수 (기본 25)
 - `requestIntervalMs`: FMP API 호출 간격 (기본 25ms)
@@ -737,7 +853,7 @@ Investing.com 기사 수집 job을 시작한다. backend는 stock market / crypt
 
 - `mode`: `recent | custom`
 - `category`: `all | stock-market-news | cryptocurrency-news`
-- `custom`: `from/to` 범위를 사용한다.
+- `custom`: `from/to` 범위를 사용한다. **summary-only** 실행 — Investing은 ticker별 뉴스가 아니라 category별 market-wide 뉴스이므로 ticker gap 계산을 하지 않는다. 전체 범위를 기준으로 fetch한다.
 - `maxPages`: category별 최대 fetch page 수
 - `requestIntervalMs`: category/page fetch 간격
 - `fulltextConcurrency`: 새 row가 생겼을 때 후속 fulltext worker 수
@@ -774,7 +890,7 @@ FMP SEC filing을 수집한다. primary endpoint는 `stable/sec-filings-search/s
 
 - `mode`: `recent | custom`
 - `recent`: DB의 마지막 `fmp_sec_filing` published_at 이후(없으면 7일 전)부터 수집
-- `custom`: `from/to` 범위로 수집
+- `custom`: `from/to` 범위로 수집. **summary-only** 실행 — ticker별 gap 계산 없이 전체 범위를 fetch한다.
 - `tickerConcurrency`: ticker worker 수 (기본 10)
 - `requestIntervalMs`: FMP API 호출 간격 (기본 25ms)
 - `maxPages`: 최대 페이지 수 (기본 40)
