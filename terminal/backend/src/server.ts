@@ -1532,7 +1532,7 @@ const pullRtprSchema = z.object({
 });
 
 const pullFmpPressReleaseSchema = z.object({
-  mode: z.enum(["recent", "custom"]).optional().default("recent"),
+  mode: z.enum(["recent", "custom", "custom-entire"]).optional().default("recent"),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   tickerConcurrency: z.number().int().min(1).max(20).optional().default(10),
@@ -1844,7 +1844,7 @@ app.post("/api/news/pull-rtpr", async (req, res, next) => {
                   tags: rawItem.tags,
                   publisher: rawItem.publisher,
                 });
-                const newsId = inserted?.id ?? await getNewsIdBySourceUrl(rawItem.source, rawItem.url);
+                const newsId = inserted?.id ?? await getNewsIdBySourceUrl(rawItem.source, rawItem.sourceType, rawItem.url);
                 await persistRtprFulltext(newsId, rawItem.bodyHtml, rawItem.body, "rtpr-ingest");
                 if (inserted) {
                   counters.totalInserted++;
@@ -1899,7 +1899,7 @@ app.post("/api/news/pull-rtpr", async (req, res, next) => {
                   tags: rawItem.tags,
                   publisher: rawItem.publisher,
                 });
-                const newsId = inserted?.id ?? await getNewsIdBySourceUrl(rawItem.source, rawItem.url);
+                const newsId = inserted?.id ?? await getNewsIdBySourceUrl(rawItem.source, rawItem.sourceType, rawItem.url);
                 await persistRtprFulltext(newsId, rawItem.bodyHtml, rawItem.body, "rtpr-ingest");
                 if (inserted) {
                   counters.totalInserted++;
@@ -1981,7 +1981,8 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
     }
 
     const input = pullFmpPressReleaseSchema.parse(req.body ?? {});
-    const isCustom = input.mode === "custom";
+    const isCustom = input.mode === "custom" || input.mode === "custom-entire";
+    const isCustomEntire = input.mode === "custom-entire";
     if (isCustom && !input.from) {
       res.status(400).json({ error: "Custom mode requires 'from' date" });
       return;
@@ -2006,7 +2007,7 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
     const fallback7d = getEtDateString(new Date(Date.now() - 7 * 86_400_000));
     const effectiveTo = input.to ?? todayEt;
     const customRequestedRange = isCustom ? { from: input.from!, to: effectiveTo } : null;
-    const customGapPlans = isCustom
+    const customGapPlans = (isCustom && !isCustomEntire)
       ? await buildTickerGapPlans({
         tickers: tickerList,
         source: "FMP",
@@ -2143,7 +2144,63 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
               appendLog(jobId, `  ⚠ FMP PR ${ticker}: ${err.message}`);
             }
           });
+        } else if (isCustomEntire) {
+          // Custom-entire mode: fetch full date range per ticker (no gap planning)
+          const effectiveFrom = customRequestedRange!.from;
+          appendLog(jobId, `Custom-entire mode: ${effectiveFrom} ~ ${effectiveTo}, ${tickerList.length} tickers`);
+
+          await runTickerPool(async (ticker) => {
+            try {
+              const items = await fetchFmpPressReleasesByTicker(ticker, {
+                fromDate: effectiveFrom,
+                toDate: effectiveTo,
+                pageLimit: input.pageLimit,
+                maxPages: input.maxPages,
+                requestIntervalMs: input.requestIntervalMs,
+              });
+
+              for (const rawItem of items) {
+                const inserted = await insertNewsItem({
+                  publishedAt: rawItem.publishedAt,
+                  source: rawItem.source,
+                  sourceType: rawItem.sourceType,
+                  title: rawItem.title,
+                  body: rawItem.body,
+                  url: rawItem.url,
+                  tickers: rawItem.providerTickers,
+                  tags: rawItem.tags,
+                  publisher: rawItem.publisher,
+                });
+                if (inserted) {
+                  counters.totalInserted++;
+                  newItems.push({
+                    id: inserted.id,
+                    tickers: inserted.tickers,
+                    publishedAt: inserted.published_at,
+                  });
+                  newFulltextTargets.push({
+                    id: inserted.id,
+                    url: rawItem.url,
+                    publisher: rawItem.publisher ?? null,
+                    body: rawItem.body,
+                    source_type: rawItem.sourceType,
+                  });
+                  streamHub.publishNews(inserted);
+                } else {
+                  counters.totalSkipped++;
+                }
+              }
+
+              if (items.length > 0) {
+                appendLog(jobId, `  FMP PR ${ticker}: ${items.length} in range`);
+              }
+            } catch (err: any) {
+              console.error(`[pull-fmp-press-release] ${ticker}: ${err.message}`);
+              appendLog(jobId, `  ⚠ FMP PR ${ticker}: ${err.message}`);
+            }
+          });
         } else {
+          // Custom gap-only mode: fetch only missing ranges per ticker
           const effectiveFrom = customRequestedRange!.from;
           appendLog(jobId, `Custom mode: ${effectiveFrom} ~ ${effectiveTo}, ${tickerList.length} tickers`);
 

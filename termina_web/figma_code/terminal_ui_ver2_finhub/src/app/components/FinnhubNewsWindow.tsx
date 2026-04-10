@@ -76,6 +76,7 @@ function getSourceTypeLabel(sourceType: SourceTypeFilter | string): string {
   if (sourceType === 'company_news') return 'Company News';
   if (sourceType === 'press_release') return 'Press Release';
   if (sourceType === 'fmp_press_release') return 'FMP PR';
+  if (sourceType === 'fmp_press_release_entire') return 'FMP PR (Entire)';
   if (sourceType === 'fmp_stock_news') return 'FMP Stock';
   if (sourceType === 'fmp_sec_filing') return 'FMP SEC';
   if (sourceType === 'market_news') return 'Market News';
@@ -86,6 +87,7 @@ function getSourceTypeShortLabel(sourceType: SourceTypeFilter | string): string 
   if (sourceType === 'company_news') return 'Co.';
   if (sourceType === 'press_release') return 'PR';
   if (sourceType === 'fmp_press_release') return 'FMP PR';
+  if (sourceType === 'fmp_press_release_entire') return 'FMP PR(E)';
   if (sourceType === 'fmp_stock_news') return 'FMP Stk';
   if (sourceType === 'fmp_sec_filing') return 'SEC';
   if (sourceType === 'market_news') return 'Mkt.';
@@ -609,7 +611,7 @@ export function FinnhubNewsWindow({
 
   // ─── Update config (last used mode/sourceType) ───
   type UpdateMode = '7d' | 'recent' | 'custom';
-  type UpdateSourceType = 'all' | 'company_news' | 'press_release' | 'market_news' | 'fmp_press_release' | 'fmp_stock_news' | 'fmp_sec_filing';
+  type UpdateSourceType = 'all' | 'company_news' | 'press_release' | 'market_news' | 'fmp_press_release' | 'fmp_press_release_entire' | 'fmp_stock_news' | 'fmp_sec_filing';
   const [lastUpdateConfig, setLastUpdateConfig] = useState<{ mode: UpdateMode; sourceType: UpdateSourceType }>(() => {
     try {
       const saved = localStorage.getItem('finnhub-last-update-config');
@@ -986,9 +988,9 @@ export function FinnhubNewsWindow({
     setUpdating(true);
     setError(null);
     try {
-      if (sourceType === 'fmp_press_release') {
+      if (sourceType === 'fmp_press_release' || sourceType === 'fmp_press_release_entire') {
         const body: Record<string, unknown> = {
-          mode,
+          mode: sourceType === 'fmp_press_release_entire' ? 'custom-entire' : mode,
           tickerConcurrency: getFmpTickerConcurrency(),
           requestIntervalMs: getFmpRequestIntervalMs(),
           pageLimit: getFmpPrPageLimit(),
@@ -1170,6 +1172,11 @@ export function FinnhubNewsWindow({
     }
     if (sourceType === 'fmp_press_release') {
       await openCustomPreflight('/api/news/pull-fmp-press-release/preflight-custom', { mode: 'custom', from, to }, 'FMP Press Release Preflight', continueRun);
+      return;
+    }
+    if (sourceType === 'fmp_press_release_entire') {
+      // Entire mode: skip preflight (no gap planning), run directly
+      continueRun();
       return;
     }
     if (sourceType === 'fmp_stock_news') {
@@ -2504,6 +2511,10 @@ export function FinnhubNewsWindow({
                       <button onClick={() => { setShowUpdateMenu(false); handleCustomStart('fmp_press_release'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <Calendar className="w-3.5 h-3.5 shrink-0 text-emerald-500" />
                         <div><div className="font-medium">Custom FMP PR</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick date range · full text included for new rows</div></div>
+                      </button>
+                      <button onClick={() => { setShowUpdateMenu(false); handleCustomStart('fmp_press_release_entire'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <Calendar className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
+                        <div><div className="font-medium">Custom FMP PR (Entire Date)</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick date range · no gap skip, fetch full range per ticker</div></div>
                       </button>
                       <button onClick={() => { setShowUpdateMenu(false); handleCustomStart('fmp_stock_news'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <Calendar className="w-3.5 h-3.5 shrink-0 text-cyan-500" />

@@ -41,7 +41,7 @@ export async function initDb(): Promise<void> {
       tickers_csv TEXT NOT NULL,
       tags_csv TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      UNIQUE (source, url)
+      UNIQUE (source, source_type, url)
     );
 
     CREATE INDEX IF NOT EXISTS idx_news_items_published ON news_items (published_at DESC, id DESC);
@@ -509,11 +509,165 @@ export async function initDb(): Promise<void> {
   await db.exec("CREATE INDEX IF NOT EXISTS idx_sec_filings_form_type ON sec_filings(form_type, filed_at DESC);");
   await db.exec("CREATE INDEX IF NOT EXISTS idx_sec_filings_filed_at ON sec_filings(filed_at DESC);");
 
+  await migrateNewsItemsUniqueConstraint();
   await purgeLegacyFinnhubSecFilings();
   await migrateFinnhubCompanyNewsPublishedAtToEt();
   await migrateInvestingPublishedAtToEt();
   await backfillModel2EvidenceRowsNewsFields();
   await refreshModel2CaseSummariesCache();
+}
+
+/**
+ * Migrate news_items UNIQUE constraint: (source, url) → (source, source_type, url).
+ * This allows the same URL to exist with different source_type values (e.g. fmp_stock_news vs fmp_press_release).
+ * Idempotent: checks the autoindex column count to decide whether migration is needed.
+ * Also repairs FK references if a previous migration broke them via SQLite's auto-rename behavior.
+ */
+async function migrateNewsItemsUniqueConstraint(): Promise<void> {
+  // --- Phase 1: Repair broken FK references from prior migration attempt ---
+  // SQLite's ALTER TABLE RENAME (non-legacy mode) rewrites FK references in child tables.
+  // If a prior migration renamed news_items → _news_items_old, child tables now reference
+  // the non-existent _news_items_old. Fix by recreating each affected child table.
+  await repairBrokenFkReferences();
+
+  const indexInfo = await db.all<{ seqno: number; cid: number; name: string }[]>(
+    "PRAGMA index_info(sqlite_autoindex_news_items_2)",
+  );
+  // autoindex_2 = the UNIQUE constraint index. If it already has 3 columns → already migrated (or fresh DB).
+  if (indexInfo.length !== 2) {
+    return;
+  }
+
+  console.log("[db] migrating news_items UNIQUE constraint: (source, url) → (source, source_type, url) ...");
+  const countBefore = (await db.get<{ c: number }>("SELECT COUNT(*) AS c FROM news_items"))?.c ?? 0;
+
+  await db.exec("PRAGMA foreign_keys = OFF;");
+  // Prevent SQLite from auto-renaming FK references in child tables when we RENAME.
+  await db.exec("PRAGMA legacy_alter_table = ON;");
+  await db.exec("BEGIN TRANSACTION;");
+  try {
+    await db.exec("ALTER TABLE news_items RENAME TO _news_items_old;");
+    await db.exec(`
+      CREATE TABLE news_items (
+        id TEXT PRIMARY KEY,
+        published_at TEXT NOT NULL,
+        source TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        url TEXT NOT NULL,
+        tickers_csv TEXT NOT NULL,
+        tags_csv TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        ohlc_ticker TEXT,
+        ohlc_date TEXT,
+        change_1d_pct REAL,
+        change_from_open_pct REAL,
+        change_7d_pct REAL,
+        change_14d_pct REAL,
+        change_30d_pct REAL,
+        change_computed_at TEXT,
+        publisher TEXT,
+        origin_url TEXT,
+        UNIQUE (source, source_type, url)
+      );
+    `);
+    await db.exec(`
+      INSERT INTO news_items
+        (id, published_at, source, source_type, title, body, url, tickers_csv, tags_csv, created_at,
+         ohlc_ticker, ohlc_date, change_1d_pct, change_from_open_pct, change_7d_pct, change_14d_pct,
+         change_30d_pct, change_computed_at, publisher, origin_url)
+      SELECT
+        id, published_at, source, source_type, title, body, url, tickers_csv, tags_csv, created_at,
+        ohlc_ticker, ohlc_date, change_1d_pct, change_from_open_pct, change_7d_pct, change_14d_pct,
+        change_30d_pct, change_computed_at, publisher, origin_url
+      FROM _news_items_old;
+    `);
+    await db.exec("DROP TABLE _news_items_old;");
+
+    // Recreate indexes (they moved with the renamed table and got dropped).
+    await db.exec("CREATE INDEX IF NOT EXISTS idx_news_items_published ON news_items (published_at DESC, id DESC);");
+    await db.exec("CREATE INDEX IF NOT EXISTS idx_news_items_source_published ON news_items (source, published_at DESC, id DESC);");
+    await db.exec("CREATE INDEX IF NOT EXISTS idx_news_items_source_type_source_published ON news_items (source_type, source, published_at DESC, id DESC);");
+
+    await db.exec("COMMIT;");
+  } catch (err) {
+    await db.exec("ROLLBACK;");
+    await db.exec("PRAGMA legacy_alter_table = OFF;");
+    await db.exec("PRAGMA foreign_keys = ON;");
+    throw err;
+  }
+  await db.exec("PRAGMA legacy_alter_table = OFF;");
+  await db.exec("PRAGMA foreign_keys = ON;");
+
+  const countAfter = (await db.get<{ c: number }>("SELECT COUNT(*) AS c FROM news_items"))?.c ?? 0;
+  console.log(`[db] migration complete — UNIQUE (source, source_type, url). rows: ${countBefore} → ${countAfter}`);
+}
+
+/**
+ * Repair child tables whose FK references were rewritten from "news_items" to "_news_items_old"
+ * by a prior ALTER TABLE RENAME (SQLite default non-legacy mode rewrites FK refs).
+ * For each affected table: rename → recreate with corrected FK → copy data → drop old.
+ */
+async function repairBrokenFkReferences(): Promise<void> {
+  // Check if repair is needed: look at news_fulltext FK target
+  const fks = await db.all<{ table: string }[]>("PRAGMA foreign_key_list(news_fulltext)");
+  const broken = fks.some(fk => fk.table === "_news_items_old");
+  if (!broken) {
+    return;
+  }
+
+  console.log("[db] repairing broken FK references (_news_items_old → news_items) in child tables ...");
+
+  // Find ALL tables that reference _news_items_old
+  const allTables = await db.all<{ name: string; sql: string }[]>(
+    `SELECT name, sql FROM sqlite_master WHERE type='table' AND sql LIKE '%_news_items_old%'`,
+  );
+
+  if (allTables.length === 0) {
+    return;
+  }
+
+  await db.exec("PRAGMA foreign_keys = OFF;");
+  await db.exec("PRAGMA legacy_alter_table = ON;");
+  await db.exec("BEGIN TRANSACTION;");
+  try {
+    for (const { name: tableName, sql: origSql } of allTables) {
+      const tmpName = `_repair_${tableName}`;
+
+      // Capture indexes BEFORE rename (they'll move to tmpName)
+      const indexes = await db.all<{ name: string; sql: string | null }[]>(
+        `SELECT name, sql FROM sqlite_master WHERE type='index' AND tbl_name=? AND sql IS NOT NULL`,
+        [tableName],
+      );
+
+      await db.exec(`ALTER TABLE "${tableName}" RENAME TO "${tmpName}";`);
+
+      // Fix FK references: replace "_news_items_old" → news_items
+      const fixedSql = origSql
+        .replace(/"_news_items_old"/g, "news_items")
+        .replace(/_news_items_old/g, "news_items");
+      await db.exec(fixedSql + ";");
+      await db.exec(`INSERT INTO "${tableName}" SELECT * FROM "${tmpName}";`);
+      await db.exec(`DROP TABLE "${tmpName}";`);
+
+      // Recreate indexes on the new table (they were dropped with tmpName)
+      for (const idx of indexes) {
+        if (idx.sql) {
+          try { await db.exec(idx.sql + ";"); } catch { /* already exists */ }
+        }
+      }
+    }
+    await db.exec("COMMIT;");
+    console.log(`[db] FK references repaired for ${allTables.length} table(s): ${allTables.map(t => t.name).join(", ")}`);
+  } catch (err) {
+    await db.exec("ROLLBACK;");
+    await db.exec("PRAGMA legacy_alter_table = OFF;");
+    await db.exec("PRAGMA foreign_keys = ON;");
+    throw err;
+  }
+  await db.exec("PRAGMA legacy_alter_table = OFF;");
+  await db.exec("PRAGMA foreign_keys = ON;");
 }
 
 async function backfillModel2EvidenceRowsNewsFields(): Promise<void> {

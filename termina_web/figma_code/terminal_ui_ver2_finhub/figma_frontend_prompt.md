@@ -289,6 +289,7 @@ score/scoreEvidence/sentiment 컬럼 규칙:
 - `company_news`
 - `press_release`
 - `fmp_press_release`
+- `fmp_press_release_entire`
 - `fmp_stock_news`
 - `fmp_sec_filing`
 - `market_news`
@@ -378,6 +379,7 @@ dispatch 라우팅 (`handleCustomPreflightStart`):
 |-----------|-------------------|------|
 | `company_news` / `press_release` / `all` | `POST /api/news/pull-finhub/preflight-custom` | gap-only 요약 modal → Continue로 실행 |
 | `fmp_press_release` | `POST /api/news/pull-fmp-press-release/preflight-custom` | gap-only 요약 modal → Continue로 실행 |
+| `fmp_press_release_entire` | (preflight 없음) | 직접 실행 — gap planning 없이 전체 날짜 범위를 fetch. `mode: 'custom-entire'`로 전송 |
 | `fmp_stock_news` | `POST /api/news/pull-fmp-stock-news/preflight-custom` | gap-only 요약 modal → Continue로 실행 |
 | `fmp_sec_filing` | `POST /api/news/pull-fmp-sec-filing/preflight-custom` | summary-only modal → Continue로 실행 |
 | `market_news` | (preflight 없음) | 직접 실행 |

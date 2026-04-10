@@ -761,9 +761,10 @@ FMP press release를 수집한다.
 }
 ```
 
-- `mode`: `recent | custom`
+- `mode`: `recent | custom | custom-entire`
 - `recent`: DB의 마지막 `fmp_press_release` anchor 이후부터 수집
 - `custom`: `from/to` 범위로 수집. **gap-only** 실행 — `buildTickerGapPlans()`로 ticker별 envelope을 계산해 missing gap 구간만 실제 fetch한다. fully covered ticker는 skip된다. job log에 `[custom preflight] fullyCovered=X, missingTickers=Y, missingRanges=Z`가 출력된다.
+- `custom-entire`: `from/to` 범위로 수집. gap planning 없이 **전체 날짜 범위**를 모든 ticker에 대해 fetch한다. envelope/gap skip 없이 과거 코드와 동일하게 동작한다. preflight 호출도 불필요하다.
 - `tickerConcurrency`: ticker worker 수 (기본 10)
 - `requestIntervalMs`: FMP API 호출 간격 (기본 25ms)
 - `pageLimit`: page당 최대 row 수 (기본 100)

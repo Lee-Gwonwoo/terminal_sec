@@ -469,8 +469,8 @@ export async function insertNewsItem(params: {
 
   if (!result.changes) {
     const existing = await getDb().get<{ publisher: string | null; origin_url: string | null }>(
-      `SELECT publisher, origin_url FROM news_items WHERE source = ? AND url = ?`,
-      [params.source, params.url],
+      `SELECT publisher, origin_url FROM news_items WHERE source = ? AND source_type = ? AND url = ?`,
+      [params.source, params.sourceType, params.url],
     );
     const nextPublisher = canonicalizePublisherLabel(params.publisher ?? null);
     const currentPublisher = canonicalizePublisherLabel(existing?.publisher ?? null);
@@ -481,14 +481,14 @@ export async function insertNewsItem(params: {
 
     if (shouldUpgradePublisher) {
       await getDb().run(
-        `UPDATE news_items SET publisher = ? WHERE source = ? AND url = ?`,
-        [nextPublisher, params.source, params.url],
+        `UPDATE news_items SET publisher = ? WHERE source = ? AND source_type = ? AND url = ?`,
+        [nextPublisher, params.source, params.sourceType, params.url],
       );
     }
     if (shouldFillOriginUrl) {
       await getDb().run(
-        `UPDATE news_items SET origin_url = ? WHERE source = ? AND url = ?`,
-        [nextOriginUrl, params.source, params.url],
+        `UPDATE news_items SET origin_url = ? WHERE source = ? AND source_type = ? AND url = ?`,
+        [nextOriginUrl, params.source, params.sourceType, params.url],
       );
     }
     return null;
@@ -547,10 +547,10 @@ export async function updateNewsBodyById(newsId: string, body: string): Promise<
   );
 }
 
-export async function getNewsIdBySourceUrl(source: string, url: string): Promise<string | null> {
+export async function getNewsIdBySourceUrl(source: string, sourceType: string, url: string): Promise<string | null> {
   const row = await getDb().get<{ id: string }>(
-    `SELECT id FROM news_items WHERE source = ? AND url = ? LIMIT 1`,
-    [source, url],
+    `SELECT id FROM news_items WHERE source = ? AND source_type = ? AND url = ? LIMIT 1`,
+    [source, sourceType, url],
   );
   return row?.id ?? null;
 }
