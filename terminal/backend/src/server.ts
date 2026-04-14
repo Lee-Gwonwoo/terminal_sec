@@ -2705,7 +2705,12 @@ app.post("/api/news/pull-fmp-sec-filing", async (req, res, next) => {
         });
 
         appendLog(jobId, `Fetched ${filings.length} filings matching universe`);
-        updateProgress(jobId, 0);
+        if (filings.length > 0) {
+          appendLog(jobId, `Processing ${filings.length} fetched filings...`);
+          updateProgress(jobId, 0, filings.length);
+        }
+
+        let processedFilings = 0;
 
         for (const filing of filings) {
           if (isJobCancelled(jobId)) break;
@@ -2768,6 +2773,9 @@ app.post("/api/news/pull-fmp-sec-filing", async (req, res, next) => {
           } else {
             counters.totalSkipped++;
           }
+
+          processedFilings += 1;
+          updateProgress(jobId, processedFilings, filings.length);
         }
 
         appendLog(jobId, `Insert: ${counters.totalInserted} new, ${counters.totalSkipped} skipped, ${counters.companionInserted} companion rows`);

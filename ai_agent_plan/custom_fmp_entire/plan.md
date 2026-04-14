@@ -90,3 +90,11 @@ inserted=0, skipped=731
 | **D. insert 순서 보장** | press_release pull을 항상 stock_news보다 먼저 실행하도록 강제 | 간단 | 순서 강제가 깨지면 재발, 근본 해결 아님 |
 
 **사용자 결정 대기 중.**
+
+### 추가 이슈 (2026-04-10): FMP SEC Pull 진행률 표시 버그
+
+- 증상: `FMP SEC Pull` job이 실제로는 filings를 계속 처리하고 있어도 UI 진행률이 `0/1699 (0%)`로 고정되어 멈춘 것처럼 보임.
+- 원인: [server.ts](terminal/backend/src/server.ts) 의 SEC filing job에서 `fetchFmpSecFilings()` 완료 직후 `updateProgress(jobId, 0)`을 호출해 `completed`를 0으로 되돌리고, 이후 filing 처리 루프에서는 진행률을 다시 갱신하지 않음.
+- 수정 방향: ticker fetch phase가 끝나면 progress total을 `filings.length`로 전환하고, filing 1건 처리 완료마다 `updateProgress()`를 호출하도록 변경.
+- 검증 계획: backend 타입체크/빌드 후, 별도 테스트 DB + 별도 포트 백엔드를 띄워 SEC pull job을 실행하고 progress가 0에서 증가하는지 확인.
+- 적용 결과: `terminal/backend/src/server.ts`에서 SEC pull이 `Fetched N filings` 이후 `Processing N fetched filings...` 로그를 남기고, progress total을 `filings.length`로 전환한 뒤 filing 처리마다 progress를 증가시키도록 수정 완료. 별도 8081 테스트 인스턴스에서 `Universe: 3 tickers` job이 `3/3 (100%)`로 완료되는 것을 확인함.
