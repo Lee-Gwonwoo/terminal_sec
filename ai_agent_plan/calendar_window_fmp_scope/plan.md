@@ -27,6 +27,42 @@
 - live DB 확인 기준, earnings row는 `2026-04-30`까지만 있는 상태가 아니다.
   - 현재 저장된 최신 earnings row는 `2027-01-27`(`DOW`)까지 확인됐다.
 
+### PLAN CHANGE #3 — 2026-04-15 FMP earnings snapshot replace
+
+- 사용자 확인 질문을 반영해 FMP earnings update semantics를 명확히 수정한다.
+  - 현재 `unique_key = ticker + report_date` 방식만으로는 earnings date가 변경될 때 기존 row가 자동으로 사라지지 않는다.
+  - 따라서 같은 update 범위에 대해서는 기존 `source='FMP'`, `event_type='earnings'` row를 먼저 치우고 새 snapshot으로 다시 채우는 방식이 필요하다.
+- 이번 수정 목표
+  - 같은 범위를 재실행했을 때 stale earnings date가 남지 않게 한다.
+  - 사용자가 보는 CalendarWindow가 "누적 append"가 아니라 "현재 FMP snapshot"에 더 가깝게 보이게 한다.
+- 확인된 현재 동작
+  - `CalendarWindow` 자체는 데이터를 일부만 잘라서 가져오는 상태가 아니다.
+  - live API 기준 date filter 없이 `378` rows가 로드되고, 최신 row는 `2027-01-27`까지 확인됐다.
+  - 화면 상단에 `2026-04-21`부터 보이는 것은 기본 정렬이 빠른 날짜 우선(`asc`)이기 때문이다.
+
+### PLAN CHANGE #4 — 2026-04-15 calendar 기본 정렬 전환
+
+- 사용자 선택에 따라 `CalendarWindow`의 기본 날짜 정렬을 빠른 날짜 우선(`asc`)에서 늦은 날짜 우선(`desc`)으로 바꾼다.
+- 적용 범위
+  - 초기 진입 시 기본 정렬
+  - 탭 전환 시 기본 정렬
+  - Reset 실행 후 기본 정렬
+  - backend fetch 기본 sort parameter
+- 기대 효과
+  - 사용자가 최신/가장 먼 earnings date를 화면 상단에서 바로 볼 수 있다.
+  - `2026-04-21`만 보여서 뒤 날짜가 없는 것처럼 보이는 오해를 줄인다.
+
+### PLAN CHANGE #5 — 2026-04-15 date range 미지정 시 lazy load
+
+- 사용자 추가 요구를 반영해 `CalendarWindow`는 날짜 범위를 지정하기 전에는 events fetch를 실행하지 않도록 바꾼다.
+- 적용 규칙
+  - `from`과 `to`가 모두 지정되기 전에는 표 데이터를 불러오지 않는다.
+  - 이 상태에서는 loading spinner 대신 날짜 지정 안내 메시지를 보여준다.
+  - Reset 후에도 다시 "날짜 미지정" 대기 상태로 돌아간다.
+- 기대 효과
+  - 창을 열자마자 수천 row를 읽어오는 초기 렉을 줄인다.
+  - 사용자가 의도한 범위만 조회하게 되어 client-side sort/filter 비용도 함께 줄어든다.
+
 ### 현재 레포 상태(중요, 확인됨)
 
 - backend에는 이미 일반형 calendar read API가 있다.
@@ -322,6 +358,7 @@
 | 2-2 | date range chunking + retry + cancel-aware fetch 구현 | `terminal/backend/src/services/*` | 범위 쪼개기 로그 확인 | ⏳ |
 | 2-3 | `calendar_events` upsert와 `source='FMP'` 저장 구현 | `terminal/backend/src/services/calendarRepository.ts` | DB row 확인 | ⏳ |
 | 2-4 | default universe 기준 FMP earnings update route/job/status 추가 | `terminal/backend/src/server.ts` | endpoint 200/에러 응답 확인 | ⏳ |
+| 2-5 | 같은 update 범위의 기존 FMP earnings rows를 snapshot replace하도록 정리 | `terminal/backend/src/services/calendarRepository.ts`, `terminal/backend/src/server.ts` | 같은 범위 재실행 후 stale row 미잔존 확인 | ⏳ |
 
 2-1 목적: FMP earnings date를 실제로 받아올 수 있게 하기 위함.
 설명: stable earnings-calendar response를 공통 event shape로 매핑한다.
@@ -347,11 +384,18 @@
 사람 검증(비개발자): 어떤 버튼이 IBKR이고 어떤 버튼이 FMP인지 구분할 수 있다.
 흔한 문제/주의: FMP key 미설정 시 400/명확한 오류를 줘야 한다.
 
+2-5 목적: earnings date가 바뀌었을 때 이전 날짜 row가 화면에 남지 않게 하기 위함.
+설명: 같은 범위 update는 append가 아니라 snapshot replace로 처리한다.
+완료 조건(눈으로 확인): 같은 범위를 재실행해도 이전 FMP date row가 누적되지 않는다.
+사람 검증(비개발자): 날짜가 변경되면 새 날짜만 남고 예전 날짜는 사라진다.
+흔한 문제/주의: 너무 좁은 custom range만 갱신하면 경계 밖으로 이동한 새 날짜는 그 범위에서 안 보일 수 있다.
+
 검증 훅:
 ```text
 - POST /api/fmp/calendar/update (가칭) 실행
 - app.db calendar_events 에 source='FMP' row 존재 확인
 - 같은 범위 재실행 시 중복 row가 증가하지 않는지 확인
+- 같은 범위 재실행 시 stale date row가 남지 않는지 확인
 ```
 사용자 확인 필요: **예**
 
@@ -397,6 +441,8 @@
 | 4-2 | industry / ownership column selector와 table rendering 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx` | 탭/컬럼 렌더링 확인 | ⏳ |
 | 4-3 | date filter, search, sort, empty state, FMP earnings update button + job polling 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx` | 브라우저 + API 확인 | ⏳ |
 | 4-4 | `Inst %`, `Float %`, `Market Cap` min/max 숫자 필터 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx` | 브라우저에서 숫자 범위 입력 후 row 변화 확인 | ⏳ |
+| 4-5 | calendar 기본 날짜 정렬을 늦은 날짜 우선으로 전환 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx` | 브라우저 첫 row 날짜 확인 | ⏳ |
+| 4-6 | 날짜 범위 미지정 시 events fetch를 막고 안내 상태를 표시 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx` | 브라우저 초기 진입/Reset 후 빈 상태 확인 | ⏳ |
 
 4-1 목적: 현재 calendar 화면을 실데이터 기반으로 바꾸기 위함.
 설명: mock array 대신 backend response를 state source of truth로 삼는다.
@@ -422,12 +468,26 @@
 사람 검증(비개발자): 예를 들어 `Inst % >= 70` 같은 조건을 넣으면 기관보유율이 높은 종목만 남는다.
 흔한 문제/주의: 값이 `null`인 row를 어떻게 취급할지 명확해야 하며, 숫자 입력이 빈 문자열일 때는 필터가 꺼져야 한다.
 
+4-5 목적: 최신/먼 미래 earnings date가 화면 상단에 바로 보이게 하기 위함.
+설명: 기본 sort direction과 reset/tab 전환 시 초기화를 모두 `desc`로 맞춘다.
+완료 조건(눈으로 확인): earnings 탭 첫 row가 `2026-04-21` 같은 가까운 날짜가 아니라 더 늦은 날짜로 시작한다.
+사람 검증(비개발자): 화면을 열자마자 가장 늦은 날짜가 먼저 보여 뒤쪽 데이터가 없는 것처럼 느껴지지 않는다.
+흔한 문제/주의: fetch 단계와 client sort 단계의 기본값이 엇갈리면 깜빡임이나 예상 밖 정렬이 생길 수 있다.
+
+4-6 목적: 초기 대량 fetch로 인한 렉을 줄이기 위함.
+설명: `from/to`가 둘 다 채워지기 전에는 API 호출을 하지 않고 date-range required 상태를 렌더링한다.
+완료 조건(눈으로 확인): 창을 열자마자 row가 뜨지 않고 날짜를 넣은 뒤에만 결과가 로드된다.
+사람 검증(비개발자): 날짜를 넣기 전에는 표가 비어 있고 안내 문구가 보인다.
+흔한 문제/주의: loading/empty/no-date 상태가 섞이면 사용자가 오류인지 대기 상태인지 구분하기 어렵다.
+
 검증 훅:
 ```text
 - backend dev + webui dev 실행
 - Calendar 창 열기
 - 탭 전환, 날짜 필터, 숫자 필터, 정렬, empty state 확인
 - /api/calendar/events 호출 결과와 화면 row 일치 확인
+- 기본 진입/Reset 후 첫 row 날짜가 늦은 날짜 우선인지 확인
+- 기본 진입/Reset 후 날짜 안내 상태이고 row가 비어 있는지 확인
 ```
 사용자 확인 필요: **예**
 

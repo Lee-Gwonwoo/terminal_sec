@@ -1006,13 +1006,27 @@ API:
 - `GET /api/calendar/events`로 현재 탭 + 날짜 범위 데이터를 읽는다.
 - earnings 탭에서 `POST /api/fmp/calendar/earnings/update`를 실행하고 `GET /api/jobs/:jobId`로 polling 한다.
 - industry / ownership(`float_pct`, `institutional_pct`, `insider_pct`)는 column selector에서 켜고 끌 수 있다.
+- earnings에서는 `Inst %`, `Float %`, `Market Cap(B$)` min/max 숫자 필터를 사용할 수 있다.
+- dividends / splits에서는 `Market Cap(B$)` min/max 숫자 필터를 사용할 수 있다.
 
 현재 구현 요약:
 
 - date range는 HTML date input이며, 값이 있으면 API query `from/to`로 바로 전달된다.
+- `from`과 `to`가 둘 다 지정되기 전에는 `GET /api/calendar/events`를 호출하지 않는다.
+  - 이 상태에서는 row table 대신 날짜 범위를 먼저 선택하라는 안내 메시지를 보여준다.
+  - Reset 후에도 같은 대기 상태로 돌아간다.
+- 기본 날짜 정렬은 늦은 날짜 우선(`desc`)이다.
+  - 초기 진입, 탭 전환, Reset 모두 이 기준을 사용한다.
 - search는 client-side로 `ticker`, `company`, `title`, `industry`, `source`를 대상으로 동작한다.
+- 숫자 범위 필터는 현재 fetch된 row 집합에 대해 client-side로 즉시 적용된다.
+  - `Inst %`, `Float %`는 퍼센트 값 그대로 비교한다.
+  - `Market Cap` 입력 단위는 `B$`이며, 프론트에서 내부 비교 시 실제 달러 값으로 환산한다.
+  - 숫자 필터가 켜져 있을 때 해당 값이 `null`인 row는 결과에서 제외된다.
 - earnings stable source에는 reliable time/session이 없으므로, 관련 column 값은 비어 있을 수 있다.
 - update 버튼은 현재 date filter가 있으면 그 범위를 body에 같이 보낸다.
+- earnings update는 같은 범위에 대해 append가 아니라 snapshot replace다.
+  - 즉 같은 범위를 다시 실행하면 기존 FMP earnings row를 해당 범위에서 먼저 정리한 뒤 현재 source snapshot으로 다시 채운다.
+  - 따라서 earnings date가 바뀌었을 때 같은 범위를 재동기화하면 예전 날짜 row가 남아 누적되지 않는다.
 
 ## Case Description Window
 

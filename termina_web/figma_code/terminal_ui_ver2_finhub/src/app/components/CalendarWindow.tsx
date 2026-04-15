@@ -85,6 +85,13 @@ interface ColumnConfig {
   align?: 'left' | 'center' | 'right';
 }
 
+interface NumericFilterConfig {
+  key: 'market_cap' | 'float_pct' | 'institutional_pct';
+  label: string;
+  unitLabel: string;
+  multiplier?: number;
+}
+
 const FALLBACK_TYPES: CalendarTypeConfig[] = [
   { key: 'earnings', label: 'Earnings', supports: [], columns: ['report_date', 'ticker', 'name', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual', 'industry', 'float_pct', 'institutional_pct', 'insider_pct', 'session', 'source'] },
   { key: 'dividends', label: 'Dividends', supports: [], columns: ['ex_date', 'ticker', 'name', 'amount', 'yield', 'pay_date', 'industry', 'market_cap', 'source'] },
@@ -137,6 +144,20 @@ const COLUMN_DEFINITIONS: Record<string, Omit<ColumnConfig, 'visible'>> = {
   amount: { key: 'amount', label: 'Amount', width: '100px', align: 'right' },
   yield: { key: 'yield', label: 'Yield', width: '90px', align: 'right' },
   ratio: { key: 'ratio', label: 'Ratio', width: '100px' },
+};
+
+const NUMERIC_FILTERS_BY_TYPE: Record<string, NumericFilterConfig[]> = {
+  earnings: [
+    { key: 'institutional_pct', label: 'Inst %', unitLabel: '%' },
+    { key: 'float_pct', label: 'Float %', unitLabel: '%' },
+    { key: 'market_cap', label: 'Market Cap', unitLabel: 'B$', multiplier: 1_000_000_000 },
+  ],
+  dividends: [
+    { key: 'market_cap', label: 'Market Cap', unitLabel: 'B$', multiplier: 1_000_000_000 },
+  ],
+  splits: [
+    { key: 'market_cap', label: 'Market Cap', unitLabel: 'B$', multiplier: 1_000_000_000 },
+  ],
 };
 
 function humanizeKey(key: string): string {
@@ -216,6 +237,40 @@ function getRatioValue(row: CalendarRow): string {
   return '-';
 }
 
+function parseNumericFilterInput(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function matchesNumericRange(
+  value: unknown,
+  minInput: string,
+  maxInput: string,
+  multiplier = 1,
+): boolean {
+  const minValue = parseNumericFilterInput(minInput);
+  const maxValue = parseNumericFilterInput(maxInput);
+  if (minValue == null && maxValue == null) {
+    return true;
+  }
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return false;
+  }
+  const scaledMin = minValue == null ? null : minValue * multiplier;
+  const scaledMax = maxValue == null ? null : maxValue * multiplier;
+  if (scaledMin != null && value < scaledMin) {
+    return false;
+  }
+  if (scaledMax != null && value > scaledMax) {
+    return false;
+  }
+  return true;
+}
+
 async function fetchCalendarEvents(type: string, from: string, to: string): Promise<CalendarRow[]> {
   const allItems: CalendarRow[] = [];
   let cursor: string | undefined;
@@ -223,7 +278,7 @@ async function fetchCalendarEvents(type: string, from: string, to: string): Prom
   for (let page = 0; page < 10; page++) {
     const params = new URLSearchParams({
       type,
-      sort: 'event_time:asc',
+      sort: 'event_time:desc',
       limit: '500',
     });
     if (from) {
@@ -256,13 +311,13 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const [typeConfigs, setTypeConfigs] = useState<CalendarTypeConfig[]>(FALLBACK_TYPES);
   const [events, setEvents] = useState<CalendarRow[]>([]);
   const [activeType, setActiveType] = useState('earnings');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [sortField, setSortField] = useState<string | null>('report_date');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [columnStates, setColumnStates] = useState<Record<string, ColumnConfig[]>>(() =>
     Object.fromEntries(FALLBACK_TYPES.map((typeConfig) => [typeConfig.key, buildColumns(typeConfig.key, typeConfig.columns)]))
   );
@@ -273,10 +328,18 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const [updatePending, setUpdatePending] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const [marketCapMin, setMarketCapMin] = useState('');
+  const [marketCapMax, setMarketCapMax] = useState('');
+  const [floatPctMin, setFloatPctMin] = useState('');
+  const [floatPctMax, setFloatPctMax] = useState('');
+  const [institutionalPctMin, setInstitutionalPctMin] = useState('');
+  const [institutionalPctMax, setInstitutionalPctMax] = useState('');
 
   const currentTypeConfig = typeConfigs.find((item) => item.key === activeType) ?? FALLBACK_TYPES[0];
   const currentColumns = columnStates[activeType] ?? buildColumns(activeType, currentTypeConfig?.columns ?? []);
   const visibleColumns = currentColumns.filter((column) => column.visible);
+  const numericFilters = NUMERIC_FILTERS_BY_TYPE[activeType] ?? [];
+  const hasRequiredDateRange = Boolean(dateFrom && dateTo);
 
   useEffect(() => {
     let cancelled = false;
@@ -317,6 +380,15 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   useEffect(() => {
     let cancelled = false;
 
+    if (!hasRequiredDateRange) {
+      setEvents([]);
+      setError(null);
+      setLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const loadEvents = async () => {
       setLoading(true);
       setError(null);
@@ -343,7 +415,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     return () => {
       cancelled = true;
     };
-  }, [activeType, dateFrom, dateTo, reloadToken]);
+  }, [activeType, dateFrom, dateTo, hasRequiredDateRange, reloadToken]);
 
   useEffect(() => {
     if (!jobId || (jobStatus && jobStatus.status !== 'running')) {
@@ -423,6 +495,12 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
       );
     }
 
+    filtered = filtered.filter((event) =>
+      matchesNumericRange(event.market_cap, marketCapMin, marketCapMax, 1_000_000_000) &&
+      matchesNumericRange(event.float_pct, floatPctMin, floatPctMax) &&
+      matchesNumericRange(event.institutional_pct, institutionalPctMin, institutionalPctMax),
+    );
+
     if (sortField && sortDirection) {
       filtered.sort((a, b) => {
         const aVal = a[sortField];
@@ -447,16 +525,43 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     }
 
     return filtered;
-  }, [tabFilteredEvents, searchQuery, sortField, sortDirection]);
+  }, [
+    tabFilteredEvents,
+    searchQuery,
+    sortField,
+    sortDirection,
+    marketCapMin,
+    marketCapMax,
+    floatPctMin,
+    floatPctMax,
+    institutionalPctMin,
+    institutionalPctMax,
+  ]);
 
-  const hasActiveFilters = Boolean(searchQuery || dateFrom || dateTo);
+  const hasActiveFilters = Boolean(
+    searchQuery ||
+    dateFrom ||
+    dateTo ||
+    marketCapMin ||
+    marketCapMax ||
+    floatPctMin ||
+    floatPctMax ||
+    institutionalPctMin ||
+    institutionalPctMax,
+  );
 
   const clearAllFilters = () => {
     setDateFrom('');
     setDateTo('');
     setSearchQuery('');
-    setSortField('report_date');
-    setSortDirection('asc');
+    setMarketCapMin('');
+    setMarketCapMax('');
+    setFloatPctMin('');
+    setFloatPctMax('');
+    setInstitutionalPctMin('');
+    setInstitutionalPctMax('');
+    setSortField(activeType === 'earnings' ? 'report_date' : 'event_date');
+    setSortDirection('desc');
   };
 
   const handleEarningsUpdate = async () => {
@@ -584,7 +689,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
               onClick={() => {
                 setActiveType(typeConfig.key);
                 setSortField(typeConfig.key === 'earnings' ? 'report_date' : 'event_date');
-                setSortDirection('asc');
+                setSortDirection('desc');
               }}
               className={`px-4 py-2 text-sm font-medium rounded transition-colors ${
                 activeType === typeConfig.key
@@ -686,6 +791,61 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
           )}
         </div>
 
+        {numericFilters.length > 0 && (
+          <div className="flex flex-wrap items-end gap-3 mb-3 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2">
+            {numericFilters.map((filterConfig) => {
+              const minValue = filterConfig.key === 'market_cap'
+                ? marketCapMin
+                : filterConfig.key === 'float_pct'
+                  ? floatPctMin
+                  : institutionalPctMin;
+              const maxValue = filterConfig.key === 'market_cap'
+                ? marketCapMax
+                : filterConfig.key === 'float_pct'
+                  ? floatPctMax
+                  : institutionalPctMax;
+              const setMinValue = filterConfig.key === 'market_cap'
+                ? setMarketCapMin
+                : filterConfig.key === 'float_pct'
+                  ? setFloatPctMin
+                  : setInstitutionalPctMin;
+              const setMaxValue = filterConfig.key === 'market_cap'
+                ? setMarketCapMax
+                : filterConfig.key === 'float_pct'
+                  ? setFloatPctMax
+                  : setInstitutionalPctMax;
+
+              return (
+                <div key={filterConfig.key} className="flex items-end gap-2">
+                  <div className="min-w-[74px] text-xs font-medium text-gray-600 dark:text-gray-300 pb-2">
+                    {filterConfig.label}
+                    <span className="ml-1 text-[11px] text-gray-400 dark:text-gray-500">{filterConfig.unitLabel}</span>
+                  </div>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    step="any"
+                    value={minValue}
+                    onChange={(e) => setMinValue(e.target.value)}
+                    placeholder="Min"
+                    className="w-24 px-2 py-2 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <span className="pb-2 text-xs text-gray-400">to</span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    step="any"
+                    value={maxValue}
+                    onChange={(e) => setMaxValue(e.target.value)}
+                    placeholder="Max"
+                    className="w-24 px-2 py-2 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {activeType === 'earnings' && (
           <div className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded px-3 py-2">
             FMP stable earnings source does not provide reliable time or session. Date, estimate/actual, and DB-based ownership columns are supported.
@@ -739,7 +899,11 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
       </div>
 
       <div className="flex-1 overflow-auto">
-        {loading ? (
+        {!hasRequiredDateRange ? (
+          <div className="flex items-center justify-center h-40 px-6 text-sm text-gray-500 text-center">
+            Select both start and end dates to load calendar events.
+          </div>
+        ) : loading ? (
           <div className="flex items-center justify-center h-40 text-gray-500">Loading calendar events...</div>
         ) : error ? (
           <div className="flex items-center justify-center h-40 text-red-600 dark:text-red-400">{error}</div>
@@ -785,7 +949,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
           </table>
         )}
 
-        {!loading && !error && filteredAndSortedEvents.length === 0 && (
+        {hasRequiredDateRange && !loading && !error && filteredAndSortedEvents.length === 0 && (
           <div className="flex items-center justify-center h-40 text-gray-500">
             No events found for the current filters
           </div>
@@ -793,7 +957,9 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
       </div>
 
       <div className="px-4 py-2 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-600 dark:text-gray-400">
-        Showing {filteredAndSortedEvents.length} of {tabFilteredEvents.length} events
+        {hasRequiredDateRange
+          ? `Showing ${filteredAndSortedEvents.length} of ${tabFilteredEvents.length} events`
+          : 'Select a start and end date to load events'}
       </div>
     </div>
   );

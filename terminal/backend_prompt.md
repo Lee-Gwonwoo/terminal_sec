@@ -2363,9 +2363,11 @@ FMP stable earnings-calendar를 market-wide로 조회한 뒤, DB `default univer
 2. `getDefaultUniverseTickers()`로 대상 ticker를 읽는다.
 3. stable `/earnings-calendar`를 chunk 단위로 호출한다.
 4. market-wide 결과 중 default universe ticker와 일치하는 row만 남긴다.
-5. `type='earnings'`, `source='FMP'`, `unique_key='FMP:earnings:TICKER:DATE'`로 upsert 한다.
-6. `update_status.fmp_calendar_earnings`를 갱신한다.
-7. 응답은 `jobId`를 반환하고, 진행 상황은 `GET /api/jobs/:jobId`로 polling 한다.
+5. 각 chunk 범위에 대해 기존 `source='FMP'`, `type='earnings'` row를 default universe ticker 기준으로 먼저 삭제하고, 현재 snapshot을 다시 채운다.
+6. 새 snapshot row는 `type='earnings'`, `source='FMP'`, `unique_key='FMP:earnings:TICKER:DATE'`로 upsert 한다.
+7. 같은 범위를 다시 실행하면 append 누적이 아니라 snapshot replace가 일어난다. 즉 FMP에서 날짜가 바뀌어 기존 row가 범위 안에 남아 있으면 이전 row는 지워지고 새 row만 남는다.
+8. `update_status.fmp_calendar_earnings`를 갱신한다.
+9. 응답은 `jobId`를 반환하고, 진행 상황은 `GET /api/jobs/:jobId`로 polling 한다.
 
 응답 컬럼:
 
@@ -2383,6 +2385,7 @@ job 완료 result 컬럼:
 - `[][][]fetchedRows[][][]`
 - `[][][]matchedRows[][][]`
 - `[][][]upsertedRows[][][]`
+- `[][][]deletedRows[][][]`
 - `[][][]skippedOutsideUniverse[][][]`
 - `[][][]skippedInvalidDate[][][]`
 

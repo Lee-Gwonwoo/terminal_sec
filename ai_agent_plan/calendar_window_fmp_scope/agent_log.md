@@ -98,3 +98,146 @@
 
 - 상태
   - 구현/검증 완료, 사용자 확인 대기 (`awaiting user confirmation`)
+
+## 2026-04-15
+**작성 시각:** 2026-04-15 15:04 (local)
+
+### calendar 숫자 필터 추가 + earnings 최신 날짜 재확인
+
+- 변경 파일
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+  - `ai_agent_plan/calendar_window_fmp_scope/plan.md`
+- 구현 내용
+  - `CalendarWindow`에 `Inst %`, `Float %`, `Market Cap(B$)` min/max 숫자 필터 추가
+  - earnings에서는 세 필터를 모두 노출하고, dividends / splits에서는 `Market Cap(B$)` 필터를 노출
+  - 숫자 필터는 현재 fetch된 row 집합에 대해 client-side로 즉시 적용되도록 구현
+  - reset 버튼이 날짜/search와 함께 숫자 필터도 초기화하도록 수정
+  - frontend prompt 문서에 숫자 필터 동작과 단위(`B$`)를 반영
+- live 데이터 재확인
+  - `GET /api/calendar/events?type=earnings&sort=event_time:desc&limit=1` 기준 최신 earnings row는 `2027-01-27`(`DOW`)였다.
+  - 따라서 현재 DB 기준 earnings 데이터가 `2026-04-30`까지만 있는 상태는 아니다.
+- 런타임 확인
+  - 브라우저에서 숫자 필터 입력 UI(`Inst %`, `Float %`, `Market Cap`) 노출 확인
+  - row count 변화 확인
+    - 기본: `378`
+    - `Inst % >= 70`: `313`
+    - `Float % >= 95`: `225`
+    - `Market Cap >= 100B`: `44`
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `CalendarWindow.tsx` `get_errors` 0 errors |
+| 빌드 | ✅ | backend `npm run build`, frontend `npm run build` 성공 |
+| 자동 테스트 | ✅ | backend vitest `15 files / 91 tests` pass |
+| 런타임 통합 | ✅ | 브라우저에서 숫자 필터 입력 노출 + row count 변화 확인, 최신 earnings row API 재확인 |
+
+- 상태
+  - 숫자 필터 구현/검증 완료, 사용자 확인 대기 (`awaiting user confirmation`)
+
+## 2026-04-15
+**작성 시각:** 2026-04-15 15:12 (local)
+
+### FMP earnings snapshot replace 적용 + 누락/덮어쓰기 동작 정리
+
+- 변경 파일
+  - `terminal/backend/src/services/calendarRepository.ts`
+  - `terminal/backend/src/server.ts`
+  - `terminal/backend_prompt.md`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+  - `ai_agent_plan/calendar_window_fmp_scope/plan.md`
+- 확인한 원인
+  - `CalendarWindow`가 일부만 잘라서 가져오는 구조는 아니었다.
+  - 브라우저 기준 date filter 없이 row가 로드되고 있었고, 상단에 `2026-04-21`부터 보인 것은 기본 정렬이 빠른 날짜 우선(`asc`)이기 때문이었다.
+  - 다만 backend 저장 semantics는 `unique_key = FMP:earnings:TICKER:DATE` upsert만 사용하고 있어서, earnings date가 변경되면 기존 row가 자동 삭제되지 않는 문제가 있었다.
+  - 실제 검증에서도 `2026-04-21` 하루 기준 기존 row count가 `9`였지만, 같은 날짜를 다시 FMP에서 당기자 current snapshot은 `20`건이었다.
+- 구현 내용
+  - `deleteCalendarEventsForSourceRange(...)` helper 추가
+  - `POST /api/fmp/calendar/earnings/update`가 각 chunk마다 transaction 안에서 기존 `source='FMP'`, `type='earnings'` row를 먼저 삭제하고 현재 snapshot을 다시 채우도록 수정
+  - job result에 `deletedRows` 포함
+  - backend/frontend prompt 문서에 snapshot replace semantics 반영
+- 런타임 확인
+  - `GET /api/calendar/events?type=earnings&sort=event_time:desc&limit=5` 기준 최신 row는 여전히 `2027-01-27 (DOW)`까지 확인됨
+  - `2026-04-21` 하루 재실행 결과
+    - 재실행 전 count: `9`
+    - job result: `matchedRows=20`, `deletedRows=9`
+    - 재실행 후 count: `20`
+  - 기본 범위 전체 재동기화 실행
+    - range: `2025-10-17 ~ 2026-10-12`
+    - result: `matchedRows=2652`, `upsertedRows=2652`, `deletedRows=382`
+    - chunk log 예시: `2026-04-15~2026-05-14`에서 `replaced=379`
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `calendarRepository.ts`, `server.ts` `get_errors` 0 errors |
+| 빌드 | ✅ | backend `npm run build` 성공 |
+| 자동 테스트 | ✅ | backend vitest `15 files / 91 tests` pass |
+| 런타임 통합 | ✅ | one-day refresh(`2026-04-21`)로 `deletedRows`/count 변화 확인, default full refresh job 완료 확인 |
+
+- 상태
+  - FMP earnings update가 append 누적이 아니라 범위별 snapshot replace로 동작하도록 수정 완료, 사용자 확인 대기 (`awaiting user confirmation`)
+
+## 2026-04-15
+**작성 시각:** 2026-04-15 15:18 (local)
+
+### Calendar 기본 날짜 정렬을 늦은 날짜 우선으로 전환
+
+- 변경 파일
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+  - `ai_agent_plan/calendar_window_fmp_scope/plan.md`
+- 구현 내용
+  - `fetchCalendarEvents(...)`의 기본 sort parameter를 `event_time:desc`로 변경
+  - `CalendarWindow` 초기 `sortDirection`을 `desc`로 변경
+  - 탭 전환 시 기본 정렬을 `desc`로 유지하도록 수정
+  - Reset 실행 시 active tab에 맞는 date field를 유지하면서 기본 정렬을 `desc`로 복원하도록 수정
+  - frontend prompt 문서에 기본 날짜 정렬이 늦은 날짜 우선이라는 점을 반영
+- 런타임 확인
+  - 브라우저 reload 후 earnings 첫 row가 `2027-01-27 / DOW`로 표시됨을 확인
+  - 하단 summary는 `Showing 2643 of 2643 events`로 확인됨
+  - 따라서 더 늦은 earnings date가 화면 상단에 먼저 보이도록 변경이 반영됨
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `CalendarWindow.tsx` `get_errors` 0 errors |
+| 빌드 | ✅ | backend `npm run build`, frontend `npm run build` 성공 |
+| 자동 테스트 | ✅ | backend vitest `15 files / 91 tests` pass |
+| 런타임 통합 | ✅ | 브라우저 reload 후 earnings 첫 row `2027-01-27 / DOW` 확인 |
+
+- 상태
+  - calendar 기본 날짜 정렬 전환 완료, 사용자 확인 대기 (`awaiting user confirmation`)
+
+## 2026-04-15
+**작성 시각:** 2026-04-15 15:37 (local)
+
+### Calendar 초기 lazy load 적용 — 날짜 지정 전 events 미표시
+
+- 변경 파일
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+  - `ai_agent_plan/calendar_window_fmp_scope/plan.md`
+- 구현 내용
+  - `CalendarWindow`에 `hasRequiredDateRange = Boolean(dateFrom && dateTo)` gate 추가
+  - `from/to`가 둘 다 채워지기 전에는 `GET /api/calendar/events` fetch를 실행하지 않도록 수정
+  - 이 상태에서는 loading spinner 대신 `Select both start and end dates to load calendar events.` 안내 메시지를 렌더링
+  - footer도 `Select a start and end date to load events` 안내로 바뀌도록 수정
+  - Reset 후에도 다시 날짜 미지정 대기 상태로 돌아가도록 유지
+  - frontend prompt 문서와 plan 문서에 date-required lazy load 동작 반영
+- 런타임 확인
+  - 브라우저 reload 직후
+    - 안내 문구 표시 확인
+    - row count `0` 확인
+  - 같은 화면에서 `2026-04-15 ~ 2026-05-14` 입력 후
+    - browser row count `493` 확인
+    - 안내 문구 사라짐 확인
+  - 같은 범위의 live API도 `count=493`, 첫 날짜 `2026-05-14`로 확인
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `CalendarWindow.tsx` `get_errors` 0 errors |
+| 빌드 | ✅ | backend `npm run build`, frontend `npm run build` 성공 |
+| 자동 테스트 | ✅ | backend vitest `15 files / 91 tests` pass |
+| 런타임 통합 | ✅ | 브라우저 초기 무조회 상태 + 날짜 지정 후 row `493` 로드 확인 |
+
+- 상태
+  - 날짜 미지정 lazy load 적용 완료, 사용자 확인 대기 (`awaiting user confirmation`)

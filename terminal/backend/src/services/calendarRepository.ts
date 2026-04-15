@@ -150,6 +150,52 @@ export async function deleteMockCalendarRows(): Promise<number> {
   return result.changes ?? 0;
 }
 
+export async function deleteCalendarEventsForSourceRange(params: {
+  type: string;
+  source: string;
+  fromEventTime: string;
+  toEventTime: string;
+  tickers?: string[];
+}): Promise<number> {
+  const db = getDb();
+  const normalizedTickers = Array.from(new Set(
+    (params.tickers ?? [])
+      .map((ticker) => ticker.trim().toUpperCase())
+      .filter(Boolean),
+  ));
+
+  if (normalizedTickers.length === 0) {
+    const result = await db.run(
+      `DELETE FROM calendar_events
+       WHERE event_type = ?
+         AND source = ?
+         AND event_at >= ?
+         AND event_at <= ?`,
+      [params.type, params.source, params.fromEventTime, params.toEventTime],
+    );
+    return result.changes ?? 0;
+  }
+
+  let deletedRows = 0;
+  const batchSize = 400;
+  for (let index = 0; index < normalizedTickers.length; index += batchSize) {
+    const batch = normalizedTickers.slice(index, index + batchSize);
+    const placeholders = batch.map(() => "?").join(",");
+    const result = await db.run(
+      `DELETE FROM calendar_events
+       WHERE event_type = ?
+         AND source = ?
+         AND event_at >= ?
+         AND event_at <= ?
+         AND ticker IN (${placeholders})`,
+      [params.type, params.source, params.fromEventTime, params.toEventTime, ...batch],
+    );
+    deletedRows += result.changes ?? 0;
+  }
+
+  return deletedRows;
+}
+
 export async function listCalendarEvents(query: CalendarEventsQuery): Promise<{
   items: Array<Record<string, unknown>>;
   nextCursor?: string;

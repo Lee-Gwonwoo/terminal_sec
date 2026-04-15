@@ -13,7 +13,8 @@ import {
   getCalendarTypes,
   listCalendarEvents,
   upsertCalendarEvent,
-  deleteMockCalendarRows
+  deleteMockCalendarRows,
+  deleteCalendarEventsForSourceRange,
 } from "./services/calendarRepository.js";
 import { listAlertRules, upsertAlertRule } from "./services/alertsRepository.js";
 import { StreamHub } from "./realtime/streamHub.js";
@@ -3913,6 +3914,7 @@ app.post("/api/fmp/calendar/earnings/update", async (req, res, next) => {
         universeMap.set(normalized, ticker.toUpperCase());
       }
     }
+    const universeTickers = Array.from(new Set(universeMap.values()));
 
     const chunks = buildCalendarDateChunks(from, to, DEFAULT_FMP_CALENDAR_CHUNK_DAYS);
     const jobId = createJob(chunks.length, {
@@ -3928,6 +3930,7 @@ app.post("/api/fmp/calendar/earnings/update", async (req, res, next) => {
         let fetchedRows = 0;
         let matchedRows = 0;
         let upsertedRows = 0;
+        let deletedRows = 0;
         let skippedOutsideUniverse = 0;
         let skippedInvalidDate = 0;
 
@@ -3945,7 +3948,12 @@ app.post("/api/fmp/calendar/earnings/update", async (req, res, next) => {
           });
           fetchedRows += items.length;
 
-          let chunkMatchedRows = 0;
+          const chunkUpserts: Array<{
+            canonicalTicker: string;
+            reportDate: string;
+            confirmed: boolean;
+            item: Awaited<ReturnType<typeof fetchFmpEarningsCalendarChunk>>[number];
+          }> = [];
           let chunkSkippedOutsideUniverse = 0;
           let chunkSkippedInvalidDate = 0;
 
@@ -3965,35 +3973,69 @@ app.post("/api/fmp/calendar/earnings/update", async (req, res, next) => {
             }
 
             const confirmed = item.epsActual != null || item.revenueActual != null;
-            await upsertCalendarEvent({
-              type: "earnings",
-              eventTime: `${reportDate}T12:00:00.000Z`,
-              ticker: canonicalTicker,
-              title: `${canonicalTicker} earnings`,
-              fieldsJson: {
-                company_name: null,
-                report_date: reportDate,
-                time_of_day: null,
-                session: null,
-                confirmed,
-                eps_est: item.epsEstimated,
-                eps_actual: item.epsActual,
-                revenue_est: item.revenueEstimated,
-                revenue_actual: item.revenueActual,
-                surprise_pct: computeCalendarSurprisePct(item.epsActual, item.epsEstimated),
-                last_updated: item.lastUpdated,
-              },
-              source: "FMP",
-              uniqueKey: `FMP:earnings:${canonicalTicker}:${reportDate}`,
+            chunkUpserts.push({
+              canonicalTicker,
+              reportDate,
+              confirmed,
+              item,
             });
-            matchedRows++;
-            upsertedRows++;
-            chunkMatchedRows++;
           }
+
+          if (isJobCancelled(jobId)) {
+            appendLog(jobId, "🛑 Cancelled by user");
+            return;
+          }
+
+          const db = getDb();
+          const fromEventTime = `${chunk.from}T00:00:00.000Z`;
+          const toEventTime = `${chunk.to}T23:59:59.999Z`;
+          let chunkDeletedRows = 0;
+          await db.run("BEGIN IMMEDIATE");
+          try {
+            chunkDeletedRows = await deleteCalendarEventsForSourceRange({
+              type: "earnings",
+              source: "FMP",
+              fromEventTime,
+              toEventTime,
+              tickers: universeTickers,
+            });
+
+            for (const entry of chunkUpserts) {
+              await upsertCalendarEvent({
+                type: "earnings",
+                eventTime: `${entry.reportDate}T12:00:00.000Z`,
+                ticker: entry.canonicalTicker,
+                title: `${entry.canonicalTicker} earnings`,
+                fieldsJson: {
+                  company_name: null,
+                  report_date: entry.reportDate,
+                  time_of_day: null,
+                  session: null,
+                  confirmed: entry.confirmed,
+                  eps_est: entry.item.epsEstimated,
+                  eps_actual: entry.item.epsActual,
+                  revenue_est: entry.item.revenueEstimated,
+                  revenue_actual: entry.item.revenueActual,
+                  surprise_pct: computeCalendarSurprisePct(entry.item.epsActual, entry.item.epsEstimated),
+                  last_updated: entry.item.lastUpdated,
+                },
+                source: "FMP",
+                uniqueKey: `FMP:earnings:${entry.canonicalTicker}:${entry.reportDate}`,
+              });
+            }
+            await db.run("COMMIT");
+          } catch (error) {
+            await db.run("ROLLBACK");
+            throw error;
+          }
+
+          matchedRows += chunkUpserts.length;
+          upsertedRows += chunkUpserts.length;
+          deletedRows += chunkDeletedRows;
 
           appendLog(
             jobId,
-            `[chunk ${index + 1}/${chunks.length}] ${chunk.from}~${chunk.to}: fetched=${items.length}, matched=${chunkMatchedRows}, outsideUniverse=${chunkSkippedOutsideUniverse}, invalidDate=${chunkSkippedInvalidDate}`,
+            `[chunk ${index + 1}/${chunks.length}] ${chunk.from}~${chunk.to}: fetched=${items.length}, matched=${chunkUpserts.length}, replaced=${chunkDeletedRows}, outsideUniverse=${chunkSkippedOutsideUniverse}, invalidDate=${chunkSkippedInvalidDate}`,
           );
           updateProgress(jobId, index + 1, chunks.length);
         }
@@ -4006,6 +4048,7 @@ app.post("/api/fmp/calendar/earnings/update", async (req, res, next) => {
           fetchedRows,
           matchedRows,
           upsertedRows,
+          deletedRows,
           skippedOutsideUniverse,
           skippedInvalidDate,
         });
@@ -4020,6 +4063,7 @@ app.post("/api/fmp/calendar/earnings/update", async (req, res, next) => {
           fetchedRows,
           matchedRows,
           upsertedRows,
+          deletedRows,
           skippedOutsideUniverse,
           skippedInvalidDate,
         });
