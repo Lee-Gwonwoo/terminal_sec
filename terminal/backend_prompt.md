@@ -498,6 +498,7 @@ SEC filing companion table.
 - `GET /api/calendar/events`
 - `GET /api/calendar/events/export.csv`
 - `GET /api/calendar/events/:id`
+- `POST /api/fmp/calendar/earnings/update`
 - `POST /api/ibkr/calendar/update`
 - `POST /api/ibkr/calendar/update-custom/preflight`
 - `POST /api/ibkr/calendar/update-custom`
@@ -1093,7 +1094,8 @@ Control Window / localStorage 공통 설정:
 - `CaseResearchWindow`는 `/api/research/*` 전체를 사용해 섹션/페이지 CRUD, reorder, 검색, 자동 저장을 수행한다.
 - `EvidenceTableWindow`는 `GET /api/model2/analyses`, `GET /api/model2/analyses/:analysisId/cases`, `GET /api/model2/analyses/:analysisId/evidence`를 사용한다.
 - `CaseDescriptionWindow`는 backend 호출 없이 `EvidenceTableWindow`가 보낸 case metadata를 같은 탭 안의 보조 창으로 렌더링한다.
-- 현재 `WatchlistWindow`, `CalendarWindow`는 백엔드 API를 직접 사용하지 않는다.
+- `CalendarWindow`는 `GET /api/calendar/types`, `GET /api/calendar/events`, `POST /api/fmp/calendar/earnings/update`, `GET /api/jobs/:jobId`를 사용한다.
+- 현재 `WatchlistWindow`만 backend API와 직접 연결되어 있지 않다.
 
 ## Case Research API
 
@@ -2242,6 +2244,23 @@ query:
 - `cursor`
 - `limit`
 
+동작 주의:
+
+- `from`, `to`에 `YYYY-MM-DD`를 주면 backend가 각각 `00:00:00.000Z`, `23:59:59.999Z`로 정규화한다.
+- 따라서 같은 날짜를 From/To에 넣어도 그 날짜의 event가 빠지지 않는다.
+- earnings row는 `calendar_events.meta_json` 외에도 DB company metadata를 enrich해서 내려준다.
+  - `[][][]name[][][]`
+  - `[][][]industry[][][]`
+  - `[][][]market_cap[][][]`
+  - `[][][]float_pct[][][]`
+  - `[][][]institutional_pct[][][]`
+  - `[][][]insider_pct[][][]`
+  - source 컬럼: `[][][]market_cap_source[][][]`, `[][][]float_source[][][]`, `[][][]institutional_source[][][]`, `[][][]insider_source[][][]`
+
+FMP earnings row 주의:
+
+- stable earnings source는 신뢰 가능한 `time/session`을 제공하지 않으므로, 현재 `[][][]time_of_day[][][]`, `[][][]session[][][]`은 `null`일 수 있다.
+
 ### `GET /api/calendar/events/export.csv`
 
 위와 같은 필터로 CSV export를 만든다.
@@ -2324,6 +2343,48 @@ UI 위치:
 
 - `POST /api/ibkr/calendar/update`와 동일하게 synchronous response다.
 - 따라서 다른 background job처럼 View Log dropdown에서 선택하는 대상이 아니다.
+
+### `POST /api/fmp/calendar/earnings/update`
+
+FMP stable earnings-calendar를 market-wide로 조회한 뒤, DB `default universe` ticker와 일치하는 row만 `calendar_events`에 upsert 하는 background job이다.
+
+요청 body:
+
+```json
+{ "from": "2026-04-01", "to": "2026-04-30" }
+```
+
+- `from`, `to`는 선택 사항이다.
+- 생략하면 backend 기본 윈도우(`오늘 -180일` ~ `오늘 +180일`)를 사용한다.
+
+동작:
+
+1. body `from/to`를 읽고 `YYYY-MM-DD` 형식을 검증한다.
+2. `getDefaultUniverseTickers()`로 대상 ticker를 읽는다.
+3. stable `/earnings-calendar`를 chunk 단위로 호출한다.
+4. market-wide 결과 중 default universe ticker와 일치하는 row만 남긴다.
+5. `type='earnings'`, `source='FMP'`, `unique_key='FMP:earnings:TICKER:DATE'`로 upsert 한다.
+6. `update_status.fmp_calendar_earnings`를 갱신한다.
+7. 응답은 `jobId`를 반환하고, 진행 상황은 `GET /api/jobs/:jobId`로 polling 한다.
+
+응답 컬럼:
+
+- `[][][]jobId[][][]`
+- `[][][]requestedRange[][][]`
+
+job 완료 result 컬럼:
+
+- `[][][]source[][][]`
+- `[][][]type[][][]`
+- `[][][]from[][][]`
+- `[][][]to[][][]`
+- `[][][]defaultUniverseTickers[][][]`
+- `[][][]chunks[][][]`
+- `[][][]fetchedRows[][][]`
+- `[][][]matchedRows[][][]`
+- `[][][]upsertedRows[][][]`
+- `[][][]skippedOutsideUniverse[][][]`
+- `[][][]skippedInvalidDate[][][]`
 
 ## OHLC API
 

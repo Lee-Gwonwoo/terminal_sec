@@ -1001,11 +1001,18 @@ API:
 
 현재 상태:
 
-- mock data only
-- API 연동 없음
-- earnings / conference / dividend / analyst_rating 탭 UI는 존재
+- backend API 연동 있음
+- `GET /api/calendar/types`로 탭 목록을 읽는다.
+- `GET /api/calendar/events`로 현재 탭 + 날짜 범위 데이터를 읽는다.
+- earnings 탭에서 `POST /api/fmp/calendar/earnings/update`를 실행하고 `GET /api/jobs/:jobId`로 polling 한다.
+- industry / ownership(`float_pct`, `institutional_pct`, `insider_pct`)는 column selector에서 켜고 끌 수 있다.
 
-즉 backend의 `calendar_events` API와 아직 연결된 화면이 아니다.
+현재 구현 요약:
+
+- date range는 HTML date input이며, 값이 있으면 API query `from/to`로 바로 전달된다.
+- search는 client-side로 `ticker`, `company`, `title`, `industry`, `source`를 대상으로 동작한다.
+- earnings stable source에는 reliable time/session이 없으므로, 관련 column 값은 비어 있을 수 있다.
+- update 버튼은 현재 date filter가 있으면 그 범위를 body에 같이 보낸다.
 
 ## Case Description Window
 
@@ -1242,7 +1249,8 @@ API:
 - default ticker의 market cap / float / institutional / insider 값은 프론트 local state가 아니라 backend `company_profiles` 기반이다.
 - source badge는 프론트에서 계산하지 않고 backend가 내려주는 `marketCapSource`, `floatSource`, `institutionalSource`, `insiderSource` 값을 그대로 사용한다.
 - case research의 섹션/페이지 데이터는 localStorage가 아니라 backend DB에 저장된다.
-- 단, calendar update는 프론트는 job처럼 다루지만 backend는 아직 동기 응답형이다.
+- `CalendarWindow`의 FMP earnings update는 backend job + polling 계약으로 동작한다.
+- 단, `DataControlWindow`의 IBKR calendar update 섹션은 여전히 backend 동기 응답형 endpoint를 사용한다.
 - saved search, watchlist menu 선택값 등 일부 UI 상태는 메모리 state만 사용하고 영속 저장되지 않는다.
 - News Feed의 Changes % 영역에서 기본 날짜 개념은 `ohlc_date = change_pct 기준일`이다. forward 날짜가 필요하면 `change_1d_target_date`를 별도로 봐야 한다.
 
@@ -1260,7 +1268,7 @@ API:
 - `src/app/components/NewsWindow.tsx`: EODHD 기반 부분 구현 창
 - `src/app/components/CaseResearchWindow.tsx`: 연구 노트 창
 - `src/app/components/WatchlistWindow.tsx`: mock watchlist 창
-- `src/app/components/CalendarWindow.tsx`: mock calendar 창
+- `src/app/components/CalendarWindow.tsx`: API 기반 calendar 창
 - `src/app/components/BraveNewsWindow.tsx`: 미연결 잔존 파일
 - `vite.config.ts`: `/api`, `/healthz` proxy 설정
 
@@ -1268,7 +1276,8 @@ API:
 
 - active window 중 backend와 완전히 맞물려 있는 것은 `Finnhub News`, `Default Ticker`, `Data Control`, `AI Research Window`, `Evidence Table` 중심이다.
 - `NewsWindow`는 일부 backend를 사용하지만 현재 운영 기준의 주력 뉴스 창은 아니다.
-- `CalendarWindow`와 `WatchlistWindow`는 UI만 있고 운영 데이터와 연결되어 있지 않다.
+- `CalendarWindow`는 backend `calendar_events` + FMP earnings update job과 연결되어 있다.
+- `WatchlistWindow`는 여전히 UI만 있고 운영 데이터와 연결되어 있지 않다.
 - `keywords`는 backend 응답으로 내려오고 `DEFAULT_COLUMNS`에 포함되어 있으며 컬럼 매뉴에서 표시/숨김 가능하다. 단 기본 숨김 상태다.
 - `DataControlWindow`의 calendar 섹션은 backend가 `jobId`를 돌려준다고 가정하는 UI지만, 실제 backend는 현재 즉시 결과 응답형이다.
 - `BraveNewsWindow`는 사실상 보관 파일에 가깝다. 새 작업은 여기에 붙이지 않는 편이 안전하다.

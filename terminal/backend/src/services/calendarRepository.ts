@@ -8,27 +8,35 @@ export const CALENDAR_TYPE_CONFIG = [
     supports: ["time_of_day"],
     columns: [
       "ticker",
+      "name",
       "company_name",
+      "industry",
       "report_date",
       "time_of_day",
+      "session",
+      "confirmed",
       "eps_est",
       "eps_actual",
       "revenue_est",
       "revenue_actual",
-      "surprise_pct"
+      "surprise_pct",
+      "market_cap",
+      "float_pct",
+      "institutional_pct",
+      "insider_pct"
     ]
   },
   {
     key: "dividends",
     label: "Dividends",
     supports: [],
-    columns: ["ticker", "ex_date", "pay_date", "amount", "yield"]
+    columns: ["ticker", "name", "industry", "ex_date", "pay_date", "amount", "yield", "market_cap"]
   },
   {
     key: "splits",
     label: "Splits",
     supports: [],
-    columns: ["ticker", "split_date", "ratio"]
+    columns: ["ticker", "name", "industry", "split_date", "ratio", "market_cap"]
   },
   {
     key: "analyst_ratings",
@@ -80,6 +88,22 @@ type CalendarDbRow = {
   source: string;
   unique_key: string;
   created_at: string;
+};
+
+type CalendarTickerMetadataRow = {
+  ticker: string;
+  exchange: string | null;
+  name: string | null;
+  sector: string | null;
+  industry: string | null;
+  market_cap: number | null;
+  float_pct: number | null;
+  institutional_pct: number | null;
+  insider_pct: number | null;
+  market_cap_source: string | null;
+  float_source: string | null;
+  institutional_source: string | null;
+  insider_source: string | null;
 };
 
 export function getCalendarTypes() {
@@ -186,7 +210,7 @@ export async function listCalendarEvents(query: CalendarEventsQuery): Promise<{
   `;
 
   const rows = await getDb().all<CalendarDbRow[]>(sql, values);
-  const mapped = rows.map((row) => mapCalendarRow(row));
+  const mapped = await mapCalendarRows(rows);
   const hasMore = mapped.length > limit;
   const items = hasMore ? mapped.slice(0, limit) : mapped;
   const nextCursor = hasMore ? encodeCursor(items[items.length - 1] as any) : undefined;
@@ -199,7 +223,11 @@ export async function getCalendarEventById(id: string): Promise<Record<string, u
      FROM calendar_events WHERE id = ?`,
     [id]
   );
-  return row ? mapCalendarRow(row) : null;
+  if (!row) {
+    return null;
+  }
+  const mapped = await mapCalendarRows([row]);
+  return mapped[0] ?? null;
 }
 
 export async function exportCalendarEventsCsv(query: CalendarEventsQuery): Promise<string> {
@@ -218,20 +246,214 @@ export async function exportCalendarEventsCsv(query: CalendarEventsQuery): Promi
   return [headers.join(","), ...rows].join("\n");
 }
 
-function mapCalendarRow(row: CalendarDbRow): Record<string, unknown> {
-  const fieldsJson = JSON.parse(row.meta_json) as Record<string, unknown>;
+async function mapCalendarRows(rows: CalendarDbRow[]): Promise<Array<Record<string, unknown>>> {
+  const tickers = Array.from(new Set(
+    rows
+      .map((row) => row.ticker?.toUpperCase() ?? "")
+      .filter((ticker): ticker is string => Boolean(ticker))
+  ));
+  const metadataMap = await getCalendarTickerMetadataMap(tickers);
+  return rows.map((row) => mapCalendarRow(row, metadataMap.get(row.ticker?.toUpperCase() ?? "")));
+}
+
+function mapCalendarRow(
+  row: CalendarDbRow,
+  metadata?: CalendarTickerMetadataRow,
+): Record<string, unknown> {
+  const fieldsJson = parseFieldsJson(row.meta_json);
+  const eventDate = getEventDate(row.event_at);
+  const companyName = getStringField(fieldsJson.company_name) ?? metadata?.name ?? null;
+  const epsEstimated = getNumberField(fieldsJson.eps_est);
+  const epsActual = getNumberField(fieldsJson.eps_actual);
+  const revenueEstimated = getNumberField(fieldsJson.revenue_est);
+  const revenueActual = getNumberField(fieldsJson.revenue_actual);
+  const timeOfDay = getStringField(fieldsJson.time_of_day);
+  const surprisePct = getNumberField(fieldsJson.surprise_pct) ?? computeSurprisePct(epsActual, epsEstimated);
+  const confirmed = getBooleanField(fieldsJson.confirmed) ?? (epsActual != null || revenueActual != null);
+  const session = getStringField(fieldsJson.session) ?? deriveSession(timeOfDay);
+
   return {
     id: row.id,
     type: row.event_type,
     event_time: row.event_at,
-    ticker: row.ticker,
+    event_date: eventDate,
+    ticker: row.ticker || null,
     title: row.title,
     source: row.source,
     unique_key: row.unique_key,
     fields_json: fieldsJson,
     created_at: row.created_at,
-    ...fieldsJson
+    ...fieldsJson,
+    report_date: getStringField(fieldsJson.report_date) ?? eventDate,
+    company_name: companyName,
+    name: metadata?.name ?? companyName ?? (row.ticker || null),
+    exchange: metadata?.exchange ?? null,
+    sector: metadata?.sector ?? null,
+    industry: metadata?.industry ?? null,
+    market_cap: metadata?.market_cap ?? null,
+    float_pct: metadata?.float_pct ?? null,
+    institutional_pct: metadata?.institutional_pct ?? null,
+    insider_pct: metadata?.insider_pct ?? null,
+    market_cap_source: metadata?.market_cap_source ?? null,
+    float_source: metadata?.float_source ?? null,
+    institutional_source: metadata?.institutional_source ?? null,
+    insider_source: metadata?.insider_source ?? null,
+    time_of_day: timeOfDay,
+    session,
+    confirmed,
+    eps_est: epsEstimated,
+    eps_actual: epsActual,
+    revenue_est: revenueEstimated,
+    revenue_actual: revenueActual,
+    surprise_pct: surprisePct,
   };
+}
+
+async function getCalendarTickerMetadataMap(
+  tickers: string[],
+): Promise<Map<string, CalendarTickerMetadataRow>> {
+  if (tickers.length === 0) {
+    return new Map();
+  }
+  const placeholders = tickers.map(() => "?").join(",");
+  const rows = await getDb().all<CalendarTickerMetadataRow[]>(
+    `SELECT s.ticker,
+            s.exchange,
+            s.name,
+            s.sector,
+            s.industry,
+            (
+              SELECT cp.market_cap
+              FROM company_profiles cp
+              WHERE cp.security_id = s.id AND cp.market_cap IS NOT NULL
+              ORDER BY cp.fetched_at DESC, cp.id DESC
+              LIMIT 1
+            ) AS market_cap,
+            (
+              SELECT cp.float_pct
+              FROM company_profiles cp
+              WHERE cp.security_id = s.id AND cp.float_pct IS NOT NULL
+              ORDER BY cp.fetched_at DESC, cp.id DESC
+              LIMIT 1
+            ) AS float_pct,
+            (
+              SELECT cp.institutional_pct
+              FROM company_profiles cp
+              WHERE cp.security_id = s.id AND cp.institutional_pct IS NOT NULL AND cp.institutional_source = 'yahoo'
+              ORDER BY cp.fetched_at DESC, cp.id DESC
+              LIMIT 1
+            ) AS institutional_pct,
+            (
+              SELECT cp.insider_pct
+              FROM company_profiles cp
+              WHERE cp.security_id = s.id AND cp.insider_pct IS NOT NULL
+              ORDER BY cp.fetched_at DESC, cp.id DESC
+              LIMIT 1
+            ) AS insider_pct,
+            (
+              SELECT cp.market_cap_source
+              FROM company_profiles cp
+              WHERE cp.security_id = s.id AND cp.market_cap IS NOT NULL
+              ORDER BY cp.fetched_at DESC, cp.id DESC
+              LIMIT 1
+            ) AS market_cap_source,
+            (
+              SELECT cp.float_source
+              FROM company_profiles cp
+              WHERE cp.security_id = s.id AND cp.float_pct IS NOT NULL
+              ORDER BY cp.fetched_at DESC, cp.id DESC
+              LIMIT 1
+            ) AS float_source,
+            (
+              SELECT cp.institutional_source
+              FROM company_profiles cp
+              WHERE cp.security_id = s.id AND cp.institutional_pct IS NOT NULL AND cp.institutional_source = 'yahoo'
+              ORDER BY cp.fetched_at DESC, cp.id DESC
+              LIMIT 1
+            ) AS institutional_source,
+            (
+              SELECT cp.insider_source
+              FROM company_profiles cp
+              WHERE cp.security_id = s.id AND cp.insider_pct IS NOT NULL
+              ORDER BY cp.fetched_at DESC, cp.id DESC
+              LIMIT 1
+            ) AS insider_source
+       FROM securities s
+       WHERE s.ticker IN (${placeholders})`,
+    tickers,
+  );
+
+  return new Map(rows.map((row) => [row.ticker.toUpperCase(), row]));
+}
+
+function parseFieldsJson(raw: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function getEventDate(eventAt: string): string | null {
+  return /^\d{4}-\d{2}-\d{2}/.test(eventAt) ? eventAt.slice(0, 10) : null;
+}
+
+function getStringField(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function getNumberField(value: unknown): number | null {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value.replaceAll(",", "").trim());
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function getBooleanField(value: unknown): boolean | null {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+  if (typeof value === "string") {
+    if (value === "true" || value === "1") {
+      return true;
+    }
+    if (value === "false" || value === "0") {
+      return false;
+    }
+  }
+  return null;
+}
+
+function computeSurprisePct(actual: number | null, estimated: number | null): number | null {
+  if (actual == null || estimated == null || estimated === 0) {
+    return null;
+  }
+  return ((actual - estimated) / Math.abs(estimated)) * 100;
+}
+
+function deriveSession(timeOfDay: string | null): string | null {
+  if (timeOfDay === "BMO") {
+    return "pre-market";
+  }
+  if (timeOfDay === "AMC") {
+    return "after-market";
+  }
+  if (timeOfDay === "Unknown") {
+    return "unknown";
+  }
+  return null;
 }
 
 function buildSortExpression(sortBy: string): string {

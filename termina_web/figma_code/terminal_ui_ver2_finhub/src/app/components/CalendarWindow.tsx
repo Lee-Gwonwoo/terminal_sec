@@ -1,141 +1,391 @@
-import React, { useState, useMemo, useRef } from 'react';
-import { 
-  Search, 
-  ChevronDown, 
-  ChevronUp, 
+import React, { useEffect, useMemo, useState } from 'react';
+import {
   Calendar as CalendarIcon,
+  ChevronDown,
+  ChevronUp,
+  Eye,
+  RefreshCw,
+  Search,
   Settings2,
   X,
-  GripVertical
 } from 'lucide-react';
-import DatePicker from 'react-datepicker';
-import { mockCalendarData } from '../mockData';
-import { CalendarEvent } from '../types';
 import { getCompanyTickerDataAttrs } from '../companyDescription';
 
 interface CalendarWindowProps {
   onTickerClick?: (ticker: string) => void;
 }
 
+const API_BASE = '';
+
 type SortDirection = 'asc' | 'desc' | null;
-type SortField = keyof CalendarEvent | null;
-type CalendarType = 'earnings' | 'conference' | 'dividend' | 'analyst_rating';
+
+interface CalendarTypeConfig {
+  key: string;
+  label: string;
+  supports: string[];
+  columns: string[];
+}
+
+interface CalendarRow {
+  id: string;
+  type: string;
+  event_time: string;
+  event_date?: string | null;
+  ticker?: string | null;
+  title?: string | null;
+  source?: string | null;
+  unique_key?: string | null;
+  name?: string | null;
+  company_name?: string | null;
+  exchange?: string | null;
+  sector?: string | null;
+  industry?: string | null;
+  report_date?: string | null;
+  time_of_day?: string | null;
+  session?: string | null;
+  confirmed?: boolean | null;
+  eps_est?: number | null;
+  eps_actual?: number | null;
+  revenue_est?: number | null;
+  revenue_actual?: number | null;
+  surprise_pct?: number | null;
+  market_cap?: number | null;
+  float_pct?: number | null;
+  institutional_pct?: number | null;
+  insider_pct?: number | null;
+  ex_date?: string | null;
+  pay_date?: string | null;
+  amount?: number | null;
+  yield?: number | null;
+  split_date?: string | null;
+  ratio?: string | number | null;
+  numerator?: number | null;
+  denominator?: number | null;
+  [key: string]: unknown;
+}
+
+interface CalendarResponse {
+  items: CalendarRow[];
+  nextCursor?: string;
+}
+
+interface JobStatus {
+  status: 'running' | 'done' | 'failed' | 'cancelled';
+  progress: { completed: number; total: number; pct: number };
+  logs: string[];
+  error?: string;
+  result?: Record<string, unknown>;
+}
 
 interface ColumnConfig {
-  key: keyof CalendarEvent;
+  key: string;
   label: string;
   visible: boolean;
   width: string;
+  align?: 'left' | 'center' | 'right';
 }
 
-// Define columns for each calendar type
-// NOTE: 'date' = Date Announcement (회사가 실제로 earnings 발표를 하는 날짜)
-// NOTE: 'time' = Time of Announcement (회사가 earnings 발표를 하는 시각)
-// NOTE: 'session' = Market Session (pre-market: 장전, market-hours: 정규장, after-market: 장후)
-const earningsColumns: ColumnConfig[] = [
-  { key: 'date', label: 'Date Announcement', visible: true, width: '130px' },
-  { key: 'time', label: 'Time', visible: true, width: '80px' },
-  { key: 'ticker', label: 'Symbol', visible: true, width: '80px' },
-  { key: 'name', label: 'Name', visible: false, width: '150px' },  // Hidden by default
-  { key: 'event', label: 'Event', visible: false, width: '200px' },  // Hidden by default
-  { key: 'session', label: 'Session', visible: true, width: '110px' },
-  { key: 'period', label: 'Period', visible: true, width: '80px' },
-  { key: 'confirmed', label: 'Confirmed', visible: true, width: '90px' },
-  { key: 'eps', label: 'EPS', visible: true, width: '80px' },
-  { key: 'estimatedEps', label: 'Est. EPS', visible: true, width: '90px' },
-  { key: 'surprisePercent', label: 'Surprise %', visible: true, width: '100px' },
-  { key: 'revenue', label: 'Revenue', visible: true, width: '110px' },
-  { key: 'estimatedRevenue', label: 'Est. Revenue', visible: true, width: '120px' },
+const FALLBACK_TYPES: CalendarTypeConfig[] = [
+  { key: 'earnings', label: 'Earnings', supports: [], columns: ['report_date', 'ticker', 'name', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual', 'industry', 'float_pct', 'institutional_pct', 'insider_pct', 'session', 'source'] },
+  { key: 'dividends', label: 'Dividends', supports: [], columns: ['ex_date', 'ticker', 'name', 'amount', 'yield', 'pay_date', 'industry', 'market_cap', 'source'] },
+  { key: 'splits', label: 'Splits', supports: [], columns: ['split_date', 'ticker', 'name', 'ratio', 'industry', 'market_cap', 'source'] },
+  { key: 'analyst_ratings', label: 'Analyst Ratings', supports: [], columns: ['ticker', 'title', 'source'] },
+  { key: 'sec_filings', label: 'SEC Filings', supports: [], columns: ['event_date', 'ticker', 'title', 'source'] },
+  { key: 'economics', label: 'Economics', supports: [], columns: ['event_date', 'title', 'source'] },
 ];
 
-const conferenceColumns: ColumnConfig[] = [
-  { key: 'date', label: 'Date Announcement', visible: true, width: '130px' },
-  { key: 'time', label: 'Time', visible: true, width: '80px' },
-  { key: 'ticker', label: 'Symbol', visible: true, width: '80px' },
-  { key: 'name', label: 'Name', visible: false, width: '150px' },  // Hidden by default
-  { key: 'event', label: 'Event', visible: false, width: '250px' },  // Hidden by default
-  { key: 'session', label: 'Session', visible: true, width: '110px' },
-  { key: 'confirmed', label: 'Confirmed', visible: true, width: '90px' },
-];
+const TYPE_COLUMN_ORDER: Record<string, string[]> = {
+  earnings: ['report_date', 'ticker', 'name', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual', 'industry', 'float_pct', 'institutional_pct', 'insider_pct', 'session', 'source'],
+  dividends: ['ex_date', 'ticker', 'name', 'amount', 'yield', 'pay_date', 'industry', 'market_cap', 'source'],
+  splits: ['split_date', 'ticker', 'name', 'ratio', 'industry', 'market_cap', 'source'],
+};
 
-const dividendColumns: ColumnConfig[] = [
-  { key: 'date', label: 'Date Announcement', visible: true, width: '130px' },
-  { key: 'time', label: 'Time', visible: true, width: '80px' },
-  { key: 'ticker', label: 'Symbol', visible: true, width: '80px' },
-  { key: 'name', label: 'Name', visible: false, width: '150px' },  // Hidden by default
-  { key: 'event', label: 'Event', visible: false, width: '250px' },  // Hidden by default
-  { key: 'session', label: 'Session', visible: true, width: '110px' },
-  { key: 'confirmed', label: 'Confirmed', visible: true, width: '90px' },
-];
+const VISIBLE_COLUMNS_BY_TYPE: Record<string, string[]> = {
+  earnings: ['report_date', 'ticker', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual'],
+  dividends: ['ex_date', 'ticker', 'amount', 'yield', 'pay_date'],
+  splits: ['split_date', 'ticker', 'ratio'],
+  analyst_ratings: ['event_date', 'ticker', 'title'],
+  sec_filings: ['event_date', 'ticker', 'title'],
+  economics: ['event_date', 'title', 'source'],
+};
 
-const analystRatingColumns: ColumnConfig[] = [
-  { key: 'date', label: 'Date Announcement', visible: true, width: '130px' },
-  { key: 'time', label: 'Time', visible: true, width: '80px' },
-  { key: 'ticker', label: 'Symbol', visible: true, width: '80px' },
-  { key: 'name', label: 'Name', visible: false, width: '150px' },  // Hidden by default
-  { key: 'event', label: 'Event', visible: false, width: '180px' },  // Hidden by default
-  { key: 'analystFirm', label: 'Analyst Firm', visible: true, width: '130px' },
-  { key: 'analystName', label: 'Analyst Name', visible: true, width: '130px' },
-  { key: 'action', label: 'Action', visible: true, width: '110px' },
-  { key: 'priorRating', label: 'Prior Rating', visible: true, width: '110px' },
-  { key: 'rating', label: 'Rating', visible: true, width: '100px' },
-  { key: 'priorPriceTarget', label: 'Prior PT', visible: true, width: '100px' },
-  { key: 'priceTarget', label: 'Price Target', visible: true, width: '110px' },
-  { key: 'confirmed', label: 'Confirmed', visible: true, width: '90px' },
-];
+const COLUMN_DEFINITIONS: Record<string, Omit<ColumnConfig, 'visible'>> = {
+  event_date: { key: 'event_date', label: 'Date', width: '110px' },
+  report_date: { key: 'report_date', label: 'Date', width: '110px' },
+  ex_date: { key: 'ex_date', label: 'Ex Date', width: '110px' },
+  pay_date: { key: 'pay_date', label: 'Pay Date', width: '110px' },
+  split_date: { key: 'split_date', label: 'Split Date', width: '110px' },
+  ticker: { key: 'ticker', label: 'Symbol', width: '90px' },
+  name: { key: 'name', label: 'Name', width: '180px' },
+  company_name: { key: 'company_name', label: 'Company', width: '180px' },
+  title: { key: 'title', label: 'Title', width: '240px' },
+  source: { key: 'source', label: 'Source', width: '100px' },
+  industry: { key: 'industry', label: 'Industry', width: '180px' },
+  exchange: { key: 'exchange', label: 'Exchange', width: '110px' },
+  sector: { key: 'sector', label: 'Sector', width: '140px' },
+  session: { key: 'session', label: 'Session', width: '110px' },
+  confirmed: { key: 'confirmed', label: 'Confirmed', width: '100px', align: 'center' },
+  eps_est: { key: 'eps_est', label: 'Est. EPS', width: '100px', align: 'right' },
+  eps_actual: { key: 'eps_actual', label: 'EPS', width: '90px', align: 'right' },
+  revenue_est: { key: 'revenue_est', label: 'Est. Revenue', width: '130px', align: 'right' },
+  revenue_actual: { key: 'revenue_actual', label: 'Revenue', width: '130px', align: 'right' },
+  surprise_pct: { key: 'surprise_pct', label: 'Surprise %', width: '110px', align: 'right' },
+  market_cap: { key: 'market_cap', label: 'Market Cap', width: '130px', align: 'right' },
+  float_pct: { key: 'float_pct', label: 'Float %', width: '90px', align: 'right' },
+  institutional_pct: { key: 'institutional_pct', label: 'Inst %', width: '90px', align: 'right' },
+  insider_pct: { key: 'insider_pct', label: 'Insider %', width: '90px', align: 'right' },
+  amount: { key: 'amount', label: 'Amount', width: '100px', align: 'right' },
+  yield: { key: 'yield', label: 'Yield', width: '90px', align: 'right' },
+  ratio: { key: 'ratio', label: 'Ratio', width: '100px' },
+};
+
+function humanizeKey(key: string): string {
+  return key
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function buildColumns(type: string, backendColumns: string[]): ColumnConfig[] {
+  const ordered = Array.from(new Set([
+    ...(TYPE_COLUMN_ORDER[type] ?? []),
+    ...backendColumns,
+    'source',
+  ]));
+
+  return ordered.map((key) => {
+    const definition = COLUMN_DEFINITIONS[key] ?? { key, label: humanizeKey(key), width: '140px' };
+    return {
+      ...definition,
+      visible: (VISIBLE_COLUMNS_BY_TYPE[type] ?? []).includes(key),
+    };
+  });
+}
+
+function mergeColumns(existing: ColumnConfig[] | undefined, next: ColumnConfig[]): ColumnConfig[] {
+  if (!existing || existing.length === 0) {
+    return next;
+  }
+  const nextByKey = new Map(next.map((column) => [column.key, column]));
+  const preserved = existing
+    .filter((column) => nextByKey.has(column.key))
+    .map((column) => ({
+      ...nextByKey.get(column.key)!,
+      visible: column.visible,
+      width: column.width,
+    }));
+  const preservedKeys = new Set(preserved.map((column) => column.key));
+  const appended = next.filter((column) => !preservedKeys.has(column.key));
+  return [...preserved, ...appended];
+}
+
+function formatCompactCurrency(value: number): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    notation: 'compact',
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value);
+}
+
+function formatPercent(value: number): string {
+  return `${value.toFixed(2)}%`;
+}
+
+function formatDateValue(value: unknown): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    return '-';
+  }
+  return value.slice(0, 10);
+}
+
+function getRatioValue(row: CalendarRow): string {
+  if (typeof row.ratio === 'string' && row.ratio.trim()) {
+    return row.ratio;
+  }
+  if (typeof row.ratio === 'number' && Number.isFinite(row.ratio)) {
+    return String(row.ratio);
+  }
+  if (typeof row.numerator === 'number' && typeof row.denominator === 'number') {
+    return `${row.numerator}:${row.denominator}`;
+  }
+  return '-';
+}
+
+async function fetchCalendarEvents(type: string, from: string, to: string): Promise<CalendarRow[]> {
+  const allItems: CalendarRow[] = [];
+  let cursor: string | undefined;
+
+  for (let page = 0; page < 10; page++) {
+    const params = new URLSearchParams({
+      type,
+      sort: 'event_time:asc',
+      limit: '500',
+    });
+    if (from) {
+      params.set('from', from);
+    }
+    if (to) {
+      params.set('to', to);
+    }
+    if (cursor) {
+      params.set('cursor', cursor);
+    }
+
+    const response = await fetch(`${API_BASE}/api/calendar/events?${params.toString()}`);
+    if (!response.ok) {
+      throw new Error(`Calendar fetch failed: HTTP ${response.status}`);
+    }
+
+    const data = await response.json() as CalendarResponse;
+    allItems.push(...data.items);
+    if (!data.nextCursor) {
+      break;
+    }
+    cursor = data.nextCursor;
+  }
+
+  return allItems;
+}
 
 export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
-  const [events] = useState<CalendarEvent[]>(mockCalendarData);
-  const [activeTab, setActiveTab] = useState<CalendarType>('earnings');
+  const [typeConfigs, setTypeConfigs] = useState<CalendarTypeConfig[]>(FALLBACK_TYPES);
+  const [events, setEvents] = useState<CalendarRow[]>([]);
+  const [activeType, setActiveType] = useState('earnings');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [dateFrom, setDateFrom] = useState<Date | null>(null);
-  const [dateTo, setDateTo] = useState<Date | null>(null);
-  const [sortField, setSortField] = useState<SortField>('date');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [sortField, setSortField] = useState<string | null>('report_date');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
-  
-  // Separate column states for each tab
-  const [earningsColumnState, setEarningsColumnState] = useState<ColumnConfig[]>(earningsColumns);
-  const [conferenceColumnState, setConferenceColumnState] = useState<ColumnConfig[]>(conferenceColumns);
-  const [dividendColumnState, setDividendColumnState] = useState<ColumnConfig[]>(dividendColumns);
-  const [analystRatingColumnState, setAnalystRatingColumnState] = useState<ColumnConfig[]>(analystRatingColumns);
-  
+  const [columnStates, setColumnStates] = useState<Record<string, ColumnConfig[]>>(() =>
+    Object.fromEntries(FALLBACK_TYPES.map((typeConfig) => [typeConfig.key, buildColumns(typeConfig.key, typeConfig.columns)]))
+  );
   const [showColumnMenu, setShowColumnMenu] = useState(false);
-  const [showFilterMenu, setShowFilterMenu] = useState(false);
-  
-  // Filter states per tab
-  const [sessionFilter, setSessionFilter] = useState<string[]>([]);
-  const [periodFilter, setPeriodFilter] = useState<string[]>([]);
-  const [actionFilter, setActionFilter] = useState<string[]>([]);
-  const [confirmedFilter, setConfirmedFilter] = useState<boolean | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
+  const [showJobLogs, setShowJobLogs] = useState(false);
+  const [updatePending, setUpdatePending] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
 
-  // Column drag and resize states
-  const [draggedColumn, setDraggedColumn] = useState<keyof CalendarEvent | null>(null);
-  const [resizingColumn, setResizingColumn] = useState<keyof CalendarEvent | null>(null);
-  const [resizeStartX, setResizeStartX] = useState(0);
-  const [resizeStartWidth, setResizeStartWidth] = useState(0);
+  const currentTypeConfig = typeConfigs.find((item) => item.key === activeType) ?? FALLBACK_TYPES[0];
+  const currentColumns = columnStates[activeType] ?? buildColumns(activeType, currentTypeConfig?.columns ?? []);
+  const visibleColumns = currentColumns.filter((column) => column.visible);
 
-  const getCurrentColumns = () => {
-    switch (activeTab) {
-      case 'earnings': return earningsColumnState;
-      case 'conference': return conferenceColumnState;
-      case 'dividend': return dividendColumnState;
-      case 'analyst_rating': return analystRatingColumnState;
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadTypes = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/calendar/types`);
+        if (!response.ok) {
+          throw new Error(`Calendar type fetch failed: HTTP ${response.status}`);
+        }
+        const data = await response.json() as CalendarTypeConfig[];
+        if (cancelled || data.length === 0) {
+          return;
+        }
+        setTypeConfigs(data);
+        setColumnStates((previous) => {
+          const next = { ...previous };
+          for (const typeConfig of data) {
+            next[typeConfig.key] = mergeColumns(previous[typeConfig.key], buildColumns(typeConfig.key, typeConfig.columns));
+          }
+          return next;
+        });
+        if (!data.some((item) => item.key === activeType)) {
+          const earningsType = data.find((item) => item.key === 'earnings');
+          setActiveType(earningsType?.key ?? data[0].key);
+        }
+      } catch {
+        // Fallback types are already loaded.
+      }
+    };
+
+    void loadTypes();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadEvents = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const items = await fetchCalendarEvents(activeType, dateFrom, dateTo);
+        if (cancelled) {
+          return;
+        }
+        setEvents(items);
+      } catch (loadError) {
+        if (cancelled) {
+          return;
+        }
+        setEvents([]);
+        setError(loadError instanceof Error ? loadError.message : 'Failed to load calendar events');
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void loadEvents();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeType, dateFrom, dateTo, reloadToken]);
+
+  useEffect(() => {
+    if (!jobId || (jobStatus && jobStatus.status !== 'running')) {
+      return;
     }
-  };
 
-  const setCurrentColumns = (columns: ColumnConfig[]) => {
-    switch (activeTab) {
-      case 'earnings': setEarningsColumnState(columns); break;
-      case 'conference': setConferenceColumnState(columns); break;
-      case 'dividend': setDividendColumnState(columns); break;
-      case 'analyst_rating': setAnalystRatingColumnState(columns); break;
-    }
-  };
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/jobs/${jobId}`);
+        if (!response.ok) {
+          return;
+        }
+        const data = await response.json() as JobStatus;
+        if (cancelled) {
+          return;
+        }
+        setJobStatus(data);
+        if (data.status === 'done') {
+          setUpdatePending(false);
+          setReloadToken((value) => value + 1);
+        }
+        if (data.status === 'failed' || data.status === 'cancelled') {
+          setUpdatePending(false);
+        }
+      } catch {
+        // Transient polling failure.
+      }
+    };
 
-  const handleSort = (field: keyof CalendarEvent) => {
+    void poll();
+    const timer = setInterval(poll, 2500);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [jobId, jobStatus]);
+
+  const handleSort = (field: string) => {
     if (sortField === field) {
-      setSortDirection(prev => 
-        prev === 'asc' ? 'desc' : prev === 'desc' ? null : 'asc'
+      setSortDirection((previous) =>
+        previous === 'asc' ? 'desc' : previous === 'desc' ? null : 'asc'
       );
       if (sortDirection === 'desc') {
         setSortField(null);
@@ -146,159 +396,41 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     }
   };
 
-  const toggleColumn = (key: keyof CalendarEvent) => {
-    const currentColumns = getCurrentColumns();
-    const updatedColumns = currentColumns.map(col => 
-      col.key === key ? { ...col, visible: !col.visible } : col
-    );
-    setCurrentColumns(updatedColumns);
+  const toggleColumn = (key: string) => {
+    setColumnStates((previous) => ({
+      ...previous,
+      [activeType]: currentColumns.map((column) =>
+        column.key === key ? { ...column, visible: !column.visible } : column,
+      ),
+    }));
   };
 
-  // Column drag handlers
-  const handleColumnDragStart = (e: React.DragEvent, columnKey: keyof CalendarEvent) => {
-    setDraggedColumn(columnKey);
-    e.dataTransfer.effectAllowed = 'move';
-  };
-
-  const handleColumnDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-  };
-
-  const handleColumnDrop = (e: React.DragEvent, targetColumnKey: keyof CalendarEvent) => {
-    e.preventDefault();
-    
-    if (!draggedColumn || draggedColumn === targetColumnKey) {
-      setDraggedColumn(null);
-      return;
-    }
-
-    const currentColumns = getCurrentColumns();
-    const draggedIndex = currentColumns.findIndex(col => col.key === draggedColumn);
-    const targetIndex = currentColumns.findIndex(col => col.key === targetColumnKey);
-
-    if (draggedIndex === -1 || targetIndex === -1) {
-      setDraggedColumn(null);
-      return;
-    }
-
-    const newColumns = [...currentColumns];
-    const [removed] = newColumns.splice(draggedIndex, 1);
-    newColumns.splice(targetIndex, 0, removed);
-
-    setCurrentColumns(newColumns);
-    setDraggedColumn(null);
-  };
-
-  const handleColumnDragEnd = () => {
-    setDraggedColumn(null);
-  };
-
-  // Column resize handlers
-  const handleResizeStart = (e: React.MouseEvent, columnKey: keyof CalendarEvent, currentWidth: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setResizingColumn(columnKey);
-    setResizeStartX(e.clientX);
-    setResizeStartWidth(parseInt(currentWidth));
-  };
-
-  const handleResizeMove = (e: MouseEvent) => {
-    if (!resizingColumn) return;
-
-    const diff = e.clientX - resizeStartX;
-    const newWidth = Math.max(60, resizeStartWidth + diff);
-
-    const currentColumns = getCurrentColumns();
-    const updatedColumns = currentColumns.map(col => 
-      col.key === resizingColumn ? { ...col, width: `${newWidth}px` } : col
-    );
-    setCurrentColumns(updatedColumns);
-  };
-
-  const handleResizeEnd = () => {
-    setResizingColumn(null);
-  };
-
-  // Add resize event listeners
-  React.useEffect(() => {
-    if (resizingColumn) {
-      document.addEventListener('mousemove', handleResizeMove);
-      document.addEventListener('mouseup', handleResizeEnd);
-      return () => {
-        document.removeEventListener('mousemove', handleResizeMove);
-        document.removeEventListener('mouseup', handleResizeEnd);
-      };
-    }
-  }, [resizingColumn, resizeStartX, resizeStartWidth]);
-
-  // Filter events by active tab type
   const tabFilteredEvents = useMemo(() => {
-    return events.filter(event => event.type === activeTab);
-  }, [events, activeTab]);
+    return events.filter((event) => event.type === activeType);
+  }, [events, activeType]);
 
   const filteredAndSortedEvents = useMemo(() => {
     let filtered = [...tabFilteredEvents];
 
-    // Search filter
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(event =>
-        event.ticker.toLowerCase().includes(query) ||
-        event.name.toLowerCase().includes(query) ||
-        event.event.toLowerCase().includes(query) ||
-        (event.analystFirm?.toLowerCase().includes(query)) ||
-        (event.analystName?.toLowerCase().includes(query))
+      filtered = filtered.filter((event) =>
+        String(event.ticker ?? '').toLowerCase().includes(query) ||
+        String(event.name ?? event.company_name ?? '').toLowerCase().includes(query) ||
+        String(event.title ?? '').toLowerCase().includes(query) ||
+        String(event.industry ?? '').toLowerCase().includes(query) ||
+        String(event.source ?? '').toLowerCase().includes(query),
       );
     }
 
-    // Date range filter
-    if (dateFrom) {
-      filtered = filtered.filter(event => 
-        new Date(event.date) >= dateFrom
-      );
-    }
-    if (dateTo) {
-      filtered = filtered.filter(event => 
-        new Date(event.date) <= dateTo
-      );
-    }
-
-    // Session filter
-    if (sessionFilter.length > 0) {
-      filtered = filtered.filter(event => 
-        event.session && sessionFilter.includes(event.session)
-      );
-    }
-
-    // Period filter (for earnings)
-    if (periodFilter.length > 0) {
-      filtered = filtered.filter(event => 
-        event.period && periodFilter.includes(event.period)
-      );
-    }
-
-    // Action filter (for analyst ratings)
-    if (actionFilter.length > 0) {
-      filtered = filtered.filter(event => 
-        event.action && actionFilter.includes(event.action)
-      );
-    }
-
-    // Confirmed filter
-    if (confirmedFilter !== null) {
-      filtered = filtered.filter(event => event.confirmed === confirmedFilter);
-    }
-
-    // Sorting
     if (sortField && sortDirection) {
       filtered.sort((a, b) => {
         const aVal = a[sortField];
         const bVal = b[sortField];
-        
+
         if (aVal === undefined || aVal === null) return 1;
         if (bVal === undefined || bVal === null) return -1;
-        
+
         let comparison = 0;
         if (typeof aVal === 'string' && typeof bVal === 'string') {
           comparison = aVal.localeCompare(bVal);
@@ -306,156 +438,197 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
           comparison = aVal - bVal;
         } else if (typeof aVal === 'boolean' && typeof bVal === 'boolean') {
           comparison = (aVal === bVal) ? 0 : aVal ? 1 : -1;
+        } else {
+          comparison = String(aVal).localeCompare(String(bVal));
         }
-        
+
         return sortDirection === 'asc' ? comparison : -comparison;
       });
     }
 
     return filtered;
-  }, [tabFilteredEvents, searchQuery, dateFrom, dateTo, sessionFilter, periodFilter, actionFilter, confirmedFilter, sortField, sortDirection]);
+  }, [tabFilteredEvents, searchQuery, sortField, sortDirection]);
 
-  const formatValue = (value: any, key: keyof CalendarEvent): string => {
-    if (value === undefined || value === null) return '-';
-    
-    switch (key) {
-      case 'date':
-        return new Date(value).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
-      case 'confirmed':
-        return value ? '✓' : '○';
-      case 'priceTarget':
-      case 'priorPriceTarget':
-        return `$${value.toLocaleString()}`;
-      case 'revenue':
-      case 'estimatedRevenue':
-        return `$${(value / 1000000).toFixed(1)}M`;
-      case 'eps':
-      case 'estimatedEps':
-        return value.toFixed(2);
-      case 'surprisePercent':
-        return `${value.toFixed(2)}%`;
-      case 'session':
-        return value.split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-      default:
-        return String(value);
-    }
-  };
-
-  const currentColumns = getCurrentColumns();
-  const visibleColumns = currentColumns.filter(col => col.visible);
-
-  const allSessions = Array.from(new Set(tabFilteredEvents.map(e => e.session).filter(Boolean)));
-  const allPeriods = Array.from(new Set(tabFilteredEvents.map(e => e.period).filter(Boolean)));
-  const allActions = Array.from(new Set(tabFilteredEvents.map(e => e.action).filter(Boolean)));
-
-  const hasActiveFilters = sessionFilter.length > 0 || periodFilter.length > 0 || 
-                          actionFilter.length > 0 || confirmedFilter !== null || 
-                          dateFrom !== null || dateTo !== null;
+  const hasActiveFilters = Boolean(searchQuery || dateFrom || dateTo);
 
   const clearAllFilters = () => {
-    setSessionFilter([]);
-    setPeriodFilter([]);
-    setActionFilter([]);
-    setConfirmedFilter(null);
-    setDateFrom(null);
-    setDateTo(null);
+    setDateFrom('');
+    setDateTo('');
     setSearchQuery('');
+    setSortField('report_date');
+    setSortDirection('asc');
   };
 
-  const getActionColor = (action?: string) => {
-    switch (action) {
-      case 'Buy':
-      case 'Outperform':
-      case 'Overweight':
-        return 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300';
-      case 'Sell':
-      case 'Underperform':
-        return 'bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300';
-      case 'Hold':
-      case 'Neutral':
-      case 'Market Perform':
-        return 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300';
-      default:
-        return 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300';
+  const handleEarningsUpdate = async () => {
+    setActionError(null);
+    setUpdatePending(true);
+    setShowJobLogs(false);
+    try {
+      const response = await fetch(`${API_BASE}/api/fmp/calendar/earnings/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: dateFrom || undefined,
+          to: dateTo || undefined,
+        }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(typeof data.error === 'string' ? data.error : `HTTP ${response.status}`);
+      }
+      const data = await response.json() as { jobId: string };
+      setJobId(data.jobId);
+      setJobStatus(null);
+    } catch (updateError) {
+      setUpdatePending(false);
+      setActionError(updateError instanceof Error ? updateError.message : 'FMP earnings update failed');
     }
   };
 
-  const tabLabels: Record<CalendarType, string> = {
-    earnings: 'Earnings',
-    conference: 'Conference',
-    dividend: 'Dividend',
-    analyst_rating: 'Analyst Rating'
+  const cancelJob = async () => {
+    if (!jobId || !jobStatus || jobStatus.status !== 'running') {
+      return;
+    }
+    await fetch(`${API_BASE}/api/jobs/${jobId}/cancel`, { method: 'POST' });
+  };
+
+  const formatValue = (row: CalendarRow, key: string): string => {
+    const value = row[key];
+    if (value === undefined || value === null || value === '') {
+      return '-';
+    }
+
+    if (key === 'ratio') {
+      return getRatioValue(row);
+    }
+    if (key.endsWith('_date') || key === 'event_date') {
+      return formatDateValue(value);
+    }
+    if (key === 'market_cap' || key === 'revenue_est' || key === 'revenue_actual' || key === 'amount') {
+      return typeof value === 'number' ? formatCompactCurrency(value) : String(value);
+    }
+    if (key === 'eps_est' || key === 'eps_actual') {
+      return typeof value === 'number' ? value.toFixed(2) : String(value);
+    }
+    if (key === 'surprise_pct' || key === 'yield' || key === 'float_pct' || key === 'institutional_pct' || key === 'insider_pct') {
+      return typeof value === 'number' ? formatPercent(value) : String(value);
+    }
+    if (typeof value === 'number') {
+      return formatNumber(value);
+    }
+    if (typeof value === 'boolean') {
+      return value ? 'Yes' : 'No';
+    }
+    return String(value);
+  };
+
+  const renderCell = (row: CalendarRow, column: ColumnConfig) => {
+    const value = row[column.key];
+
+    if (column.key === 'ticker') {
+      const ticker = typeof value === 'string' ? value : '';
+      if (!ticker) {
+        return <span>-</span>;
+      }
+      return (
+        <button
+          onClick={() => onTickerClick?.(ticker)}
+          {...getCompanyTickerDataAttrs(ticker)}
+          className="px-2 py-0.5 text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-200 dark:hover:bg-blue-800 font-medium"
+        >
+          {ticker}
+        </button>
+      );
+    }
+
+    if (column.key === 'confirmed') {
+      const confirmed = Boolean(value);
+      return (
+        <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${confirmed ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'}`}>
+          {confirmed ? 'Confirmed' : 'Pending'}
+        </span>
+      );
+    }
+
+    if (column.key === 'source') {
+      return (
+        <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200">
+          {formatValue(row, column.key)}
+        </span>
+      );
+    }
+
+    if (column.key === 'surprise_pct' && typeof value === 'number') {
+      return (
+        <span className={value > 0 ? 'text-green-600 dark:text-green-400 font-medium' : value < 0 ? 'text-red-600 dark:text-red-400 font-medium' : ''}>
+          {formatValue(row, column.key)}
+        </span>
+      );
+    }
+
+    return <span>{formatValue(row, column.key)}</span>;
   };
 
   return (
     <div className="flex flex-col h-full bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
-      {/* Header */}
       <div className="px-4 py-3 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
         <h3 className="font-medium flex items-center gap-2 mb-3">
           <CalendarIcon className="w-4 h-4" />
           Events Calendar
         </h3>
 
-        {/* Tabs */}
         <div className="flex items-center gap-1 mb-3">
-          {(['earnings', 'conference', 'dividend', 'analyst_rating'] as CalendarType[]).map(tab => (
+          {typeConfigs.map((typeConfig) => (
             <button
-              key={tab}
+              key={typeConfig.key}
               onClick={() => {
-                setActiveTab(tab);
-                // Reset filters when switching tabs
-                clearAllFilters();
-                setSortField('date');
+                setActiveType(typeConfig.key);
+                setSortField(typeConfig.key === 'earnings' ? 'report_date' : 'event_date');
                 setSortDirection('asc');
               }}
               className={`px-4 py-2 text-sm font-medium rounded transition-colors ${
-                activeTab === tab
+                activeType === typeConfig.key
                   ? 'bg-blue-600 text-white'
                   : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 border border-gray-300 dark:border-gray-600'
               }`}
             >
-              {tabLabels[tab]}
+              {typeConfig.label}
             </button>
           ))}
         </div>
 
-        {/* Search and Controls Row */}
         <div className="flex items-center gap-2 mb-3">
-          {/* Search */}
           <div className="flex-1 relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
               type="text"
-              placeholder="Search by symbol, name, or event..."
+              placeholder="Search by symbol, company, title, or industry..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-9 pr-3 py-2 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
 
-          {/* Date Range */}
           <div className="flex items-center gap-2">
-            <DatePicker
-              selected={dateFrom}
-              onChange={setDateFrom}
-              placeholderText="From Date"
-              className="px-3 py-2 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 w-32"
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="px-3 py-2 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 w-36"
             />
             <span className="text-sm text-gray-500">to</span>
-            <DatePicker
-              selected={dateTo}
-              onChange={setDateTo}
-              placeholderText="To Date"
-              className="px-3 py-2 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 w-32"
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="px-3 py-2 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 w-36"
             />
           </div>
 
-          {/* Column Selector */}
           <div className="relative">
             <button
               onClick={() => {
                 setShowColumnMenu(!showColumnMenu);
-                setShowFilterMenu(false);
               }}
               className="flex items-center gap-1 px-3 py-2 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-600"
             >
@@ -465,24 +638,24 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
             
             {showColumnMenu && (
               <>
-                <div 
-                  className="fixed inset-0 z-10" 
+                <div
+                  className="fixed inset-0 z-10"
                   onClick={() => setShowColumnMenu(false)}
                 />
                 <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg z-20 w-56 max-h-96 overflow-auto">
                   <div className="p-2 space-y-1">
-                    {currentColumns.map(col => (
+                    {currentColumns.map((column) => (
                       <label
-                        key={col.key}
+                        key={column.key}
                         className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer"
                       >
                         <input
                           type="checkbox"
-                          checked={col.visible}
-                          onChange={() => toggleColumn(col.key)}
+                          checked={column.visible}
+                          onChange={() => toggleColumn(column.key)}
                           className="rounded"
                         />
-                        <span className="text-sm">{col.label}</span>
+                        <span className="text-sm">{column.label}</span>
                       </label>
                     ))}
                   </div>
@@ -491,7 +664,17 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
             )}
           </div>
 
-          {/* Reset Filters Button */}
+          {activeType === 'earnings' && (
+            <button
+              onClick={handleEarningsUpdate}
+              disabled={updatePending}
+              className={`flex items-center gap-2 px-3 py-2 text-sm rounded text-white ${updatePending ? 'bg-blue-400 cursor-wait' : 'bg-blue-600 hover:bg-blue-700'}`}
+            >
+              <RefreshCw className={`w-4 h-4 ${updatePending ? 'animate-spin' : ''}`} />
+              Update FMP Earnings Dates
+            </button>
+          )}
+
           {hasActiveFilters && (
             <button
               onClick={clearAllFilters}
@@ -503,328 +686,112 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
           )}
         </div>
 
-        {/* Quick Filters Row */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Session Filter */}
-          {allSessions.length > 0 && (
-            <div className="relative">
-              <button
-                onClick={() => {
-                  setShowFilterMenu(showFilterMenu === 'session' ? false : 'session');
-                }}
-                className={`flex items-center gap-1 px-3 py-1 text-xs border rounded ${
-                  sessionFilter.length > 0 
-                    ? 'bg-blue-100 dark:bg-blue-900 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300' 
-                    : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600'
-                }`}
-              >
-                Session {sessionFilter.length > 0 && `(${sessionFilter.length})`}
-                <ChevronDown className="w-3 h-3" />
-              </button>
-              
-              {showFilterMenu === 'session' && (
-                <>
-                  <div 
-                    className="fixed inset-0 z-10" 
-                    onClick={() => setShowFilterMenu(false)}
-                  />
-                  <div className="absolute left-0 top-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg z-20 w-48 p-2">
-                    {allSessions.map(session => (
-                      <label key={session} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={sessionFilter.includes(session)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSessionFilter([...sessionFilter, session]);
-                            } else {
-                              setSessionFilter(sessionFilter.filter(s => s !== session));
-                            }
-                          }}
-                          className="rounded"
-                        />
-                        <span className="text-sm capitalize">{session.replace('-', ' ')}</span>
-                      </label>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* Period Filter - Only for Earnings */}
-          {activeTab === 'earnings' && allPeriods.length > 0 && (
-            <div className="relative">
-              <button
-                onClick={() => {
-                  setShowFilterMenu(showFilterMenu === 'period' ? false : 'period');
-                }}
-                className={`flex items-center gap-1 px-3 py-1 text-xs border rounded ${
-                  periodFilter.length > 0 
-                    ? 'bg-blue-100 dark:bg-blue-900 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300' 
-                    : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600'
-                }`}
-              >
-                Period {periodFilter.length > 0 && `(${periodFilter.length})`}
-                <ChevronDown className="w-3 h-3" />
-              </button>
-              
-              {showFilterMenu === 'period' && (
-                <>
-                  <div 
-                    className="fixed inset-0 z-10" 
-                    onClick={() => setShowFilterMenu(false)}
-                  />
-                  <div className="absolute left-0 top-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg z-20 w-40 p-2">
-                    {allPeriods.map(period => (
-                      <label key={period} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={periodFilter.includes(period)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setPeriodFilter([...periodFilter, period]);
-                            } else {
-                              setPeriodFilter(periodFilter.filter(p => p !== period));
-                            }
-                          }}
-                          className="rounded"
-                        />
-                        <span className="text-sm">{period}</span>
-                      </label>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* Action Filter - Only for Analyst Rating */}
-          {activeTab === 'analyst_rating' && allActions.length > 0 && (
-            <div className="relative">
-              <button
-                onClick={() => {
-                  setShowFilterMenu(showFilterMenu === 'action' ? false : 'action');
-                }}
-                className={`flex items-center gap-1 px-3 py-1 text-xs border rounded ${
-                  actionFilter.length > 0 
-                    ? 'bg-blue-100 dark:bg-blue-900 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300' 
-                    : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600'
-                }`}
-              >
-                Action {actionFilter.length > 0 && `(${actionFilter.length})`}
-                <ChevronDown className="w-3 h-3" />
-              </button>
-              
-              {showFilterMenu === 'action' && (
-                <>
-                  <div 
-                    className="fixed inset-0 z-10" 
-                    onClick={() => setShowFilterMenu(false)}
-                  />
-                  <div className="absolute left-0 top-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg z-20 w-48 p-2 max-h-64 overflow-auto">
-                    {allActions.map(action => (
-                      <label key={action} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={actionFilter.includes(action)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setActionFilter([...actionFilter, action]);
-                            } else {
-                              setActionFilter(actionFilter.filter(a => a !== action));
-                            }
-                          }}
-                          className="rounded"
-                        />
-                        <span className="text-sm">{action}</span>
-                      </label>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* Confirmed Filter */}
-          <div className="relative">
-            <button
-              onClick={() => {
-                setShowFilterMenu(showFilterMenu === 'confirmed' ? false : 'confirmed');
-              }}
-              className={`flex items-center gap-1 px-3 py-1 text-xs border rounded ${
-                confirmedFilter !== null 
-                  ? 'bg-blue-100 dark:bg-blue-900 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300' 
-                  : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600'
-              }`}
-            >
-              Confirmed
-              <ChevronDown className="w-3 h-3" />
-            </button>
-            
-            {showFilterMenu === 'confirmed' && (
-              <>
-                <div 
-                  className="fixed inset-0 z-10" 
-                  onClick={() => setShowFilterMenu(false)}
-                />
-                <div className="absolute left-0 top-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg z-20 w-40 p-2">
-                  <label className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
-                    <input
-                      type="radio"
-                      checked={confirmedFilter === null}
-                      onChange={() => setConfirmedFilter(null)}
-                    />
-                    <span className="text-sm">All</span>
-                  </label>
-                  <label className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
-                    <input
-                      type="radio"
-                      checked={confirmedFilter === true}
-                      onChange={() => setConfirmedFilter(true)}
-                    />
-                    <span className="text-sm">Confirmed</span>
-                  </label>
-                  <label className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
-                    <input
-                      type="radio"
-                      checked={confirmedFilter === false}
-                      onChange={() => setConfirmedFilter(false)}
-                    />
-                    <span className="text-sm">Unconfirmed</span>
-                  </label>
-                </div>
-              </>
-            )}
+        {activeType === 'earnings' && (
+          <div className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded px-3 py-2">
+            FMP stable earnings source does not provide reliable time or session. Date, estimate/actual, and DB-based ownership columns are supported.
           </div>
-        </div>
-      </div>
+        )}
 
-      {/* Table */}
-      <div className="flex-1 overflow-auto">
-        <table className="w-full border-collapse">
-          <thead className="sticky top-0 bg-gray-100 dark:bg-gray-800 z-10">
-            <tr>
-              {visibleColumns.map(col => (
-                <th
-                  key={col.key}
-                  style={{ width: col.width, position: 'relative' }}
-                  className={`px-3 py-2 text-left text-xs font-medium border-b border-gray-300 dark:border-gray-700 ${
-                    draggedColumn === col.key ? 'opacity-50' : ''
-                  }`}
-                  draggable
-                  onDragStart={(e) => handleColumnDragStart(e, col.key)}
-                  onDragOver={handleColumnDragOver}
-                  onDrop={(e) => handleColumnDrop(e, col.key)}
-                  onDragEnd={handleColumnDragEnd}
+        {actionError && (
+          <div className="mt-3 text-sm text-red-600 dark:text-red-400">{actionError}</div>
+        )}
+
+        {jobStatus && (
+          <div className="mt-3 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3">
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <div className="text-sm font-medium">
+                FMP earnings update: <span className="capitalize">{jobStatus.status}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowJobLogs((value) => !value)}
+                  className="flex items-center gap-1 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800"
                 >
-                  <div className="flex items-center gap-1 justify-between">
-                    <div className="flex items-center gap-1">
-                      <GripVertical className="w-3 h-3 text-gray-400 cursor-move" />
-                      <button
-                        onClick={() => handleSort(col.key)}
-                        className="hover:text-blue-600 dark:hover:text-blue-400"
-                      >
-                        {col.label}
-                      </button>
-                      {sortField === col.key && (
-                        sortDirection === 'asc' ? (
-                          <ChevronUp className="w-3 h-3" />
-                        ) : (
-                          <ChevronDown className="w-3 h-3" />
-                        )
-                      )}
-                    </div>
-                    
-                    {/* Resize Handle */}
-                    <div
-                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 group"
-                      onMouseDown={(e) => handleResizeStart(e, col.key, col.width)}
-                    >
-                      <div className="w-full h-full group-hover:bg-blue-500" />
-                    </div>
-                  </div>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filteredAndSortedEvents.map(event => (
-              <tr
-                key={event.id}
-                className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
-              >
-                {visibleColumns.map(col => {
-                  const value = event[col.key];
-                  
-                  // Special rendering for certain columns
-                  if (col.key === 'ticker') {
-                    return (
-                      <td key={col.key} className="px-3 py-2 text-sm">
-                        <button
-                          onClick={() => onTickerClick?.(value as string)}
-                          {...getCompanyTickerDataAttrs(value as string)}
-                          className="px-2 py-0.5 text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-200 dark:hover:bg-blue-800 font-medium"
-                        >
-                          {value as string}
-                        </button>
-                      </td>
-                    );
-                  }
-                  
-                  if (col.key === 'action') {
-                    return (
-                      <td key={col.key} className="px-3 py-2 text-sm">
-                        {value && (
-                          <span className={`inline-block px-2 py-0.5 text-xs rounded font-medium ${getActionColor(value as string)}`}>
-                            {value as string}
-                          </span>
-                        )}
-                        {!value && '-'}
-                      </td>
-                    );
-                  }
-                  
-                  if (col.key === 'confirmed') {
-                    return (
-                      <td key={col.key} className="px-3 py-2 text-sm text-center">
-                        <span className={value ? 'text-green-600 dark:text-green-400 font-bold' : 'text-gray-400'}>
-                          {formatValue(value, col.key)}
-                        </span>
-                      </td>
-                    );
-                  }
-
-                  if (col.key === 'surprisePercent' && value !== undefined && value !== null) {
-                    const num = value as number;
-                    return (
-                      <td key={col.key} className="px-3 py-2 text-sm">
-                        <span className={num > 0 ? 'text-green-600 dark:text-green-400 font-medium' : num < 0 ? 'text-red-600 dark:text-red-400 font-medium' : ''}>
-                          {formatValue(value, col.key)}
-                        </span>
-                      </td>
-                    );
-                  }
-                  
-                  return (
-                    <td key={col.key} className="px-3 py-2 text-sm">
-                      {formatValue(value, col.key)}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        
-        {filteredAndSortedEvents.length === 0 && (
-          <div className="flex items-center justify-center h-40 text-gray-500">
-            No events found
+                  <Eye className="w-3 h-3" />
+                  {showJobLogs ? 'Hide Log' : 'View Log'}
+                </button>
+                {jobStatus.status === 'running' && (
+                  <button
+                    onClick={cancelJob}
+                    className="px-2 py-1 text-xs border border-red-300 text-red-600 dark:border-red-700 dark:text-red-400 rounded hover:bg-red-50 dark:hover:bg-red-900/20"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="h-2 bg-gray-100 dark:bg-gray-800 rounded overflow-hidden">
+              <div className="h-full bg-blue-500 transition-all" style={{ width: `${jobStatus.progress.pct}%` }} />
+            </div>
+            <div className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+              {jobStatus.progress.completed} / {jobStatus.progress.total || 0} chunks, {jobStatus.progress.pct}%
+            </div>
+            {jobStatus.error && (
+              <div className="mt-2 text-xs text-red-600 dark:text-red-400">{jobStatus.error}</div>
+            )}
+            {showJobLogs && (
+              <div className="mt-3 max-h-40 overflow-auto rounded bg-gray-50 dark:bg-gray-950 p-2 text-xs font-mono whitespace-pre-wrap">
+                {jobStatus.logs.length > 0 ? jobStatus.logs.join('\n') : 'No logs yet'}
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {/* Footer with count */}
+      <div className="flex-1 overflow-auto">
+        {loading ? (
+          <div className="flex items-center justify-center h-40 text-gray-500">Loading calendar events...</div>
+        ) : error ? (
+          <div className="flex items-center justify-center h-40 text-red-600 dark:text-red-400">{error}</div>
+        ) : (
+          <table className="w-full border-collapse">
+            <thead className="sticky top-0 bg-gray-100 dark:bg-gray-800 z-10">
+              <tr>
+                {visibleColumns.map((column) => (
+                  <th
+                    key={column.key}
+                    style={{ width: column.width }}
+                    className={`px-3 py-2 text-xs font-medium border-b border-gray-300 dark:border-gray-700 ${column.align === 'right' ? 'text-right' : column.align === 'center' ? 'text-center' : 'text-left'}`}
+                  >
+                    <button
+                      onClick={() => handleSort(column.key)}
+                      className="inline-flex items-center gap-1 hover:text-blue-600 dark:hover:text-blue-400"
+                    >
+                      {column.label}
+                      {sortField === column.key && sortDirection === 'asc' && <ChevronUp className="w-3 h-3" />}
+                      {sortField === column.key && sortDirection === 'desc' && <ChevronDown className="w-3 h-3" />}
+                    </button>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filteredAndSortedEvents.map((row) => (
+                <tr
+                  key={row.id}
+                  className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
+                >
+                  {visibleColumns.map((column) => (
+                    <td
+                      key={column.key}
+                      className={`px-3 py-2 text-sm ${column.align === 'right' ? 'text-right' : column.align === 'center' ? 'text-center' : 'text-left'}`}
+                    >
+                      {renderCell(row, column)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        {!loading && !error && filteredAndSortedEvents.length === 0 && (
+          <div className="flex items-center justify-center h-40 text-gray-500">
+            No events found for the current filters
+          </div>
+        )}
+      </div>
+
       <div className="px-4 py-2 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-600 dark:text-gray-400">
         Showing {filteredAndSortedEvents.length} of {tabFilteredEvents.length} events
       </div>

@@ -6,6 +6,7 @@ const MAX_RETRIES = 10;
 const BASE_DELAY_MS = 300;
 const MAX_BACKOFF_MS = 30_000;
 const DEFAULT_REQUEST_INTERVAL_MS = 25;
+const DEFAULT_REQUEST_TIMEOUT_MS = 45_000;
 
 type FmpPressReleaseRawItem = {
   symbol?: string;
@@ -23,6 +24,7 @@ export interface FmpPressReleaseFetchOptions {
   pageLimit?: number;
   maxPages?: number;
   requestIntervalMs?: number;
+  timeoutMs?: number;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -65,7 +67,17 @@ function normalizePublishedAt(value: string | undefined): string {
   return parsed.toISOString().slice(0, 19);
 }
 
-async function fetchPage(symbol: string, page: number, pageLimit: number, requestIntervalMs: number): Promise<FmpPressReleaseRawItem[]> {
+function buildTimeoutError(symbol: string, page: number, timeoutMs: number): Error {
+  return new Error(`FMP press release request timeout: ${symbol.toUpperCase()} page=${page} after ${timeoutMs}ms`);
+}
+
+async function fetchPage(
+  symbol: string,
+  page: number,
+  pageLimit: number,
+  requestIntervalMs: number,
+  timeoutMs: number,
+): Promise<FmpPressReleaseRawItem[]> {
   const apiKey = config.fmpApiKey;
   if (!apiKey) {
     throw new Error("FMP API key is not configured");
@@ -75,8 +87,12 @@ async function fetchPage(symbol: string, page: number, pageLimit: number, reques
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     await acquireFmpPressReleaseSlot(requestIntervalMs);
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => {
+      controller.abort(buildTimeoutError(symbol, page, timeoutMs));
+    }, timeoutMs);
     try {
-      const resp = await fetch(url);
+      const resp = await fetch(url, { signal: controller.signal });
       if (resp.status === 429) {
         const backoffMs = Math.min(BASE_DELAY_MS * Math.pow(2, attempt - 1), MAX_BACKOFF_MS);
         await sleep(backoffMs);
@@ -89,11 +105,19 @@ async function fetchPage(symbol: string, page: number, pageLimit: number, reques
       const data = await resp.json();
       return Array.isArray(data) ? (data as FmpPressReleaseRawItem[]) : [];
     } catch (err: any) {
-      const isRetryable = err instanceof TypeError || /429|timeout|network/i.test(err?.message ?? "");
+      const normalizedError = controller.signal.aborted
+        ? controller.signal.reason instanceof Error
+          ? controller.signal.reason
+          : buildTimeoutError(symbol, page, timeoutMs)
+        : err;
+      const message = normalizedError instanceof Error ? normalizedError.message : String(normalizedError ?? "");
+      const isRetryable = normalizedError instanceof TypeError || /429|timeout|network|abort/i.test(message);
       if (!isRetryable || attempt === MAX_RETRIES) {
-        throw err;
+        throw normalizedError;
       }
       await sleep(Math.min(BASE_DELAY_MS * attempt, MAX_BACKOFF_MS));
+    } finally {
+      clearTimeout(timeoutHandle);
     }
   }
 
@@ -129,6 +153,7 @@ export async function fetchFmpPressReleasesByTicker(
   const pageLimit = Math.max(1, Math.min(Math.floor(options.pageLimit ?? 100), 100));
   const maxPages = Math.max(1, Math.min(Math.floor(options.maxPages ?? 12), 50));
   const requestIntervalMs = Math.max(0, Math.min(Math.floor(options.requestIntervalMs ?? DEFAULT_REQUEST_INTERVAL_MS), 5_000));
+  const timeoutMs = Math.max(1_000, Math.min(Math.floor(options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS), 300_000));
   const fromDate = options.fromDate;
   const toDate = options.toDate;
 
@@ -136,7 +161,7 @@ export async function fetchFmpPressReleasesByTicker(
   const seenUrls = new Set<string>();
 
   for (let page = 0; page < maxPages; page++) {
-    const rawItems = await fetchPage(ticker, page, pageLimit, requestIntervalMs);
+    const rawItems = await fetchPage(ticker, page, pageLimit, requestIntervalMs, timeoutMs);
     if (rawItems.length === 0) {
       break;
     }

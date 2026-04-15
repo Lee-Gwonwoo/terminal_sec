@@ -101,6 +101,7 @@ import { fetchRtprArticles, fetchRtprArticlesByTicker } from "./services/ptprNew
 import { fetchFmpPressReleasesByTicker } from "./services/fmpPressReleaseProvider.js";
 import { fetchFmpStockNewsByTicker } from "./services/fmpStockNewsProvider.js";
 import { fetchFmpSecFilings } from "./services/fmpSecFilingProvider.js";
+import { fetchFmpEarningsCalendarChunk } from "./services/fmpEarningsCalendarProvider.js";
 import { generateSecFilingSummary } from "./services/secFilingSummary.js";
 import { getEtDateString } from "./services/timeUtils.js";
 import {
@@ -113,6 +114,7 @@ import {
   clampFinnhubCompanyDataConcurrency,
   getFinnhubCompanyDataDefaults,
 } from "./services/finnhubCompanyDataThrottle.js";
+import { normalizeFmpSymbol } from "./utils/fmpSymbol.js";
 
 const app = express();
 const streamHub = new StreamHub();
@@ -127,6 +129,8 @@ const DEFAULT_FINNHUB_REQUEST_INTERVAL_MS = 1000;
 const DEFAULT_RTPR_TICKER_CONCURRENCY = 5;
 const DEFAULT_FMP_STOCK_FULLTEXT_CONCURRENCY = 25;
 const DEFAULT_FINNHUB_COMPANY_DATA = getFinnhubCompanyDataDefaults();
+const DEFAULT_FMP_CALENDAR_CHUNK_DAYS = 30;
+const DEFAULT_FMP_CALENDAR_REQUEST_INTERVAL_MS = 250;
 
 function buildBatchLevels(requestedConcurrency: number): number[] {
   const safeConcurrency = Math.max(1, Math.min(20, Math.floor(requestedConcurrency)));
@@ -273,10 +277,14 @@ type TickerListRow = {
   marketCap: number | null;
   floatPct: number | null;
   institutionalPct: number | null;
+  insiderPct: number | null;
   marketCapSource: string | null;
   floatSource: string | null;
   institutionalSource: string | null;
+  insiderSource: string | null;
 };
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function parseList(input: unknown): string[] | undefined {
   if (typeof input !== "string" || input.trim() === "") {
@@ -286,6 +294,57 @@ function parseList(input: unknown): string[] | undefined {
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
+}
+
+function normalizeCalendarFromParam(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  return ISO_DATE_RE.test(value) ? `${value}T00:00:00.000Z` : value;
+}
+
+function normalizeCalendarToParam(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  return ISO_DATE_RE.test(value) ? `${value}T23:59:59.999Z` : value;
+}
+
+function shiftIsoDate(isoDate: string, days: number): string {
+  const date = new Date(`${isoDate}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function buildCalendarDateChunks(from: string, to: string, chunkDays: number): Array<{ from: string; to: string }> {
+  const chunks: Array<{ from: string; to: string }> = [];
+  let cursor = from;
+  while (cursor <= to) {
+    const end = shiftIsoDate(cursor, chunkDays - 1);
+    const chunkTo = end < to ? end : to;
+    chunks.push({ from: cursor, to: chunkTo });
+    cursor = shiftIsoDate(chunkTo, 1);
+  }
+  return chunks;
+}
+
+function getDefaultFmpCalendarWindow(): { from: string; to: string } {
+  const today = new Date().toISOString().slice(0, 10);
+  return {
+    from: shiftIsoDate(today, -180),
+    to: shiftIsoDate(today, 180),
+  };
+}
+
+function computeCalendarSurprisePct(actual: number | null, estimated: number | null): number | null {
+  if (actual == null || estimated == null || estimated === 0) {
+    return null;
+  }
+  return ((actual - estimated) / Math.abs(estimated)) * 100;
+}
+
+function normalizeCalendarDateOnly(value: string): string | null {
+  return ISO_DATE_RE.test(value) ? value : null;
 }
 
 function parseNewsQuery(query: Record<string, unknown>): NewsQuery {
@@ -595,9 +654,11 @@ function mapCsvTickerRowsToListRows(rows: Array<{ ticker: string; name: string |
     marketCap: null,
     floatPct: null,
     institutionalPct: null,
+    insiderPct: null,
     marketCapSource: null,
     floatSource: null,
     institutionalSource: null,
+    insiderSource: null,
   }));
 }
 
@@ -753,9 +814,11 @@ async function getDefaultUniverseRows(): Promise<TickerListRow[]> {
       marketCap: null,
       floatPct: null,
       institutionalPct: null,
+      insiderPct: null,
       marketCapSource: null,
       floatSource: null,
       institutionalSource: null,
+      insiderSource: null,
     }));
   }
 }
@@ -1541,6 +1604,9 @@ const pullFmpPressReleaseSchema = z.object({
   maxPages: z.number().int().min(1).max(50).optional().default(12),
 });
 
+const FMP_PR_HEARTBEAT_LOG_INTERVAL_MS = 30_000;
+const FMP_PR_CHECKPOINT_EVERY_TICKERS = 50;
+
 const pullFmpStockNewsSchema = z.object({
   mode: z.enum(["recent", "custom"]).optional().default("recent"),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
@@ -2039,10 +2105,51 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
       const confirmedEmptyKey = "fmp_press_release";
       const yesterday = getEtDateString(new Date(Date.now() - 86_400_000));
       let completedTickers = 0;
+      const startedAtMs = Date.now();
+      const activeTickers = new Set<string>();
+      let tickerPhaseHeartbeat: NodeJS.Timeout | null = null;
+
+      const emitTickerPhaseLog = (reason: "heartbeat" | "checkpoint" | "final" = "heartbeat") => {
+        const elapsedSec = Math.max(0, Math.round((Date.now() - startedAtMs) / 1000));
+        const activePreview = Array.from(activeTickers).slice(0, 4);
+        const activeSummary = activePreview.length > 0
+          ? `${activePreview.join(", ")}${activeTickers.size > activePreview.length ? ` +${activeTickers.size - activePreview.length} more` : ""}`
+          : "none";
+        appendLog(
+          jobId,
+          `[${reason}] completed=${completedTickers}/${tickerList.length}, inserted=${counters.totalInserted}, skipped=${counters.totalSkipped}, active=${activeSummary}, elapsed=${elapsedSec}s`,
+        );
+      };
+
+      const stopTickerHeartbeat = () => {
+        if (!tickerPhaseHeartbeat) {
+          return;
+        }
+        clearInterval(tickerPhaseHeartbeat);
+        tickerPhaseHeartbeat = null;
+      };
+
+      const startTickerHeartbeat = () => {
+        if (tickerPhaseHeartbeat) {
+          return;
+        }
+        tickerPhaseHeartbeat = setInterval(() => {
+          if (!isJobCancelled(jobId) && completedTickers < tickerList.length) {
+            emitTickerPhaseLog("heartbeat");
+          }
+        }, FMP_PR_HEARTBEAT_LOG_INTERVAL_MS);
+        tickerPhaseHeartbeat.unref?.();
+      };
 
       const finishOneTicker = () => {
         completedTickers += 1;
         updateProgress(jobId, completedTickers);
+        if (
+          completedTickers === tickerList.length
+          || completedTickers % FMP_PR_CHECKPOINT_EVERY_TICKERS === 0
+        ) {
+          emitTickerPhaseLog(completedTickers === tickerList.length ? "final" : "checkpoint");
+        }
       };
 
       const runTickerPool = async (processTicker: (ticker: string) => Promise<void>) => {
@@ -2056,8 +2163,13 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
               return;
             }
             const ticker = tickerList[currentIndex];
-            await processTicker(ticker);
-            finishOneTicker();
+            activeTickers.add(ticker);
+            try {
+              await processTicker(ticker);
+              finishOneTicker();
+            } finally {
+              activeTickers.delete(ticker);
+            }
           }
         };
 
@@ -2066,6 +2178,7 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
       };
 
       try {
+        startTickerHeartbeat();
         if (isCustom && customRequestedRange && customGapPlans) {
           const summary = summarizeTickerGapPlans({
             source: "FMP",
@@ -2267,6 +2380,8 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
           });
         }
 
+        stopTickerHeartbeat();
+
         appendLog(jobId, `Total: inserted=${counters.totalInserted}, skipped=${counters.totalSkipped}`);
 
         let changeMergeResult = { merged: 0, skipped: 0 };
@@ -2321,6 +2436,7 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
         });
         activePullJobs.delete(jobKey);
       } catch (err: any) {
+        stopTickerHeartbeat();
         console.error(`[pull-fmp-press-release] job ${jobId} fatal error: ${err.message}`);
         failJob(jobId, err.message || "Unknown error");
         activePullJobs.delete(jobKey);
@@ -3697,12 +3813,14 @@ app.get("/api/calendar/events", async (req, res, next) => {
   try {
     const sortRaw = typeof req.query.sort === "string" ? req.query.sort : "event_time:desc";
     const [sortByRaw, sortDirRaw] = sortRaw.split(":");
+    const from = typeof req.query.from === "string" ? normalizeCalendarFromParam(req.query.from) : undefined;
+    const to = typeof req.query.to === "string" ? normalizeCalendarToParam(req.query.to) : undefined;
     const result = await listCalendarEvents({
       type: typeof req.query.type === "string" ? req.query.type : "earnings",
       tickers: parseList(req.query.tickers),
       watchlistId: typeof req.query.watchlist_id === "string" ? req.query.watchlist_id : undefined,
-      from: typeof req.query.from === "string" ? req.query.from : undefined,
-      to: typeof req.query.to === "string" ? req.query.to : undefined,
+      from,
+      to,
       timeOfDay:
         req.query.time_of_day === "BMO" || req.query.time_of_day === "AMC" || req.query.time_of_day === "Unknown"
           ? req.query.time_of_day
@@ -3724,12 +3842,14 @@ app.get("/api/calendar/events/export.csv", async (req, res, next) => {
   try {
     const sortRaw = typeof req.query.sort === "string" ? req.query.sort : "event_time:desc";
     const [sortByRaw, sortDirRaw] = sortRaw.split(":");
+    const from = typeof req.query.from === "string" ? normalizeCalendarFromParam(req.query.from) : undefined;
+    const to = typeof req.query.to === "string" ? normalizeCalendarToParam(req.query.to) : undefined;
     const csv = await exportCalendarEventsCsv({
       type: typeof req.query.type === "string" ? req.query.type : "earnings",
       tickers: parseList(req.query.tickers),
       watchlistId: typeof req.query.watchlist_id === "string" ? req.query.watchlist_id : undefined,
-      from: typeof req.query.from === "string" ? req.query.from : undefined,
-      to: typeof req.query.to === "string" ? req.query.to : undefined,
+      from,
+      to,
       timeOfDay:
         req.query.time_of_day === "BMO" || req.query.time_of_day === "AMC" || req.query.time_of_day === "Unknown"
           ? req.query.time_of_day
@@ -3756,6 +3876,157 @@ app.get("/api/calendar/events/:id", async (req, res, next) => {
       return;
     }
     res.json(event);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/fmp/calendar/earnings/update", async (req, res, next) => {
+  try {
+    if (!config.fmpApiKey) {
+      res.status(400).json({ error: "FMP_API_KEY not configured" });
+      return;
+    }
+
+    const defaultWindow = getDefaultFmpCalendarWindow();
+    const from = typeof req.body?.from === "string" && req.body.from.trim()
+      ? req.body.from.trim()
+      : defaultWindow.from;
+    const to = typeof req.body?.to === "string" && req.body.to.trim()
+      ? req.body.to.trim()
+      : defaultWindow.to;
+
+    if (!ISO_DATE_RE.test(from) || !ISO_DATE_RE.test(to)) {
+      res.status(400).json({ error: "from/to must be YYYY-MM-DD" });
+      return;
+    }
+    if (to < from) {
+      res.status(400).json({ error: "to must be greater than or equal to from" });
+      return;
+    }
+
+    const tickers = await getDefaultUniverseTickers();
+    const universeMap = new Map<string, string>();
+    for (const ticker of tickers) {
+      const normalized = normalizeFmpSymbol(ticker);
+      if (normalized) {
+        universeMap.set(normalized, ticker.toUpperCase());
+      }
+    }
+
+    const chunks = buildCalendarDateChunks(from, to, DEFAULT_FMP_CALENDAR_CHUNK_DAYS);
+    const jobId = createJob(chunks.length, {
+      category: "other",
+      label: "FMP Earnings Calendar Update",
+    });
+    appendLog(jobId, `Starting FMP earnings calendar update for ${tickers.length} default-universe tickers`);
+    appendLog(jobId, `Range=${from}~${to}, chunks=${chunks.length}, endpoint=stable/earnings-calendar`);
+    res.json({ jobId, requestedRange: { from, to } });
+
+    void (async () => {
+      try {
+        let fetchedRows = 0;
+        let matchedRows = 0;
+        let upsertedRows = 0;
+        let skippedOutsideUniverse = 0;
+        let skippedInvalidDate = 0;
+
+        for (let index = 0; index < chunks.length; index++) {
+          if (isJobCancelled(jobId)) {
+            appendLog(jobId, "🛑 Cancelled by user");
+            return;
+          }
+
+          const chunk = chunks[index];
+          const items = await fetchFmpEarningsCalendarChunk({
+            from: chunk.from,
+            to: chunk.to,
+            requestIntervalMs: DEFAULT_FMP_CALENDAR_REQUEST_INTERVAL_MS,
+          });
+          fetchedRows += items.length;
+
+          let chunkMatchedRows = 0;
+          let chunkSkippedOutsideUniverse = 0;
+          let chunkSkippedInvalidDate = 0;
+
+          for (const item of items) {
+            const canonicalTicker = universeMap.get(normalizeFmpSymbol(item.symbol));
+            if (!canonicalTicker) {
+              skippedOutsideUniverse++;
+              chunkSkippedOutsideUniverse++;
+              continue;
+            }
+
+            const reportDate = normalizeCalendarDateOnly(item.date);
+            if (!reportDate) {
+              skippedInvalidDate++;
+              chunkSkippedInvalidDate++;
+              continue;
+            }
+
+            const confirmed = item.epsActual != null || item.revenueActual != null;
+            await upsertCalendarEvent({
+              type: "earnings",
+              eventTime: `${reportDate}T12:00:00.000Z`,
+              ticker: canonicalTicker,
+              title: `${canonicalTicker} earnings`,
+              fieldsJson: {
+                company_name: null,
+                report_date: reportDate,
+                time_of_day: null,
+                session: null,
+                confirmed,
+                eps_est: item.epsEstimated,
+                eps_actual: item.epsActual,
+                revenue_est: item.revenueEstimated,
+                revenue_actual: item.revenueActual,
+                surprise_pct: computeCalendarSurprisePct(item.epsActual, item.epsEstimated),
+                last_updated: item.lastUpdated,
+              },
+              source: "FMP",
+              uniqueKey: `FMP:earnings:${canonicalTicker}:${reportDate}`,
+            });
+            matchedRows++;
+            upsertedRows++;
+            chunkMatchedRows++;
+          }
+
+          appendLog(
+            jobId,
+            `[chunk ${index + 1}/${chunks.length}] ${chunk.from}~${chunk.to}: fetched=${items.length}, matched=${chunkMatchedRows}, outsideUniverse=${chunkSkippedOutsideUniverse}, invalidDate=${chunkSkippedInvalidDate}`,
+          );
+          updateProgress(jobId, index + 1, chunks.length);
+        }
+
+        await setLastSuccess("fmp_calendar_earnings", new Date().toISOString(), {
+          from,
+          to,
+          defaultUniverseTickers: tickers.length,
+          chunks: chunks.length,
+          fetchedRows,
+          matchedRows,
+          upsertedRows,
+          skippedOutsideUniverse,
+          skippedInvalidDate,
+        });
+
+        completeJob(jobId, {
+          source: "FMP",
+          type: "earnings",
+          from,
+          to,
+          defaultUniverseTickers: tickers.length,
+          chunks: chunks.length,
+          fetchedRows,
+          matchedRows,
+          upsertedRows,
+          skippedOutsideUniverse,
+          skippedInvalidDate,
+        });
+      } catch (error) {
+        failJob(jobId, error instanceof Error ? error.message : String(error));
+      }
+    })();
   } catch (error) {
     next(error);
   }
