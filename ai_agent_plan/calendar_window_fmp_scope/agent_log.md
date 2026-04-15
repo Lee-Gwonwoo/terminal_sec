@@ -241,3 +241,34 @@
 
 - 상태
   - 날짜 미지정 lazy load 적용 완료, 사용자 확인 대기 (`awaiting user confirmation`)
+
+## 2026-04-15
+**작성 시각:** 2026-04-15 20:25 (local)
+
+### FMP IPO calendar 데이터 범위 재정리
+
+- 작업 목적
+  - 사용자의 추가 질문에 맞춰 FMP IPO endpoint에서 실제로 받을 수 있는 데이터 shape를 별도 정리
+  - 기존 `plan.md`의 IPO 1줄 요약을 응답 필드 단위 설명으로 보강
+- 확인 근거
+  - FMP stable docs `IPOs Calendar API`
+  - 문서의 parameter 표 및 sample response 재확인
+- 정리한 핵심 내용
+  - endpoint는 `/stable/ipos-calendar`
+  - 확인된 기본 parameter는 `from`, `to`이며 문서상 `Max 90-day date range`
+  - 문서 sample response 기준 필드는 `symbol`, `date`, `daa`, `company`, `exchange`, `actions`, `shares`, `priceRange`, `marketCap`
+  - `shares`, `priceRange`, `marketCap`은 nullable로 봐야 한다.
+  - `actions`는 상태 string으로 취급하는 편이 맞고, `daa`는 raw timestamp로만 우선 보존하는 편이 안전하다.
+  - docs FAQ에는 exchange/company filter 가능성이 언급되지만, 현재 parameter 표에는 보이지 않아 live entitlement 재확인이 필요하다.
+- 변경 파일
+  - `ai_agent_plan/calendar_window_fmp_scope/plan.md`
+- 검증
+
+| 검증 항목 | 결과 | 비고 |
+|-----------|------|------|
+| FMP IPO docs 재확인 | ✅ | parameter 표 + sample response 확인 |
+| plan 문서 반영 | ✅ | 필드별 의미, nullable, 구현 주의점 추가 |
+| live endpoint 호출 | 미실시 | 이번 작업은 docs 정리만 수행, entitlement probe는 별도 후속 작업 |
+
+- 상태
+  - IPO 데이터 범위 정리 완료, 사용자 확인 대기 (`awaiting user confirmation`)

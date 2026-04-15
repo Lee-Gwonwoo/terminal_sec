@@ -9,7 +9,7 @@ interface AddTabModalProps {
 }
 
 export function AddTabModal({ isOpen, onClose, onStart }: AddTabModalProps) {
-  const [selectedWindows, setSelectedWindows] = useState<WindowType[]>(['news']);
+  const [selectedWindows, setSelectedWindows] = useState<WindowType[]>([]);
 
   if (!isOpen) return null;
 
@@ -24,7 +24,7 @@ export function AddTabModal({ isOpen, onClose, onStart }: AddTabModalProps) {
   const handleStart = () => {
     if (selectedWindows.length > 0) {
       onStart(selectedWindows);
-      setSelectedWindows(['news']);
+      setSelectedWindows([]);
       onClose();
     }
   };
@@ -53,16 +53,6 @@ export function AddTabModal({ isOpen, onClose, onStart }: AddTabModalProps) {
                 className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               />
               <span>Calendar</span>
-            </label>
-
-            <label className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={selectedWindows.includes('news')}
-                onChange={() => toggleWindow('news')}
-                className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-              />
-              <span>News</span>
             </label>
 
             <label className="flex items-center gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">

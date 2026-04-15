@@ -114,6 +114,86 @@
 | IPOs Calendar | `/stable/ipos-calendar` | `symbol`, `date`, `daa`, `company`, `exchange`, `actions`, `shares`, `priceRange`, `marketCap` | 중간 | 중간 | ticker 미정/null, action state, company-first event 처리 결정 필요 |
 | Economic Calendar | `/stable/economic-calendar` | `date`, `country`, `event`, `currency`, `previous`, `estimate`, `actual`, `change`, `impact`, `changePercentage`, `unit` | 중간 | 중간 | ticker 없음, 국가/이벤트 중심이며 문서 FAQ상 UTC time |
 
+### FMP IPO 데이터 상세 정리 (2026-04-15 docs 재확인)
+
+- 기준 endpoint
+  - `/stable/ipos-calendar`
+- 확인된 query parameter
+  - `from` (date, required)
+  - `to` (date, required)
+  - 문서 표기: `Max 90-day date range`
+- 문서 설명 기준으로 받을 수 있는 핵심 정보
+  - 예정 IPO 날짜
+  - 회사명
+  - 상장 예정 거래소
+  - 예상 가격대
+  - 공모 주식 수(있을 때)
+  - market information
+
+#### 응답 필드별 의미
+
+| 필드 | 타입(문서 샘플 기준) | 의미 | 운영 메모 |
+|------|------|------|------|
+| `[][][]symbol[][][]` | string | 예정 상장 종목 심볼 | pre-IPO 단계에서는 비어 있거나 나중에 바뀔 가능성을 열어 두는 편이 안전하다. 현재 문서 샘플은 `PEVC` |
+| `[][][]date[][][]` | `YYYY-MM-DD` string | IPO 예정일 | calendar top-level `event_at`의 주 기준값으로 쓰기 가장 적합 |
+| `[][][]daa[][][]` | ISO datetime string | 문서 샘플상 `date`와 같은 날의 timestamp 표현 | 정확한 business 의미는 문서에서 별도 정의하지 않으므로, phase 1에서는 raw 보존만 하고 정렬 기준은 `date`를 우선하는 편이 안전 |
+| `[][][]company[][][]` | string | 회사명 | title 생성과 ticker 미존재 row의 대표 식별자에 적합 |
+| `[][][]exchange[][][]` | string | 상장 예정 거래소 | NYSE, NASDAQ 같은 listing venue 표시용 |
+| `[][][]actions[][][]` | string | 현재 IPO 상태/액션 | 문서 샘플은 `Expected`; 향후 `Priced`, `Withdrawn`, `Postponed` 같은 상태 가능성을 열어 두고 raw string 보존 권장 |
+| `[][][]shares[][][]` | number or null | 공모 주식 수 | 문서 샘플에서는 `null`; nullable 전제로 처리 필요 |
+| `[][][]priceRange[][][]` | string or null | 예상 공모가 범위 | 문서 샘플에서는 `null`; 숫자 2개가 아니라 string range일 가능성을 전제로 raw 보존 필요 |
+| `[][][]marketCap[][][]` | number or null | 예상 시가총액 또는 문서상 market information | 문서 샘플에서는 `null`; 단위/통화는 live entitlement 응답으로 재확인 필요 |
+
+#### 문서 샘플 응답 (확인된 shape)
+
+```json
+[
+  {
+    "symbol": "PEVC",
+    "date": "2025-02-03",
+    "daa": "2025-02-03T05:00:00.000Z",
+    "company": "Pacer Funds Trust",
+    "exchange": "NYSE",
+    "actions": "Expected",
+    "shares": null,
+    "priceRange": null,
+    "marketCap": null
+  }
+]
+```
+
+#### CalendarWindow 관점에서 바로 쓸 수 있는 값
+
+- 표 기본 컬럼 후보
+  - `IPO Date` ← `date`
+  - `Symbol` ← `symbol`
+  - `Company` ← `company`
+  - `Exchange` ← `exchange`
+  - `Status` ← `actions`
+  - `Shares` ← `shares`
+  - `Price Range` ← `priceRange`
+  - `Market Cap` ← `marketCap`
+- `meta_json` raw 보존 후보
+  - `[][][]ipo_date[][][]` = `date`
+  - `[][][]daa[][][]` = raw timestamp
+  - `[][][]company[][][]`
+  - `[][][]exchange[][][]`
+  - `[][][]actions[][][]`
+  - `[][][]shares[][][]`
+  - `[][][]price_range[][][]`
+  - `[][][]market_cap[][][]`
+
+#### 구현 시 주의점
+
+- `symbol`은 earnings/dividends처럼 안정적인 상장 ticker라고 가정하면 안 된다.
+  - pre-IPO에서는 ticker가 없거나 변경될 수 있어 `company + exchange + date` 같은 fallback key 전략이 필요할 수 있다.
+- `actions`는 사실상 상태값 역할을 하므로, 고정 enum으로 먼저 박기보다 raw string 저장이 안전하다.
+- `shares`, `priceRange`, `marketCap`은 문서 샘플에서도 `null`이므로, 값이 없을 때 빈 문자열/0으로 대체하지 않는 편이 맞다.
+- docs FAQ에는 exchange/company name filter가 가능하다고 적혀 있지만, 현재 stable docs parameter 표에는 `from/to`만 보인다.
+  - 따라서 backend contract에 filter 파라미터를 바로 박기 전에는 live key로 실제 지원 여부를 다시 확인해야 한다.
+- docs 설명상 IPO calendar는 upcoming IPO 중심이다.
+  - earnings처럼 과거 확정 실적 history를 길게 보관하는 데이터와는 성격이 다르므로, snapshot성 데이터로 보는 편이 맞다.
+
 #### FMP calendar 계열에서 지금 확정된 운영 제약
 
 - Earnings/Dividends/Splits 문서에는 `Maximum 4000 records per request`, `Max 90-day date range` 제한이 표시된다.

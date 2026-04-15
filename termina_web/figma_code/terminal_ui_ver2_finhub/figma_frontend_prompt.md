@@ -107,7 +107,6 @@ Vite dev proxy:
 `AddTabModal.tsx`에서 선택 가능한 창:
 
 - Calendar
-- News
 - News Feed: Finnhub API
 - Investing News
 - Watch List
@@ -116,6 +115,8 @@ Vite dev proxy:
 - Data Control
 - AI Research Window
 - Evidence Table
+
+기본 선택값은 비어 있으며, 아무 창도 고르지 않으면 `Start` 버튼은 비활성화된다.
 
 초기 창 배치 규칙:
 
