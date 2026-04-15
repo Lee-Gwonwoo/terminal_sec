@@ -272,3 +272,30 @@
 
 - 상태
   - IPO 데이터 범위 정리 완료, 사용자 확인 대기 (`awaiting user confirmation`)
+
+## 2026-04-15
+**작성 시각:** 2026-04-15 17:39 (local)
+
+### PLAN CHANGE — Calendar ticker 우클릭 Financial dialog 범위 추가
+
+- 작업 목적
+  - 사용자의 새 요구를 반영해 `CalendarWindow` ticker 우클릭에서 재무 차트 dialog를 여는 범위를 plan에 먼저 반영
+  - backend / frontend 구현 경로를 FMP stable endpoint 기준으로 고정
+- 변경 파일
+  - `ai_agent_plan/calendar_window_fmp_scope/plan.md`
+  - `ai_agent_plan/calendar_window_fmp_scope/agent_log.md`
+- 이번 변경에서 고정한 구현 방향
+  - ticker 좌클릭은 기존 linked-ticker 동작 유지
+  - ticker 우클릭 menu에 `Financial` 액션 추가
+  - dialog에는 annual / quarterly toggle과 함께 `Revenue`, `Earnings`, `Valuation(P/E, P/S)` 차트를 표시
+  - backend data source는 `income-statement`, `key-metrics`, `ratios`를 묶는 read-only API로 구성
+- 확인 근거
+  - 현재 `CalendarWindow.tsx`는 ticker 좌클릭만 있고 우클릭 menu / financial dialog가 없음
+  - 현재 backend에는 ticker financial-history를 내려주는 API가 없음
+  - FMP stable docs 기준 endpoint 후보는 `/stable/income-statement`, `/stable/key-metrics`, `/stable/ratios`
+  - live sample 확인 기준
+    - income-statement: `revenue`, `netIncome`, `eps`, `fiscalYear`, `period`
+    - key-metrics: `marketCap`
+    - ratios: `priceToSalesRatio`, `priceToEarningsRatio`, `enterpriseValueMultiple`
+- 상태
+  - plan 범위 확장 반영 완료, 구현 진행 중 (`awaiting user confirmation`)

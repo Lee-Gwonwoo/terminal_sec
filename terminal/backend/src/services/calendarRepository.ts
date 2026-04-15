@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { getDb } from "../db.js";
+import { getIpoSecEnrichmentMap, type IpoSecEnrichmentRow } from "./ipoSecEnrichmentRepository.js";
 
 export const CALENDAR_TYPE_CONFIG = [
   {
@@ -24,6 +25,30 @@ export const CALENDAR_TYPE_CONFIG = [
       "float_pct",
       "institutional_pct",
       "insider_pct"
+    ]
+  },
+  {
+    key: "ipos",
+    label: "IPOs",
+    supports: [],
+    columns: [
+      "ipo_date",
+      "ticker",
+      "company_name",
+      "exchange",
+      "status",
+      "price_range",
+      "shares",
+      "offer_amount",
+      "company_description",
+      "sec_form",
+      "sec_filing_date",
+      "sec_accepted_date",
+      "sec_owner_count",
+      "sec_max_owner_pct",
+      "sec_total_owner_pct",
+      "prospectus_url",
+      "disclosure_url"
     ]
   },
   {
@@ -299,16 +324,26 @@ async function mapCalendarRows(rows: CalendarDbRow[]): Promise<Array<Record<stri
       .filter((ticker): ticker is string => Boolean(ticker))
   ));
   const metadataMap = await getCalendarTickerMetadataMap(tickers);
-  return rows.map((row) => mapCalendarRow(row, metadataMap.get(row.ticker?.toUpperCase() ?? "")));
+  const ipoUniqueKeys = rows
+    .filter((row) => row.event_type === "ipos" && row.unique_key)
+    .map((row) => row.unique_key);
+  const ipoSecMap = await getIpoSecEnrichmentMap(ipoUniqueKeys);
+  return rows.map((row) => mapCalendarRow(
+    row,
+    metadataMap.get(row.ticker?.toUpperCase() ?? ""),
+    ipoSecMap.get(row.unique_key),
+  ));
 }
 
 function mapCalendarRow(
   row: CalendarDbRow,
   metadata?: CalendarTickerMetadataRow,
+  ipoSec?: IpoSecEnrichmentRow,
 ): Record<string, unknown> {
   const fieldsJson = parseFieldsJson(row.meta_json);
   const eventDate = getEventDate(row.event_at);
   const companyName = getStringField(fieldsJson.company_name) ?? metadata?.name ?? null;
+  const companyDescription = getStringField(fieldsJson.company_description) ?? ipoSec?.company_description ?? null;
   const epsEstimated = getNumberField(fieldsJson.eps_est);
   const epsActual = getNumberField(fieldsJson.eps_actual);
   const revenueEstimated = getNumberField(fieldsJson.revenue_est);
@@ -317,6 +352,9 @@ function mapCalendarRow(
   const surprisePct = getNumberField(fieldsJson.surprise_pct) ?? computeSurprisePct(epsActual, epsEstimated);
   const confirmed = getBooleanField(fieldsJson.confirmed) ?? (epsActual != null || revenueActual != null);
   const session = getStringField(fieldsJson.session) ?? deriveSession(timeOfDay);
+  const ipoDate = getStringField(fieldsJson.ipo_date) ?? eventDate;
+  const secFilingDate = ipoSec?.filing_date ? ipoSec.filing_date.slice(0, 10) : null;
+  const secAcceptedDate = ipoSec?.accepted_date ? ipoSec.accepted_date.slice(0, 10) : null;
 
   return {
     id: row.id,
@@ -331,11 +369,13 @@ function mapCalendarRow(
     created_at: row.created_at,
     ...fieldsJson,
     report_date: getStringField(fieldsJson.report_date) ?? eventDate,
+    ipo_date: ipoDate,
     company_name: companyName,
+    company_description: companyDescription,
     name: metadata?.name ?? companyName ?? (row.ticker || null),
-    exchange: metadata?.exchange ?? null,
-    sector: metadata?.sector ?? null,
-    industry: metadata?.industry ?? null,
+    exchange: metadata?.exchange ?? getStringField(fieldsJson.exchange) ?? null,
+    sector: metadata?.sector ?? getStringField(fieldsJson.sector) ?? null,
+    industry: metadata?.industry ?? getStringField(fieldsJson.industry) ?? null,
     market_cap: metadata?.market_cap ?? null,
     float_pct: metadata?.float_pct ?? null,
     institutional_pct: metadata?.institutional_pct ?? null,
@@ -352,6 +392,22 @@ function mapCalendarRow(
     revenue_est: revenueEstimated,
     revenue_actual: revenueActual,
     surprise_pct: surprisePct,
+    status: getStringField(fieldsJson.status) ?? getStringField(fieldsJson.action) ?? null,
+    shares: getNumberField(fieldsJson.shares),
+    price_range: getStringField(fieldsJson.price_range),
+    offer_amount: getNumberField(fieldsJson.offer_amount),
+    daa: getStringField(fieldsJson.daa),
+    sec_form: ipoSec?.form_type ?? null,
+    sec_filing_date: secFilingDate,
+    sec_accepted_date: secAcceptedDate,
+    sec_owner_count: ipoSec?.ownership_holder_count ?? null,
+    sec_max_owner_pct: ipoSec?.ownership_max_pct ?? null,
+    sec_total_owner_pct: ipoSec?.ownership_total_pct ?? null,
+    sec_document_url: ipoSec?.document_url ?? null,
+    prospectus_url: ipoSec?.prospectus_url ?? null,
+    disclosure_url: ipoSec?.disclosure_url ?? null,
+    sec_source_note: ipoSec?.source_note ?? null,
+    sec_last_synced_at: ipoSec?.fetched_at ?? null,
   };
 }
 

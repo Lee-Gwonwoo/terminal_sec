@@ -63,6 +63,24 @@
   - 창을 열자마자 수천 row를 읽어오는 초기 렉을 줄인다.
   - 사용자가 의도한 범위만 조회하게 되어 client-side sort/filter 비용도 함께 줄어든다.
 
+### PLAN CHANGE #6 — 2026-04-15 ticker 우클릭 Financial dialog 추가
+
+- 사용자 추가 요구를 반영해 `CalendarWindow`의 ticker 셀 interaction 범위를 다음으로 확장한다.
+  - ticker 좌클릭은 기존 `onTickerClick` linked-ticker 동작을 유지한다.
+  - ticker 우클릭 시 작은 context menu를 띄우고 `Financial` 액션을 제공한다.
+  - `Financial` 선택 시 annual / quarterly toggle이 있는 dialog를 열고, 과거 revenue / earnings / valuation 그래프를 표시한다.
+- backend data source는 FMP stable financial statement 계열로 고정한다.
+  - revenue / earnings: `/stable/income-statement`
+  - valuation / market cap: `/stable/key-metrics`, `/stable/ratios`
+- 이번 phase의 표시 범위
+  - `Revenue` chart: revenue history
+  - `Earnings` chart: net income + EPS history
+  - `Valuation` chart: `P/E`, `P/S` history
+- 구현 제약
+  - dialog는 ticker가 있는 row에서만 열린다.
+  - API 응답에서 valuation ratio가 비어 있으면, 가능한 경우 `marketCap / netIncome`, `marketCap / revenue`로 fallback 계산한다.
+  - FMP stable income-statement 실제 응답은 `calendarYear`가 아니라 `fiscalYear`, `period` 중심이므로 label 생성 규칙을 별도로 둔다.
+
 ### 현재 레포 상태(중요, 확인됨)
 
 - backend에는 이미 일반형 calendar read API가 있다.
@@ -91,6 +109,10 @@
   - `mockCalendarData`를 직접 사용한다.
   - 탭 타입이 `earnings | conference | dividend | analyst_rating`로 고정되어 있다.
   - backend의 `dividends`, `splits`, `sec_filings`, `economics`와 naming/shape mismatch가 있다.
+- frontend `CalendarWindow`의 ticker 셀은 아직 좌클릭만 지원한다.
+  - 우클릭 context menu가 없고, financial chart dialog도 없다.
+- backend에는 `CalendarWindow`에서 바로 쓸 수 있는 ticker financial-history read API가 아직 없다.
+  - 현재 FMP provider는 profile, shares-float, OHLC, news, SEC filing, earnings calendar, IPO calendar까지만 구현돼 있다.
 - mock 데이터 정책상, `calendar window` 작업에서는 새 mock을 추가하면 안 된다. 현재 남아 있는 mock calendar UI를 실데이터로 치환하는 방향이 맞다.
 
 #### 현재 레포에 이미 연결된 FMP 데이터
@@ -216,6 +238,11 @@
 - earnings update는 `POST /api/fmp/calendar/earnings/update`(가칭) job 기반으로 제공한다.
 - update route는 body에 `from/to`가 있으면 해당 범위를 사용하고, 없으면 기본 운영 범위를 사용한다.
 - `session/time`은 FMP stable earnings source에 없으므로 UI에서 비어 있는 값으로 처리한다.
+- ticker 우클릭 `Financial` action으로 annual / quarterly dialog를 열 수 있게 한다.
+- dialog에는 아래 3개 chart group을 포함한다.
+  - revenue history
+  - earnings history (`net income`, `EPS`)
+  - valuation history (`P/E`, `P/S`)
 
 ### 제약 / 비범위
 
@@ -330,6 +357,7 @@
 | D6 | date range fetch 전략 | 90일 chunking | FMP 문서에 max 90-day date range 제한이 표시되기 때문 |
 | D7 | provider coexist dedupe | `unique_key`에 source prefix 포함 | 현재 unique index가 `(event_type, unique_key)`라 source 충돌 위험이 있기 때문 |
 | D8 | calendar route 설계 | IBKR route와 분리된 FMP route 추가 | provider별 실패/재시도/로그를 분리하는 편이 운영상 명확하기 때문 |
+| D9 | financial dialog data source | `income-statement + key-metrics + ratios` | revenue/earnings/valuation을 가장 적은 endpoint 수로 함께 만들 수 있기 때문 |
 
 ### 계획 중간 필수 확인
 
@@ -479,13 +507,14 @@
 ```
 사용자 확인 필요: **예**
 
-#### ⏳ Step 3 — query layer enrich와 date filter 정렬
+#### ⏳ Step 3 — query layer enrich, financial detail API, date filter 정렬
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
 | 3-1 | earnings row에 DB metadata(`industry`, ownership, company name)를 enrich | `terminal/backend/src/services/calendarRepository.ts` | `/api/calendar/events` 응답 확인 | ⏳ |
 | 3-2 | date-only `from/to` query를 inclusive day range로 정규화 | `terminal/backend/src/server.ts`, `terminal/backend/src/services/calendarRepository.ts` | query 조합 확인 | ⏳ |
 | 3-3 | CSV export와 type config가 새 필드 구조를 반영하도록 조정 | `terminal/backend/src/services/calendarRepository.ts` | export.csv 확인 | ⏳ |
+| 3-4 | ticker별 revenue / earnings / valuation series를 내려주는 read-only API 추가 | `terminal/backend/src/services/*`, `terminal/backend/src/server.ts` | `/api/calendar/financials/:ticker` 응답 확인 | ⬜ |
 
 3-1 목적: calendar row가 별도 external fetch 없이 DB metadata를 함께 보여주게 하기 위함.
 설명: `industry`, `float_pct`, `institutional_pct`, `insider_pct`를 existing DB에서 붙인다.
@@ -505,11 +534,18 @@
 사람 검증(비개발자): 화면과 CSV가 같은 의미의 컬럼을 가진다.
 흔한 문제/주의: `meta_json` key rename 후 export를 놓치기 쉽다.
 
+3-4 목적: CalendarWindow ticker 우클릭 dialog가 필요한 재무 시계열을 바로 읽게 하기 위함.
+설명: FMP stable `income-statement`, `key-metrics`, `ratios`를 묶어 annual / quarterly series를 반환하는 read-only endpoint를 만든다.
+완료 조건(눈으로 확인): 특정 ticker에 대해 revenue, net income, EPS, P/E, P/S series가 하나의 API payload로 내려온다.
+사람 검증(비개발자): ticker 하나를 지정했을 때 dialog에 그릴 데이터가 API에서 바로 보인다.
+흔한 문제/주의: `peRatio`가 비어 있는 응답이 있을 수 있으므로, `priceToEarningsRatio` 또는 `marketCap / netIncome` fallback 규칙이 필요하다.
+
 검증 훅:
 ```text
 - GET /api/calendar/types
 - GET /api/calendar/events?type=earnings
 - GET /api/calendar/events/export.csv?type=earnings
+- GET /api/calendar/financials/AAPL
 ```
 사용자 확인 필요: **예**
 
@@ -523,6 +559,7 @@
 | 4-4 | `Inst %`, `Float %`, `Market Cap` min/max 숫자 필터 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx` | 브라우저에서 숫자 범위 입력 후 row 변화 확인 | ⏳ |
 | 4-5 | calendar 기본 날짜 정렬을 늦은 날짜 우선으로 전환 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx` | 브라우저 첫 row 날짜 확인 | ⏳ |
 | 4-6 | 날짜 범위 미지정 시 events fetch를 막고 안내 상태를 표시 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx` | 브라우저 초기 진입/Reset 후 빈 상태 확인 | ⏳ |
+| 4-7 | ticker 우클릭 context menu와 Financial dialog 차트 UI 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx` | 브라우저에서 우클릭 menu + dialog 확인 | ⬜ |
 
 4-1 목적: 현재 calendar 화면을 실데이터 기반으로 바꾸기 위함.
 설명: mock array 대신 backend response를 state source of truth로 삼는다.
@@ -560,6 +597,12 @@
 사람 검증(비개발자): 날짜를 넣기 전에는 표가 비어 있고 안내 문구가 보인다.
 흔한 문제/주의: loading/empty/no-date 상태가 섞이면 사용자가 오류인지 대기 상태인지 구분하기 어렵다.
 
+4-7 목적: CalendarWindow 안에서 ticker별 재무 history를 바로 보게 하기 위함.
+설명: ticker 셀 우클릭으로 `Financial` menu를 띄우고, 선택 시 annual / quarterly toggle이 있는 dialog에서 revenue / earnings / valuation charts를 렌더링한다.
+완료 조건(눈으로 확인): ticker를 우클릭하면 menu가 뜨고, `Financial`을 누르면 dialog 안에 3개 chart group이 보인다.
+사람 검증(비개발자): 같은 캘린더 창에서 종목 재무 흐름을 추가 창 없이 바로 열어볼 수 있다.
+흔한 문제/주의: 좌클릭 linked-ticker 동작을 깨뜨리면 기존 window linkage UX가 회귀한다.
+
 검증 훅:
 ```text
 - backend dev + webui dev 실행
@@ -568,6 +611,7 @@
 - /api/calendar/events 호출 결과와 화면 row 일치 확인
 - 기본 진입/Reset 후 첫 row 날짜가 늦은 날짜 우선인지 확인
 - 기본 진입/Reset 후 날짜 안내 상태이고 row가 비어 있는지 확인
+- ticker 우클릭 -> Financial menu -> dialog open -> annual/quarterly toggle 확인
 ```
 사용자 확인 필요: **예**
 
@@ -669,12 +713,18 @@ Legend:
   -> ⏳ 2-2 90일 chunking + retry 구현
   -> ⏳ 2-3 calendar_events upsert 구현
   -> ⏳ 2-4 FMP calendar update route 추가
-  -> ⏳ 3-1 calendar type config 정리
-  -> ⏳ 3-2 query filter 조정
+  -> ⏳ 2-5 FMP earnings snapshot replace 적용
+  -> ⏳ 3-1 earnings row metadata enrich
+  -> ⏳ 3-2 inclusive day range query 정규화
   -> ⏳ 3-3 export 동기화
+  -> ⬜ 3-4 ticker financial detail read API 추가
   -> ⏳ 4-1 mock 제거 + API fetch 연결
   -> ⏳ 4-2 탭/컬럼 backend canonical 정렬
   -> ⏳ 4-3 filter/sort/empty state 정리
+  -> ⏳ 4-4 숫자 필터 추가
+  -> ⏳ 4-5 기본 날짜 desc 정렬
+  -> ⏳ 4-6 날짜 미지정 lazy load
+  -> ⬜ 4-7 ticker context menu + Financial dialog
   -> ⏳ 5-1 backend 문서 동기화
   -> ⏳ 5-2 frontend 문서 동기화
   -> ⏳ 5-3 정적분석/빌드/테스트/runtime 검증
@@ -732,3 +782,7 @@ Legend:
   - `calendar window` 작업 전용 plan 폴더를 새로 생성했다.
   - FMP 데이터 범위를 `현재 구현됨`과 `calendar 후보`로 분리했다.
   - phase 1 기본 권장안을 `earnings/dividends/splits`로 두고, `IPO/economics`는 차단된 확장 단계로 분리했다.
+- 2026-04-15 ticker Financial dialog 범위 추가:
+  - `CalendarWindow` ticker 셀에 우클릭 context menu를 추가하고 `Financial` 액션을 연다.
+  - `Financial` dialog는 annual / quarterly toggle과 함께 revenue / earnings / valuation chart를 표시한다.
+  - backend에는 FMP stable `income-statement`, `key-metrics`, `ratios`를 묶는 read-only financial detail API가 추가 대상이다.

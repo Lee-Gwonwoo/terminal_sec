@@ -52,6 +52,50 @@ function encodeCursor(item: Pick<NewsItem, "published_at" | "id">): string {
   return Buffer.from(`${item.published_at}|${item.id}`).toString("base64");
 }
 
+type CompanyProfileNumericField = "float_pct" | "institutional_pct" | "insider_pct";
+
+function buildPrimaryTickerSql(alias: string): string {
+  return `CASE
+    WHEN ${alias}.tickers_csv IS NULL OR TRIM(${alias}.tickers_csv) = '' THEN NULL
+    WHEN instr(substr(${alias}.tickers_csv, 2), ',') <= 0 THEN NULL
+    ELSE substr(${alias}.tickers_csv, 2, instr(substr(${alias}.tickers_csv, 2), ',') - 1)
+  END`;
+}
+
+function buildLatestCompanyProfileScalarSql(
+  alias: string,
+  fieldName: CompanyProfileNumericField,
+  valueConditionSql: string,
+): string {
+  const primaryTickerSql = buildPrimaryTickerSql(alias);
+  return `(
+    SELECT cp.${fieldName}
+    FROM company_profiles cp
+    JOIN securities s ON s.id = cp.security_id
+    WHERE s.ticker = ${primaryTickerSql}
+      AND ${valueConditionSql}
+    ORDER BY cp.fetched_at DESC, cp.id DESC
+    LIMIT 1
+  )`;
+}
+
+function appendNumericRangeWhereClause(
+  where: string[],
+  values: unknown[],
+  valueSql: string,
+  minValue?: number,
+  maxValue?: number,
+): void {
+  if (typeof minValue === "number" && Number.isFinite(minValue)) {
+    where.push(`${valueSql} >= ?`);
+    values.push(minValue);
+  }
+  if (typeof maxValue === "number" && Number.isFinite(maxValue)) {
+    where.push(`${valueSql} <= ?`);
+    values.push(maxValue);
+  }
+}
+
 export interface IsoDateRange {
   from: string;
   to: string;
@@ -178,6 +222,24 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
     where.push(`(ni.published_at < ? OR (ni.published_at = ? AND ni.id < ?))`);
   }
 
+  const floatPctSql = buildLatestCompanyProfileScalarSql("ni", "float_pct", "cp.float_pct IS NOT NULL");
+  const institutionalPctSql = buildLatestCompanyProfileScalarSql(
+    "ni",
+    "institutional_pct",
+    "cp.institutional_pct IS NOT NULL AND cp.institutional_source = 'yahoo'",
+  );
+  const insiderPctSql = buildLatestCompanyProfileScalarSql("ni", "insider_pct", "cp.insider_pct IS NOT NULL");
+
+  appendNumericRangeWhereClause(where, values, floatPctSql, query.floatPctMin, query.floatPctMax);
+  appendNumericRangeWhereClause(
+    where,
+    values,
+    institutionalPctSql,
+    query.institutionalPctMin,
+    query.institutionalPctMax,
+  );
+  appendNumericRangeWhereClause(where, values, insiderPctSql, query.insiderPctMin, query.insiderPctMax);
+
   const requestedLimit = typeof query.limit === "number" && Number.isFinite(query.limit) ? query.limit : 500;
   const rangeDays = computeRangeDays(query.from, query.to);
   const policyMax = capLimitByRangeDays(rangeDays);
@@ -205,7 +267,10 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
            naa.score AS ai_score,
            naa.score_evidence AS ai_score_evidence,
            naa.analysis_status AS ai_analysis_status,
-           naa.keywords_json AS ai_keywords_json
+              naa.keywords_json AS ai_keywords_json,
+              ${floatPctSql} AS float_pct,
+              ${institutionalPctSql} AS institutional_pct,
+              ${insiderPctSql} AS insider_pct
     FROM news_items ni
     LEFT JOIN sec_filings sf ON sf.news_id = ni.id
     LEFT JOIN news_fulltext nf ON nf.news_id = ni.id
@@ -235,6 +300,13 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
 }
 
 export async function getNewsById(id: string): Promise<NewsItem | null> {
+  const floatPctSql = buildLatestCompanyProfileScalarSql("ni", "float_pct", "cp.float_pct IS NOT NULL");
+  const institutionalPctSql = buildLatestCompanyProfileScalarSql(
+    "ni",
+    "institutional_pct",
+    "cp.institutional_pct IS NOT NULL AND cp.institutional_source = 'yahoo'",
+  );
+  const insiderPctSql = buildLatestCompanyProfileScalarSql("ni", "insider_pct", "cp.insider_pct IS NOT NULL");
   const row = await getDb().get<any>(
     `SELECT ni.id, ni.published_at, ni.source, ni.publisher, COALESCE(ni.origin_url, sf.filing_url, sf.report_url) AS origin_url, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
             cm_1d.ohlc_ticker,
@@ -255,7 +327,10 @@ export async function getNewsById(id: string): Promise<NewsItem | null> {
             naa.score AS ai_score,
             naa.score_evidence AS ai_score_evidence,
             naa.analysis_status AS ai_analysis_status,
-            naa.keywords_json AS ai_keywords_json
+                 naa.keywords_json AS ai_keywords_json,
+                 ${floatPctSql} AS float_pct,
+                 ${institutionalPctSql} AS institutional_pct,
+                 ${insiderPctSql} AS insider_pct
      FROM news_items ni
     LEFT JOIN sec_filings sf ON sf.news_id = ni.id
      LEFT JOIN news_fulltext nf ON nf.news_id = ni.id
@@ -385,6 +460,24 @@ export async function getModel1News(query: NewsQuery): Promise<{ items: Model1Ne
     where.push(`(mn.published_at < ? OR (mn.published_at = ? AND mn.id < ?))`);
   }
 
+  const floatPctSql = buildLatestCompanyProfileScalarSql("mn", "float_pct", "cp.float_pct IS NOT NULL");
+  const institutionalPctSql = buildLatestCompanyProfileScalarSql(
+    "mn",
+    "institutional_pct",
+    "cp.institutional_pct IS NOT NULL AND cp.institutional_source = 'yahoo'",
+  );
+  const insiderPctSql = buildLatestCompanyProfileScalarSql("mn", "insider_pct", "cp.insider_pct IS NOT NULL");
+
+  appendNumericRangeWhereClause(where, values, floatPctSql, query.floatPctMin, query.floatPctMax);
+  appendNumericRangeWhereClause(
+    where,
+    values,
+    institutionalPctSql,
+    query.institutionalPctMin,
+    query.institutionalPctMax,
+  );
+  appendNumericRangeWhereClause(where, values, insiderPctSql, query.insiderPctMin, query.insiderPctMax);
+
   const requestedLimit = typeof query.limit === "number" && Number.isFinite(query.limit) ? query.limit : 500;
   const rangeDays = computeRangeDays(query.from, query.to);
   const policyMax = capLimitByRangeDays(rangeDays);
@@ -394,8 +487,11 @@ export async function getModel1News(query: NewsQuery): Promise<{ items: Model1Ne
   const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
   const sql = `
     SELECT mn.id, mn.published_at, mn.source, mn.publisher, COALESCE(mn.origin_url, sf.filing_url, sf.report_url) AS origin_url, mn.source_type, mn.title, mn.body, mn.url, mn.tickers_csv, mn.tags_csv, mn.created_at,
-           mn.has_full_text, mn.keywords_json, mn.keywords_status,
-           mn.ai_score, mn.ai_score_evidence, mn.ai_analysis_status, mn.ai_keywords_json
+          mn.has_full_text, mn.keywords_json, mn.keywords_status,
+          mn.ai_score, mn.ai_score_evidence, mn.ai_analysis_status, mn.ai_keywords_json,
+          ${floatPctSql} AS float_pct,
+          ${institutionalPctSql} AS institutional_pct,
+          ${insiderPctSql} AS insider_pct
     FROM model1_current_news_view mn
     LEFT JOIN sec_filings sf ON sf.news_id = mn.id
     ${extraJoins}
@@ -415,10 +511,20 @@ export async function getModel1News(query: NewsQuery): Promise<{ items: Model1Ne
 }
 
 export async function getModel1NewsById(id: string): Promise<Model1NewsItem | null> {
+  const floatPctSql = buildLatestCompanyProfileScalarSql("mn", "float_pct", "cp.float_pct IS NOT NULL");
+  const institutionalPctSql = buildLatestCompanyProfileScalarSql(
+    "mn",
+    "institutional_pct",
+    "cp.institutional_pct IS NOT NULL AND cp.institutional_source = 'yahoo'",
+  );
+  const insiderPctSql = buildLatestCompanyProfileScalarSql("mn", "insider_pct", "cp.insider_pct IS NOT NULL");
   const row = await getDb().get<any>(
     `SELECT mn.id, mn.published_at, mn.source, mn.publisher, COALESCE(mn.origin_url, sf.filing_url, sf.report_url) AS origin_url, mn.source_type, mn.title, mn.body, mn.url, mn.tickers_csv, mn.tags_csv, mn.created_at,
             mn.has_full_text, mn.keywords_json, mn.keywords_status,
-            mn.ai_score, mn.ai_score_evidence, mn.ai_analysis_status, mn.ai_keywords_json
+            mn.ai_score, mn.ai_score_evidence, mn.ai_analysis_status, mn.ai_keywords_json,
+            ${floatPctSql} AS float_pct,
+            ${institutionalPctSql} AS institutional_pct,
+            ${insiderPctSql} AS insider_pct
      FROM model1_current_news_view mn
      LEFT JOIN sec_filings sf ON sf.news_id = mn.id
      WHERE mn.id = ?`,
@@ -622,6 +728,9 @@ function mapNewsRow(
     })(),
     ipoDate: (primaryTicker && ipoMap ? ipoMap.get(primaryTicker) : undefined) ?? null,
     marketCap: (primaryTicker && marketCapMap ? marketCapMap.get(primaryTicker) : undefined) ?? null,
+    floatPct: row.float_pct ?? null,
+    institutionalPct: row.institutional_pct ?? null,
+    insiderPct: row.insider_pct ?? null,
     // AI analysis
     score: row.ai_score ?? null,
     scoreEvidence: row.ai_score_evidence ?? null,
@@ -674,6 +783,9 @@ function mapModel1NewsRow(
     })(),
     ipoDate: (primaryTicker && ipoMap ? ipoMap.get(primaryTicker) : undefined) ?? null,
     marketCap: (primaryTicker && marketCapMap ? marketCapMap.get(primaryTicker) : undefined) ?? null,
+    floatPct: row.float_pct ?? null,
+    institutionalPct: row.institutional_pct ?? null,
+    insiderPct: row.insider_pct ?? null,
     score: row.ai_score ?? null,
     scoreEvidence: row.ai_score_evidence ?? null,
     analysisStatus: row.ai_analysis_status ?? null,

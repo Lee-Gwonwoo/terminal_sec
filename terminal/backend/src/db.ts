@@ -509,6 +509,32 @@ export async function initDb(): Promise<void> {
   await db.exec("CREATE INDEX IF NOT EXISTS idx_sec_filings_form_type ON sec_filings(form_type, filed_at DESC);");
   await db.exec("CREATE INDEX IF NOT EXISTS idx_sec_filings_filed_at ON sec_filings(filed_at DESC);");
 
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS ipo_sec_enrichments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_unique_key TEXT NOT NULL UNIQUE,
+      ticker TEXT,
+      ipo_date TEXT,
+      cik TEXT,
+      form_type TEXT,
+      filing_date TEXT,
+      accepted_date TEXT,
+      document_url TEXT,
+      prospectus_url TEXT,
+      disclosure_url TEXT,
+      company_description TEXT,
+      ownership_total_pct REAL,
+      ownership_max_pct REAL,
+      ownership_holder_count INTEGER,
+      ownership_values_json TEXT,
+      raw_json TEXT,
+      source_note TEXT,
+      fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+  await db.exec("CREATE INDEX IF NOT EXISTS idx_ipo_sec_enrichments_ticker_date ON ipo_sec_enrichments(ticker, ipo_date);");
+  await db.exec("CREATE INDEX IF NOT EXISTS idx_ipo_sec_enrichments_fetched_at ON ipo_sec_enrichments(fetched_at DESC);");
+
   await migrateNewsItemsUniqueConstraint();
   await purgeLegacyFinnhubSecFilings();
   await migrateFinnhubCompanyNewsPublishedAtToEt();

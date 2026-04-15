@@ -10,7 +10,7 @@
 - 실제 API 연동이 살아 있는 주요 창은 `Finnhub News`, `Investing News`, `Default Ticker`, `Daily Change History`, `Data Control`, `AI Research Window`, `Evidence Table`, `Watchlist` 이다.
 - `News` 창도 `GET /api/news`, `POST /api/news/pull-eodhd`를 실제로 호출하지만, 현재 운영 기준의 주력 뉴스 창은 아니다.
 - `Watchlist` 창은 backend `watchlists` API와 연결되어 있고, 종목 이름/가격 일부는 프론트의 fallback lookup을 함께 사용한다.
-- `Calendar` 창은 현재 mock data 기반이다.
+- `Calendar` 창은 backend `calendar_events` 기반의 실데이터 창이며, 현재 earnings + IPO 탭과 background job polling을 지원한다.
 - `BraveNewsWindow.tsx` 파일은 남아 있지만 현재 `WindowType`에 연결되어 있지 않아 UI에서 열 수 없다.
 - 탭/창 레이아웃, 다크 모드, 전역 글자 크기, 뉴스 제목/요약 글자 크기, linked ticker는 `terminal-workspace-v1`로 localStorage에 저장된다.
 - 추가 UI 상태로 `finhub-news-ui-state`, `investing-news-ui-state`, `finnhub-last-update-config`, `data-control-active-tab`, `ft-concurrency`, `fmp-pr-fulltext-concurrency`, `fmp-stock-fulltext-concurrency`, `change-fmp-concurrency`, `finnhub-ticker-concurrency`, `finnhub-request-interval-sec`, `finnhub-company-news-ticker-concurrency`, `finnhub-company-news-request-interval-sec`, `rtpr-ticker-concurrency`, `fmp-concurrency`, `fmp-request-interval-ms`, `fmp-pr-page-limit`, `fmp-pr-max-pages`, `fmp-sec-max-pages`, `fmp-skip-existing`, `peers-skip-existing`, `ipo-skip-existing`, `yahoo-concurrency`, `yahoo-request-interval-ms`, `yahoo-skip-existing`를 사용한다.
@@ -162,6 +162,9 @@ GET /api/news?source_names=FINNHUB,RTPR,FMP&limit=500
 - `source_type` (`company_news | press_release | fmp_press_release | fmp_stock_news | fmp_sec_filing | market_news`)
 - `tickers` (ticker 전용 검색, 예: `AAPL,TSLA`)
 - `from`, `to` (YYYY-MM-DD 날짜 범위 필터)
+- `floatPctMin`, `floatPctMax`
+- `institutionalPctMin`, `institutionalPctMax`
+- `insiderPctMin`, `insiderPctMax`
 - `bookmarkFolderId` (북마크 폴더 필터)
 - `cursor` (cursor 기반 페이지네이션)
 
@@ -185,6 +188,18 @@ GET /api/news?source_names=FINNHUB,RTPR,FMP&limit=500
   - source type filter 버튼 묶음
   - `Full View` / `Model_1 Safe`, `Bookmark view`, `Display mode`
   - `Update`, `View Log`, `Full Text`, `Refresh`, `Control`, `Save`, `Load`
+- 하단 유틸리티 줄
+  - item count / loading 상태
+  - 에러 메시지 / `Model_1 safe payload active`
+  - `Filters`, `Columns`, `Watch Lists`
+
+`Filters` 드롭다운은 `Default Ticker Window`와 같은 DB 기반 ownership 수치를 사용한다.
+
+- `Float %`
+- `Inst %`
+- `Insider %`
+
+각 항목은 `Min/Max` 범위 입력 2개를 가지며, 값이 바뀌면 backend `/api/news`, `/api/model1/news`를 같은 범위 조건으로 다시 조회한다.
 
 ### 뉴스 창 UI 락 규칙 기준표
 
@@ -203,18 +218,13 @@ GET /api/news?source_names=FINNHUB,RTPR,FMP&limit=500
 - 따라서 Investing update가 running이어도 Finnhub 창의 `Recent FMP PR` / `FMP Stock Pull` / `RTPR Pull`은 계속 눌릴 수 있다.
 - 반대로 Finnhub 계열 update/fulltext가 running이어도 Investing 창은 자기 scope job이 아니면 잠기지 않는다.
 - 로그 패널은 선택된 job id를 기준으로 표시하고, active job이 여러 개면 같은 scope 안에서만 dropdown으로 전환할 수 있다.
-- 하단 유틸리티 줄
-  - item count / loading 상태
-  - 에러 메시지 / `Model_1 safe payload active`
-  - `Columns`, `Watch Lists`
-
 검색 필드 자체는 여전히 아래 3개다:
 
 1. 일반 keyword 검색창
 2. Ticker 전용 검색창
 3. From / To 날짜 입력
 
-동작 트리거는 Enter 또는 discrete filter 변경 시 재조회다. 현재 구현은 프론트 내부 300ms debounce가 아니라, Enter 기반 검색 + source/bookmark/date 변경 시 즉시 재조회 조합에 가깝다.
+동작 트리거는 Enter 또는 discrete filter 변경 시 재조회다. 현재 구현은 프론트 내부 300ms debounce가 아니라, Enter 기반 검색 + source/bookmark/date/ownership filter 변경 시 즉시 재조회 조합에 가깝다.
 
 ### 테이블 컬럼
 
@@ -228,6 +238,9 @@ GET /api/news?source_names=FINNHUB,RTPR,FMP&limit=500
 - `[][][]industry[][][]`
 - `[][][]ipoDate[][][]`
 - `[][][]marketCap[][][]`
+- `[][][]floatPct[][][]`
+- `[][][]institutionalPct[][][]`
+- `[][][]insiderPct[][][]`
 - `[][][]source[][][]`
 - `[][][]fulltext[][][]`
 - `[][][]changes[][][]`
@@ -241,13 +254,18 @@ GET /api/news?source_names=FINNHUB,RTPR,FMP&limit=500
 기본 visible 상태:
 
 - 기본 숨김: `source`, `keywords`, `score`, `scoreEvidence`, `sentiment`, `peers`, `companyDesc`
-- 나머지는 기본 표시
+- 나머지는 기본 표시 (`Market Cap`, `Float %`, `Inst %`, `Insider %` 포함)
 
 market cap 컬럼 규칙:
 
-- `marketCap`은 backend의 최신 `company_profiles.market_cap` 값을 사용한다.
-- 표시는 `$12.34B`, `$950.0M`, `$1.25T` 형식으로 축약한다.
-- 값이 없으면 `-`를 표시한다.
+- `marketCap`는 backend의 최신 `company_profiles.market_cap` 대표값이다.
+- 표시는 `$12.34B`, `$850.0M` 같은 축약 형식이고, 값이 없으면 `-`를 표시한다.
+
+ownership 컬럼 규칙:
+
+- `floatPct`, `institutionalPct`, `insiderPct`는 backend의 최신 `company_profiles` 대표 row 값이다.
+- `institutionalPct`는 `Default Ticker Window`와 동일하게 Yahoo source 행만 대표값으로 본다.
+- 표시는 `12.34%` 형식이고, 값이 없으면 `-`를 표시한다.
 
 score/scoreEvidence/sentiment 컬럼 규칙:
 
@@ -1006,7 +1024,9 @@ API:
 - `GET /api/calendar/types`로 탭 목록을 읽는다.
 - `GET /api/calendar/events`로 현재 탭 + 날짜 범위 데이터를 읽는다.
 - earnings 탭에서 `POST /api/fmp/calendar/earnings/update`를 실행하고 `GET /api/jobs/:jobId`로 polling 한다.
+- IPO 탭에서 `POST /api/fmp/calendar/ipos/update`, `POST /api/fmp/calendar/ipos/sec-download`를 실행하고 같은 `GET /api/jobs/:jobId` polling 패턴을 사용한다.
 - industry / ownership(`float_pct`, `institutional_pct`, `insider_pct`)는 column selector에서 켜고 끌 수 있다.
+- IPO direct/SEC 컬럼(`ipo_date`, `company_name`, `exchange`, `status`, `price_range`, `shares`, `offer_amount`, `company_description`, `sec_max_owner_pct`, `sec_total_owner_pct`, `prospectus_url`, `disclosure_url`)도 column selector에서 켜고 끌 수 있다.
 - earnings에서는 `Inst %`, `Float %`, `Market Cap(B$)` min/max 숫자 필터를 사용할 수 있다.
 - dividends / splits에서는 `Market Cap(B$)` min/max 숫자 필터를 사용할 수 있다.
 
@@ -1018,16 +1038,19 @@ API:
   - Reset 후에도 같은 대기 상태로 돌아간다.
 - 기본 날짜 정렬은 늦은 날짜 우선(`desc`)이다.
   - 초기 진입, 탭 전환, Reset 모두 이 기준을 사용한다.
-- search는 client-side로 `ticker`, `company`, `title`, `industry`, `source`를 대상으로 동작한다.
+- search는 client-side로 `ticker`, `company`, `title`, `industry`, `source`, `status`, `company_description`을 대상으로 동작한다.
 - 숫자 범위 필터는 현재 fetch된 row 집합에 대해 client-side로 즉시 적용된다.
   - `Inst %`, `Float %`는 퍼센트 값 그대로 비교한다.
   - `Market Cap` 입력 단위는 `B$`이며, 프론트에서 내부 비교 시 실제 달러 값으로 환산한다.
   - 숫자 필터가 켜져 있을 때 해당 값이 `null`인 row는 결과에서 제외된다.
 - earnings stable source에는 reliable time/session이 없으므로, 관련 column 값은 비어 있을 수 있다.
 - update 버튼은 현재 date filter가 있으면 그 범위를 body에 같이 보낸다.
+- IPO 탭의 `Download SEC Data` 버튼은 선택한 날짜 범위가 있어야 활성화된다.
 - earnings update는 같은 범위에 대해 append가 아니라 snapshot replace다.
   - 즉 같은 범위를 다시 실행하면 기존 FMP earnings row를 해당 범위에서 먼저 정리한 뒤 현재 source snapshot으로 다시 채운다.
   - 따라서 earnings date가 바뀌었을 때 같은 범위를 재동기화하면 예전 날짜 row가 남아 누적되지 않는다.
+- IPO update도 같은 범위에서 snapshot replace다. 다만 SEC-derived description/ownership는 별도 저장소에 유지되므로 FMP snapshot refresh만으로 사라지지 않는다.
+- IPO SEC ownership 컬럼은 post-listing public holders summary가 아니라 prospectus/disclosure 본문에서 파싱한 named-owner percentages다.
 
 ## Case Description Window
 

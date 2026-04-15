@@ -31,12 +31,14 @@ interface CalendarRow {
   type: string;
   event_time: string;
   event_date?: string | null;
+  ipo_date?: string | null;
   ticker?: string | null;
   title?: string | null;
   source?: string | null;
   unique_key?: string | null;
   name?: string | null;
   company_name?: string | null;
+  company_description?: string | null;
   exchange?: string | null;
   sector?: string | null;
   industry?: string | null;
@@ -53,6 +55,20 @@ interface CalendarRow {
   float_pct?: number | null;
   institutional_pct?: number | null;
   insider_pct?: number | null;
+  status?: string | null;
+  shares?: number | null;
+  price_range?: string | null;
+  offer_amount?: number | null;
+  daa?: string | null;
+  sec_form?: string | null;
+  sec_filing_date?: string | null;
+  sec_accepted_date?: string | null;
+  sec_owner_count?: number | null;
+  sec_max_owner_pct?: number | null;
+  sec_total_owner_pct?: number | null;
+  prospectus_url?: string | null;
+  disclosure_url?: string | null;
+  sec_last_synced_at?: string | null;
   ex_date?: string | null;
   pay_date?: string | null;
   amount?: number | null;
@@ -94,6 +110,7 @@ interface NumericFilterConfig {
 
 const FALLBACK_TYPES: CalendarTypeConfig[] = [
   { key: 'earnings', label: 'Earnings', supports: [], columns: ['report_date', 'ticker', 'name', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual', 'industry', 'float_pct', 'institutional_pct', 'insider_pct', 'session', 'source'] },
+  { key: 'ipos', label: 'IPOs', supports: [], columns: ['ipo_date', 'ticker', 'company_name', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'company_description', 'sec_form', 'sec_filing_date', 'sec_accepted_date', 'sec_owner_count', 'sec_max_owner_pct', 'sec_total_owner_pct', 'prospectus_url', 'disclosure_url', 'source'] },
   { key: 'dividends', label: 'Dividends', supports: [], columns: ['ex_date', 'ticker', 'name', 'amount', 'yield', 'pay_date', 'industry', 'market_cap', 'source'] },
   { key: 'splits', label: 'Splits', supports: [], columns: ['split_date', 'ticker', 'name', 'ratio', 'industry', 'market_cap', 'source'] },
   { key: 'analyst_ratings', label: 'Analyst Ratings', supports: [], columns: ['ticker', 'title', 'source'] },
@@ -103,12 +120,14 @@ const FALLBACK_TYPES: CalendarTypeConfig[] = [
 
 const TYPE_COLUMN_ORDER: Record<string, string[]> = {
   earnings: ['report_date', 'ticker', 'name', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual', 'industry', 'float_pct', 'institutional_pct', 'insider_pct', 'session', 'source'],
+  ipos: ['ipo_date', 'ticker', 'company_name', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'company_description', 'sec_form', 'sec_filing_date', 'sec_accepted_date', 'sec_owner_count', 'sec_max_owner_pct', 'sec_total_owner_pct', 'prospectus_url', 'disclosure_url', 'source'],
   dividends: ['ex_date', 'ticker', 'name', 'amount', 'yield', 'pay_date', 'industry', 'market_cap', 'source'],
   splits: ['split_date', 'ticker', 'name', 'ratio', 'industry', 'market_cap', 'source'],
 };
 
 const VISIBLE_COLUMNS_BY_TYPE: Record<string, string[]> = {
   earnings: ['report_date', 'ticker', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual'],
+  ipos: ['ipo_date', 'ticker', 'company_name', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'sec_max_owner_pct', 'company_description'],
   dividends: ['ex_date', 'ticker', 'amount', 'yield', 'pay_date'],
   splits: ['split_date', 'ticker', 'ratio'],
   analyst_ratings: ['event_date', 'ticker', 'title'],
@@ -119,17 +138,32 @@ const VISIBLE_COLUMNS_BY_TYPE: Record<string, string[]> = {
 const COLUMN_DEFINITIONS: Record<string, Omit<ColumnConfig, 'visible'>> = {
   event_date: { key: 'event_date', label: 'Date', width: '110px' },
   report_date: { key: 'report_date', label: 'Date', width: '110px' },
+  ipo_date: { key: 'ipo_date', label: 'IPO Date', width: '110px' },
   ex_date: { key: 'ex_date', label: 'Ex Date', width: '110px' },
   pay_date: { key: 'pay_date', label: 'Pay Date', width: '110px' },
   split_date: { key: 'split_date', label: 'Split Date', width: '110px' },
   ticker: { key: 'ticker', label: 'Symbol', width: '90px' },
   name: { key: 'name', label: 'Name', width: '180px' },
   company_name: { key: 'company_name', label: 'Company', width: '180px' },
+  company_description: { key: 'company_description', label: 'Description', width: '320px' },
   title: { key: 'title', label: 'Title', width: '240px' },
   source: { key: 'source', label: 'Source', width: '100px' },
   industry: { key: 'industry', label: 'Industry', width: '180px' },
   exchange: { key: 'exchange', label: 'Exchange', width: '110px' },
   sector: { key: 'sector', label: 'Sector', width: '140px' },
+  status: { key: 'status', label: 'Status', width: '100px', align: 'center' },
+  shares: { key: 'shares', label: 'Shares', width: '120px', align: 'right' },
+  price_range: { key: 'price_range', label: 'Price Range', width: '130px' },
+  offer_amount: { key: 'offer_amount', label: 'Offer Amount', width: '130px', align: 'right' },
+  daa: { key: 'daa', label: 'DAA', width: '90px' },
+  sec_form: { key: 'sec_form', label: 'SEC Form', width: '110px' },
+  sec_filing_date: { key: 'sec_filing_date', label: 'Filing Date', width: '110px' },
+  sec_accepted_date: { key: 'sec_accepted_date', label: 'Accepted', width: '110px' },
+  sec_owner_count: { key: 'sec_owner_count', label: 'SEC Owners', width: '95px', align: 'right' },
+  sec_max_owner_pct: { key: 'sec_max_owner_pct', label: 'SEC Max %', width: '95px', align: 'right' },
+  sec_total_owner_pct: { key: 'sec_total_owner_pct', label: 'SEC Total %', width: '95px', align: 'right' },
+  prospectus_url: { key: 'prospectus_url', label: 'Prospectus', width: '110px' },
+  disclosure_url: { key: 'disclosure_url', label: 'Disclosure', width: '110px' },
   session: { key: 'session', label: 'Session', width: '110px' },
   confirmed: { key: 'confirmed', label: 'Confirmed', width: '100px', align: 'center' },
   eps_est: { key: 'eps_est', label: 'Est. EPS', width: '100px', align: 'right' },
@@ -181,6 +215,16 @@ function buildColumns(type: string, backendColumns: string[]): ColumnConfig[] {
       visible: (VISIBLE_COLUMNS_BY_TYPE[type] ?? []).includes(key),
     };
   });
+}
+
+function getDefaultSortFieldForType(type: string): string {
+  if (type === 'earnings') {
+    return 'report_date';
+  }
+  if (type === 'ipos') {
+    return 'ipo_date';
+  }
+  return 'event_date';
 }
 
 function mergeColumns(existing: ColumnConfig[] | undefined, next: ColumnConfig[]): ColumnConfig[] {
@@ -316,7 +360,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const [sortField, setSortField] = useState<string | null>('report_date');
+  const [sortField, setSortField] = useState<string | null>(() => getDefaultSortFieldForType('earnings'));
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [columnStates, setColumnStates] = useState<Record<string, ColumnConfig[]>>(() =>
     Object.fromEntries(FALLBACK_TYPES.map((typeConfig) => [typeConfig.key, buildColumns(typeConfig.key, typeConfig.columns)]))
@@ -324,6 +368,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const [showColumnMenu, setShowColumnMenu] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
+  const [jobLabel, setJobLabel] = useState('Calendar update');
   const [showJobLogs, setShowJobLogs] = useState(false);
   const [updatePending, setUpdatePending] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -490,6 +535,8 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
         String(event.ticker ?? '').toLowerCase().includes(query) ||
         String(event.name ?? event.company_name ?? '').toLowerCase().includes(query) ||
         String(event.title ?? '').toLowerCase().includes(query) ||
+        String(event.company_description ?? '').toLowerCase().includes(query) ||
+        String(event.status ?? '').toLowerCase().includes(query) ||
         String(event.industry ?? '').toLowerCase().includes(query) ||
         String(event.source ?? '').toLowerCase().includes(query),
       );
@@ -560,16 +607,21 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     setFloatPctMax('');
     setInstitutionalPctMin('');
     setInstitutionalPctMax('');
-    setSortField(activeType === 'earnings' ? 'report_date' : 'event_date');
+    setSortField(getDefaultSortFieldForType(activeType));
     setSortDirection('desc');
   };
 
-  const handleEarningsUpdate = async () => {
+  const startCalendarJob = async (params: {
+    url: string;
+    label: string;
+    failureMessage: string;
+  }) => {
     setActionError(null);
     setUpdatePending(true);
     setShowJobLogs(false);
+    setJobLabel(params.label);
     try {
-      const response = await fetch(`${API_BASE}/api/fmp/calendar/earnings/update`, {
+      const response = await fetch(`${API_BASE}${params.url}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -586,8 +638,32 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
       setJobStatus(null);
     } catch (updateError) {
       setUpdatePending(false);
-      setActionError(updateError instanceof Error ? updateError.message : 'FMP earnings update failed');
+      setActionError(updateError instanceof Error ? updateError.message : params.failureMessage);
     }
+  };
+
+  const handleEarningsUpdate = async () => {
+    await startCalendarJob({
+      url: '/api/fmp/calendar/earnings/update',
+      label: 'FMP earnings update',
+      failureMessage: 'FMP earnings update failed',
+    });
+  };
+
+  const handleIpoUpdate = async () => {
+    await startCalendarJob({
+      url: '/api/fmp/calendar/ipos/update',
+      label: 'FMP IPO update',
+      failureMessage: 'FMP IPO update failed',
+    });
+  };
+
+  const handleIpoSecDownload = async () => {
+    await startCalendarJob({
+      url: '/api/fmp/calendar/ipos/sec-download',
+      label: 'IPO SEC download',
+      failureMessage: 'IPO SEC download failed',
+    });
   };
 
   const cancelJob = async () => {
@@ -609,13 +685,13 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     if (key.endsWith('_date') || key === 'event_date') {
       return formatDateValue(value);
     }
-    if (key === 'market_cap' || key === 'revenue_est' || key === 'revenue_actual' || key === 'amount') {
+    if (key === 'market_cap' || key === 'revenue_est' || key === 'revenue_actual' || key === 'amount' || key === 'offer_amount') {
       return typeof value === 'number' ? formatCompactCurrency(value) : String(value);
     }
     if (key === 'eps_est' || key === 'eps_actual') {
       return typeof value === 'number' ? value.toFixed(2) : String(value);
     }
-    if (key === 'surprise_pct' || key === 'yield' || key === 'float_pct' || key === 'institutional_pct' || key === 'insider_pct') {
+    if (key === 'surprise_pct' || key === 'yield' || key === 'float_pct' || key === 'institutional_pct' || key === 'insider_pct' || key === 'sec_max_owner_pct' || key === 'sec_total_owner_pct') {
       return typeof value === 'number' ? formatPercent(value) : String(value);
     }
     if (typeof value === 'number') {
@@ -663,6 +739,45 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
       );
     }
 
+    if (column.key === 'status') {
+      const normalized = String(value ?? '').toLowerCase();
+      const colorClass = normalized === 'priced'
+        ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300'
+        : normalized === 'filed'
+          ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+          : normalized === 'expected'
+            ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300'
+            : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200';
+
+      return (
+        <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${colorClass}`}>
+          {formatValue(row, column.key)}
+        </span>
+      );
+    }
+
+    if (column.key === 'prospectus_url' || column.key === 'disclosure_url') {
+      const url = typeof value === 'string' ? value : '';
+      if (!url) {
+        return <span>-</span>;
+      }
+      return (
+        <a
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          className="text-blue-600 dark:text-blue-400 hover:underline"
+        >
+          Open
+        </a>
+      );
+    }
+
+    if (column.key === 'company_description') {
+      const text = formatValue(row, column.key);
+      return <span className="block max-w-[320px] truncate" title={text}>{text}</span>;
+    }
+
     if (column.key === 'surprise_pct' && typeof value === 'number') {
       return (
         <span className={value > 0 ? 'text-green-600 dark:text-green-400 font-medium' : value < 0 ? 'text-red-600 dark:text-red-400 font-medium' : ''}>
@@ -688,7 +803,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
               key={typeConfig.key}
               onClick={() => {
                 setActiveType(typeConfig.key);
-                setSortField(typeConfig.key === 'earnings' ? 'report_date' : 'event_date');
+                setSortField(getDefaultSortFieldForType(typeConfig.key));
                 setSortDirection('desc');
               }}
               className={`px-4 py-2 text-sm font-medium rounded transition-colors ${
@@ -780,6 +895,27 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
             </button>
           )}
 
+          {activeType === 'ipos' && (
+            <>
+              <button
+                onClick={handleIpoUpdate}
+                disabled={updatePending || !hasRequiredDateRange}
+                className={`flex items-center gap-2 px-3 py-2 text-sm rounded text-white ${(updatePending || !hasRequiredDateRange) ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
+              >
+                <RefreshCw className={`w-4 h-4 ${updatePending ? 'animate-spin' : ''}`} />
+                Update FMP IPO
+              </button>
+              <button
+                onClick={handleIpoSecDownload}
+                disabled={updatePending || !hasRequiredDateRange}
+                className={`flex items-center gap-2 px-3 py-2 text-sm rounded text-white ${(updatePending || !hasRequiredDateRange) ? 'bg-emerald-400 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700'}`}
+              >
+                <RefreshCw className={`w-4 h-4 ${updatePending ? 'animate-spin' : ''}`} />
+                Download SEC Data
+              </button>
+            </>
+          )}
+
           {hasActiveFilters && (
             <button
               onClick={clearAllFilters}
@@ -852,6 +988,12 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
           </div>
         )}
 
+        {activeType === 'ipos' && (
+          <div className="text-xs text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded px-3 py-2">
+            IPO rows come from FMP IPO calendar. The SEC download action fills company description and named-owner percentages parsed from prospectus or disclosure documents. These SEC ownership fields are separate from post-listing public holders data.
+          </div>
+        )}
+
         {actionError && (
           <div className="mt-3 text-sm text-red-600 dark:text-red-400">{actionError}</div>
         )}
@@ -860,7 +1002,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
           <div className="mt-3 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3">
             <div className="flex items-center justify-between gap-3 mb-2">
               <div className="text-sm font-medium">
-                FMP earnings update: <span className="capitalize">{jobStatus.status}</span>
+                {jobLabel}: <span className="capitalize">{jobStatus.status}</span>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -884,7 +1026,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
               <div className="h-full bg-blue-500 transition-all" style={{ width: `${jobStatus.progress.pct}%` }} />
             </div>
             <div className="mt-2 text-xs text-gray-600 dark:text-gray-400">
-              {jobStatus.progress.completed} / {jobStatus.progress.total || 0} chunks, {jobStatus.progress.pct}%
+              {jobStatus.progress.completed} / {jobStatus.progress.total || 0} steps, {jobStatus.progress.pct}%
             </div>
             {jobStatus.error && (
               <div className="mt-2 text-xs text-red-600 dark:text-red-400">{jobStatus.error}</div>

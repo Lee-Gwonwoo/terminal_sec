@@ -275,6 +275,40 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 제약: `UNIQUE (event_type, unique_key)`
 
+주의:
+
+- earnings row는 estimate/actual/date snapshot을 `meta_json`에 보관한다.
+- IPO row는 direct field(`[][][]ipo_date[][][]`, `[][][]company_name[][][]`, `[][][]exchange[][][]`, `[][][]status[][][]`, `[][][]shares[][][]`, `[][][]price_range[][][]`, `[][][]offer_amount[][][]`, `[][][]daa[][][]`)를 `meta_json`에 보관한다.
+
+#### `ipo_sec_enrichments`
+
+컬럼:
+
+- `[][][]id[][][]`
+- `[][][]event_unique_key[][][]`
+- `[][][]ticker[][][]`
+- `[][][]ipo_date[][][]`
+- `[][][]cik[][][]`
+- `[][][]form_type[][][]`
+- `[][][]filing_date[][][]`
+- `[][][]accepted_date[][][]`
+- `[][][]document_url[][][]`
+- `[][][]prospectus_url[][][]`
+- `[][][]disclosure_url[][][]`
+- `[][][]company_description[][][]`
+- `[][][]ownership_total_pct[][][]`
+- `[][][]ownership_max_pct[][][]`
+- `[][][]ownership_holder_count[][][]`
+- `[][][]ownership_values_json[][][]`
+- `[][][]raw_json[][][]`
+- `[][][]source_note[][][]`
+- `[][][]fetched_at[][][]`
+
+의미:
+
+- IPO row 자체는 `calendar_events` snapshot으로 유지하고, SEC 기반 description/ownership는 별도 영속 테이블에 보관한다.
+- 이 분리 구조 덕분에 FMP IPO snapshot을 다시 받아도 SEC enrich 결과가 함께 사라지지 않는다.
+
 #### `company_profiles`
 
 컬럼:
@@ -1094,7 +1128,7 @@ Control Window / localStorage 공통 설정:
 - `CaseResearchWindow`는 `/api/research/*` 전체를 사용해 섹션/페이지 CRUD, reorder, 검색, 자동 저장을 수행한다.
 - `EvidenceTableWindow`는 `GET /api/model2/analyses`, `GET /api/model2/analyses/:analysisId/cases`, `GET /api/model2/analyses/:analysisId/evidence`를 사용한다.
 - `CaseDescriptionWindow`는 backend 호출 없이 `EvidenceTableWindow`가 보낸 case metadata를 같은 탭 안의 보조 창으로 렌더링한다.
-- `CalendarWindow`는 `GET /api/calendar/types`, `GET /api/calendar/events`, `POST /api/fmp/calendar/earnings/update`, `GET /api/jobs/:jobId`를 사용한다.
+- `CalendarWindow`는 `GET /api/calendar/types`, `GET /api/calendar/events`, `POST /api/fmp/calendar/earnings/update`, `POST /api/fmp/calendar/ipos/update`, `POST /api/fmp/calendar/ipos/sec-download`, `GET /api/jobs/:jobId`를 사용한다.
 - 현재 `WatchlistWindow`만 backend API와 직접 연결되어 있지 않다.
 
 ## Case Research API
@@ -2256,10 +2290,16 @@ query:
   - `[][][]institutional_pct[][][]`
   - `[][][]insider_pct[][][]`
   - source 컬럼: `[][][]market_cap_source[][][]`, `[][][]float_source[][][]`, `[][][]institutional_source[][][]`, `[][][]insider_source[][][]`
+- IPO row는 direct FMP field(`[][][]ipo_date[][][]`, `[][][]company_name[][][]`, `[][][]exchange[][][]`, `[][][]status[][][]`, `[][][]shares[][][]`, `[][][]price_range[][][]`, `[][][]offer_amount[][][]`)와 SEC enrich field(`[][][]company_description[][][]`, `[][][]sec_form[][][]`, `[][][]sec_filing_date[][][]`, `[][][]sec_accepted_date[][][]`, `[][][]sec_owner_count[][][]`, `[][][]sec_max_owner_pct[][][]`, `[][][]sec_total_owner_pct[][][]`, `[][][]prospectus_url[][][]`, `[][][]disclosure_url[][][]`)를 함께 내려준다.
 
 FMP earnings row 주의:
 
 - stable earnings source는 신뢰 가능한 `time/session`을 제공하지 않으므로, 현재 `[][][]time_of_day[][][]`, `[][][]session[][][]`은 `null`일 수 있다.
+
+IPO SEC enrich 주의:
+
+- `sec_owner_count`, `sec_max_owner_pct`, `sec_total_owner_pct`는 prospectus/disclosure 본문에서 beneficial ownership section을 heuristic하게 파싱한 값이다.
+- 이 값들은 post-listing public holders summary(`institutional_pct`, `insider_pct`)와 의미가 다르므로 같은 컬럼으로 합치지 않는다.
 
 ### `GET /api/calendar/events/export.csv`
 
@@ -2388,6 +2428,72 @@ job 완료 result 컬럼:
 - `[][][]deletedRows[][][]`
 - `[][][]skippedOutsideUniverse[][][]`
 - `[][][]skippedInvalidDate[][][]`
+
+### `POST /api/fmp/calendar/ipos/update`
+
+FMP stable `ipos-calendar`를 range 기준 snapshot으로 받아 `calendar_events`의 `type='ipos'` row를 갱신하는 background job이다.
+
+요청 body:
+
+```json
+{ "from": "2026-04-15", "to": "2026-07-14" }
+```
+
+동작:
+
+1. body `from/to`를 읽고 `YYYY-MM-DD` 형식을 검증한다.
+2. stable `/ipos-calendar`를 30일 chunk로 호출한다.
+3. 각 chunk 범위의 기존 `type='ipos'`, `source='FMP'` row를 먼저 삭제한다.
+4. 현재 snapshot을 `unique_key='FMP:ipos:IPO_DATE:COMPANY:EXCHANGE'` 기준으로 upsert 한다.
+5. row direct field는 `meta_json`에 저장한다.
+6. `update_status.fmp_calendar_ipos`를 갱신한다.
+
+job 완료 result 컬럼:
+
+- `[][][]source[][][]`
+- `[][][]type[][][]`
+- `[][][]from[][][]`
+- `[][][]to[][][]`
+- `[][][]chunks[][][]`
+- `[][][]fetchedRows[][][]`
+- `[][][]upsertedRows[][][]`
+- `[][][]deletedRows[][][]`
+- `[][][]skippedInvalidDate[][][]`
+
+### `POST /api/fmp/calendar/ipos/sec-download`
+
+현재 저장된 IPO row를 기준으로 FMP `ipos-disclosure`, `ipos-prospectus`, 그리고 generic `sec-filings-search/symbol` fallback을 조회해 SEC-derived description/ownership를 `ipo_sec_enrichments`에 저장하는 background job이다.
+
+요청 body:
+
+```json
+{ "from": "2026-04-15", "to": "2026-04-24" }
+```
+
+동작:
+
+1. 선택 범위의 stored IPO row를 읽는다.
+2. SEC metadata 조회는 `from - 365일` ~ `to` lookback 범위를 사용한다.
+3. `ipos-disclosure`, `ipos-prospectus`, generic SEC filing search를 함께 조회한다.
+4. 각 ticker에 대해 가장 적절한 filing URL을 골라 본문을 다운로드한다.
+5. beneficial ownership section과 company overview 문단을 heuristic하게 파싱한다.
+6. 결과를 `ipo_sec_enrichments`에 upsert 한다.
+7. `update_status.fmp_calendar_ipos_sec`를 갱신한다.
+
+job 완료 result 컬럼:
+
+- `[][][]from[][][]`
+- `[][][]to[][][]`
+- `[][][]secLookbackFrom[][][]`
+- `[][][]rows[][][]`
+- `[][][]disclosures[][][]`
+- `[][][]prospectuses[][][]`
+- `[][][]genericFilings[][][]`
+- `[][][]enrichedRows[][][]`
+- `[][][]skippedNoTicker[][][]`
+- `[][][]missingDocumentRows[][][]`
+- `[][][]descriptionRows[][][]`
+- `[][][]ownershipRows[][][]`
 
 ## OHLC API
 

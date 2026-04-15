@@ -8,6 +8,12 @@ export type NewsQuery = {
   tags?: string[];
   from?: string;
   to?: string;
+  floatPctMin?: number;
+  floatPctMax?: number;
+  institutionalPctMin?: number;
+  institutionalPctMax?: number;
+  insiderPctMin?: number;
+  insiderPctMax?: number;
   limit?: number;
   cursor?: string;
   bookmarkFolderId?: string;
@@ -48,6 +54,9 @@ export type NewsItem = {
   industry?: string | null;
   ipoDate?: string | null;
   marketCap?: number | null;
+  floatPct?: number | null;
+  institutionalPct?: number | null;
+  insiderPct?: number | null;
   // ver3: AI analysis
   score?: number | null;
   scoreEvidence?: string | null;

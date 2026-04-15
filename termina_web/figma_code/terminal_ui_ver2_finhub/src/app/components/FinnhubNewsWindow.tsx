@@ -32,7 +32,7 @@ type DisplayMode = 'title-only' | 'title-abstract';
 type NewsProjectionMode = 'full' | 'model1-safe';
 
 // ─── Column definition ───
-type ColumnId = 'date' | 'ticker' | 'time' | 'title' | 'publisher' | 'industry' | 'ipoDate' | 'source' | 'changes' | 'fulltext' | 'keywords' | 'score' | 'scoreEvidence' | 'sentiment' | 'peers' | 'companyDesc';
+type ColumnId = 'date' | 'ticker' | 'time' | 'title' | 'publisher' | 'industry' | 'ipoDate' | 'marketCap' | 'floatPct' | 'institutionalPct' | 'insiderPct' | 'source' | 'changes' | 'fulltext' | 'keywords' | 'score' | 'scoreEvidence' | 'sentiment' | 'peers' | 'companyDesc';
 
 interface ColumnDef {
   id: ColumnId;
@@ -50,6 +50,10 @@ const DEFAULT_COLUMNS: ColumnDef[] = [
   { id: 'publisher',    label: 'Publisher',  defaultWidth: 96,  minWidth: 60 },
   { id: 'industry',     label: 'Industry',   defaultWidth: 110, minWidth: 60 },
   { id: 'ipoDate',      label: 'IPO Date',   defaultWidth: 96,  minWidth: 76 },
+  { id: 'marketCap',    label: 'Market Cap', defaultWidth: 112, minWidth: 84 },
+  { id: 'floatPct',     label: 'Float %',    defaultWidth: 90,  minWidth: 68 },
+  { id: 'institutionalPct', label: 'Inst %', defaultWidth: 90,  minWidth: 68 },
+  { id: 'insiderPct',   label: 'Insider %',  defaultWidth: 90,  minWidth: 68 },
   { id: 'source',       label: 'Sources',    defaultWidth: 90,  minWidth: 50 },
   { id: 'fulltext',     label: 'Full Text',  defaultWidth: 60,  minWidth: 40 },
   { id: 'changes',      label: 'Changes %',  defaultWidth: 280, minWidth: 160 },
@@ -298,6 +302,10 @@ interface BackendNewsItem {
   keywordsStatus?: string | null;
   industry?: string | null;
   ipoDate?: string | null;
+  marketCap?: number | null;
+  floatPct?: number | null;
+  institutionalPct?: number | null;
+  insiderPct?: number | null;
   score?: number | null;
   scoreEvidence?: string | null;
   analysisStatus?: string | null;
@@ -335,6 +343,10 @@ interface DisplayItem {
   keywordsStatus: string | null;
   industry: string | null;
   ipoDate: string | null;
+  marketCap: number | null;
+  floatPct: number | null;
+  institutionalPct: number | null;
+  insiderPct: number | null;
   score: number | null;
   scoreEvidence: string | null;
   sentiment: number | null;
@@ -431,6 +443,10 @@ function mapBackendItem(item: BackendNewsItem): DisplayItem {
     keywordsStatus: item.keywordsStatus ?? null,
     industry: item.industry ?? null,
     ipoDate: item.ipoDate ?? null,
+    marketCap: item.marketCap ?? null,
+    floatPct: item.floatPct ?? null,
+    institutionalPct: item.institutionalPct ?? null,
+    insiderPct: item.insiderPct ?? null,
     score: item.score ?? null,
     scoreEvidence: item.scoreEvidence ?? null,
     sentiment: item.sentimentBullishPct ?? null,
@@ -446,6 +462,20 @@ function mapBackendItem(item: BackendNewsItem): DisplayItem {
 const formatChange = (val: number | null) => {
   if (val === null || val === undefined) return '-';
   return `${val > 0 ? '+' : ''}${val.toFixed(2)}%`;
+};
+
+const formatOwnershipPct = (val: number | null) => {
+  if (val === null || val === undefined) return '-';
+  return `${val.toFixed(2)}%`;
+};
+
+const formatMarketCap = (val: number | null) => {
+  if (val === null || val === undefined || !Number.isFinite(val)) return '-';
+  const abs = Math.abs(val);
+  if (abs >= 1_000_000_000_000) return `$${(val / 1_000_000_000_000).toFixed(2)}T`;
+  if (abs >= 1_000_000_000) return `$${(val / 1_000_000_000).toFixed(2)}B`;
+  if (abs >= 1_000_000) return `$${(val / 1_000_000).toFixed(1)}M`;
+  return `$${val.toFixed(0)}`;
 };
 
 const changeColor = (val: number | null) => {
@@ -479,6 +509,12 @@ export function FinnhubNewsWindow({
   const [tickerQuery, setTickerQuery] = useState(initialTicker || '');
   const [fromDate, setFromDate] = useState(() => typeof persistedUiState?.fromDate === 'string' ? persistedUiState.fromDate : '');
   const [toDate, setToDate] = useState(() => typeof persistedUiState?.toDate === 'string' ? persistedUiState.toDate : '');
+  const [floatPctMin, setFloatPctMin] = useState(() => typeof persistedUiState?.floatPctMin === 'string' ? persistedUiState.floatPctMin : '');
+  const [floatPctMax, setFloatPctMax] = useState(() => typeof persistedUiState?.floatPctMax === 'string' ? persistedUiState.floatPctMax : '');
+  const [institutionalPctMin, setInstitutionalPctMin] = useState(() => typeof persistedUiState?.institutionalPctMin === 'string' ? persistedUiState.institutionalPctMin : '');
+  const [institutionalPctMax, setInstitutionalPctMax] = useState(() => typeof persistedUiState?.institutionalPctMax === 'string' ? persistedUiState.institutionalPctMax : '');
+  const [insiderPctMin, setInsiderPctMin] = useState(() => typeof persistedUiState?.insiderPctMin === 'string' ? persistedUiState.insiderPctMin : '');
+  const [insiderPctMax, setInsiderPctMax] = useState(() => typeof persistedUiState?.insiderPctMax === 'string' ? persistedUiState.insiderPctMax : '');
   const [bookmarkFolders, setBookmarkFolders] = useState<BookmarkFolder[]>([]);
   const [bookmarkFoldersLoaded, setBookmarkFoldersLoaded] = useState(false);
   const [selectedBookmarkFolderId, setSelectedBookmarkFolderId] = useState<string>(() => typeof persistedUiState?.selectedBookmarkFolderId === 'string' ? persistedUiState.selectedBookmarkFolderId : '');
@@ -673,6 +709,34 @@ export function FinnhubNewsWindow({
   const loadMenuRef = useRef<HTMLDivElement>(null);
   const displayModeMenuRef = useRef<HTMLDivElement>(null);
   // columnMenuRef declared above with column state
+
+  const activeNumericFilterCount = [
+    floatPctMin,
+    floatPctMax,
+    institutionalPctMin,
+    institutionalPctMax,
+    insiderPctMin,
+    insiderPctMax,
+  ].filter((value) => value.trim()).length;
+  const hasNumericFilters = activeNumericFilterCount > 0;
+
+  const applyOwnershipFilterParams = useCallback((params: URLSearchParams) => {
+    if (floatPctMin.trim()) params.set('floatPctMin', floatPctMin.trim());
+    if (floatPctMax.trim()) params.set('floatPctMax', floatPctMax.trim());
+    if (institutionalPctMin.trim()) params.set('institutionalPctMin', institutionalPctMin.trim());
+    if (institutionalPctMax.trim()) params.set('institutionalPctMax', institutionalPctMax.trim());
+    if (insiderPctMin.trim()) params.set('insiderPctMin', insiderPctMin.trim());
+    if (insiderPctMax.trim()) params.set('insiderPctMax', insiderPctMax.trim());
+  }, [floatPctMin, floatPctMax, institutionalPctMin, institutionalPctMax, insiderPctMin, insiderPctMax]);
+
+  const clearNumericFilters = useCallback(() => {
+    setFloatPctMin('');
+    setFloatPctMax('');
+    setInstitutionalPctMin('');
+    setInstitutionalPctMax('');
+    setInsiderPctMin('');
+    setInsiderPctMax('');
+  }, []);
 
   const copyToClipboard = useCallback(async (text: string) => {
     try {
@@ -880,6 +944,7 @@ export function FinnhubNewsWindow({
       if (toDate) {
         params.set('to', toDate);
       }
+      applyOwnershipFilterParams(params);
       params.set('limit', String(NEWS_PAGE_SIZE));
 
       const res = await fetch(`${newsApiBase}?${params.toString()}`, { signal: controller.signal });
@@ -897,7 +962,7 @@ export function FinnhubNewsWindow({
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, [selectedBookmarkFolderId, sourceTypeFilter, fromDate, toDate, newsApiBase]);
+  }, [selectedBookmarkFolderId, sourceTypeFilter, fromDate, toDate, newsApiBase, applyOwnershipFilterParams]);
 
   // ─── Fetch more (cursor-based append) ───
   const fetchMore = useCallback(async () => {
@@ -931,6 +996,7 @@ export function FinnhubNewsWindow({
       if (toDate) {
         params.set('to', toDate);
       }
+      applyOwnershipFilterParams(params);
       params.set('limit', String(NEWS_PAGE_SIZE));
       params.set('cursor', nextCursor);
 
@@ -948,7 +1014,7 @@ export function FinnhubNewsWindow({
       setLoadingMore(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nextCursor, loadingMore, selectedBookmarkFolderId, sourceTypeFilter, fromDate, toDate, newsApiBase]);
+  }, [nextCursor, loadingMore, selectedBookmarkFolderId, sourceTypeFilter, fromDate, toDate, newsApiBase, applyOwnershipFilterParams]);
 
   useEffect(() => {
     if (isModel1SafeMode && sort.column === 'changes') {
@@ -1679,6 +1745,10 @@ export function FinnhubNewsWindow({
       case 'publisher': return (item.publisher ?? '').toLowerCase();
       case 'industry': return (item.industry ?? '').toLowerCase();
       case 'ipoDate': return item.ipoDate ?? '';
+      case 'marketCap': return item.marketCap ?? -Infinity;
+      case 'floatPct': return item.floatPct ?? -Infinity;
+      case 'institutionalPct': return item.institutionalPct ?? -Infinity;
+      case 'insiderPct': return item.insiderPct ?? -Infinity;
       case 'source': return item.source.toLowerCase();
       case 'fulltext': return item.hasFullText ? 1 : 0;
       case 'changes': return item.changeFromOpenPct ?? 0;
@@ -1783,10 +1853,16 @@ export function FinnhubNewsWindow({
         tickerQuery,
         fromDate,
         toDate,
+        floatPctMin,
+        floatPctMax,
+        institutionalPctMin,
+        institutionalPctMax,
+        insiderPctMin,
+        insiderPctMax,
         selectedBookmarkFolderId,
       }));
     } catch { /* quota / SSR */ }
-  }, [visibleCols, displayMode, newsProjection, sourceTypeFilter, searchQuery, tickerQuery, fromDate, toDate, selectedBookmarkFolderId]);
+  }, [visibleCols, displayMode, newsProjection, sourceTypeFilter, searchQuery, tickerQuery, fromDate, toDate, floatPctMin, floatPctMax, institutionalPctMin, institutionalPctMax, insiderPctMin, insiderPctMax, selectedBookmarkFolderId]);
 
   // ─── Save / Load ───
   const handleSaveSearch = () => {
@@ -1939,6 +2015,14 @@ export function FinnhubNewsWindow({
         return <span className="truncate text-gray-600 dark:text-gray-400" title={newsItem.industry ?? undefined}>{newsItem.industry ?? '-'}</span>;
       case 'ipoDate':
         return <span className="truncate text-gray-600 dark:text-gray-400" title={newsItem.ipoDate ?? undefined}>{newsItem.ipoDate ?? '-'}</span>;
+      case 'marketCap':
+        return <span className="truncate text-gray-600 dark:text-gray-400 tabular-nums">{formatMarketCap(newsItem.marketCap)}</span>;
+      case 'floatPct':
+        return <span className="truncate text-gray-600 dark:text-gray-400 tabular-nums">{formatOwnershipPct(newsItem.floatPct)}</span>;
+      case 'institutionalPct':
+        return <span className="truncate text-gray-600 dark:text-gray-400 tabular-nums">{formatOwnershipPct(newsItem.institutionalPct)}</span>;
+      case 'insiderPct':
+        return <span className="truncate text-gray-600 dark:text-gray-400 tabular-nums">{formatOwnershipPct(newsItem.insiderPct)}</span>;
       case 'source': {
         const sourceHref = newsItem.originUrl || (newsItem.url?.startsWith('http') ? newsItem.url : null);
         return renderLinkCell(newsItem.source, 'text-gray-600 dark:text-gray-400', sourceHref);
@@ -2824,6 +2908,100 @@ export function FinnhubNewsWindow({
           )}
 
           <div className="flex items-center gap-2 lg:ml-auto">
+            <div className="relative" ref={filterMenuRef}>
+              <button
+                onClick={() => { setShowFilterMenu(!showFilterMenu); setShowColumnMenu(false); setShowLoadMenu(false); setShowDisplayModeMenu(false); setShowWatchlistMenu(false); }}
+                className={`px-2.5 py-1.5 text-xs border rounded-lg transition-colors flex items-center gap-1.5 ${
+                  hasNumericFilters
+                    ? 'border-blue-300 bg-blue-50 text-blue-600 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                    : 'border-gray-300 dark:border-gray-600 hover:bg-white dark:hover:bg-gray-800 bg-white dark:bg-gray-900'
+                }`}
+                title="Filter by Default Ticker ownership data"
+              >
+                <Filter className="w-3.5 h-3.5" />
+                <span className="whitespace-nowrap">Filters</span>
+                {activeNumericFilterCount > 0 && (
+                  <span className="inline-flex min-w-[18px] justify-center rounded-full bg-blue-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                    {activeNumericFilterCount}
+                  </span>
+                )}
+                <ChevronDown className="w-3 h-3" />
+              </button>
+              {showFilterMenu && (
+                <div className="absolute top-full mt-1 right-0 w-[320px] bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-lg z-30">
+                  <div className="p-3 space-y-3">
+                    <div>
+                      <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-400 dark:text-gray-500">Ownership Filters</div>
+                      <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">Default Ticker Window과 같은 DB 값으로 Finnhub News 결과를 다시 조회합니다.</div>
+                    </div>
+
+                    {[
+                      {
+                        key: 'floatPct',
+                        label: 'Float %',
+                        min: floatPctMin,
+                        max: floatPctMax,
+                        setMin: setFloatPctMin,
+                        setMax: setFloatPctMax,
+                      },
+                      {
+                        key: 'institutionalPct',
+                        label: 'Inst %',
+                        min: institutionalPctMin,
+                        max: institutionalPctMax,
+                        setMin: setInstitutionalPctMin,
+                        setMax: setInstitutionalPctMax,
+                      },
+                      {
+                        key: 'insiderPct',
+                        label: 'Insider %',
+                        min: insiderPctMin,
+                        max: insiderPctMax,
+                        setMin: setInsiderPctMin,
+                        setMax: setInsiderPctMax,
+                      },
+                    ].map((filterRow) => (
+                      <div key={filterRow.key} className="space-y-1.5">
+                        <div className="text-[11px] font-medium text-gray-600 dark:text-gray-300">{filterRow.label}</div>
+                        <div className="grid grid-cols-[1fr_auto_1fr] gap-2 items-center">
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            step="any"
+                            value={filterRow.min}
+                            onChange={(e) => filterRow.setMin(e.target.value)}
+                            placeholder="Min"
+                            className="w-full px-2 py-2 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                          <span className="text-[11px] text-gray-400 dark:text-gray-500">to</span>
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            step="any"
+                            value={filterRow.max}
+                            onChange={(e) => filterRow.setMax(e.target.value)}
+                            placeholder="Max"
+                            className="w-full px-2 py-2 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                        </div>
+                      </div>
+                    ))}
+
+                    <div className="flex items-center justify-between gap-2 pt-1">
+                      <div className="text-[10px] text-gray-400 dark:text-gray-500">입력 즉시 DB 재조회</div>
+                      <button
+                        onClick={() => clearNumericFilters()}
+                        disabled={!hasNumericFilters}
+                        className="px-2.5 py-1.5 text-[11px] border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="relative" ref={columnMenuRef}>
             <button
               onClick={() => { setShowColumnMenu(!showColumnMenu); setShowFilterMenu(false); setShowLoadMenu(false); setShowDisplayModeMenu(false); setShowWatchlistMenu(false); }}

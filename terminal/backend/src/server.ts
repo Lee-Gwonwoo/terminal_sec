@@ -103,6 +103,15 @@ import { fetchFmpPressReleasesByTicker } from "./services/fmpPressReleaseProvide
 import { fetchFmpStockNewsByTicker } from "./services/fmpStockNewsProvider.js";
 import { fetchFmpSecFilings } from "./services/fmpSecFilingProvider.js";
 import { fetchFmpEarningsCalendarChunk } from "./services/fmpEarningsCalendarProvider.js";
+import {
+  fetchFmpIpoCalendarChunk,
+  fetchFmpIpoDisclosureChunk,
+  fetchFmpIpoProspectusChunk,
+  type FmpIpoDisclosureItem,
+  type FmpIpoProspectusItem,
+} from "./services/fmpIpoCalendarProvider.js";
+import { upsertIpoSecEnrichment } from "./services/ipoSecEnrichmentRepository.js";
+import { downloadIpoSecInsights } from "./services/ipoSecInsights.js";
 import { generateSecFilingSummary } from "./services/secFilingSummary.js";
 import { getEtDateString } from "./services/timeUtils.js";
 import {
@@ -348,6 +357,157 @@ function normalizeCalendarDateOnly(value: string): string | null {
   return ISO_DATE_RE.test(value) ? value : null;
 }
 
+function normalizeUpperTicker(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim().toUpperCase();
+  return trimmed ? trimmed : null;
+}
+
+function slugCalendarKeyPart(value: string | null | undefined): string {
+  const normalized = String(value ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized || "UNKNOWN";
+}
+
+function buildFmpIpoUniqueKey(params: {
+  ipoDate: string;
+  company: string | null;
+  exchange: string | null;
+  ticker: string | null;
+}): string {
+  const companyPart = slugCalendarKeyPart(params.company ?? params.ticker);
+  const exchangePart = slugCalendarKeyPart(params.exchange);
+  return `FMP:ipos:${params.ipoDate}:${companyPart}:${exchangePart}`;
+}
+
+function parseCalendarMetaJson(raw: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function normalizeDocumentDate(value: string | null | undefined): string | null {
+  if (!value || typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
+    return trimmed.slice(0, 10);
+  }
+  return null;
+}
+
+function sortDateDesc(left: string | null | undefined, right: string | null | undefined): number {
+  const leftValue = left ?? "";
+  const rightValue = right ?? "";
+  if (leftValue === rightValue) {
+    return 0;
+  }
+  return leftValue < rightValue ? 1 : -1;
+}
+
+function pickBestIpoProspectus(items: FmpIpoProspectusItem[], ipoDate: string | null): FmpIpoProspectusItem | undefined {
+  if (items.length === 0) {
+    return undefined;
+  }
+
+  const exactMatch = ipoDate
+    ? items.find((item) => normalizeDocumentDate(item.ipoDate) === ipoDate)
+    : undefined;
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+  return [...items].sort((left, right) => sortDateDesc(left.acceptedDate ?? left.filingDate, right.acceptedDate ?? right.filingDate))[0];
+}
+
+function pickBestIpoDisclosure(items: FmpIpoDisclosureItem[]): FmpIpoDisclosureItem | undefined {
+  if (items.length === 0) {
+    return undefined;
+  }
+  return [...items].sort((left, right) => sortDateDesc(left.acceptedDate ?? left.filingDate, right.acceptedDate ?? right.filingDate))[0];
+}
+
+type GenericSecFiling = Awaited<ReturnType<typeof fetchFmpSecFilings>>[number];
+
+function isIpoRelatedSecForm(formType: string | null | undefined): boolean {
+  if (!formType) {
+    return false;
+  }
+  return /^(S-1|S-1\/A|F-1|F-1\/A|424B|424B1|424B3|424B4|424B5|FWP|EFFECT)/i.test(formType);
+}
+
+function pickBestGenericIpoSecFiling(items: GenericSecFiling[], ipoDate: string | null): GenericSecFiling | undefined {
+  const filtered = items.filter((item) => isIpoRelatedSecForm(item.formType));
+  if (filtered.length === 0) {
+    return undefined;
+  }
+
+  const exactMatch = ipoDate
+    ? filtered.find((item) => normalizeDocumentDate(item.filingDate) === ipoDate || normalizeDocumentDate(item.acceptedDate) === ipoDate)
+    : undefined;
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+  return [...filtered].sort((left, right) => sortDateDesc(left.acceptedDate ?? left.filingDate, right.acceptedDate ?? right.filingDate))[0];
+}
+
+type StoredIpoCalendarRow = {
+  unique_key: string;
+  ticker: string | null;
+  meta_json: string;
+  event_at: string;
+};
+
+async function listStoredIpoEventsForRange(from: string, to: string): Promise<Array<{
+  uniqueKey: string;
+  ticker: string | null;
+  companyName: string | null;
+  ipoDate: string | null;
+}>> {
+  const rows = await getDb().all<StoredIpoCalendarRow[]>(
+    `SELECT unique_key, ticker, meta_json, event_at
+     FROM calendar_events
+     WHERE event_type = 'ipos'
+       AND source = 'FMP'
+       AND event_at >= ?
+       AND event_at <= ?
+     ORDER BY event_at ASC, id ASC`,
+    [`${from}T00:00:00.000Z`, `${to}T23:59:59.999Z`],
+  );
+
+  return rows.map((row) => {
+    const meta = parseCalendarMetaJson(row.meta_json);
+    return {
+      uniqueKey: row.unique_key,
+      ticker: normalizeUpperTicker(row.ticker),
+      companyName: typeof meta.company_name === "string" && meta.company_name.trim() ? meta.company_name.trim() : null,
+      ipoDate: typeof meta.ipo_date === "string" && ISO_DATE_RE.test(meta.ipo_date) ? meta.ipo_date : row.event_at.slice(0, 10),
+    };
+  });
+}
+
+function parseFiniteQueryNumber(value: unknown): number | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 function parseNewsQuery(query: Record<string, unknown>): NewsQuery {
   const parsedLimit = typeof query.limit === "string" ? Number(query.limit) : undefined;
   const limit = Number.isFinite(parsedLimit as number) ? (parsedLimit as number) : undefined;
@@ -363,6 +523,12 @@ function parseNewsQuery(query: Record<string, unknown>): NewsQuery {
     tags: parseList(query.tags),
     from: typeof query.from === "string" ? query.from : undefined,
     to: typeof query.to === "string" ? query.to : undefined,
+    floatPctMin: parseFiniteQueryNumber(query.floatPctMin ?? query.float_pct_min),
+    floatPctMax: parseFiniteQueryNumber(query.floatPctMax ?? query.float_pct_max),
+    institutionalPctMin: parseFiniteQueryNumber(query.institutionalPctMin ?? query.institutional_pct_min),
+    institutionalPctMax: parseFiniteQueryNumber(query.institutionalPctMax ?? query.institutional_pct_max),
+    insiderPctMin: parseFiniteQueryNumber(query.insiderPctMin ?? query.insider_pct_min),
+    insiderPctMax: parseFiniteQueryNumber(query.insiderPctMax ?? query.insider_pct_max),
     limit,
     cursor: typeof query.cursor === "string" ? query.cursor : undefined,
     bookmarkFolderId: typeof query.bookmarkFolderId === "string" ? query.bookmarkFolderId : undefined,
@@ -4066,6 +4232,390 @@ app.post("/api/fmp/calendar/earnings/update", async (req, res, next) => {
           deletedRows,
           skippedOutsideUniverse,
           skippedInvalidDate,
+        });
+      } catch (error) {
+        failJob(jobId, error instanceof Error ? error.message : String(error));
+      }
+    })();
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/fmp/calendar/ipos/update", async (req, res, next) => {
+  try {
+    if (!config.fmpApiKey) {
+      res.status(400).json({ error: "FMP_API_KEY not configured" });
+      return;
+    }
+
+    const defaultWindow = getDefaultFmpCalendarWindow();
+    const from = typeof req.body?.from === "string" && req.body.from.trim()
+      ? req.body.from.trim()
+      : defaultWindow.from;
+    const to = typeof req.body?.to === "string" && req.body.to.trim()
+      ? req.body.to.trim()
+      : defaultWindow.to;
+
+    if (!ISO_DATE_RE.test(from) || !ISO_DATE_RE.test(to)) {
+      res.status(400).json({ error: "from/to must be YYYY-MM-DD" });
+      return;
+    }
+    if (to < from) {
+      res.status(400).json({ error: "to must be greater than or equal to from" });
+      return;
+    }
+
+    const chunks = buildCalendarDateChunks(from, to, DEFAULT_FMP_CALENDAR_CHUNK_DAYS);
+    const jobId = createJob(chunks.length, {
+      category: "other",
+      label: "FMP IPO Calendar Update",
+    });
+    appendLog(jobId, `Starting FMP IPO calendar update for ${from}~${to}`);
+    appendLog(jobId, `Range=${from}~${to}, chunks=${chunks.length}, endpoint=stable/ipos-calendar`);
+    res.json({ jobId, requestedRange: { from, to } });
+
+    void (async () => {
+      try {
+        let fetchedRows = 0;
+        let upsertedRows = 0;
+        let deletedRows = 0;
+        let skippedInvalidDate = 0;
+
+        for (let index = 0; index < chunks.length; index++) {
+          if (isJobCancelled(jobId)) {
+            appendLog(jobId, "Cancelled by user");
+            return;
+          }
+
+          const chunk = chunks[index];
+          const items = await fetchFmpIpoCalendarChunk({
+            from: chunk.from,
+            to: chunk.to,
+            requestIntervalMs: DEFAULT_FMP_CALENDAR_REQUEST_INTERVAL_MS,
+          });
+          fetchedRows += items.length;
+
+          const validItems: Array<Awaited<ReturnType<typeof fetchFmpIpoCalendarChunk>>[number] & { ipoDate: string; ticker: string | null }> = [];
+          for (const item of items) {
+            const ipoDate = normalizeCalendarDateOnly(item.date);
+            if (!ipoDate) {
+              skippedInvalidDate++;
+              continue;
+            }
+            validItems.push({
+              ...item,
+              ipoDate,
+              ticker: normalizeUpperTicker(item.symbol),
+            });
+          }
+
+          const db = getDb();
+          const fromEventTime = `${chunk.from}T00:00:00.000Z`;
+          const toEventTime = `${chunk.to}T23:59:59.999Z`;
+          let chunkDeletedRows = 0;
+
+          await db.run("BEGIN IMMEDIATE");
+          try {
+            chunkDeletedRows = await deleteCalendarEventsForSourceRange({
+              type: "ipos",
+              source: "FMP",
+              fromEventTime,
+              toEventTime,
+            });
+
+            for (const item of validItems) {
+              const companyName = item.company ?? item.ticker ?? "IPO";
+              await upsertCalendarEvent({
+                type: "ipos",
+                eventTime: `${item.ipoDate}T12:00:00.000Z`,
+                ticker: item.ticker ?? undefined,
+                title: `${companyName} IPO`,
+                fieldsJson: {
+                  ipo_date: item.ipoDate,
+                  company_name: item.company,
+                  exchange: item.exchange,
+                  status: item.action,
+                  shares: item.shares,
+                  price_range: item.priceRange,
+                  offer_amount: item.marketCap,
+                  daa: item.daa,
+                },
+                source: "FMP",
+                uniqueKey: buildFmpIpoUniqueKey({
+                  ipoDate: item.ipoDate,
+                  company: item.company,
+                  exchange: item.exchange,
+                  ticker: item.ticker,
+                }),
+              });
+            }
+
+            await db.run("COMMIT");
+          } catch (error) {
+            await db.run("ROLLBACK");
+            throw error;
+          }
+
+          upsertedRows += validItems.length;
+          deletedRows += chunkDeletedRows;
+
+          appendLog(
+            jobId,
+            `[chunk ${index + 1}/${chunks.length}] ${chunk.from}~${chunk.to}: fetched=${items.length}, upserted=${validItems.length}, replaced=${chunkDeletedRows}, invalidDate=${items.length - validItems.length}`,
+          );
+          updateProgress(jobId, index + 1, chunks.length);
+        }
+
+        await setLastSuccess("fmp_calendar_ipos", new Date().toISOString(), {
+          from,
+          to,
+          chunks: chunks.length,
+          fetchedRows,
+          upsertedRows,
+          deletedRows,
+          skippedInvalidDate,
+        });
+
+        completeJob(jobId, {
+          source: "FMP",
+          type: "ipos",
+          from,
+          to,
+          chunks: chunks.length,
+          fetchedRows,
+          upsertedRows,
+          deletedRows,
+          skippedInvalidDate,
+        });
+      } catch (error) {
+        failJob(jobId, error instanceof Error ? error.message : String(error));
+      }
+    })();
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/fmp/calendar/ipos/sec-download", async (req, res, next) => {
+  try {
+    if (!config.fmpApiKey) {
+      res.status(400).json({ error: "FMP_API_KEY not configured" });
+      return;
+    }
+
+    const defaultWindow = getDefaultFmpCalendarWindow();
+    const from = typeof req.body?.from === "string" && req.body.from.trim()
+      ? req.body.from.trim()
+      : defaultWindow.from;
+    const to = typeof req.body?.to === "string" && req.body.to.trim()
+      ? req.body.to.trim()
+      : defaultWindow.to;
+
+    if (!ISO_DATE_RE.test(from) || !ISO_DATE_RE.test(to)) {
+      res.status(400).json({ error: "from/to must be YYYY-MM-DD" });
+      return;
+    }
+    if (to < from) {
+      res.status(400).json({ error: "to must be greater than or equal to from" });
+      return;
+    }
+
+    const rows = await listStoredIpoEventsForRange(from, to);
+    const jobId = createJob(rows.length, {
+      category: "other",
+      label: "IPO SEC Download",
+    });
+    appendLog(jobId, `Starting IPO SEC download for ${rows.length} IPO rows in ${from}~${to}`);
+    res.json({ jobId, requestedRange: { from, to }, rows: rows.length });
+
+    void (async () => {
+      try {
+        if (rows.length === 0) {
+          appendLog(jobId, "No IPO rows found in the selected range");
+          completeJob(jobId, {
+            from,
+            to,
+            rows: 0,
+            enrichedRows: 0,
+            skippedNoTicker: 0,
+            missingDocumentRows: 0,
+            descriptionRows: 0,
+            ownershipRows: 0,
+          });
+          return;
+        }
+
+        const secLookbackFrom = shiftIsoDate(from, -365);
+        const chunks = buildCalendarDateChunks(secLookbackFrom, to, DEFAULT_FMP_CALENDAR_CHUNK_DAYS);
+        const disclosures: FmpIpoDisclosureItem[] = [];
+        const prospectuses: FmpIpoProspectusItem[] = [];
+        appendLog(jobId, `SEC metadata lookback=${secLookbackFrom}~${to}`);
+
+        for (const chunk of chunks) {
+          disclosures.push(...await fetchFmpIpoDisclosureChunk({
+            from: chunk.from,
+            to: chunk.to,
+            requestIntervalMs: DEFAULT_FMP_CALENDAR_REQUEST_INTERVAL_MS,
+          }));
+          prospectuses.push(...await fetchFmpIpoProspectusChunk({
+            from: chunk.from,
+            to: chunk.to,
+            requestIntervalMs: DEFAULT_FMP_CALENDAR_REQUEST_INTERVAL_MS,
+          }));
+        }
+
+        const secUniverse = new Set(rows.map((row) => row.ticker).filter((ticker): ticker is string => Boolean(ticker)));
+        const genericFilings = await fetchFmpSecFilings({
+          fromDate: secLookbackFrom,
+          toDate: to,
+          concurrency: Math.min(5, Math.max(1, secUniverse.size)),
+          maxPages: 8,
+          requestIntervalMs: DEFAULT_FMP_CALENDAR_REQUEST_INTERVAL_MS,
+          universeSymbols: secUniverse,
+        });
+
+        const disclosureMap = new Map<string, FmpIpoDisclosureItem[]>();
+        for (const item of disclosures) {
+          const symbol = normalizeUpperTicker(item.symbol);
+          if (!symbol) {
+            continue;
+          }
+          const bucket = disclosureMap.get(symbol) ?? [];
+          bucket.push(item);
+          disclosureMap.set(symbol, bucket);
+        }
+
+        const prospectusMap = new Map<string, FmpIpoProspectusItem[]>();
+        for (const item of prospectuses) {
+          const symbol = normalizeUpperTicker(item.symbol);
+          if (!symbol) {
+            continue;
+          }
+          const bucket = prospectusMap.get(symbol) ?? [];
+          bucket.push(item);
+          prospectusMap.set(symbol, bucket);
+        }
+
+        const genericFilingMap = new Map<string, GenericSecFiling[]>();
+        for (const item of genericFilings) {
+          const symbol = normalizeUpperTicker(item.symbol);
+          if (!symbol) {
+            continue;
+          }
+          const bucket = genericFilingMap.get(symbol) ?? [];
+          bucket.push(item);
+          genericFilingMap.set(symbol, bucket);
+        }
+
+        let enrichedRows = 0;
+        let skippedNoTicker = 0;
+        let missingDocumentRows = 0;
+        let descriptionRows = 0;
+        let ownershipRows = 0;
+
+        for (let index = 0; index < rows.length; index++) {
+          if (isJobCancelled(jobId)) {
+            appendLog(jobId, "Cancelled by user");
+            return;
+          }
+
+          const row = rows[index];
+          if (!row.ticker) {
+            skippedNoTicker++;
+            appendLog(jobId, `[${index + 1}/${rows.length}] skipped ${row.companyName ?? row.uniqueKey}: missing ticker`);
+            updateProgress(jobId, index + 1, rows.length);
+            continue;
+          }
+
+          const prospectus = pickBestIpoProspectus(prospectusMap.get(row.ticker) ?? [], row.ipoDate);
+          const disclosure = pickBestIpoDisclosure(disclosureMap.get(row.ticker) ?? []);
+          const genericFiling = pickBestGenericIpoSecFiling(genericFilingMap.get(row.ticker) ?? [], row.ipoDate);
+
+          if (!prospectus && !disclosure && !genericFiling) {
+            missingDocumentRows++;
+            appendLog(jobId, `[${index + 1}/${rows.length}] ${row.ticker}: no disclosure/prospectus metadata matched`);
+            updateProgress(jobId, index + 1, rows.length);
+            continue;
+          }
+
+          const insights = await downloadIpoSecInsights([
+            prospectus?.url,
+            disclosure?.url,
+            genericFiling?.finalLink,
+            genericFiling?.link,
+          ]);
+          const primaryDocument = prospectus ?? disclosure ?? genericFiling;
+          const primaryFormType = prospectus?.form ?? disclosure?.form ?? genericFiling?.formType ?? '-';
+
+          await upsertIpoSecEnrichment({
+            eventUniqueKey: row.uniqueKey,
+            ticker: row.ticker,
+            ipoDate: row.ipoDate,
+            cik: prospectus?.cik ?? disclosure?.cik ?? genericFiling?.cik ?? null,
+            formType: prospectus?.form ?? disclosure?.form ?? genericFiling?.formType ?? null,
+            filingDate: prospectus?.filingDate ?? disclosure?.filingDate ?? genericFiling?.filingDate ?? null,
+            acceptedDate: prospectus?.acceptedDate ?? disclosure?.acceptedDate ?? genericFiling?.acceptedDate ?? null,
+            documentUrl: insights.documentUrl ?? prospectus?.url ?? disclosure?.url ?? genericFiling?.finalLink ?? genericFiling?.link ?? null,
+            prospectusUrl: prospectus?.url ?? null,
+            disclosureUrl: disclosure?.url ?? null,
+            companyDescription: insights.companyDescription,
+            ownershipTotalPct: insights.ownershipTotalPct,
+            ownershipMaxPct: insights.ownershipMaxPct,
+            ownershipHolderCount: insights.ownershipHolderCount,
+            ownershipValuesJson: insights.ownershipValues.length > 0 ? JSON.stringify(insights.ownershipValues) : null,
+            rawJson: JSON.stringify({
+              prospectus: prospectus?.raw ?? null,
+              disclosure: disclosure?.raw ?? null,
+              genericFiling: genericFiling ?? null,
+              ownershipValues: insights.ownershipValues,
+            }),
+            sourceNote: insights.sourceNote,
+          });
+
+          enrichedRows++;
+          if (insights.companyDescription) {
+            descriptionRows++;
+          }
+          if (insights.ownershipHolderCount != null) {
+            ownershipRows++;
+          }
+
+          appendLog(
+            jobId,
+            `[${index + 1}/${rows.length}] ${row.ticker}: description=${insights.companyDescription ? "yes" : "no"}, ownerCount=${insights.ownershipHolderCount ?? 0}, form=${primaryFormType}`,
+          );
+          updateProgress(jobId, index + 1, rows.length);
+        }
+
+        await setLastSuccess("fmp_calendar_ipos_sec", new Date().toISOString(), {
+          from,
+          to,
+          secLookbackFrom,
+          rows: rows.length,
+          disclosures: disclosures.length,
+          prospectuses: prospectuses.length,
+          genericFilings: genericFilings.length,
+          enrichedRows,
+          skippedNoTicker,
+          missingDocumentRows,
+          descriptionRows,
+          ownershipRows,
+        });
+
+        completeJob(jobId, {
+          from,
+          to,
+          secLookbackFrom,
+          rows: rows.length,
+          disclosures: disclosures.length,
+          prospectuses: prospectuses.length,
+          genericFilings: genericFilings.length,
+          enrichedRows,
+          skippedNoTicker,
+          missingDocumentRows,
+          descriptionRows,
+          ownershipRows,
         });
       } catch (error) {
         failJob(jobId, error instanceof Error ? error.message : String(error));
