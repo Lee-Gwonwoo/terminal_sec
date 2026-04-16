@@ -2371,10 +2371,11 @@ default universe ticker 전체에 대해 financial history + analyst estimate sn
 요청 body:
 
 ```json
-{}
+{ "concurrency": 4, "requestIntervalMs": 250 }
 ```
 
-- 현재 body 값은 사용하지 않는다.
+- `[][][]concurrency[][][]`는 선택 사항이다. default universe ticker worker 수와 shared FMP request scheduler 최대 동시 요청 수를 함께 제어한다.
+- `[][][]requestIntervalMs[][][]`는 선택 사항이다. shared FMP request scheduler의 요청 시작 간격(ms)이다.
 - 대상 ticker는 항상 `getDefaultUniverseTickers()` 결과다.
 
 응답(성공 시):
@@ -2388,16 +2389,20 @@ default universe ticker 전체에 대해 financial history + analyst estimate sn
 1. `FMP_API_KEY` 존재 여부를 확인한다.
 2. `getDefaultUniverseTickers()`로 대상 ticker를 가져온다.
 3. background job(`FMP Financial + Past Estimate Sync`)을 생성한다.
-4. 각 ticker마다 `income-statement`, `key-metrics`, `ratios`, `analyst-estimates`를 합쳐 annual / quarterly snapshot을 만든다.
-5. ticker별 기존 `calendar_financial_series` row를 먼저 지우고 새 snapshot으로 replace 저장한다.
-6. job progress/log/result에 synced ticker 수, failed ticker 수, annual/quarterly row 수, estimate row 수를 남긴다.
+4. body에 `concurrency`가 오면 그 값으로 ticker worker pool과 shared FMP request scheduler를 구성한다.
+5. 각 ticker마다 `income-statement`, `key-metrics`, `ratios`, `analyst-estimates`를 합쳐 annual / quarterly snapshot을 만든다.
+6. ticker별 기존 `calendar_financial_series` row를 먼저 지우고 새 snapshot으로 replace 저장한다.
+7. job progress/log/result에 synced ticker 수, failed ticker 수, annual/quarterly row 수, estimate row 수, concurrency 값을 남긴다.
 
 주의:
 
 - date range를 받지 않는다. 항상 default universe 전체를 돈다.
 - default universe가 비어 있으면 에러를 반환한다.
 - 이 endpoint는 즉시 `{ jobId }`만 반환하고 실제 적재는 background job에서 진행한다.
+- current frontend는 `CalendarWindow` earnings 탭의 `FMP Sync Settings`에서 financial sync concurrency 값을 저장하고, 다음 실행부터 body `concurrency`로 보낸다.
 - quarterly snapshot은 past estimate를 확보하려고 statement보다 넓은 analyst-estimates window를 사용한다.
+- annual actual과 다음 회계연도 estimate가 upstream에서 같은 raw `date`를 공유하는 경우가 있어, backend는 annual snapshot 저장 시 fiscal-year-end canonical date를 사용해 `calendar_financial_series` unique collision을 피한다.
+- worker pool로 fetch는 병렬화하지만, SQLite snapshot replace transaction은 job 내부에서 직렬화해 `cannot start a transaction within a transaction` 오류를 피한다.
 - ticker 하나의 fetch/store 실패는 전체 job을 abort하지 않고 `FAILED` log + `tickersFailed` count로 누적한 뒤 다음 ticker로 계속 진행한다.
 
 ### `POST /api/ibkr/calendar/update`
@@ -2482,23 +2487,32 @@ FMP stable earnings-calendar를 market-wide로 조회한 뒤, DB `default univer
 요청 body:
 
 ```json
-{ "from": "2026-04-01", "to": "2026-04-30" }
+{ "from": "2026-04-01", "to": "2026-04-30", "concurrency": 4, "requestIntervalMs": 250 }
 ```
 
 - `from`, `to`는 선택 사항이다.
 - 생략하면 backend 기본 윈도우(`오늘 -180일` ~ `오늘 +180일`)를 사용한다.
+- `[][][]concurrency[][][]`는 선택 사항이다. date chunk worker 수와 shared FMP request scheduler 최대 동시 요청 수를 함께 제어한다.
+- `[][][]requestIntervalMs[][][]`는 선택 사항이다. shared FMP request scheduler의 요청 시작 간격(ms)이다.
 
 동작:
 
 1. body `from/to`를 읽고 `YYYY-MM-DD` 형식을 검증한다.
 2. `getDefaultUniverseTickers()`로 대상 ticker를 읽는다.
 3. stable `/earnings-calendar`를 chunk 단위로 호출한다.
-4. market-wide 결과 중 default universe ticker와 일치하는 row만 남긴다.
-5. 각 chunk 범위에 대해 기존 `source='FMP'`, `type='earnings'` row를 default universe ticker 기준으로 먼저 삭제하고, 현재 snapshot을 다시 채운다.
-6. 새 snapshot row는 `type='earnings'`, `source='FMP'`, `unique_key='FMP:earnings:TICKER:DATE'`로 upsert 한다.
-7. 같은 범위를 다시 실행하면 append 누적이 아니라 snapshot replace가 일어난다. 즉 FMP에서 날짜가 바뀌어 기존 row가 범위 안에 남아 있으면 이전 row는 지워지고 새 row만 남는다.
-8. `update_status.fmp_calendar_earnings`를 갱신한다.
-9. 응답은 `jobId`를 반환하고, 진행 상황은 `GET /api/jobs/:jobId`로 polling 한다.
+4. body에 `concurrency`가 오면 그 값으로 chunk worker pool과 shared FMP request scheduler를 구성한다.
+5. market-wide 결과 중 default universe ticker와 일치하는 row만 남긴다.
+6. 각 chunk 범위에 대해 기존 `source='FMP'`, `type='earnings'` row를 default universe ticker 기준으로 먼저 삭제하고, 현재 snapshot을 다시 채운다.
+7. 새 snapshot row는 `type='earnings'`, `source='FMP'`, `unique_key='FMP:earnings:TICKER:DATE'`로 upsert 한다.
+8. 같은 범위를 다시 실행하면 append 누적이 아니라 snapshot replace가 일어난다. 즉 FMP에서 날짜가 바뀌어 기존 row가 범위 안에 남아 있으면 이전 row는 지워지고 새 row만 남는다.
+9. `update_status.fmp_calendar_earnings`를 갱신한다.
+10. 응답은 `jobId`를 반환하고, 진행 상황은 `GET /api/jobs/:jobId`로 polling 한다.
+
+주의:
+
+- current frontend는 `CalendarWindow` earnings 탭의 `FMP Sync Settings`에서 earnings update concurrency 값을 저장하고, 다음 실행부터 body `concurrency`로 보낸다.
+- concurrency를 높이면 같은 날짜 범위에서도 chunk 여러 개가 병렬로 처리될 수 있다.
+- 다만 chunk별 SQLite snapshot replace transaction은 job 내부에서 직렬화한다. 즉 fetch 병렬성과 DB write 안정성을 분리해 유지한다.
 
 응답 컬럼:
 

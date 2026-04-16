@@ -1050,8 +1050,12 @@ API:
   - `Market Cap` 입력 단위는 `B$`이며, 프론트에서 내부 비교 시 실제 달러 값으로 환산한다.
   - 숫자 필터가 켜져 있을 때 해당 값이 `null`인 row는 결과에서 제외된다.
 - earnings stable source에는 reliable time/session이 없으므로, 관련 column 값은 비어 있을 수 있다.
-- earnings `Update FMP Earnings Dates` 버튼은 현재 date filter가 있으면 그 범위를 body에 같이 보낸다.
-- earnings `Sync Financial + Past Estimates` 버튼은 현재 date filter와 무관하게 default universe 전체를 대상으로 실행된다.
+- earnings 탭에는 `FMP Sync Settings` 버튼이 있고, 여기서 다음 실행에 쓸 concurrency 값을 수정할 수 있다.
+  - `Earnings Update` concurrency
+  - `Financial Sync` concurrency
+  - 값은 localStorage `calendar-fmp-earnings-concurrency`, `calendar-fmp-financial-concurrency`에 저장된다.
+- earnings `Update FMP Earnings Dates` 버튼은 현재 date filter가 있으면 그 범위를 body에 같이 보내고, 현재 설정된 earnings concurrency도 함께 보낸다.
+- earnings `Sync Financial + Past Estimates` 버튼은 현재 date filter와 무관하게 default universe 전체를 대상으로 실행되며, 현재 설정된 financial sync concurrency를 body에 같이 보낸다.
   - 목적은 ticker financial history뿐 아니라 past quarterly estimate cache까지 다시 적재하는 것이다.
 - earnings 화면은 현재 필터 결과 기준 `Confirmed / Pending` count를 함께 보여준다.
   - 현재 범위가 confirmed-only면 종료일을 더 미래로 늘리라는 안내를 같이 표시한다.

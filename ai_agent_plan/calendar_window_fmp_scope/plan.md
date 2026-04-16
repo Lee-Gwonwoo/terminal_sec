@@ -123,6 +123,21 @@
     - full sync 완료 result에 `tickersFailed`를 포함해 partial failure를 노출
     - 사용자가 버튼을 다시 눌렀을 때 immediate failure 없이 background download가 계속 진행되게 한다
 
+### PLAN CHANGE #11 — 2026-04-16 calendar window FMP sync concurrency 조절 UI 추가
+
+- 사용자의 추가 요구를 반영해 earnings 탭의 두 FMP 버튼에 대해 window 내부에서 병렬 처리 수치를 직접 수정할 수 있는 설정 UI를 추가한다.
+- 적용 범위
+  - `Update FMP Earnings Dates` 버튼: next run용 concurrency 값을 UI에서 수정해 body로 전달
+  - `Sync Financial + Past Estimates` 버튼: next run용 concurrency 값을 UI에서 수정해 body로 전달
+- backend 구현 목표
+  - `POST /api/fmp/calendar/earnings/update`는 요청 body의 `[][][]concurrency[][][]`, `[][][]requestIntervalMs[][][]`를 읽어 chunk worker pool + shared FMP scheduler에 반영한다.
+  - `POST /api/fmp/calendar/financials/update`는 요청 body의 `[][][]concurrency[][][]`, `[][][]requestIntervalMs[][][]`를 읽어 ticker worker pool + shared FMP scheduler에 반영한다.
+  - 기존의 취소 / 진행률 / 실패 집계 semantics는 유지한다.
+- frontend 구현 목표
+  - earnings 탭 툴바에 `FMP Sync Settings` UI를 추가하고, earnings / financial sync concurrency 값을 각각 저장한다.
+  - 값은 localStorage에 유지해 창을 다시 열어도 마지막 설정이 남게 한다.
+  - 사용자가 수정한 값은 다음 button click부터 즉시 반영된다.
+
 ### 현재 레포 상태(중요, 확인됨)
 
 - backend에는 이미 일반형 calendar read API가 있다.

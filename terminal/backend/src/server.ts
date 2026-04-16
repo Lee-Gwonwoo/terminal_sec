@@ -104,6 +104,7 @@ import { fetchFmpStockNewsByTicker } from "./services/fmpStockNewsProvider.js";
 import { fetchFmpSecFilings } from "./services/fmpSecFilingProvider.js";
 import { fetchFmpEarningsCalendarChunk } from "./services/fmpEarningsCalendarProvider.js";
 import { fetchFmpFinancialSeries } from "./services/fmpFinancialSeriesProvider.js";
+import { createFmpRequestScheduler } from "./services/fmpRequestScheduler.js";
 import { getStoredCalendarFinancialSeries, replaceCalendarFinancialSeriesSnapshot } from "./services/calendarFinancialRepository.js";
 import {
   fetchFmpIpoCalendarChunk,
@@ -148,6 +149,24 @@ function buildBatchLevels(requestedConcurrency: number): number[] {
   const safeConcurrency = Math.max(1, Math.min(20, Math.floor(requestedConcurrency)));
   const middleConcurrency = Math.max(1, Math.ceil(safeConcurrency / 2));
   return [...new Set([safeConcurrency, middleConcurrency, 1])].sort((a, b) => b - a);
+}
+
+function createAsyncMutex() {
+  let scheduler: Promise<void> = Promise.resolve();
+
+  return async function runExclusive<T>(task: () => Promise<T>): Promise<T> {
+    const previous = scheduler;
+    let release!: () => void;
+    scheduler = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await task();
+    } finally {
+      release();
+    }
+  };
 }
 
 type GapExecutionMode = "gap-only" | "fully-covered-skip" | "summary-only";
@@ -4194,6 +4213,9 @@ app.post("/api/fmp/calendar/financials/update", async (_req, res, next) => {
       return;
     }
 
+    const concurrency = clampFmpConcurrency(Number(_req.body?.concurrency));
+    const requestIntervalMs = clampFmpIntervalMs(Number(_req.body?.requestIntervalMs));
+
     const tickers = Array.from(
       new Set((await getDefaultUniverseTickers())
         .map((ticker) => normalizeUpperTicker(ticker))
@@ -4209,9 +4231,11 @@ app.post("/api/fmp/calendar/financials/update", async (_req, res, next) => {
       category: "other",
       label: "FMP Financial + Past Estimate Sync",
     });
+    const workerCount = Math.max(1, Math.min(concurrency, tickers.length || 1));
     appendLog(jobId, `Starting FMP financial + past estimate sync for ${tickers.length} default-universe tickers`);
     appendLog(jobId, "Endpoints=stable/income-statement + stable/key-metrics + stable/ratios + stable/analyst-estimates");
     appendLog(jobId, "Quarterly analyst-estimates window is extended so past estimate periods can be merged into the stored quarterly history");
+    appendLog(jobId, `[batch] concurrency=${workerCount}, requestIntervalMs=${requestIntervalMs}`);
     res.json({ jobId, requestedTickers: tickers.length });
 
     void (async () => {
@@ -4222,35 +4246,65 @@ app.post("/api/fmp/calendar/financials/update", async (_req, res, next) => {
         let quarterlyRows = 0;
         let annualEstimateRows = 0;
         let quarterlyEstimateRows = 0;
+        let nextIndex = 0;
+        let completedTickers = 0;
+        const runDbWrite = createAsyncMutex();
+        const scheduler = createFmpRequestScheduler({
+          maxConcurrentRequests: workerCount,
+          requestIntervalMs,
+        });
 
-        for (let index = 0; index < tickers.length; index++) {
-          if (isJobCancelled(jobId)) {
-            appendLog(jobId, "Cancelled by user");
-            return;
+        const worker = async () => {
+          while (true) {
+            if (isJobCancelled(jobId)) {
+              return;
+            }
+
+            const index = nextIndex;
+            nextIndex += 1;
+            if (index >= tickers.length) {
+              return;
+            }
+
+            const ticker = tickers[index];
+            try {
+              const payload = await fetchFmpFinancialSeries(ticker, {
+                requestIntervalMs,
+                scheduler,
+              });
+              await runDbWrite(async () => {
+                await replaceCalendarFinancialSeriesSnapshot(payload);
+              });
+
+              syncedTickers += 1;
+              annualRows += payload.annual.length;
+              quarterlyRows += payload.quarterly.length;
+              annualEstimateRows += payload.annual.filter((point) => point.revenueEstimate != null || point.netIncomeEstimate != null || point.epsEstimate != null).length;
+              quarterlyEstimateRows += payload.quarterly.filter((point) => point.revenueEstimate != null || point.netIncomeEstimate != null || point.epsEstimate != null).length;
+            } catch (error) {
+              tickersFailed += 1;
+              appendLog(jobId, `${ticker}: FAILED — ${error instanceof Error ? error.message : String(error)}`);
+            }
+
+            completedTickers += 1;
+            if (completedTickers % 25 === 0 || completedTickers === tickers.length) {
+              appendLog(jobId, `[${completedTickers}/${tickers.length}] last=${ticker} (synced=${syncedTickers}, failed=${tickersFailed})`);
+            }
+            updateProgress(jobId, completedTickers, tickers.length);
           }
+        };
 
-          const ticker = tickers[index];
-          try {
-            const payload = await fetchFmpFinancialSeries(ticker);
-            await replaceCalendarFinancialSeriesSnapshot(payload);
+        await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
-            syncedTickers += 1;
-            annualRows += payload.annual.length;
-            quarterlyRows += payload.quarterly.length;
-            annualEstimateRows += payload.annual.filter((point) => point.revenueEstimate != null || point.netIncomeEstimate != null || point.epsEstimate != null).length;
-            quarterlyEstimateRows += payload.quarterly.filter((point) => point.revenueEstimate != null || point.netIncomeEstimate != null || point.epsEstimate != null).length;
-          } catch (error) {
-            tickersFailed += 1;
-            appendLog(jobId, `${ticker}: FAILED — ${error instanceof Error ? error.message : String(error)}`);
-          }
-
-          if ((index + 1) % 25 === 0 || index === tickers.length - 1) {
-            appendLog(jobId, `[${index + 1}/${tickers.length}] processed through ${ticker} (synced=${syncedTickers}, failed=${tickersFailed})`);
-          }
-          updateProgress(jobId, index + 1, tickers.length);
+        if (isJobCancelled(jobId)) {
+          appendLog(jobId, "Cancelled by user");
+          return;
         }
 
         await setLastSuccess("fmp_calendar_financials", new Date().toISOString(), {
+          requestedTickers: tickers.length,
+          concurrency: workerCount,
+          requestIntervalMs,
           syncedTickers,
           tickersFailed,
           annualRows,
@@ -4260,6 +4314,9 @@ app.post("/api/fmp/calendar/financials/update", async (_req, res, next) => {
         });
 
         completeJob(jobId, {
+          requestedTickers: tickers.length,
+          concurrency: workerCount,
+          requestIntervalMs,
           syncedTickers,
           tickersFailed,
           annualRows,
@@ -4300,6 +4357,9 @@ app.post("/api/fmp/calendar/earnings/update", async (req, res, next) => {
       return;
     }
 
+    const concurrency = clampFmpConcurrency(Number(req.body?.concurrency));
+    const requestIntervalMs = clampFmpIntervalMs(Number(req.body?.requestIntervalMs));
+
     const tickers = await getDefaultUniverseTickers();
     const universeMap = new Map<string, string>();
     for (const ticker of tickers) {
@@ -4315,8 +4375,10 @@ app.post("/api/fmp/calendar/earnings/update", async (req, res, next) => {
       category: "other",
       label: "FMP Earnings Calendar Update",
     });
+    const workerCount = Math.max(1, Math.min(concurrency, chunks.length || 1));
     appendLog(jobId, `Starting FMP earnings calendar update for ${tickers.length} default-universe tickers`);
     appendLog(jobId, `Range=${from}~${to}, chunks=${chunks.length}, endpoint=stable/earnings-calendar`);
+    appendLog(jobId, `[batch] concurrency=${workerCount}, requestIntervalMs=${requestIntervalMs}`);
     res.json({ jobId, requestedRange: { from, to } });
 
     void (async () => {
@@ -4327,111 +4389,136 @@ app.post("/api/fmp/calendar/earnings/update", async (req, res, next) => {
         let deletedRows = 0;
         let skippedOutsideUniverse = 0;
         let skippedInvalidDate = 0;
+        let nextIndex = 0;
+        let completedChunks = 0;
+        const runDbWrite = createAsyncMutex();
+        const scheduler = createFmpRequestScheduler({
+          maxConcurrentRequests: workerCount,
+          requestIntervalMs,
+        });
 
-        for (let index = 0; index < chunks.length; index++) {
-          if (isJobCancelled(jobId)) {
-            appendLog(jobId, "🛑 Cancelled by user");
-            return;
-          }
-
-          const chunk = chunks[index];
-          const items = await fetchFmpEarningsCalendarChunk({
-            from: chunk.from,
-            to: chunk.to,
-            requestIntervalMs: DEFAULT_FMP_CALENDAR_REQUEST_INTERVAL_MS,
-          });
-          fetchedRows += items.length;
-
-          const chunkUpserts: Array<{
-            canonicalTicker: string;
-            reportDate: string;
-            confirmed: boolean;
-            item: Awaited<ReturnType<typeof fetchFmpEarningsCalendarChunk>>[number];
-          }> = [];
-          let chunkSkippedOutsideUniverse = 0;
-          let chunkSkippedInvalidDate = 0;
-
-          for (const item of items) {
-            const canonicalTicker = universeMap.get(normalizeFmpSymbol(item.symbol));
-            if (!canonicalTicker) {
-              skippedOutsideUniverse++;
-              chunkSkippedOutsideUniverse++;
-              continue;
+        const worker = async () => {
+          while (true) {
+            if (isJobCancelled(jobId)) {
+              return;
             }
 
-            const reportDate = normalizeCalendarDateOnly(item.date);
-            if (!reportDate) {
-              skippedInvalidDate++;
-              chunkSkippedInvalidDate++;
-              continue;
+            const index = nextIndex;
+            nextIndex += 1;
+            if (index >= chunks.length) {
+              return;
             }
 
-            const confirmed = item.epsActual != null || item.revenueActual != null;
-            chunkUpserts.push({
-              canonicalTicker,
-              reportDate,
-              confirmed,
-              item,
+            const chunk = chunks[index];
+            const items = await fetchFmpEarningsCalendarChunk({
+              from: chunk.from,
+              to: chunk.to,
+              requestIntervalMs,
+              scheduler,
             });
-          }
+            fetchedRows += items.length;
 
-          if (isJobCancelled(jobId)) {
-            appendLog(jobId, "🛑 Cancelled by user");
-            return;
-          }
+            const chunkUpserts: Array<{
+              canonicalTicker: string;
+              reportDate: string;
+              confirmed: boolean;
+              item: Awaited<ReturnType<typeof fetchFmpEarningsCalendarChunk>>[number];
+            }> = [];
+            let chunkSkippedOutsideUniverse = 0;
+            let chunkSkippedInvalidDate = 0;
 
-          const db = getDb();
-          const fromEventTime = `${chunk.from}T00:00:00.000Z`;
-          const toEventTime = `${chunk.to}T23:59:59.999Z`;
-          let chunkDeletedRows = 0;
-          await db.run("BEGIN IMMEDIATE");
-          try {
-            chunkDeletedRows = await deleteCalendarEventsForSourceRange({
-              type: "earnings",
-              source: "FMP",
-              fromEventTime,
-              toEventTime,
-              tickers: universeTickers,
-            });
+            for (const item of items) {
+              const canonicalTicker = universeMap.get(normalizeFmpSymbol(item.symbol));
+              if (!canonicalTicker) {
+                skippedOutsideUniverse++;
+                chunkSkippedOutsideUniverse++;
+                continue;
+              }
 
-            for (const entry of chunkUpserts) {
-              await upsertCalendarEvent({
-                type: "earnings",
-                eventTime: `${entry.reportDate}T12:00:00.000Z`,
-                ticker: entry.canonicalTicker,
-                title: `${entry.canonicalTicker} earnings`,
-                fieldsJson: {
-                  company_name: null,
-                  report_date: entry.reportDate,
-                  time_of_day: null,
-                  session: null,
-                  confirmed: entry.confirmed,
-                  eps_est: entry.item.epsEstimated,
-                  eps_actual: entry.item.epsActual,
-                  revenue_est: entry.item.revenueEstimated,
-                  revenue_actual: entry.item.revenueActual,
-                  surprise_pct: computeCalendarSurprisePct(entry.item.epsActual, entry.item.epsEstimated),
-                  last_updated: entry.item.lastUpdated,
-                },
-                source: "FMP",
-                uniqueKey: `FMP:earnings:${entry.canonicalTicker}:${entry.reportDate}`,
+              const reportDate = normalizeCalendarDateOnly(item.date);
+              if (!reportDate) {
+                skippedInvalidDate++;
+                chunkSkippedInvalidDate++;
+                continue;
+              }
+
+              const confirmed = item.epsActual != null || item.revenueActual != null;
+              chunkUpserts.push({
+                canonicalTicker,
+                reportDate,
+                confirmed,
+                item,
               });
             }
-            await db.run("COMMIT");
-          } catch (error) {
-            await db.run("ROLLBACK");
-            throw error;
+
+            if (isJobCancelled(jobId)) {
+              return;
+            }
+
+            const fromEventTime = `${chunk.from}T00:00:00.000Z`;
+            const toEventTime = `${chunk.to}T23:59:59.999Z`;
+            let chunkDeletedRows = 0;
+            await runDbWrite(async () => {
+              const db = getDb();
+              await db.run("BEGIN IMMEDIATE");
+              try {
+                chunkDeletedRows = await deleteCalendarEventsForSourceRange({
+                  type: "earnings",
+                  source: "FMP",
+                  fromEventTime,
+                  toEventTime,
+                  tickers: universeTickers,
+                });
+
+                for (const entry of chunkUpserts) {
+                  await upsertCalendarEvent({
+                    type: "earnings",
+                    eventTime: `${entry.reportDate}T12:00:00.000Z`,
+                    ticker: entry.canonicalTicker,
+                    title: `${entry.canonicalTicker} earnings`,
+                    fieldsJson: {
+                      company_name: null,
+                      report_date: entry.reportDate,
+                      time_of_day: null,
+                      session: null,
+                      confirmed: entry.confirmed,
+                      eps_est: entry.item.epsEstimated,
+                      eps_actual: entry.item.epsActual,
+                      revenue_est: entry.item.revenueEstimated,
+                      revenue_actual: entry.item.revenueActual,
+                      surprise_pct: computeCalendarSurprisePct(entry.item.epsActual, entry.item.epsEstimated),
+                      last_updated: entry.item.lastUpdated,
+                    },
+                    source: "FMP",
+                    uniqueKey: `FMP:earnings:${entry.canonicalTicker}:${entry.reportDate}`,
+                  });
+                }
+                await db.run("COMMIT");
+              } catch (error) {
+                await db.run("ROLLBACK");
+                throw error;
+              }
+            });
+
+            matchedRows += chunkUpserts.length;
+            upsertedRows += chunkUpserts.length;
+            deletedRows += chunkDeletedRows;
+
+            appendLog(
+              jobId,
+              `[chunk ${index + 1}/${chunks.length}] ${chunk.from}~${chunk.to}: fetched=${items.length}, matched=${chunkUpserts.length}, replaced=${chunkDeletedRows}, outsideUniverse=${chunkSkippedOutsideUniverse}, invalidDate=${chunkSkippedInvalidDate}`,
+            );
+
+            completedChunks += 1;
+            updateProgress(jobId, completedChunks, chunks.length);
           }
+        };
 
-          matchedRows += chunkUpserts.length;
-          upsertedRows += chunkUpserts.length;
-          deletedRows += chunkDeletedRows;
+        await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
-          appendLog(
-            jobId,
-            `[chunk ${index + 1}/${chunks.length}] ${chunk.from}~${chunk.to}: fetched=${items.length}, matched=${chunkUpserts.length}, replaced=${chunkDeletedRows}, outsideUniverse=${chunkSkippedOutsideUniverse}, invalidDate=${chunkSkippedInvalidDate}`,
-          );
-          updateProgress(jobId, index + 1, chunks.length);
+        if (isJobCancelled(jobId)) {
+          appendLog(jobId, "🛑 Cancelled by user");
+          return;
         }
 
         await setLastSuccess("fmp_calendar_earnings", new Date().toISOString(), {
@@ -4439,6 +4526,8 @@ app.post("/api/fmp/calendar/earnings/update", async (req, res, next) => {
           to,
           defaultUniverseTickers: tickers.length,
           chunks: chunks.length,
+          concurrency: workerCount,
+          requestIntervalMs,
           fetchedRows,
           matchedRows,
           upsertedRows,
@@ -4454,6 +4543,8 @@ app.post("/api/fmp/calendar/earnings/update", async (req, res, next) => {
           to,
           defaultUniverseTickers: tickers.length,
           chunks: chunks.length,
+          concurrency: workerCount,
+          requestIntervalMs,
           fetchedRows,
           matchedRows,
           upsertedRows,

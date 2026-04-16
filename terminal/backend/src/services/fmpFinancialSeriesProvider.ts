@@ -1,5 +1,6 @@
 import { config } from "../config.js";
 import { normalizeFmpSymbol } from "../utils/fmpSymbol.js";
+import { createFmpRequestScheduler, type FmpRequestScheduler } from "./fmpRequestScheduler.js";
 
 const FMP_BASE = "https://financialmodelingprep.com/stable";
 const MAX_RETRIES = 10;
@@ -7,6 +8,7 @@ const BASE_DELAY_MS = 300;
 const MAX_BACKOFF_MS = 30_000;
 const DEFAULT_FMP_REQUEST_INTERVAL_MS = 250;
 const DEFAULT_ANNUAL_LIMIT = 6;
+const DEFAULT_ANNUAL_ESTIMATE_LIMIT = 20;
 const DEFAULT_QUARTERLY_LIMIT = 8;
 const DEFAULT_QUARTERLY_ESTIMATE_LIMIT = 24;
 const DEFAULT_QUARTERLY_FUTURE_ESTIMATE_POINTS = 4;
@@ -40,24 +42,6 @@ export interface FmpFinancialSeriesResponse {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-let fmpFinancialScheduler: Promise<void> = Promise.resolve();
-
-async function acquireFmpFinancialSlot(intervalMs: number): Promise<void> {
-  const previous = fmpFinancialScheduler;
-  let release!: () => void;
-  fmpFinancialScheduler = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await previous;
-  try {
-    if (intervalMs > 0) {
-      await sleep(intervalMs);
-    }
-  } finally {
-    release();
-  }
 }
 
 function toNullableString(value: unknown): string | null {
@@ -101,6 +85,14 @@ function deriveAnnualFiscalYear(item: Record<string, unknown>): string | null {
     return null;
   }
   return date.slice(0, 4);
+}
+
+function deriveAnnualCanonicalDate(item: Record<string, unknown>): string | null {
+  const fiscalYear = deriveAnnualFiscalYear(item);
+  if (fiscalYear && /^\d{4}$/.test(fiscalYear)) {
+    return `${fiscalYear}-12-31`;
+  }
+  return toNullableString(item.date);
 }
 
 function deriveQuarterlyPeriodFromDate(date: string | null): string | null {
@@ -204,23 +196,45 @@ function trimQuarterlySeries(
   return [...historicalWindow, ...futureEstimateWindow];
 }
 
+/**
+ * Annual series trimming: drop estimate-only rows that predate the earliest
+ * actual data point.  Keep all actuals + overlapping estimates + future estimates.
+ */
+function trimAnnualSeries(
+  points: FmpFinancialSeriesPoint[],
+): FmpFinancialSeriesPoint[] {
+  if (points.length === 0) {
+    return points;
+  }
+  const actualPoints = points.filter(hasActualFinancialValue);
+  if (actualPoints.length === 0) {
+    return points;
+  }
+  const earliestActualDate = actualPoints[0].date;
+  return points.filter((point) => point.date >= earliestActualDate || hasActualFinancialValue(point));
+}
+
 function updatePointIdentity(
   point: FmpFinancialSeriesPoint,
   item: Record<string, unknown>,
   mode: FinancialPeriodMode,
 ): void {
-  const itemDate = toNullableString(item.date);
-  if (itemDate && (!point.date || point.date.includes(":"))) {
-    point.date = itemDate;
-  }
-
   if (mode === "annual") {
+    const canonicalDate = deriveAnnualCanonicalDate(item);
+    if (canonicalDate) {
+      point.date = canonicalDate;
+    }
     const fiscalYear = deriveAnnualFiscalYear(item) ?? point.fiscalYear;
     const period = toNullableString(item.period) ?? point.period;
     point.fiscalYear = fiscalYear;
     point.period = period;
     point.label = buildSeriesLabel(point.date, point.fiscalYear, point.period, mode);
     return;
+  }
+
+  const itemDate = toNullableString(item.date);
+  if (itemDate && (!point.date || point.date.includes(":"))) {
+    point.date = itemDate;
   }
 
   const explicitFiscalYear = toNullableString(item.fiscalYear ?? item.calendarYear);
@@ -237,6 +251,7 @@ async function fetchStableSymbolArray(params: {
   period: FinancialPeriodMode;
   limit: number;
   requestIntervalMs?: number;
+  scheduler: FmpRequestScheduler;
 }): Promise<Record<string, unknown>[]> {
   const apiKey = config.fmpApiKey;
   if (!apiKey) {
@@ -257,7 +272,7 @@ async function fetchStableSymbolArray(params: {
   const url = `${FMP_BASE}/${params.endpoint}?${query.toString()}`;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    await acquireFmpFinancialSlot(intervalMs);
+    const release = await params.scheduler.acquire(intervalMs);
     try {
       const response = await fetch(url);
       if (response.status === 429 || response.status >= 500) {
@@ -281,6 +296,8 @@ async function fetchStableSymbolArray(params: {
       }
       const backoff = Math.min(BASE_DELAY_MS * Math.pow(2, attempt - 1), MAX_BACKOFF_MS);
       await sleep(backoff);
+    } finally {
+      release();
     }
   }
 
@@ -296,7 +313,12 @@ async function fetchPeriodSeries(
     futureEstimateCount?: number;
   },
   requestIntervalMs?: number,
+  scheduler?: FmpRequestScheduler,
 ): Promise<FmpFinancialSeriesPoint[]> {
+  const requestScheduler = scheduler ?? createFmpRequestScheduler({
+    maxConcurrentRequests: 1,
+    requestIntervalMs,
+  });
   const [incomeStatement, keyMetrics, ratios, analystEstimates] = await Promise.all([
     fetchStableSymbolArray({
       endpoint: "income-statement",
@@ -304,6 +326,7 @@ async function fetchPeriodSeries(
       period: mode,
       limit: params.limit,
       requestIntervalMs,
+      scheduler: requestScheduler,
     }),
     fetchStableSymbolArray({
       endpoint: "key-metrics",
@@ -311,6 +334,7 @@ async function fetchPeriodSeries(
       period: mode,
       limit: params.limit,
       requestIntervalMs,
+      scheduler: requestScheduler,
     }),
     fetchStableSymbolArray({
       endpoint: "ratios",
@@ -318,6 +342,7 @@ async function fetchPeriodSeries(
       period: mode,
       limit: params.limit,
       requestIntervalMs,
+      scheduler: requestScheduler,
     }),
     fetchStableSymbolArray({
       endpoint: "analyst-estimates",
@@ -325,6 +350,7 @@ async function fetchPeriodSeries(
       period: mode,
       limit: params.estimateLimit,
       requestIntervalMs,
+      scheduler: requestScheduler,
     }).catch(() => []),
   ]);
 
@@ -339,7 +365,9 @@ async function fetchPeriodSeries(
     if (existing) {
       return existing;
     }
-    const date = toNullableString(item.date) ?? key;
+    const date = mode === "annual"
+      ? deriveAnnualCanonicalDate(item) ?? key
+      : toNullableString(item.date) ?? key;
     const fiscalYear = mode === "annual"
       ? deriveAnnualFiscalYear(item)
       : deriveQuarterlyMetadata(item).fiscalYear;
@@ -447,7 +475,7 @@ async function fetchPeriodSeries(
     return trimQuarterlySeries(merged, params.futureEstimateCount ?? DEFAULT_QUARTERLY_FUTURE_ESTIMATE_POINTS);
   }
 
-  return merged;
+  return trimAnnualSeries(merged);
 }
 
 export async function fetchFmpFinancialSeries(
@@ -458,6 +486,7 @@ export async function fetchFmpFinancialSeries(
     quarterlyEstimateLimit?: number;
     quarterlyFutureEstimateCount?: number;
     requestIntervalMs?: number;
+    scheduler?: FmpRequestScheduler;
   } = {},
 ): Promise<FmpFinancialSeriesResponse> {
   const normalizedTicker = ticker.trim().toUpperCase();
@@ -477,17 +506,22 @@ export async function fetchFmpFinancialSeries(
   const quarterlyFutureEstimateCount = Number.isFinite(params.quarterlyFutureEstimateCount)
     ? Math.max(0, Math.min(8, Math.round(params.quarterlyFutureEstimateCount as number)))
     : DEFAULT_QUARTERLY_FUTURE_ESTIMATE_POINTS;
+  const requestScheduler = params.scheduler ?? createFmpRequestScheduler({
+    maxConcurrentRequests: 1,
+    requestIntervalMs: params.requestIntervalMs,
+  });
 
+  const annualEstimateLimit = Math.max(annualLimit, DEFAULT_ANNUAL_ESTIMATE_LIMIT);
   const [annual, quarterly] = await Promise.all([
     fetchPeriodSeries(normalizedTicker, "annual", {
       limit: annualLimit,
-      estimateLimit: annualLimit,
-    }, params.requestIntervalMs),
+      estimateLimit: annualEstimateLimit,
+    }, params.requestIntervalMs, requestScheduler),
     fetchPeriodSeries(normalizedTicker, "quarter", {
       limit: quarterlyLimit,
       estimateLimit: quarterlyEstimateLimit,
       futureEstimateCount: quarterlyFutureEstimateCount,
-    }, params.requestIntervalMs),
+    }, params.requestIntervalMs, requestScheduler),
   ]);
 
   return {

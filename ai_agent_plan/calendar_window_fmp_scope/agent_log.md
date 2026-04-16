@@ -342,6 +342,62 @@
   - 구현 + build/test + live API + browser 검증 완료
   - 사용자 확인 대기 (`awaiting user confirmation`)
 
+## 2026-04-16
+**작성 시각:** 2026-04-16 08:31 (local)
+
+### CalendarWindow FMP Sync Settings 추가 + calendar concurrency 안전화
+
+- 변경 파일
+  - `terminal/backend/src/services/fmpRequestScheduler.ts`
+  - `terminal/backend/src/services/fmpEarningsCalendarProvider.ts`
+  - `terminal/backend/src/services/fmpFinancialSeriesProvider.ts`
+  - `terminal/backend/src/services/calendarFinancialRepository.ts`
+  - `terminal/backend/src/server.ts`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx`
+  - `terminal/backend_prompt.md`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+  - `ai_agent_plan/calendar_window_fmp_scope/plan.md`
+  - `ai_agent_plan/calendar_window_fmp_scope/agent_log.md`
+- 사용자 요구
+  - earnings 탭의 `Update FMP Earnings Dates`, `Sync Financial + Past Estimates` 두 버튼에 대해 window 안에서 병렬 처리 수치를 수정할 수 있게 해 달라는 요청.
+- 구현 내용
+  - earnings 탭 툴바에 `FMP Sync Settings` 버튼 추가
+  - settings panel 안에 `Earnings Update`, `Financial Sync` concurrency spinbutton 추가
+  - 값은 localStorage `calendar-fmp-earnings-concurrency`, `calendar-fmp-financial-concurrency`에 저장되도록 구현
+  - `POST /api/fmp/calendar/earnings/update`, `POST /api/fmp/calendar/financials/update`가 body `concurrency`, `requestIntervalMs`를 읽어 worker pool + shared FMP request scheduler에 반영하도록 수정
+  - FMP request는 병렬화하되 SQLite transaction write는 route 내부 mutex로 직렬화해 concurrent `BEGIN IMMEDIATE` 충돌을 방지
+  - annual financial snapshot은 fiscal year 기반 canonical date를 사용하고 insert 전 same-date guard merge를 적용해 `LOW`처럼 actual FY2025와 next-FY estimate가 같은 raw date를 공유할 때의 unique collision을 제거
+- 중간에 발견한 문제와 수정
+  - 첫 multi-chunk earnings concurrency 검증에서 `SQLITE_ERROR: cannot start a transaction within a transaction` 발생
+    - 원인: chunk worker들이 shared SQLite connection에서 동시에 `BEGIN IMMEDIATE` 실행
+    - 조치: chunk fetch는 병렬 유지, DB write transaction만 mutex로 직렬화
+  - 첫 financial concurrency 검증에서 `LOW` ticker에 `UNIQUE constraint failed: calendar_financial_series.ticker, period_type, report_date` 발생
+    - 원인: annual actual(`FY2025`)과 annual estimate(`FY2026`)가 upstream raw `2026-01-30`을 함께 사용
+    - 조치: annual canonical date를 fiscal-year-end로 정규화하고 snapshot insert 전 same-date merge guard 추가
+- 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `fmpRequestScheduler.ts`, `fmpEarningsCalendarProvider.ts`, `fmpFinancialSeriesProvider.ts`, `calendarFinancialRepository.ts`, `server.ts`, `CalendarWindow.tsx` error 0 |
+| 빌드 | ✅ | backend `npm run build`, frontend `npm run build` 성공 |
+| 자동 테스트 | ✅ | backend vitest `15 files / 91 tests` 통과 |
+| 런타임 통합 | ✅ | `POST /api/fmp/calendar/earnings/update` (`2026-01-01~2026-04-30`, `concurrency=3`) 완료 + job result에 `concurrency=3` 확인, `POST /api/fmp/calendar/financials/update` (`concurrency=4`) running/log 확인 후 cancel, `LOW` direct snapshot fetch+store 성공, browser에서 `FMP Sync Settings` 버튼과 두 concurrency spinbutton 노출 확인 |
+
+- 런타임 확인 메모
+  - earnings verification job `aa84cdb3-1fac-4130-85b9-c741752d6fe7`
+    - 완료 상태: `done`
+    - logs: `[batch] concurrency=3, requestIntervalMs=250`
+    - result: `chunks=4`, `concurrency=3`, `matchedRows=1382`
+  - financial verification job `0cb9c085-9f57-4537-bf71-81b6964334c2`
+    - running 중 log: `[batch] concurrency=4, requestIntervalMs=250`
+    - cancel 직전 progress: `25/1699`, `synced=25`, `failed=0`
+    - 이후 verification 목적상 cancel 완료
+  - browser snapshot 기준 earnings toolbar에 `FMP Sync Settings` 버튼 표시, panel 안에 `Earnings Update=1`, `Financial Sync=1` spinbutton 확인
+
+- 상태
+  - 구현 + build/test + live API + browser 검증 완료
+  - 사용자 확인 대기 (`awaiting user confirmation`)
+
 ## 2026-04-15
 **작성 시각:** 2026-04-15 21:48 (local)
 

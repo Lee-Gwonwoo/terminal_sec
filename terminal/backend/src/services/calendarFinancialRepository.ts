@@ -81,11 +81,66 @@ function mergeAnnualStoredPoints(points: FmpFinancialSeriesPoint[]): FmpFinancia
   return Array.from(merged.values()).sort((left, right) => left.date.localeCompare(right.date));
 }
 
+function resolveStorageReportDate(
+  periodType: "annual" | "quarterly",
+  point: FmpFinancialSeriesPoint,
+): string {
+  if (periodType === "annual" && point.fiscalYear && /^\d{4}$/.test(point.fiscalYear)) {
+    return `${point.fiscalYear}-12-31`;
+  }
+  return point.date;
+}
+
+function mergeSnapshotPoints(
+  periodType: "annual" | "quarterly",
+  points: FmpFinancialSeriesPoint[],
+): FmpFinancialSeriesPoint[] {
+  const merged = new Map<string, FmpFinancialSeriesPoint>();
+
+  for (const point of points) {
+    const reportDate = resolveStorageReportDate(periodType, point);
+    const existing = merged.get(reportDate);
+    if (!existing) {
+      merged.set(reportDate, {
+        ...point,
+        date: reportDate,
+      });
+      continue;
+    }
+
+    existing.revenue ??= point.revenue;
+    existing.revenueEstimate ??= point.revenueEstimate;
+    existing.netIncome ??= point.netIncome;
+    existing.netIncomeEstimate ??= point.netIncomeEstimate;
+    existing.eps ??= point.eps;
+    existing.epsEstimate ??= point.epsEstimate;
+    existing.marketCap ??= point.marketCap;
+    existing.peRatio ??= point.peRatio;
+    existing.psRatio ??= point.psRatio;
+    existing.numAnalystsRevenue ??= point.numAnalystsRevenue;
+    existing.numAnalystsEps ??= point.numAnalystsEps;
+
+    if (existing.fiscalYear == null && point.fiscalYear != null) {
+      existing.fiscalYear = point.fiscalYear;
+    }
+    if (existing.period == null && point.period != null) {
+      existing.period = point.period;
+    }
+    if ((!existing.label || existing.label === existing.date) && point.label) {
+      existing.label = point.label;
+    }
+  }
+
+  return Array.from(merged.values()).sort((left, right) => left.date.localeCompare(right.date));
+}
+
 export async function replaceCalendarFinancialSeriesSnapshot(
   payload: FmpFinancialSeriesResponse,
 ): Promise<void> {
   const db = getDb();
   const ticker = payload.ticker.trim().toUpperCase();
+  const annualPoints = mergeSnapshotPoints("annual", payload.annual);
+  const quarterlyPoints = mergeSnapshotPoints("quarterly", payload.quarterly);
   const insertSql = `
     INSERT INTO calendar_financial_series (
       ticker,
@@ -139,8 +194,8 @@ export async function replaceCalendarFinancialSeriesSnapshot(
         }
       };
 
-      await insertSeries("annual", payload.annual);
-      await insertSeries("quarterly", payload.quarterly);
+      await insertSeries("annual", annualPoints);
+      await insertSeries("quarterly", quarterlyPoints);
     } finally {
       await statement.finalize();
     }

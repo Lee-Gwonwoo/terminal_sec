@@ -198,6 +198,24 @@ const NUMERIC_FILTERS_BY_TYPE: Record<string, NumericFilterConfig[]> = {
 };
 
 const IPO_SECURITY_TYPE_ORDER = ['Common Stock', 'Unit', 'Warrant', 'Rights', 'ADS', 'ETF', 'Fund/Trust', 'Preferred', 'Other'];
+const DEFAULT_EARNINGS_UPDATE_CONCURRENCY = 1;
+const DEFAULT_FINANCIAL_SYNC_CONCURRENCY = 1;
+
+function readStoredNumberInRange(key: string, fallback: number, min: number, max: number): number {
+  try {
+    const raw = localStorage.getItem(key);
+    const value = Number(raw);
+    if (!Number.isFinite(value)) {
+      return fallback;
+    }
+    if (value < min || value > max) {
+      return fallback;
+    }
+    return Math.floor(value);
+  } catch {
+    return fallback;
+  }
+}
 
 function humanizeKey(key: string): string {
   return key
@@ -371,6 +389,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     Object.fromEntries(FALLBACK_TYPES.map((typeConfig) => [typeConfig.key, buildColumns(typeConfig.key, typeConfig.columns)]))
   );
   const [showColumnMenu, setShowColumnMenu] = useState(false);
+  const [showFmpSettingsMenu, setShowFmpSettingsMenu] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
   const [jobLabel, setJobLabel] = useState('Calendar update');
@@ -395,6 +414,12 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     ticker: string;
     companyName: string | null;
   } | null>(null);
+  const [earningsUpdateConcurrency, setEarningsUpdateConcurrency] = useState(() =>
+    readStoredNumberInRange('calendar-fmp-earnings-concurrency', DEFAULT_EARNINGS_UPDATE_CONCURRENCY, 1, 20)
+  );
+  const [financialSyncConcurrency, setFinancialSyncConcurrency] = useState(() =>
+    readStoredNumberInRange('calendar-fmp-financial-concurrency', DEFAULT_FINANCIAL_SYNC_CONCURRENCY, 1, 20)
+  );
 
   const currentTypeConfig = typeConfigs.find((item) => item.key === activeType) ?? FALLBACK_TYPES[0];
   const currentColumns = columnStates[activeType] ?? buildColumns(activeType, currentTypeConfig?.columns ?? []);
@@ -538,6 +563,26 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
       window.removeEventListener('resize', closeMenu);
     };
   }, [tickerContextMenu]);
+
+  const saveEarningsUpdateConcurrency = (value: number) => {
+    const nextValue = Number.isFinite(value) ? Math.max(1, Math.min(20, Math.floor(value))) : DEFAULT_EARNINGS_UPDATE_CONCURRENCY;
+    setEarningsUpdateConcurrency(nextValue);
+    try {
+      localStorage.setItem('calendar-fmp-earnings-concurrency', String(nextValue));
+    } catch {
+      // Ignore storage errors.
+    }
+  };
+
+  const saveFinancialSyncConcurrency = (value: number) => {
+    const nextValue = Number.isFinite(value) ? Math.max(1, Math.min(20, Math.floor(value))) : DEFAULT_FINANCIAL_SYNC_CONCURRENCY;
+    setFinancialSyncConcurrency(nextValue);
+    try {
+      localStorage.setItem('calendar-fmp-financial-concurrency', String(nextValue));
+    } catch {
+      // Ignore storage errors.
+    }
+  };
 
   const handleSort = (field: string) => {
     if (sortField === field) {
@@ -736,6 +781,11 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
       url: '/api/fmp/calendar/earnings/update',
       label: 'FMP earnings update',
       failureMessage: 'FMP earnings update failed',
+      requestBody: {
+        from: dateFrom || undefined,
+        to: dateTo || undefined,
+        concurrency: earningsUpdateConcurrency,
+      },
     });
   };
 
@@ -760,7 +810,9 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
       url: '/api/fmp/calendar/financials/update',
       label: 'FMP financial + past estimate sync',
       failureMessage: 'FMP financial + past estimate sync failed',
-      requestBody: {},
+      requestBody: {
+        concurrency: financialSyncConcurrency,
+      },
     });
   };
 
@@ -1042,6 +1094,62 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                 <RefreshCw className={`w-4 h-4 ${updatePending ? 'animate-spin' : ''}`} />
                 Sync Financial + Past Estimates
               </button>
+              <div className="relative">
+                <button
+                  onClick={() => setShowFmpSettingsMenu((value) => !value)}
+                  className="flex items-center gap-2 px-3 py-2 text-sm rounded bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
+                >
+                  <Settings2 className="w-4 h-4" />
+                  FMP Sync Settings
+                </button>
+
+                {showFmpSettingsMenu && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-10"
+                      onClick={() => setShowFmpSettingsMenu(false)}
+                    />
+                    <div className="absolute right-0 top-full mt-2 w-80 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 shadow-lg z-20">
+                      <div className="text-sm font-medium text-gray-800 dark:text-gray-100 mb-2">
+                        FMP Sync Concurrency
+                      </div>
+                      <div className="space-y-3">
+                        <label className="block">
+                          <span className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
+                            Earnings Update
+                          </span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={20}
+                            step={1}
+                            value={earningsUpdateConcurrency}
+                            onChange={(event) => saveEarningsUpdateConcurrency(Number(event.target.value))}
+                            className="w-full px-3 py-2 text-sm bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
+                            Financial Sync
+                          </span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={20}
+                            step={1}
+                            value={financialSyncConcurrency}
+                            onChange={(event) => saveFinancialSyncConcurrency(Number(event.target.value))}
+                            className="w-full px-3 py-2 text-sm bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                        </label>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 leading-5">
+                          Higher values speed up the next run but can hit FMP rate limits. These values apply only to the next button click and stay saved in this window.
+                        </p>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
             </>
           )}
 

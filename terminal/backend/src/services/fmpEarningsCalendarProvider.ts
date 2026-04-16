@@ -1,4 +1,5 @@
 import { config } from "../config.js";
+import { createFmpRequestScheduler, type FmpRequestScheduler } from "./fmpRequestScheduler.js";
 
 const FMP_BASE = "https://financialmodelingprep.com/stable";
 const MAX_RETRIES = 10;
@@ -19,24 +20,6 @@ export interface FmpEarningsCalendarItem {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-let fmpCalendarScheduler: Promise<void> = Promise.resolve();
-
-async function acquireFmpCalendarSlot(intervalMs: number): Promise<void> {
-  const previous = fmpCalendarScheduler;
-  let release!: () => void;
-  fmpCalendarScheduler = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await previous;
-  try {
-    if (intervalMs > 0) {
-      await sleep(intervalMs);
-    }
-  } finally {
-    release();
-  }
 }
 
 function toNullableNumber(value: unknown): number | null {
@@ -83,6 +66,7 @@ export async function fetchFmpEarningsCalendarChunk(params: {
   from: string;
   to: string;
   requestIntervalMs?: number;
+  scheduler?: FmpRequestScheduler;
 }): Promise<FmpEarningsCalendarItem[]> {
   const apiKey = config.fmpApiKey;
   if (!apiKey) {
@@ -92,6 +76,10 @@ export async function fetchFmpEarningsCalendarChunk(params: {
   const intervalMs = Number.isFinite(params.requestIntervalMs)
     ? Math.max(0, Math.min(5_000, Math.round(params.requestIntervalMs as number)))
     : DEFAULT_FMP_REQUEST_INTERVAL_MS;
+  const scheduler = params.scheduler ?? createFmpRequestScheduler({
+    maxConcurrentRequests: 1,
+    requestIntervalMs: intervalMs,
+  });
 
   const query = new URLSearchParams({
     from: params.from,
@@ -101,7 +89,7 @@ export async function fetchFmpEarningsCalendarChunk(params: {
   const url = `${FMP_BASE}/earnings-calendar?${query.toString()}`;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    await acquireFmpCalendarSlot(intervalMs);
+    const release = await scheduler.acquire(intervalMs);
     try {
       const response = await fetch(url);
       if (response.status === 429 || response.status >= 500) {
@@ -137,6 +125,8 @@ export async function fetchFmpEarningsCalendarChunk(params: {
       }
       const backoff = Math.min(BASE_DELAY_MS * Math.pow(2, attempt - 1), MAX_BACKOFF_MS);
       await sleep(backoff);
+    } finally {
+      release();
     }
   }
 
