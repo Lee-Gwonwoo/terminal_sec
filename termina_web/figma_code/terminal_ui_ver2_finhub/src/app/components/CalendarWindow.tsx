@@ -33,6 +33,7 @@ interface CalendarRow {
   event_time: string;
   event_date?: string | null;
   ipo_date?: string | null;
+  ipo_security_type?: string | null;
   ticker?: string | null;
   title?: string | null;
   source?: string | null;
@@ -111,7 +112,7 @@ interface NumericFilterConfig {
 
 const FALLBACK_TYPES: CalendarTypeConfig[] = [
   { key: 'earnings', label: 'Earnings', supports: [], columns: ['report_date', 'ticker', 'name', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual', 'industry', 'float_pct', 'institutional_pct', 'insider_pct', 'session', 'source'] },
-  { key: 'ipos', label: 'IPOs', supports: [], columns: ['ipo_date', 'ticker', 'company_name', 'industry', 'float_pct', 'institutional_pct', 'insider_pct', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'company_description', 'sec_form', 'sec_filing_date', 'sec_accepted_date', 'sec_owner_count', 'sec_max_owner_pct', 'sec_total_owner_pct', 'prospectus_url', 'disclosure_url', 'source'] },
+  { key: 'ipos', label: 'IPOs', supports: [], columns: ['ipo_date', 'ticker', 'ipo_security_type', 'company_name', 'industry', 'float_pct', 'institutional_pct', 'insider_pct', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'company_description', 'sec_form', 'sec_filing_date', 'sec_accepted_date', 'sec_owner_count', 'sec_max_owner_pct', 'sec_total_owner_pct', 'prospectus_url', 'disclosure_url', 'source'] },
   { key: 'dividends', label: 'Dividends', supports: [], columns: ['ex_date', 'ticker', 'name', 'amount', 'yield', 'pay_date', 'industry', 'market_cap', 'source'] },
   { key: 'splits', label: 'Splits', supports: [], columns: ['split_date', 'ticker', 'name', 'ratio', 'industry', 'market_cap', 'source'] },
   { key: 'analyst_ratings', label: 'Analyst Ratings', supports: [], columns: ['ticker', 'title', 'source'] },
@@ -121,14 +122,14 @@ const FALLBACK_TYPES: CalendarTypeConfig[] = [
 
 const TYPE_COLUMN_ORDER: Record<string, string[]> = {
   earnings: ['report_date', 'ticker', 'name', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual', 'industry', 'float_pct', 'institutional_pct', 'insider_pct', 'session', 'source'],
-  ipos: ['ipo_date', 'ticker', 'company_name', 'industry', 'float_pct', 'institutional_pct', 'insider_pct', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'company_description', 'sec_form', 'sec_filing_date', 'sec_accepted_date', 'sec_owner_count', 'sec_max_owner_pct', 'sec_total_owner_pct', 'prospectus_url', 'disclosure_url', 'source'],
+  ipos: ['ipo_date', 'ticker', 'ipo_security_type', 'company_name', 'industry', 'float_pct', 'institutional_pct', 'insider_pct', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'company_description', 'sec_form', 'sec_filing_date', 'sec_accepted_date', 'sec_owner_count', 'sec_max_owner_pct', 'sec_total_owner_pct', 'prospectus_url', 'disclosure_url', 'source'],
   dividends: ['ex_date', 'ticker', 'name', 'amount', 'yield', 'pay_date', 'industry', 'market_cap', 'source'],
   splits: ['split_date', 'ticker', 'name', 'ratio', 'industry', 'market_cap', 'source'],
 };
 
 const VISIBLE_COLUMNS_BY_TYPE: Record<string, string[]> = {
   earnings: ['report_date', 'ticker', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual'],
-  ipos: ['ipo_date', 'ticker', 'company_name', 'industry', 'institutional_pct', 'insider_pct', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'sec_max_owner_pct', 'company_description'],
+  ipos: ['ipo_date', 'ticker', 'ipo_security_type', 'company_name', 'industry', 'institutional_pct', 'insider_pct', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'sec_max_owner_pct', 'company_description'],
   dividends: ['ex_date', 'ticker', 'amount', 'yield', 'pay_date'],
   splits: ['split_date', 'ticker', 'ratio'],
   analyst_ratings: ['event_date', 'ticker', 'title'],
@@ -140,6 +141,7 @@ const COLUMN_DEFINITIONS: Record<string, Omit<ColumnConfig, 'visible'>> = {
   event_date: { key: 'event_date', label: 'Date', width: '110px' },
   report_date: { key: 'report_date', label: 'Date', width: '110px' },
   ipo_date: { key: 'ipo_date', label: 'IPO Date', width: '110px' },
+  ipo_security_type: { key: 'ipo_security_type', label: 'Security Type', width: '130px' },
   ex_date: { key: 'ex_date', label: 'Ex Date', width: '110px' },
   pay_date: { key: 'pay_date', label: 'Pay Date', width: '110px' },
   split_date: { key: 'split_date', label: 'Split Date', width: '110px' },
@@ -194,6 +196,8 @@ const NUMERIC_FILTERS_BY_TYPE: Record<string, NumericFilterConfig[]> = {
     { key: 'market_cap', label: 'Market Cap', unitLabel: 'B$', multiplier: 1_000_000_000 },
   ],
 };
+
+const IPO_SECURITY_TYPE_ORDER = ['Common Stock', 'Unit', 'Warrant', 'Rights', 'ADS', 'ETF', 'Fund/Trust', 'Preferred', 'Other'];
 
 function humanizeKey(key: string): string {
   return key
@@ -380,6 +384,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const [floatPctMax, setFloatPctMax] = useState('');
   const [institutionalPctMin, setInstitutionalPctMin] = useState('');
   const [institutionalPctMax, setInstitutionalPctMax] = useState('');
+  const [ipoSecurityTypeFilter, setIpoSecurityTypeFilter] = useState('all');
   const [tickerContextMenu, setTickerContextMenu] = useState<{
     x: number;
     y: number;
@@ -561,6 +566,29 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     return events.filter((event) => event.type === activeType);
   }, [events, activeType]);
 
+  const ipoSecurityTypeOptions = useMemo(() => {
+    const values = Array.from(new Set(
+      tabFilteredEvents
+        .map((event) => typeof event.ipo_security_type === 'string' ? event.ipo_security_type : '')
+        .filter(Boolean),
+    ));
+
+    return values.sort((left, right) => {
+      const leftIndex = IPO_SECURITY_TYPE_ORDER.indexOf(left);
+      const rightIndex = IPO_SECURITY_TYPE_ORDER.indexOf(right);
+      if (leftIndex === -1 && rightIndex === -1) {
+        return left.localeCompare(right);
+      }
+      if (leftIndex === -1) {
+        return 1;
+      }
+      if (rightIndex === -1) {
+        return -1;
+      }
+      return leftIndex - rightIndex;
+    });
+  }, [tabFilteredEvents]);
+
   const filteredAndSortedEvents = useMemo(() => {
     let filtered = [...tabFilteredEvents];
 
@@ -571,10 +599,15 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
         String(event.name ?? event.company_name ?? '').toLowerCase().includes(query) ||
         String(event.title ?? '').toLowerCase().includes(query) ||
         String(event.company_description ?? '').toLowerCase().includes(query) ||
+        String(event.ipo_security_type ?? '').toLowerCase().includes(query) ||
         String(event.status ?? '').toLowerCase().includes(query) ||
         String(event.industry ?? '').toLowerCase().includes(query) ||
         String(event.source ?? '').toLowerCase().includes(query),
       );
+    }
+
+    if (activeType === 'ipos' && ipoSecurityTypeFilter !== 'all') {
+      filtered = filtered.filter((event) => event.ipo_security_type === ipoSecurityTypeFilter);
     }
 
     filtered = filtered.filter((event) =>
@@ -610,6 +643,8 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   }, [
     tabFilteredEvents,
     searchQuery,
+    activeType,
+    ipoSecurityTypeFilter,
     sortField,
     sortDirection,
     marketCapMin,
@@ -637,6 +672,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     searchQuery ||
     dateFrom ||
     dateTo ||
+    ipoSecurityTypeFilter !== 'all' ||
     marketCapMin ||
     marketCapMax ||
     floatPctMin ||
@@ -649,6 +685,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     setDateFrom('');
     setDateTo('');
     setSearchQuery('');
+    setIpoSecurityTypeFilter('all');
     setMarketCapMin('');
     setMarketCapMax('');
     setFloatPctMin('');
@@ -721,8 +758,8 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const handleFinancialHistorySync = async () => {
     await startCalendarJob({
       url: '/api/fmp/calendar/financials/update',
-      label: 'FMP financial history sync',
-      failureMessage: 'FMP financial history sync failed',
+      label: 'FMP financial + past estimate sync',
+      failureMessage: 'FMP financial + past estimate sync failed',
       requestBody: {},
     });
   };
@@ -829,6 +866,27 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
           : normalized === 'expected'
             ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300'
             : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200';
+
+      return (
+        <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${colorClass}`}>
+          {formatValue(row, column.key)}
+        </span>
+      );
+    }
+
+    if (column.key === 'ipo_security_type') {
+      const normalized = String(value ?? '').toLowerCase();
+      const colorClass = normalized === 'common stock'
+        ? 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
+        : normalized === 'unit'
+          ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300'
+          : normalized === 'warrant'
+            ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+            : normalized === 'rights'
+              ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300'
+              : normalized === 'etf'
+                ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300'
+                : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200';
 
       return (
         <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${colorClass}`}>
@@ -982,7 +1040,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                 className={`flex items-center gap-2 px-3 py-2 text-sm rounded text-white ${updatePending ? 'bg-indigo-400 cursor-wait' : 'bg-indigo-600 hover:bg-indigo-700'}`}
               >
                 <RefreshCw className={`w-4 h-4 ${updatePending ? 'animate-spin' : ''}`} />
-                Sync Financial History
+                Sync Financial + Past Estimates
               </button>
             </>
           )}
@@ -1074,6 +1132,24 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
           </div>
         )}
 
+        {activeType === 'ipos' && (
+          <div className="flex flex-wrap items-end gap-3 mb-3 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2">
+            <div className="min-w-[92px] text-xs font-medium text-gray-600 dark:text-gray-300 pb-2">
+              Security Type
+            </div>
+            <select
+              value={ipoSecurityTypeFilter}
+              onChange={(e) => setIpoSecurityTypeFilter(e.target.value)}
+              className="min-w-[180px] px-3 py-2 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">All</option>
+              {ipoSecurityTypeOptions.map((option) => (
+                <option key={option} value={option}>{option}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
         {activeType === 'earnings' && (
           <div className="space-y-2">
             <div className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded px-3 py-2">
@@ -1090,7 +1166,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
 
         {activeType === 'ipos' && (
           <div className="text-xs text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded px-3 py-2">
-            IPO rows come from FMP IPO calendar. The SEC download action fills company description and named-owner percentages parsed from prospectus or disclosure documents. These SEC ownership fields are separate from post-listing public holders data.
+            IPO rows come from FMP IPO calendar. Security Type is inferred from FMP ticker and company name text because FMP does not expose a dedicated warrant/unit/right field. The SEC download action fills company description and named-owner percentages parsed from prospectus or disclosure documents.
           </div>
         )}
 

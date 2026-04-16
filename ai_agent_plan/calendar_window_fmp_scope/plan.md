@@ -103,6 +103,26 @@
 - earnings 화면에는 현재 범위의 `Confirmed / Pending` count를 노출해 confirmed-only 범위인지 즉시 알 수 있게 한다.
 - financial dialog에는 과거 period의 actual-vs-estimate 비교표를 추가해 future-only estimate가 아니라 historical estimate도 바로 읽히게 한다.
 
+### PLAN CHANGE #9 — 2026-04-15 default universe 과거 quarterly estimate sync 보강
+
+- 사용자의 추가 요구를 반영해 `default universe` financial sync 버튼의 실제 적재 범위를 `재무 actual + 과거 quarterly estimate`까지 포함하도록 보강한다.
+- 확인된 원인
+  - FMP `stable/analyst-estimates?period=quarter`는 가까운 과거부터가 아니라 더 먼 미래 분기부터 내려오는 경우가 많다.
+  - 기존 구현은 quarterly `limit=8`을 statement/ratio와 estimate에 동일 적용해, 실제 과거 분기 estimate가 fetch window 밖으로 잘렸다.
+  - 또한 quarterly actual은 `fiscalYear + period` key, estimate는 `date` key로 잡혀 같은 분기라도 merge가 안 될 수 있다.
+- 이번 수정 목표
+  - quarterly estimate fetch window를 더 넓혀 past estimate row를 확보한다.
+  - quarterly estimate도 date 기반으로 회계연도/분기를 유도해 actual row와 같은 point로 merge한다.
+  - dialog의 historical comparison table은 future-only estimate row보다 실제 historical period 비교를 우선 보여준다.
+
+  ### PLAN CHANGE #10 — 2026-04-15 full sync 실패 내성 보강
+
+  - 사용자가 실제 `default universe` full sync를 실행했을 때 ticker 하나의 fetch/store 예외로 job 전체가 죽지 않도록 batch failure semantics를 보강한다.
+  - 이번 수정 목표
+    - per-ticker failure는 job log에 남기고 다음 ticker로 계속 진행
+    - full sync 완료 result에 `tickersFailed`를 포함해 partial failure를 노출
+    - 사용자가 버튼을 다시 눌렀을 때 immediate failure 없이 background download가 계속 진행되게 한다
+
 ### 현재 레포 상태(중요, 확인됨)
 
 - backend에는 이미 일반형 calendar read API가 있다.

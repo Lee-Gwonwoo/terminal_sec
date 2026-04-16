@@ -34,6 +34,7 @@ export const CALENDAR_TYPE_CONFIG = [
     columns: [
       "ipo_date",
       "ticker",
+      "ipo_security_type",
       "company_name",
       "exchange",
       "industry",
@@ -348,6 +349,9 @@ function mapCalendarRow(
   const fieldsJson = parseFieldsJson(row.meta_json);
   const eventDate = getEventDate(row.event_at);
   const companyName = getStringField(fieldsJson.company_name) ?? metadata?.name ?? null;
+  const ipoSecurityType = row.event_type === "ipos"
+    ? deriveIpoSecurityType(row.ticker, companyName)
+    : null;
   const companyDescription = getStringField(fieldsJson.company_description) ?? ipoSec?.company_description ?? metadata?.description ?? null;
   const epsEstimated = getNumberField(fieldsJson.eps_est);
   const epsActual = getNumberField(fieldsJson.eps_actual);
@@ -375,6 +379,7 @@ function mapCalendarRow(
     ...fieldsJson,
     report_date: getStringField(fieldsJson.report_date) ?? eventDate,
     ipo_date: ipoDate,
+    ipo_security_type: ipoSecurityType,
     company_name: companyName,
     company_description: companyDescription,
     name: metadata?.name ?? companyName ?? (row.ticker || null),
@@ -551,6 +556,53 @@ function getBooleanField(value: unknown): boolean | null {
     }
   }
   return null;
+}
+
+function getUpperText(value: string | null | undefined): string {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+function deriveIpoSecurityType(ticker: string | null | undefined, companyName: string | null | undefined): string {
+  const tickerUpper = getUpperText(ticker);
+  const companyUpper = getUpperText(companyName);
+
+  if (/\bETF\b|\bEXCHANGE TRADED FUND\b/.test(companyUpper)) {
+    return "ETF";
+  }
+  if (/\bWARRANTS?\b/.test(companyUpper)) {
+    return "Warrant";
+  }
+  if (/\bRIGHTS?\b/.test(companyUpper)) {
+    return "Rights";
+  }
+  if (/\bUNITS?\b/.test(companyUpper)) {
+    return "Unit";
+  }
+  if (/\bAMERICAN DEPOSITARY SHARES?\b|\bADS\b/.test(companyUpper)) {
+    return "ADS";
+  }
+  if (/\bFUND\b|\bTRUST\b/.test(companyUpper)) {
+    return "Fund/Trust";
+  }
+  if (/\bPREFERRED\b/.test(companyUpper)) {
+    return "Preferred";
+  }
+  if (/\bCLASS\s+[A-Z]\s+ORDINARY SHARES?\b|\bORDINARY SHARES?\b|\bCOMMON STOCK\b|\bCOMMON SHARES?\b/.test(companyUpper)) {
+    return "Common Stock";
+  }
+
+  const looksLikeSpac = /\bACQUISITION\b|\bBLANK CHECKS\b/.test(companyUpper);
+  if (looksLikeSpac && /U$/.test(tickerUpper)) {
+    return "Unit";
+  }
+  if (looksLikeSpac && /(R|RT)$/.test(tickerUpper)) {
+    return "Rights";
+  }
+  if (looksLikeSpac && /(W|WS|WT|Z)$/.test(tickerUpper)) {
+    return "Warrant";
+  }
+
+  return "Common Stock";
 }
 
 function computeSurprisePct(actual: number | null, estimated: number | null): number | null {

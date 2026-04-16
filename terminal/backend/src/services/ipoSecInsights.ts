@@ -407,3 +407,158 @@ export async function fetchSecSicByCik(cik: string | null | undefined): Promise<
 
   return empty;
 }
+
+// ---------------------------------------------------------------------------
+// SEC EDGAR direct lookup (bypass FMP dependency)
+// ---------------------------------------------------------------------------
+
+let tickerToCikCache: Map<string, string> | null = null;
+let tickerToCikCacheExpiry = 0;
+const TICKER_CACHE_TTL_MS = 30 * 60 * 1000;
+
+export async function getTickerToCikMap(): Promise<Map<string, string>> {
+  if (tickerToCikCache && Date.now() < tickerToCikCacheExpiry) {
+    return tickerToCikCache;
+  }
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const response = await fetch("https://www.sec.gov/files/company_tickers.json", {
+        headers: { "User-Agent": SEC_EDGAR_UA, "Accept": "application/json" },
+      });
+
+      if (response.status === 429 || response.status >= 500) {
+        if (attempt === MAX_RETRIES) {
+          return tickerToCikCache ?? new Map();
+        }
+        await sleep(BASE_DELAY_MS * attempt);
+        continue;
+      }
+
+      if (!response.ok) {
+        return tickerToCikCache ?? new Map();
+      }
+
+      const data = await response.json() as Record<string, { cik_str: number; ticker: string; title: string }>;
+      const map = new Map<string, string>();
+      for (const entry of Object.values(data)) {
+        if (entry.ticker) {
+          map.set(entry.ticker.toUpperCase(), String(entry.cik_str));
+        }
+      }
+
+      tickerToCikCache = map;
+      tickerToCikCacheExpiry = Date.now() + TICKER_CACHE_TTL_MS;
+      return map;
+    } catch {
+      if (attempt === MAX_RETRIES) {
+        return tickerToCikCache ?? new Map();
+      }
+      await sleep(BASE_DELAY_MS * attempt);
+    }
+  }
+
+  return tickerToCikCache ?? new Map();
+}
+
+export interface SecEdgarFiling {
+  form: string;
+  filingDate: string;
+  accessionNumber: string;
+  primaryDocument: string;
+  documentUrl: string;
+}
+
+export interface SecEdgarSubmissionResult {
+  sic: SecSicInfo;
+  filings: SecEdgarFiling[];
+  companyName: string | null;
+}
+
+const IPO_FORM_TYPES = new Set(["S-1", "S-1/A", "F-1", "F-1/A", "424B1", "424B2", "424B3", "424B4"]);
+
+export async function fetchSecEdgarSubmission(cik: string): Promise<SecEdgarSubmissionResult> {
+  const empty: SecEdgarSubmissionResult = {
+    sic: { sicCode: null, sicDescription: null, secIndustry: null },
+    filings: [],
+    companyName: null,
+  };
+
+  if (!cik || !cik.trim()) {
+    return empty;
+  }
+
+  const rawCik = cik.replace(/^0+/, "") || cik;
+  const paddedCik = rawCik.padStart(10, "0");
+  const url = `https://data.sec.gov/submissions/CIK${paddedCik}.json`;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const response = await fetch(url, {
+        headers: { "User-Agent": SEC_EDGAR_UA, "Accept": "application/json" },
+      });
+
+      if (response.status === 429 || response.status >= 500) {
+        if (attempt === MAX_RETRIES) {
+          return empty;
+        }
+        await sleep(BASE_DELAY_MS * attempt);
+        continue;
+      }
+
+      if (!response.ok) {
+        return empty;
+      }
+
+      const data = await response.json() as Record<string, unknown>;
+
+      // SIC info
+      const sicCode = data.sic != null ? String(data.sic) : null;
+      const sicDescription = typeof data.sicDescription === "string" ? data.sicDescription : null;
+      const sic: SecSicInfo = sicCode
+        ? { sicCode, sicDescription, secIndustry: mapSicToIndustry(sicCode, sicDescription) }
+        : { sicCode: null, sicDescription: null, secIndustry: null };
+
+      const companyName = typeof data.name === "string" ? data.name : null;
+
+      // Search recent filings for IPO forms
+      const filings: SecEdgarFiling[] = [];
+      const filingsObj = data.filings as Record<string, unknown> | undefined;
+      const recent = filingsObj?.recent as Record<string, unknown[]> | undefined;
+
+      if (recent?.form) {
+        const forms = recent.form as string[];
+        const filingDates = (recent.filingDate ?? []) as string[];
+        const accessions = (recent.accessionNumber ?? []) as string[];
+        const primaryDocs = (recent.primaryDocument ?? []) as string[];
+
+        for (let i = 0; i < forms.length; i++) {
+          if (!IPO_FORM_TYPES.has(forms[i])) {
+            continue;
+          }
+          const accession = accessions[i];
+          const primaryDoc = primaryDocs[i];
+          if (!accession || !primaryDoc) {
+            continue;
+          }
+          filings.push({
+            form: forms[i],
+            filingDate: filingDates[i] ?? "",
+            accessionNumber: accession,
+            primaryDocument: primaryDoc,
+            documentUrl: `https://www.sec.gov/Archives/edgar/data/${rawCik}/${accession.replace(/-/g, "")}/${primaryDoc}`,
+          });
+        }
+      }
+
+      return { sic, filings, companyName };
+    } catch {
+      if (attempt === MAX_RETRIES) {
+        return empty;
+      }
+      await sleep(BASE_DELAY_MS * attempt);
+    }
+  }
+
+  return empty;
+}

@@ -2296,6 +2296,7 @@ query:
   - `[][][]insider_pct[][][]`
   - source 컬럼: `[][][]market_cap_source[][][]`, `[][][]float_source[][][]`, `[][][]institutional_source[][][]`, `[][][]insider_source[][][]`
 - IPO row는 direct FMP field(`[][][]ipo_date[][][]`, `[][][]company_name[][][]`, `[][][]exchange[][][]`, `[][][]status[][][]`, `[][][]shares[][][]`, `[][][]price_range[][][]`, `[][][]offer_amount[][][]`)와 SEC enrich field(`[][][]company_description[][][]`, `[][][]sec_form[][][]`, `[][][]sec_filing_date[][][]`, `[][][]sec_accepted_date[][][]`, `[][][]sec_owner_count[][][]`, `[][][]sec_max_owner_pct[][][]`, `[][][]sec_total_owner_pct[][][]`, `[][][]sec_sic_code[][][]`, `[][][]sec_sic_description[][][]`, `[][][]sec_industry[][][]`, `[][][]prospectus_url[][][]`, `[][][]disclosure_url[][][]`)를 함께 내려준다.
+- `[][][]ipo_security_type[][][]`는 FMP의 별도 전용 필드가 아니라 `ticker + company_name` 문자열에서 backend가 파생한 구분값이다. 현재 `Common Stock`, `Unit`, `Warrant`, `Rights`, `ADS`, `ETF`, `Fund/Trust`, `Preferred`를 사용한다.
 - `[][][]company_description[][][]` fallback 순서는 `fields_json.company_description -> ipo_sec_enrichments.company_description -> 최신 company_profiles.description`이다.
 - `[][][]industry[][][]` fallback 순서는 `securities.industry -> ipo_sec_enrichments.sec_industry -> fields_json.industry`이다. 즉 SEC EDGAR SIC 기반 industry가 FMP/Yahoo profile이 없을 때도 채워진다.
 - `POST /api/fmp/calendar/ipos/update`는 direct IPO snapshot 저장 뒤 best-effort FMP/Yahoo profile sync를 한 번 더 수행해 `securities` / `company_profiles` metadata를 보강한다. 따라서 provider가 ticker profile을 주는 경우 IPO row의 `industry`, `company_description`, `institutional_pct`, `insider_pct`가 함께 채워질 수 있다.
@@ -2349,7 +2350,7 @@ CalendarWindow ticker 우클릭 `Financial` dialog용 read-only endpoint다.
 
 1. 먼저 local DB `calendar_financial_series` cache를 조회한다.
 2. cache miss면 FMP stable `income-statement`, `key-metrics`, `ratios`, `analyst-estimates`를 annual / quarterly 각각 조회한 뒤 snapshot을 DB에 저장하고 반환한다.
-3. `date` 우선, 없으면 `fiscalYear + period`를 기준 key로 삼아 series를 merge 한다.
+3. quarterly는 `report_date`(`date`)를 우선 key로 사용해 actual/estimate를 같은 분기에 붙이고, annual은 exact `date`보다 회계연도(`fiscalYear`, 없으면 `date`의 연도) 기준으로 series를 merge 한다.
 4. revenue / earnings actual은 income statement에서, estimate는 analyst-estimates(`revenueAvg`, `netIncomeAvg`, `epsAvg`)에서, market cap은 key metrics에서, valuation ratio는 ratios에서 채운다.
 5. `peRatio`, `psRatio`가 비어 있으면 가능한 경우 `marketCap / netIncome`, `marketCap / revenue`로 fallback 계산한다.
 6. estimate-only future point도 유지하고, 모든 응답은 oldest -> latest 순으로 정렬한다.
@@ -2359,6 +2360,8 @@ CalendarWindow ticker 우클릭 `Financial` dialog용 read-only endpoint다.
 - FMP stable financial statement 응답은 `calendarYear`가 아니라 `[][][]fiscalYear[][][]`, `[][][]period[][][]` 중심이다.
 - 일부 종목/기간에서는 ratio 값이 `null`일 수 있다.
 - estimate는 별도 endpoint라 actual series와 날짜/period가 완전히 일치하지 않을 수 있다.
+- quarterly analyst-estimates는 가까운 과거가 아니라 더 먼 미래 분기부터 내려오는 경우가 많아서, backend는 quarterly statement limit보다 더 넓은 estimate fetch window를 사용한 뒤 `실적 구간 + 가까운 미래 분기`만 남긴다.
+- 특히 annual estimate는 leap day/마감일 차이로 exact `date`가 하루 어긋날 수 있으므로, read path에서는 같은 회계연도 row를 하나로 접어 historical actual + estimate가 함께 보이게 한다.
 - annual/quarterly 모두 비어 있으면 `404`를 반환한다.
 
 ### `POST /api/fmp/calendar/financials/update`
@@ -2384,16 +2387,18 @@ default universe ticker 전체에 대해 financial history + analyst estimate sn
 
 1. `FMP_API_KEY` 존재 여부를 확인한다.
 2. `getDefaultUniverseTickers()`로 대상 ticker를 가져온다.
-3. background job(`FMP Financial History Sync`)을 생성한다.
+3. background job(`FMP Financial + Past Estimate Sync`)을 생성한다.
 4. 각 ticker마다 `income-statement`, `key-metrics`, `ratios`, `analyst-estimates`를 합쳐 annual / quarterly snapshot을 만든다.
 5. ticker별 기존 `calendar_financial_series` row를 먼저 지우고 새 snapshot으로 replace 저장한다.
-6. job progress/log/result에 synced ticker 수와 annual/quarterly row 수, estimate row 수를 남긴다.
+6. job progress/log/result에 synced ticker 수, failed ticker 수, annual/quarterly row 수, estimate row 수를 남긴다.
 
 주의:
 
 - date range를 받지 않는다. 항상 default universe 전체를 돈다.
 - default universe가 비어 있으면 에러를 반환한다.
 - 이 endpoint는 즉시 `{ jobId }`만 반환하고 실제 적재는 background job에서 진행한다.
+- quarterly snapshot은 past estimate를 확보하려고 statement보다 넓은 analyst-estimates window를 사용한다.
+- ticker 하나의 fetch/store 실패는 전체 job을 abort하지 않고 `FAILED` log + `tickersFailed` count로 누적한 뒤 다음 ticker로 계속 진행한다.
 
 ### `POST /api/ibkr/calendar/update`
 
@@ -2562,10 +2567,11 @@ job 완료 result 컬럼:
 2. SEC metadata 조회는 `from - 365일` ~ `to` lookback 범위를 사용한다.
 3. `ipos-disclosure`, `ipos-prospectus`, generic SEC filing search를 함께 조회한다.
 4. 각 ticker에 대해 가장 적절한 filing URL을 골라 본문을 다운로드한다.
-5. beneficial ownership section과 company overview 문단을 heuristic하게 파싱한다.
-6. CIK가 있으면 SEC EDGAR(`https://data.sec.gov/submissions/CIK{padded}.json`)에서 SIC 코드를 조회하여 industry를 결정한다.
-7. 결과를 `ipo_sec_enrichments`에 upsert 한다(sic_code, sic_description, sec_industry 포함).
-8. `update_status.fmp_calendar_ipos_sec`를 갱신한다.
+5. FMP 매칭 실패 시 SEC EDGAR direct fallback: `company_tickers.json`에서 ticker→CIK 매핑 후, `submissions/CIK{padded}.json`에서 SIC+S-1/F-1 filing URL을 한 번에 조회한다.
+6. beneficial ownership section과 company overview 문단을 heuristic하게 파싱한다.
+7. CIK가 있으면 SEC EDGAR에서 SIC 코드를 조회하여 industry를 결정한다.
+8. 결과를 `ipo_sec_enrichments`에 upsert 한다(sic_code, sic_description, sec_industry 포함).
+9. `update_status.fmp_calendar_ipos_sec`를 갱신한다.
 
 job 완료 result 컬럼:
 

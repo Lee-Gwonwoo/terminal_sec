@@ -100,6 +100,10 @@ function hasSeriesValue(series: FinancialSeriesPoint[], key: keyof FinancialSeri
   return series.some((point) => typeof point[key] === 'number' && Number.isFinite(point[key] as number));
 }
 
+function hasActualFinancialValue(point: FinancialSeriesPoint): boolean {
+  return point.revenue != null || point.netIncome != null || point.eps != null;
+}
+
 function SummaryStat({
   label,
   value,
@@ -265,11 +269,16 @@ export function CalendarFinancialDialog({
   }, [cachedResponse, periodMode]);
 
   const historicalComparisonRows = useMemo(() => {
+    const latestActualPoint = [...activeSeries].reverse().find(hasActualFinancialValue) ?? null;
+    const comparisonSeries = latestActualPoint
+      ? activeSeries.filter((point) => point.date <= latestActualPoint.date)
+      : activeSeries;
     const maxRows = periodMode === 'annual' ? 10 : 12;
-    return activeSeries.slice(-maxRows).reverse();
+    return comparisonSeries.slice(-maxRows).reverse();
   }, [activeSeries, periodMode]);
 
   const latestPoint = activeSeries.length > 0 ? activeSeries[activeSeries.length - 1] : null;
+  const summaryPoint = [...activeSeries].reverse().find(hasActualFinancialValue) ?? latestPoint;
   const revenueHasData = hasSeriesValue(activeSeries, 'revenue') || hasSeriesValue(activeSeries, 'revenueEstimate');
   const earningsHasData =
     hasSeriesValue(activeSeries, 'netIncome') ||
@@ -329,18 +338,18 @@ export function CalendarFinancialDialog({
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                 <SummaryStat
                   label={`${periodMode === 'annual' ? 'Annual' : 'Quarterly'} Revenue`}
-                  value={formatCompactUsd(latestPoint?.revenue ?? latestPoint?.revenueEstimate)}
-                  subvalue={latestPoint?.revenueEstimate != null ? `Est. ${formatCompactUsd(latestPoint.revenueEstimate)}` : undefined}
+                  value={formatCompactUsd(summaryPoint?.revenue ?? summaryPoint?.revenueEstimate)}
+                  subvalue={summaryPoint?.revenueEstimate != null ? `Est. ${formatCompactUsd(summaryPoint.revenueEstimate)}` : undefined}
                 />
                 <SummaryStat
                   label="Net Income"
-                  value={formatCompactUsd(latestPoint?.netIncome ?? latestPoint?.netIncomeEstimate)}
-                  subvalue={latestPoint?.netIncomeEstimate != null ? `Est. ${formatCompactUsd(latestPoint.netIncomeEstimate)}` : undefined}
+                  value={formatCompactUsd(summaryPoint?.netIncome ?? summaryPoint?.netIncomeEstimate)}
+                  subvalue={summaryPoint?.netIncomeEstimate != null ? `Est. ${formatCompactUsd(summaryPoint.netIncomeEstimate)}` : undefined}
                 />
                 <SummaryStat
                   label="EPS"
-                  value={formatPlainNumber(latestPoint?.eps ?? latestPoint?.epsEstimate)}
-                  subvalue={latestPoint?.epsEstimate != null ? `Est. ${formatPlainNumber(latestPoint.epsEstimate)}` : undefined}
+                  value={formatPlainNumber(summaryPoint?.eps ?? summaryPoint?.epsEstimate)}
+                  subvalue={summaryPoint?.epsEstimate != null ? `Est. ${formatPlainNumber(summaryPoint.epsEstimate)}` : undefined}
                 />
                 <SummaryStat label="P/E" value={formatRatio(latestPoint?.peRatio)} />
                 <SummaryStat label="P/S" value={formatRatio(latestPoint?.psRatio)} />

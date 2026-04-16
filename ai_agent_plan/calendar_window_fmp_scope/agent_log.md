@@ -343,6 +343,138 @@
   - 사용자 확인 대기 (`awaiting user confirmation`)
 
 ## 2026-04-15
+**작성 시각:** 2026-04-15 21:48 (local)
+
+### full sync 실패 내성 보강 + 실제 과거 데이터 다운로드 재시작
+
+- 변경 파일
+  - `terminal/backend/src/server.ts`
+  - `terminal/backend_prompt.md`
+  - `ai_agent_plan/calendar_window_fmp_scope/plan.md`
+  - `ai_agent_plan/calendar_window_fmp_scope/agent_log.md`
+- 사용자 보고 이슈
+  - 실제 `Sync Financial + Past Estimates` 실행 시 job 실패를 경험함.
+- 확인한 원인
+  - route가 ticker 단위 예외를 잡지 않고 전체 `void(async () => ...)` 바깥 catch로만 처리하고 있어서, 특정 ticker의 FMP fetch/store 실패가 전체 default-universe job abort로 이어질 수 있었다.
+- 구현 내용
+  - `POST /api/fmp/calendar/financials/update` loop를 per-ticker `try/catch`로 변경
+  - 실패 ticker는 `${ticker}: FAILED — ...` log와 `tickersFailed` count로 누적
+  - 성공 ticker는 계속 저장하고, periodic progress log는 `synced/failed` count를 함께 기록
+  - job result / `setLastSuccess()` payload에 `tickersFailed` 추가
+- 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `server.ts` error 0 |
+| 빌드 | ✅ | backend `npm run build` 성공 |
+| 자동 테스트 | ✅ | backend vitest `15 files / 91 tests` 통과 |
+| 런타임 통합 | ✅ | `POST /api/fmp/calendar/financials/update` 재실행 후 job `2bd92890-ddfe-44db-bca7-474c85b2b236`가 immediate failure 없이 `running`, progress `6 / 1699` 확인 |
+
+- 런타임 확인 메모
+  - active jobs 사전 확인 결과 없음
+  - full sync restart job: `2bd92890-ddfe-44db-bca7-474c85b2b236`
+  - 확인 시점 상태: `running`
+  - 확인 시점 progress: `completed=6`, `total=1699`
+
+- 상태
+  - 구현 + build/test + live API 검증 완료
+  - full default-universe past-data sync는 현재 background에서 실행 중
+  - 사용자 확인 대기 (`awaiting user confirmation`)
+
+## 2026-04-15
+**작성 시각:** 2026-04-15 21:42 (local)
+
+### default universe financial sync에 past quarterly estimate 포함
+
+- 변경 파일
+  - `terminal/backend/src/services/fmpFinancialSeriesProvider.ts`
+  - `terminal/backend/src/server.ts`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarFinancialDialog.tsx`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx`
+  - `terminal/backend_prompt.md`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+  - `ai_agent_plan/calendar_window_fmp_scope/plan.md`
+  - `ai_agent_plan/calendar_window_fmp_scope/agent_log.md`
+- 확인한 원인
+  - FMP `stable/analyst-estimates?period=quarter`는 가까운 과거부터가 아니라 더 먼 미래 quarter부터 내려오는 경우가 있었다.
+  - 기존 구현은 quarterly `limit=8`을 statement와 estimate에 동일 적용해서 `2025 Q1~2026 Q1` 같은 past estimate가 fetch window 밖으로 잘렸다.
+  - 추가로 quarterly actual은 `fiscalYear + period`, estimate는 `date` 기준으로 point가 갈라질 수 있어 same-date merge가 보장되지 않았다.
+- 구현 내용
+  - quarterly analyst-estimates fetch window를 기본 `24`로 확장
+  - quarterly merge key를 `report_date` 우선으로 수정하고, actual row의 explicit fiscal metadata가 들어오면 label/fiscalYear/period를 그 값으로 보정
+  - quarterly 응답은 `실적이 있는 history window + 가까운 미래 4개 estimate quarter`만 남기도록 trim
+  - earnings toolbar 버튼 라벨/Job label을 `Sync Financial + Past Estimates` / `FMP Financial + Past Estimate Sync`로 변경
+  - financial dialog summary card는 future-only last point 대신 최신 reported actual period를 우선 사용
+  - `Historical Actual vs Estimate` 표는 future-only row보다 historical actual window를 우선 표시
+- 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | changed TS/MD files error 0 |
+| 빌드 | ✅ | backend `npm run build`, frontend `npm run build` 성공 |
+| 자동 테스트 | ✅ | `15 files / 91 tests` 통과 |
+| 런타임 통합 | ✅ | provider direct call에서 `SNPS` quarterly `Q1 '25 ~ Q1 '26` actual + estimate merge 확인, `POST /api/fmp/calendar/financials/update`가 immediate failure 없이 job 생성 후 cancel 확인, browser toolbar에서 `Sync Financial + Past Estimates` 버튼 표시 확인 |
+
+- 런타임 확인 메모
+  - provider direct sample (`SNPS`)
+    - `Q1 '25`: `revenue=1.455B`, `revenueEstimate=1.451B`, `eps=1.91`, `epsEstimate=2.79054`
+    - `Q4 '25`: `revenue=2.255B`, `revenueEstimate=2.247B`
+    - `Q1 '26`: `revenue=2.409B`, `revenueEstimate=2.390B`
+  - sync endpoint verification
+    - verification job `ec1f0968-0178-4c71-9c98-a698a3dcf1a3` 생성 성공
+    - 상태 `running` 확인 후 API quota 낭비를 막기 위해 즉시 cancel
+  - 이전 검증 중 발견한 duplicate insert 오류(`UNIQUE constraint failed: calendar_financial_series.ticker, period_type, report_date`)는 quarterly merge key를 `date` 우선으로 바꾼 뒤 재현되지 않음
+
+- 상태
+  - 구현 + build/test + live API + browser 검증 완료
+  - 사용자 확인 대기 (`awaiting user confirmation`)
+
+## 2026-04-15
+**작성 시각:** 2026-04-15 21:26 (local)
+
+### confirmed-only 범위 안내 + historical estimate 가시성 보강
+
+- 변경 파일
+  - `terminal/backend/src/services/fmpFinancialSeriesProvider.ts`
+  - `terminal/backend/src/services/calendarFinancialRepository.ts`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarFinancialDialog.tsx`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx`
+  - `terminal/backend_prompt.md`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+  - `ai_agent_plan/calendar_window_fmp_scope/plan.md`
+  - `ai_agent_plan/calendar_window_fmp_scope/agent_log.md`
+- 확인한 원인
+  - `confirmed만 보인다`는 현재 선택 범위(`2026-04-14 ~ 2026-04-30`)에 실제로 confirmed row만 있기 때문이었다.
+  - 같은 earnings API를 `2026-05-31`까지 넓히면 `Pending=False`가 아니라 `confirmed=false` pending row가 47건 확인됐다.
+  - financial dialog의 과거 estimate는 데이터가 없던 것이 아니라, annual에서 estimate row와 actual row가 exact `date` 차이로 두 point로 갈라져 가시성이 떨어졌다.
+- 구현 내용
+  - annual financial series merge key를 회계연도 기준으로 보정
+  - 기존 cache에 저장된 annual duplicate row도 read path에서 접어 같은 회계연도 actual + estimate를 하나의 point로 반환
+  - earnings 화면에 현재 결과 범위의 `Confirmed / Pending` count와 confirmed-only 안내 추가
+  - financial dialog에 `Historical Actual vs Estimate` 비교표 추가
+- 검증
+
+| 검증 항목 | 결과 | 비고 |
+|-----------|------|------|
+| backend 정적 분석 | ✅ | `fmpFinancialSeriesProvider.ts`, `calendarFinancialRepository.ts` error 없음 |
+| frontend 정적 분석 | ✅ | `CalendarFinancialDialog.tsx`, `CalendarWindow.tsx` error 없음 |
+| backend build | ✅ | `terminal/backend`에서 `npm run build` 성공 |
+| backend tests | ✅ | vitest `15 files / 91 tests` 통과 |
+| frontend build | ✅ | `terminal_ui_ver2_finhub`에서 `npm run build` 성공 |
+| live financial API | ✅ | `GET /api/calendar/financials/KMX`에서 annual `2024` row가 actual + estimate로 합쳐져 반환됨 |
+| live earnings API | ✅ | `GET /api/calendar/events?type=earnings&from=2026-04-15&to=2026-06-15`에서 pending sample 확인 |
+| browser runtime | ✅ | earnings 화면의 `Confirmed 3 / Pending 0` 안내 표시, KMX dialog의 `Historical Actual vs Estimate` 표에서 2024/2025/2026 actual + estimate 동시 표시 확인 |
+
+- 런타임 확인 메모
+  - current range `2026-04-14 ~ 2026-04-30`는 confirmed 3 / pending 0
+  - widened range `2026-04-15 ~ 2026-06-15` sample first rows는 `2026-05-07` pending earnings (`ARDX`, `FROG`, `BIIB` 등)
+  - KMX annual sample: `2024 revenue=28.21B / revenueEstimate=27.69B`, `eps=3.03 / epsEstimate=2.55`
+
+- 상태
+  - 구현 + build/test + live API + browser 검증 완료
+  - 사용자 확인 대기 (`awaiting user confirmation`)
+
+## 2026-04-15
 **작성 시각:** 2026-04-15 22:20 (local)
 
 ### default ticker financial history sync + estimate overlay 구현 완료

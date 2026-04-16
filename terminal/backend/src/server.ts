@@ -113,7 +113,7 @@ import {
   type FmpIpoProspectusItem,
 } from "./services/fmpIpoCalendarProvider.js";
 import { upsertIpoSecEnrichment } from "./services/ipoSecEnrichmentRepository.js";
-import { downloadIpoSecInsights, fetchSecSicByCik } from "./services/ipoSecInsights.js";
+import { downloadIpoSecInsights, fetchSecSicByCik, getTickerToCikMap, fetchSecEdgarSubmission } from "./services/ipoSecInsights.js";
 import { generateSecFilingSummary } from "./services/secFilingSummary.js";
 import { getEtDateString } from "./services/timeUtils.js";
 import {
@@ -4207,15 +4207,17 @@ app.post("/api/fmp/calendar/financials/update", async (_req, res, next) => {
 
     const jobId = createJob(tickers.length, {
       category: "other",
-      label: "FMP Financial History Sync",
+      label: "FMP Financial + Past Estimate Sync",
     });
-    appendLog(jobId, `Starting FMP financial history sync for ${tickers.length} default-universe tickers`);
+    appendLog(jobId, `Starting FMP financial + past estimate sync for ${tickers.length} default-universe tickers`);
     appendLog(jobId, "Endpoints=stable/income-statement + stable/key-metrics + stable/ratios + stable/analyst-estimates");
+    appendLog(jobId, "Quarterly analyst-estimates window is extended so past estimate periods can be merged into the stored quarterly history");
     res.json({ jobId, requestedTickers: tickers.length });
 
     void (async () => {
       try {
         let syncedTickers = 0;
+        let tickersFailed = 0;
         let annualRows = 0;
         let quarterlyRows = 0;
         let annualEstimateRows = 0;
@@ -4228,23 +4230,29 @@ app.post("/api/fmp/calendar/financials/update", async (_req, res, next) => {
           }
 
           const ticker = tickers[index];
-          const payload = await fetchFmpFinancialSeries(ticker);
-          await replaceCalendarFinancialSeriesSnapshot(payload);
+          try {
+            const payload = await fetchFmpFinancialSeries(ticker);
+            await replaceCalendarFinancialSeriesSnapshot(payload);
 
-          syncedTickers += 1;
-          annualRows += payload.annual.length;
-          quarterlyRows += payload.quarterly.length;
-          annualEstimateRows += payload.annual.filter((point) => point.revenueEstimate != null || point.netIncomeEstimate != null || point.epsEstimate != null).length;
-          quarterlyEstimateRows += payload.quarterly.filter((point) => point.revenueEstimate != null || point.netIncomeEstimate != null || point.epsEstimate != null).length;
+            syncedTickers += 1;
+            annualRows += payload.annual.length;
+            quarterlyRows += payload.quarterly.length;
+            annualEstimateRows += payload.annual.filter((point) => point.revenueEstimate != null || point.netIncomeEstimate != null || point.epsEstimate != null).length;
+            quarterlyEstimateRows += payload.quarterly.filter((point) => point.revenueEstimate != null || point.netIncomeEstimate != null || point.epsEstimate != null).length;
+          } catch (error) {
+            tickersFailed += 1;
+            appendLog(jobId, `${ticker}: FAILED — ${error instanceof Error ? error.message : String(error)}`);
+          }
 
           if ((index + 1) % 25 === 0 || index === tickers.length - 1) {
-            appendLog(jobId, `[${index + 1}/${tickers.length}] synced through ${ticker}`);
+            appendLog(jobId, `[${index + 1}/${tickers.length}] processed through ${ticker} (synced=${syncedTickers}, failed=${tickersFailed})`);
           }
           updateProgress(jobId, index + 1, tickers.length);
         }
 
         await setLastSuccess("fmp_calendar_financials", new Date().toISOString(), {
           syncedTickers,
+          tickersFailed,
           annualRows,
           quarterlyRows,
           annualEstimateRows,
@@ -4253,6 +4261,7 @@ app.post("/api/fmp/calendar/financials/update", async (_req, res, next) => {
 
         completeJob(jobId, {
           syncedTickers,
+          tickersFailed,
           annualRows,
           quarterlyRows,
           annualEstimateRows,
@@ -4750,6 +4759,11 @@ app.post("/api/fmp/calendar/ipos/sec-download", async (req, res, next) => {
         let missingDocumentRows = 0;
         let descriptionRows = 0;
         let ownershipRows = 0;
+        let secEdgarDirectRows = 0;
+
+        // SEC EDGAR ticker→CIK map (for direct fallback when FMP has no match)
+        const tickerCikMap = await getTickerToCikMap();
+        appendLog(jobId, `SEC EDGAR ticker→CIK map loaded: ${tickerCikMap.size} entries`);
 
         for (let index = 0; index < rows.length; index++) {
           if (isJobCancelled(jobId)) {
@@ -4770,8 +4784,67 @@ app.post("/api/fmp/calendar/ipos/sec-download", async (req, res, next) => {
           const genericFiling = pickBestGenericIpoSecFiling(genericFilingMap.get(row.ticker) ?? [], row.ipoDate);
 
           if (!prospectus && !disclosure && !genericFiling) {
+            // SEC EDGAR direct fallback: look up CIK from ticker, then get SIC + filing URLs
+            const directCik = tickerCikMap.get(row.ticker);
+            if (directCik) {
+              const submission = await fetchSecEdgarSubmission(directCik);
+              const filingUrls = submission.filings.slice(0, 3).map((f) => f.documentUrl);
+              const bestFiling = submission.filings[0] ?? null;
+
+              const directInsights = filingUrls.length > 0
+                ? await downloadIpoSecInsights(filingUrls)
+                : {
+                    companyDescription: null,
+                    ownershipTotalPct: null,
+                    ownershipMaxPct: null,
+                    ownershipHolderCount: null,
+                    ownershipValues: [] as number[],
+                    documentUrl: null,
+                    sourceNote: "sec-edgar-no-ipo-filing",
+                  };
+
+              await upsertIpoSecEnrichment({
+                eventUniqueKey: row.uniqueKey,
+                ticker: row.ticker,
+                ipoDate: row.ipoDate,
+                cik: directCik,
+                formType: bestFiling?.form ?? null,
+                filingDate: bestFiling?.filingDate ?? null,
+                acceptedDate: null,
+                documentUrl: directInsights.documentUrl ?? bestFiling?.documentUrl ?? null,
+                prospectusUrl: null,
+                disclosureUrl: null,
+                companyDescription: directInsights.companyDescription,
+                ownershipTotalPct: directInsights.ownershipTotalPct,
+                ownershipMaxPct: directInsights.ownershipMaxPct,
+                ownershipHolderCount: directInsights.ownershipHolderCount,
+                ownershipValuesJson: directInsights.ownershipValues.length > 0 ? JSON.stringify(directInsights.ownershipValues) : null,
+                rawJson: JSON.stringify({ secEdgarDirect: true, filings: submission.filings.slice(0, 5) }),
+                sourceNote: directInsights.sourceNote,
+                sicCode: submission.sic.sicCode,
+                sicDescription: submission.sic.sicDescription,
+                secIndustry: submission.sic.secIndustry,
+              });
+
+              enrichedRows++;
+              secEdgarDirectRows++;
+              if (directInsights.companyDescription) {
+                descriptionRows++;
+              }
+              if (directInsights.ownershipHolderCount != null) {
+                ownershipRows++;
+              }
+
+              appendLog(
+                jobId,
+                `[${index + 1}/${rows.length}] ${row.ticker}: [SEC-DIRECT] description=${directInsights.companyDescription ? "yes" : "no"}, ownerCount=${directInsights.ownershipHolderCount ?? 0}, sic=${submission.sic.sicCode ?? "none"}, industry=${submission.sic.secIndustry ?? "none"}, filings=${submission.filings.length}`,
+              );
+              updateProgress(jobId, index + 1, rows.length);
+              continue;
+            }
+
             missingDocumentRows++;
-            appendLog(jobId, `[${index + 1}/${rows.length}] ${row.ticker}: no disclosure/prospectus metadata matched`);
+            appendLog(jobId, `[${index + 1}/${rows.length}] ${row.ticker}: no FMP match and no SEC EDGAR CIK found`);
             updateProgress(jobId, index + 1, rows.length);
             continue;
           }
@@ -4841,6 +4914,7 @@ app.post("/api/fmp/calendar/ipos/sec-download", async (req, res, next) => {
           prospectuses: prospectuses.length,
           genericFilings: genericFilings.length,
           enrichedRows,
+          secEdgarDirectRows,
           skippedNoTicker,
           missingDocumentRows,
           descriptionRows,
@@ -4856,6 +4930,7 @@ app.post("/api/fmp/calendar/ipos/sec-download", async (req, res, next) => {
           prospectuses: prospectuses.length,
           genericFilings: genericFilings.length,
           enrichedRows,
+          secEdgarDirectRows,
           skippedNoTicker,
           missingDocumentRows,
           descriptionRows,

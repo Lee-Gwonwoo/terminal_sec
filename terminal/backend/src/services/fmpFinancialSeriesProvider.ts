@@ -8,6 +8,8 @@ const MAX_BACKOFF_MS = 30_000;
 const DEFAULT_FMP_REQUEST_INTERVAL_MS = 250;
 const DEFAULT_ANNUAL_LIMIT = 6;
 const DEFAULT_QUARTERLY_LIMIT = 8;
+const DEFAULT_QUARTERLY_ESTIMATE_LIMIT = 24;
+const DEFAULT_QUARTERLY_FUTURE_ESTIMATE_POINTS = 4;
 
 type FinancialPeriodMode = "annual" | "quarter";
 
@@ -101,6 +103,24 @@ function deriveAnnualFiscalYear(item: Record<string, unknown>): string | null {
   return date.slice(0, 4);
 }
 
+function deriveQuarterlyPeriodFromDate(date: string | null): string | null {
+  if (!date || date.length < 7) {
+    return null;
+  }
+  const month = Number(date.slice(5, 7));
+  if (!Number.isInteger(month) || month < 1 || month > 12) {
+    return null;
+  }
+  return `Q${Math.floor((month - 1) / 3) + 1}`;
+}
+
+function deriveQuarterlyMetadata(item: Record<string, unknown>): { fiscalYear: string | null; period: string | null } {
+  const date = toNullableString(item.date);
+  const fiscalYear = toNullableString(item.fiscalYear ?? item.calendarYear) ?? (date && date.length >= 4 ? date.slice(0, 4) : null);
+  const period = toNullableString(item.period)?.toUpperCase() ?? deriveQuarterlyPeriodFromDate(date);
+  return { fiscalYear, period };
+}
+
 function getSeriesKey(item: Record<string, unknown>, mode: FinancialPeriodMode): string | null {
   const date = toNullableString(item.date);
 
@@ -108,10 +128,13 @@ function getSeriesKey(item: Record<string, unknown>, mode: FinancialPeriodMode):
     return deriveAnnualFiscalYear(item) ?? date;
   }
 
-  const fiscalYear = toNullableString(item.fiscalYear ?? item.calendarYear);
-  const period = toNullableString(item.period);
+  if (date) {
+    return date;
+  }
+
+  const { fiscalYear, period } = deriveQuarterlyMetadata(item);
   if (fiscalYear && period) {
-    return `${fiscalYear}:${period.toUpperCase()}`;
+    return `${fiscalYear}:${period}`;
   }
   return date;
 }
@@ -148,6 +171,64 @@ function periodSortValue(period: string | null): number {
     default:
       return 99;
   }
+}
+
+function hasActualFinancialValue(point: FmpFinancialSeriesPoint): boolean {
+  return point.revenue != null || point.netIncome != null || point.eps != null;
+}
+
+function hasEstimateFinancialValue(point: FmpFinancialSeriesPoint): boolean {
+  return point.revenueEstimate != null || point.netIncomeEstimate != null || point.epsEstimate != null;
+}
+
+function trimQuarterlySeries(
+  points: FmpFinancialSeriesPoint[],
+  futureEstimateCount: number,
+): FmpFinancialSeriesPoint[] {
+  if (points.length === 0) {
+    return points;
+  }
+
+  const actualPoints = points.filter(hasActualFinancialValue);
+  if (actualPoints.length === 0) {
+    return points.slice(-Math.max(DEFAULT_QUARTERLY_LIMIT, futureEstimateCount));
+  }
+
+  const earliestActualDate = actualPoints[0].date;
+  const latestActualDate = actualPoints[actualPoints.length - 1].date;
+  const historicalWindow = points.filter((point) => point.date >= earliestActualDate && point.date <= latestActualDate);
+  const futureEstimateWindow = points
+    .filter((point) => point.date > latestActualDate && hasEstimateFinancialValue(point))
+    .slice(0, futureEstimateCount);
+
+  return [...historicalWindow, ...futureEstimateWindow];
+}
+
+function updatePointIdentity(
+  point: FmpFinancialSeriesPoint,
+  item: Record<string, unknown>,
+  mode: FinancialPeriodMode,
+): void {
+  const itemDate = toNullableString(item.date);
+  if (itemDate && (!point.date || point.date.includes(":"))) {
+    point.date = itemDate;
+  }
+
+  if (mode === "annual") {
+    const fiscalYear = deriveAnnualFiscalYear(item) ?? point.fiscalYear;
+    const period = toNullableString(item.period) ?? point.period;
+    point.fiscalYear = fiscalYear;
+    point.period = period;
+    point.label = buildSeriesLabel(point.date, point.fiscalYear, point.period, mode);
+    return;
+  }
+
+  const explicitFiscalYear = toNullableString(item.fiscalYear ?? item.calendarYear);
+  const explicitPeriod = toNullableString(item.period)?.toUpperCase();
+  const derived = deriveQuarterlyMetadata(item);
+  point.fiscalYear = explicitFiscalYear ?? point.fiscalYear ?? derived.fiscalYear;
+  point.period = explicitPeriod ?? point.period ?? derived.period;
+  point.label = buildSeriesLabel(point.date, point.fiscalYear, point.period, mode);
 }
 
 async function fetchStableSymbolArray(params: {
@@ -209,7 +290,11 @@ async function fetchStableSymbolArray(params: {
 async function fetchPeriodSeries(
   ticker: string,
   mode: FinancialPeriodMode,
-  limit: number,
+  params: {
+    limit: number;
+    estimateLimit: number;
+    futureEstimateCount?: number;
+  },
   requestIntervalMs?: number,
 ): Promise<FmpFinancialSeriesPoint[]> {
   const [incomeStatement, keyMetrics, ratios, analystEstimates] = await Promise.all([
@@ -217,28 +302,28 @@ async function fetchPeriodSeries(
       endpoint: "income-statement",
       ticker,
       period: mode,
-      limit,
+      limit: params.limit,
       requestIntervalMs,
     }),
     fetchStableSymbolArray({
       endpoint: "key-metrics",
       ticker,
       period: mode,
-      limit,
+      limit: params.limit,
       requestIntervalMs,
     }),
     fetchStableSymbolArray({
       endpoint: "ratios",
       ticker,
       period: mode,
-      limit,
+      limit: params.limit,
       requestIntervalMs,
     }),
     fetchStableSymbolArray({
       endpoint: "analyst-estimates",
       ticker,
       period: mode,
-      limit,
+      limit: params.estimateLimit,
       requestIntervalMs,
     }).catch(() => []),
   ]);
@@ -257,8 +342,10 @@ async function fetchPeriodSeries(
     const date = toNullableString(item.date) ?? key;
     const fiscalYear = mode === "annual"
       ? deriveAnnualFiscalYear(item)
-      : toNullableString(item.fiscalYear ?? item.calendarYear);
-    const period = toNullableString(item.period);
+      : deriveQuarterlyMetadata(item).fiscalYear;
+    const period = mode === "annual"
+      ? toNullableString(item.period)
+      : deriveQuarterlyMetadata(item).period;
     const created: FmpFinancialSeriesPoint = {
       date,
       fiscalYear,
@@ -285,6 +372,7 @@ async function fetchPeriodSeries(
     if (!point) {
       continue;
     }
+    updatePointIdentity(point, item, mode);
     point.revenue = toNullableNumber(item.revenue);
     point.netIncome = toNullableNumber(item.netIncome ?? item.bottomLineNetIncome);
     point.eps = toNullableNumber(item.eps ?? item.epsDiluted);
@@ -295,6 +383,7 @@ async function fetchPeriodSeries(
     if (!point) {
       continue;
     }
+    updatePointIdentity(point, item, mode);
     point.marketCap = toNullableNumber(item.marketCap);
   }
 
@@ -303,6 +392,7 @@ async function fetchPeriodSeries(
     if (!point) {
       continue;
     }
+    updatePointIdentity(point, item, mode);
     point.peRatio = toNullableNumber(item.priceToEarningsRatio ?? item.peRatio);
     point.psRatio = toNullableNumber(item.priceToSalesRatio);
   }
@@ -312,6 +402,7 @@ async function fetchPeriodSeries(
     if (!point) {
       continue;
     }
+    updatePointIdentity(point, item, mode);
     point.revenueEstimate = toNullableNumber(item.revenueAvg ?? item.revenueEstimate ?? item.revenueEstimated);
     point.netIncomeEstimate = toNullableNumber(item.netIncomeAvg ?? item.netIncomeEstimate ?? item.netIncomeEstimated);
     point.epsEstimate = toNullableNumber(item.epsAvg ?? item.epsEstimate ?? item.epsEstimated);
@@ -352,6 +443,10 @@ async function fetchPeriodSeries(
       return periodSortValue(left.period) - periodSortValue(right.period);
     });
 
+  if (mode === "quarter") {
+    return trimQuarterlySeries(merged, params.futureEstimateCount ?? DEFAULT_QUARTERLY_FUTURE_ESTIMATE_POINTS);
+  }
+
   return merged;
 }
 
@@ -360,6 +455,8 @@ export async function fetchFmpFinancialSeries(
   params: {
     annualLimit?: number;
     quarterlyLimit?: number;
+    quarterlyEstimateLimit?: number;
+    quarterlyFutureEstimateCount?: number;
     requestIntervalMs?: number;
   } = {},
 ): Promise<FmpFinancialSeriesResponse> {
@@ -374,10 +471,23 @@ export async function fetchFmpFinancialSeries(
   const quarterlyLimit = Number.isFinite(params.quarterlyLimit)
     ? Math.max(1, Math.min(24, Math.round(params.quarterlyLimit as number)))
     : DEFAULT_QUARTERLY_LIMIT;
+  const quarterlyEstimateLimit = Number.isFinite(params.quarterlyEstimateLimit)
+    ? Math.max(quarterlyLimit, Math.min(40, Math.round(params.quarterlyEstimateLimit as number)))
+    : DEFAULT_QUARTERLY_ESTIMATE_LIMIT;
+  const quarterlyFutureEstimateCount = Number.isFinite(params.quarterlyFutureEstimateCount)
+    ? Math.max(0, Math.min(8, Math.round(params.quarterlyFutureEstimateCount as number)))
+    : DEFAULT_QUARTERLY_FUTURE_ESTIMATE_POINTS;
 
   const [annual, quarterly] = await Promise.all([
-    fetchPeriodSeries(normalizedTicker, "annual", annualLimit, params.requestIntervalMs),
-    fetchPeriodSeries(normalizedTicker, "quarter", quarterlyLimit, params.requestIntervalMs),
+    fetchPeriodSeries(normalizedTicker, "annual", {
+      limit: annualLimit,
+      estimateLimit: annualLimit,
+    }, params.requestIntervalMs),
+    fetchPeriodSeries(normalizedTicker, "quarter", {
+      limit: quarterlyLimit,
+      estimateLimit: quarterlyEstimateLimit,
+      futureEstimateCount: quarterlyFutureEstimateCount,
+    }, params.requestIntervalMs),
   ]);
 
   return {

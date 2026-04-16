@@ -10,7 +10,7 @@
 - 실제 API 연동이 살아 있는 주요 창은 `Finnhub News`, `Investing News`, `Default Ticker`, `Daily Change History`, `Data Control`, `AI Research Window`, `Evidence Table`, `Watchlist` 이다.
 - `News` 창도 `GET /api/news`, `POST /api/news/pull-eodhd`를 실제로 호출하지만, 현재 운영 기준의 주력 뉴스 창은 아니다.
 - `Watchlist` 창은 backend `watchlists` API와 연결되어 있고, 종목 이름/가격 일부는 프론트의 fallback lookup을 함께 사용한다.
-- `Calendar` 창은 backend `calendar_events` 기반의 실데이터 창이며, 현재 earnings + IPO 탭과 background job polling을 지원한다.
+- `Calendar` 창은 backend `calendar_events` 기반의 실데이터 창이며, 현재 earnings + IPO 탭과 background job polling을 지원한다. IPO 탭에는 `Security Type` 컬럼과 dropdown 필터가 있고, 이 값은 FMP의 `ticker/company_name` 문자열에서 파생된다.
 - `BraveNewsWindow.tsx` 파일은 남아 있지만 현재 `WindowType`에 연결되어 있지 않아 UI에서 열 수 없다.
 - 탭/창 레이아웃, 다크 모드, 전역 글자 크기, 뉴스 제목/요약 글자 크기, linked ticker는 `terminal-workspace-v1`로 localStorage에 저장된다.
 - 추가 UI 상태로 `finhub-news-ui-state`, `investing-news-ui-state`, `finnhub-last-update-config`, `data-control-active-tab`, `ft-concurrency`, `fmp-pr-fulltext-concurrency`, `fmp-stock-fulltext-concurrency`, `change-fmp-concurrency`, `finnhub-ticker-concurrency`, `finnhub-request-interval-sec`, `finnhub-company-news-ticker-concurrency`, `finnhub-company-news-request-interval-sec`, `rtpr-ticker-concurrency`, `fmp-concurrency`, `fmp-request-interval-ms`, `fmp-pr-page-limit`, `fmp-pr-max-pages`, `fmp-sec-max-pages`, `fmp-skip-existing`, `peers-skip-existing`, `ipo-skip-existing`, `yahoo-concurrency`, `yahoo-request-interval-ms`, `yahoo-skip-existing`를 사용한다.
@@ -1051,7 +1051,10 @@ API:
   - 숫자 필터가 켜져 있을 때 해당 값이 `null`인 row는 결과에서 제외된다.
 - earnings stable source에는 reliable time/session이 없으므로, 관련 column 값은 비어 있을 수 있다.
 - earnings `Update FMP Earnings Dates` 버튼은 현재 date filter가 있으면 그 범위를 body에 같이 보낸다.
-- earnings `Sync Financial History` 버튼은 현재 date filter와 무관하게 default universe 전체를 대상으로 실행된다.
+- earnings `Sync Financial + Past Estimates` 버튼은 현재 date filter와 무관하게 default universe 전체를 대상으로 실행된다.
+  - 목적은 ticker financial history뿐 아니라 past quarterly estimate cache까지 다시 적재하는 것이다.
+- earnings 화면은 현재 필터 결과 기준 `Confirmed / Pending` count를 함께 보여준다.
+  - 현재 범위가 confirmed-only면 종료일을 더 미래로 늘리라는 안내를 같이 표시한다.
 - IPO 탭의 `Download SEC Data` 버튼은 선택한 날짜 범위가 있어야 활성화된다.
 - IPO 탭 기본 visible 컬럼은 `IPO Date`, `Symbol`, `Company`, `Industry`, `Inst %`, `Insider %`, `Exchange`, `Status`, `Price Range`, `Shares`, `Offer Amount`, `Description`, `SEC Max %`다.
 - earnings update는 같은 범위에 대해 append가 아니라 snapshot replace다.
@@ -1065,8 +1068,11 @@ API:
   - `Revenue`: actual revenue bar + estimate dashed line
   - `Earnings`: actual net income/EPS + estimate dashed lines
   - `Valuation`: `P/E`, `P/S` history
-- financial dialog summary card는 latest point 기준 actual 값을 우선 보여주고, estimate가 있으면 `Est.` 보조 텍스트를 함께 표시한다.
+- financial dialog summary card는 가장 마지막 future estimate-only point가 아니라, 가능하면 가장 최근 reported actual period를 기준으로 보여주고 estimate가 있으면 `Est.` 보조 텍스트를 함께 표시한다.
 - dialog subtitle에는 data source가 `income statement + key metrics + ratios + analyst estimates`임을 명시한다.
+- financial dialog는 `Historical Actual vs Estimate` 비교표를 추가로 표시한다.
+  - annual의 경우 같은 회계연도 actual과 estimate를 한 줄에 붙여 과거 miss/beat를 직접 비교할 수 있어야 한다.
+  - quarterly의 경우 future-only estimate row보다 latest actual window의 historical period를 우선 보여줘야 한다.
 - valuation ratio는 backend가 FMP `ratios` 값을 우선 사용하고, 비어 있으면 `marketCap / netIncome`, `marketCap / revenue` fallback을 계산해 내려준다.
 
 ## Case Description Window
