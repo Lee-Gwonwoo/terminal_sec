@@ -103,6 +103,8 @@ import { fetchFmpPressReleasesByTicker } from "./services/fmpPressReleaseProvide
 import { fetchFmpStockNewsByTicker } from "./services/fmpStockNewsProvider.js";
 import { fetchFmpSecFilings } from "./services/fmpSecFilingProvider.js";
 import { fetchFmpEarningsCalendarChunk } from "./services/fmpEarningsCalendarProvider.js";
+import { fetchFmpFinancialSeries } from "./services/fmpFinancialSeriesProvider.js";
+import { getStoredCalendarFinancialSeries, replaceCalendarFinancialSeriesSnapshot } from "./services/calendarFinancialRepository.js";
 import {
   fetchFmpIpoCalendarChunk,
   fetchFmpIpoDisclosureChunk,
@@ -111,7 +113,7 @@ import {
   type FmpIpoProspectusItem,
 } from "./services/fmpIpoCalendarProvider.js";
 import { upsertIpoSecEnrichment } from "./services/ipoSecEnrichmentRepository.js";
-import { downloadIpoSecInsights } from "./services/ipoSecInsights.js";
+import { downloadIpoSecInsights, fetchSecSicByCik } from "./services/ipoSecInsights.js";
 import { generateSecFilingSummary } from "./services/secFilingSummary.js";
 import { getEtDateString } from "./services/timeUtils.js";
 import {
@@ -459,6 +461,111 @@ function pickBestGenericIpoSecFiling(items: GenericSecFiling[], ipoDate: string 
   }
 
   return [...filtered].sort((left, right) => sortDateDesc(left.acceptedDate ?? left.filingDate, right.acceptedDate ?? right.filingDate))[0];
+}
+
+async function syncIpoProfileMetadata(params: {
+  tickers: string[];
+  jobId?: string;
+  shouldCancel?: () => boolean;
+}): Promise<{
+  requested: number;
+  fmpFetched: number;
+  yahooFetched: number;
+}> {
+  const uniqueTickers = Array.from(new Set(params.tickers.map((ticker) => normalizeUpperTicker(ticker)).filter((ticker): ticker is string => Boolean(ticker))));
+  if (uniqueTickers.length === 0) {
+    return {
+      requested: 0,
+      fmpFetched: 0,
+      yahooFetched: 0,
+    };
+  }
+
+  const log = (message: string) => {
+    if (params.jobId) {
+      appendLog(params.jobId, message);
+    }
+  };
+
+  const { concurrency: fmpConcurrency, requestIntervalMs: fmpInterval } = getFmpDefaults();
+  const fmpBatch = await fetchFmpProfilesBatch(uniqueTickers, {
+    concurrency: fmpConcurrency,
+    requestIntervalMs: fmpInterval,
+    shouldCancel: params.shouldCancel,
+  });
+
+  if (fmpBatch.cancelled || params.shouldCancel?.()) {
+    return {
+      requested: uniqueTickers.length,
+      fmpFetched: fmpBatch.results.size,
+      yahooFetched: 0,
+    };
+  }
+
+  for (const [ticker, profile] of fmpBatch.results) {
+    const secId = await upsertSecurity(
+      ticker,
+      profile.exchangeShortName || null,
+      profile.companyName || null,
+      profile.sector || null,
+      profile.industry || null,
+    );
+    await upsertCompanyProfile(
+      secId,
+      "fmp",
+      profile.description || null,
+      profile.ceo || null,
+      profile.fullTimeEmployees ? parseInt(profile.fullTimeEmployees, 10) || null : null,
+      profile.website || null,
+      profile.ipoDate || null,
+      profile.mktCap || null,
+      JSON.stringify(profile.raw),
+    );
+  }
+
+  const yahooTarget = uniqueTickers.filter((ticker) => !fmpBatch.results.has(ticker));
+  let yahooFetched = 0;
+
+  if (yahooTarget.length > 0 && !params.shouldCancel?.()) {
+    const { concurrency: yahooConcurrency, requestIntervalMs: yahooInterval } = getYahooDefaults();
+    const yahooBatch = await fetchYahooProfilesBatch(yahooTarget, {
+      concurrency: yahooConcurrency,
+      requestIntervalMs: yahooInterval,
+      shouldCancel: params.shouldCancel,
+    });
+
+    if (!yahooBatch.cancelled && !params.shouldCancel?.()) {
+      for (const [ticker, profile] of yahooBatch.results) {
+        const secId = await upsertSecurity(
+          ticker,
+          null,
+          null,
+          profile.sector || null,
+          profile.industry || null,
+        );
+        await upsertCompanyProfile(
+          secId,
+          "yahoo",
+          profile.longBusinessSummary || null,
+          null,
+          null,
+          profile.website || null,
+          null,
+          null,
+          JSON.stringify(profile.raw),
+        );
+      }
+      yahooFetched = yahooBatch.results.size;
+    }
+  }
+
+  log(`IPO profile sync: requested=${uniqueTickers.length}, fmpFetched=${fmpBatch.results.size}, yahooFetched=${yahooFetched}`);
+
+  return {
+    requested: uniqueTickers.length,
+    fmpFetched: fmpBatch.results.size,
+    yahooFetched,
+  };
 }
 
 type StoredIpoCalendarRow = {
@@ -4048,6 +4155,118 @@ app.get("/api/calendar/events/:id", async (req, res, next) => {
   }
 });
 
+app.get("/api/calendar/financials/:ticker", async (req, res, next) => {
+  try {
+    if (!config.fmpApiKey) {
+      res.status(400).json({ error: "FMP_API_KEY not configured" });
+      return;
+    }
+
+    const ticker = normalizeUpperTicker(req.params.ticker);
+    if (!ticker) {
+      res.status(400).json({ error: "Ticker is required" });
+      return;
+    }
+
+    const cached = await getStoredCalendarFinancialSeries(ticker);
+    if (cached && (cached.annual.length > 0 || cached.quarterly.length > 0)) {
+      res.json(cached);
+      return;
+    }
+
+    const result = await fetchFmpFinancialSeries(ticker);
+    if (result.annual.length === 0 && result.quarterly.length === 0) {
+      res.status(404).json({ error: `No FMP financial history found for ${ticker}` });
+      return;
+    }
+
+    await replaceCalendarFinancialSeriesSnapshot(result);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/fmp/calendar/financials/update", async (_req, res, next) => {
+  try {
+    if (!config.fmpApiKey) {
+      res.status(400).json({ error: "FMP_API_KEY not configured" });
+      return;
+    }
+
+    const tickers = Array.from(
+      new Set((await getDefaultUniverseTickers())
+        .map((ticker) => normalizeUpperTicker(ticker))
+        .filter((ticker): ticker is string => Boolean(ticker)))
+    );
+
+    if (tickers.length === 0) {
+      res.status(400).json({ error: "Default universe is empty" });
+      return;
+    }
+
+    const jobId = createJob(tickers.length, {
+      category: "other",
+      label: "FMP Financial History Sync",
+    });
+    appendLog(jobId, `Starting FMP financial history sync for ${tickers.length} default-universe tickers`);
+    appendLog(jobId, "Endpoints=stable/income-statement + stable/key-metrics + stable/ratios + stable/analyst-estimates");
+    res.json({ jobId, requestedTickers: tickers.length });
+
+    void (async () => {
+      try {
+        let syncedTickers = 0;
+        let annualRows = 0;
+        let quarterlyRows = 0;
+        let annualEstimateRows = 0;
+        let quarterlyEstimateRows = 0;
+
+        for (let index = 0; index < tickers.length; index++) {
+          if (isJobCancelled(jobId)) {
+            appendLog(jobId, "Cancelled by user");
+            return;
+          }
+
+          const ticker = tickers[index];
+          const payload = await fetchFmpFinancialSeries(ticker);
+          await replaceCalendarFinancialSeriesSnapshot(payload);
+
+          syncedTickers += 1;
+          annualRows += payload.annual.length;
+          quarterlyRows += payload.quarterly.length;
+          annualEstimateRows += payload.annual.filter((point) => point.revenueEstimate != null || point.netIncomeEstimate != null || point.epsEstimate != null).length;
+          quarterlyEstimateRows += payload.quarterly.filter((point) => point.revenueEstimate != null || point.netIncomeEstimate != null || point.epsEstimate != null).length;
+
+          if ((index + 1) % 25 === 0 || index === tickers.length - 1) {
+            appendLog(jobId, `[${index + 1}/${tickers.length}] synced through ${ticker}`);
+          }
+          updateProgress(jobId, index + 1, tickers.length);
+        }
+
+        await setLastSuccess("fmp_calendar_financials", new Date().toISOString(), {
+          syncedTickers,
+          annualRows,
+          quarterlyRows,
+          annualEstimateRows,
+          quarterlyEstimateRows,
+        });
+
+        completeJob(jobId, {
+          syncedTickers,
+          annualRows,
+          quarterlyRows,
+          annualEstimateRows,
+          quarterlyEstimateRows,
+        });
+      } catch (error) {
+        failJob(jobId, error instanceof Error ? error.message : String(error));
+      }
+    })();
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/fmp/calendar/earnings/update", async (req, res, next) => {
   try {
     if (!config.fmpApiKey) {
@@ -4267,7 +4486,8 @@ app.post("/api/fmp/calendar/ipos/update", async (req, res, next) => {
     }
 
     const chunks = buildCalendarDateChunks(from, to, DEFAULT_FMP_CALENDAR_CHUNK_DAYS);
-    const jobId = createJob(chunks.length, {
+    const jobTotal = chunks.length + 1;
+    const jobId = createJob(jobTotal, {
       category: "other",
       label: "FMP IPO Calendar Update",
     });
@@ -4281,6 +4501,7 @@ app.post("/api/fmp/calendar/ipos/update", async (req, res, next) => {
         let upsertedRows = 0;
         let deletedRows = 0;
         let skippedInvalidDate = 0;
+        const profileTickers = new Set<string>();
 
         for (let index = 0; index < chunks.length; index++) {
           if (isJobCancelled(jobId)) {
@@ -4308,6 +4529,9 @@ app.post("/api/fmp/calendar/ipos/update", async (req, res, next) => {
               ipoDate,
               ticker: normalizeUpperTicker(item.symbol),
             });
+            if (item.symbol) {
+              profileTickers.add(item.symbol.toUpperCase());
+            }
           }
 
           const db = getDb();
@@ -4364,8 +4588,19 @@ app.post("/api/fmp/calendar/ipos/update", async (req, res, next) => {
             jobId,
             `[chunk ${index + 1}/${chunks.length}] ${chunk.from}~${chunk.to}: fetched=${items.length}, upserted=${validItems.length}, replaced=${chunkDeletedRows}, invalidDate=${items.length - validItems.length}`,
           );
-          updateProgress(jobId, index + 1, chunks.length);
+          updateProgress(jobId, index + 1, jobTotal);
         }
+
+        const profileSync = await syncIpoProfileMetadata({
+          tickers: Array.from(profileTickers),
+          jobId,
+          shouldCancel: () => isJobCancelled(jobId),
+        });
+        if (isJobCancelled(jobId)) {
+          appendLog(jobId, "Cancelled by user");
+          return;
+        }
+        updateProgress(jobId, jobTotal, jobTotal);
 
         await setLastSuccess("fmp_calendar_ipos", new Date().toISOString(), {
           from,
@@ -4375,6 +4610,7 @@ app.post("/api/fmp/calendar/ipos/update", async (req, res, next) => {
           upsertedRows,
           deletedRows,
           skippedInvalidDate,
+          profileSync,
         });
 
         completeJob(jobId, {
@@ -4387,6 +4623,7 @@ app.post("/api/fmp/calendar/ipos/update", async (req, res, next) => {
           upsertedRows,
           deletedRows,
           skippedInvalidDate,
+          profileSync,
         });
       } catch (error) {
         failJob(jobId, error instanceof Error ? error.message : String(error));
@@ -4547,12 +4784,16 @@ app.post("/api/fmp/calendar/ipos/sec-download", async (req, res, next) => {
           ]);
           const primaryDocument = prospectus ?? disclosure ?? genericFiling;
           const primaryFormType = prospectus?.form ?? disclosure?.form ?? genericFiling?.formType ?? '-';
+          const resolvedCik = prospectus?.cik ?? disclosure?.cik ?? genericFiling?.cik ?? null;
+
+          // Phase 2: SEC EDGAR SIC industry lookup
+          const sicInfo = await fetchSecSicByCik(resolvedCik);
 
           await upsertIpoSecEnrichment({
             eventUniqueKey: row.uniqueKey,
             ticker: row.ticker,
             ipoDate: row.ipoDate,
-            cik: prospectus?.cik ?? disclosure?.cik ?? genericFiling?.cik ?? null,
+            cik: resolvedCik,
             formType: prospectus?.form ?? disclosure?.form ?? genericFiling?.formType ?? null,
             filingDate: prospectus?.filingDate ?? disclosure?.filingDate ?? genericFiling?.filingDate ?? null,
             acceptedDate: prospectus?.acceptedDate ?? disclosure?.acceptedDate ?? genericFiling?.acceptedDate ?? null,
@@ -4571,6 +4812,9 @@ app.post("/api/fmp/calendar/ipos/sec-download", async (req, res, next) => {
               ownershipValues: insights.ownershipValues,
             }),
             sourceNote: insights.sourceNote,
+            sicCode: sicInfo.sicCode,
+            sicDescription: sicInfo.sicDescription,
+            secIndustry: sicInfo.secIndustry,
           });
 
           enrichedRows++;
@@ -4583,7 +4827,7 @@ app.post("/api/fmp/calendar/ipos/sec-download", async (req, res, next) => {
 
           appendLog(
             jobId,
-            `[${index + 1}/${rows.length}] ${row.ticker}: description=${insights.companyDescription ? "yes" : "no"}, ownerCount=${insights.ownershipHolderCount ?? 0}, form=${primaryFormType}`,
+            `[${index + 1}/${rows.length}] ${row.ticker}: description=${insights.companyDescription ? "yes" : "no"}, ownerCount=${insights.ownershipHolderCount ?? 0}, sic=${sicInfo.sicCode ?? "none"}, industry=${sicInfo.secIndustry ?? "none"}, form=${primaryFormType}`,
           );
           updateProgress(jobId, index + 1, rows.length);
         }
@@ -5504,9 +5748,9 @@ app.get("/api/universes/:id/items", async (req, res) => {
 
 // ── Step 5-3: company profile API ──
 
-import { fetchFmpProfile, fetchFmpProfilesBatch, clampFmpConcurrency, clampFmpIntervalMs } from "./services/fmpCompanyProfileProvider.js";
+import { fetchFmpProfile, fetchFmpProfilesBatch, clampFmpConcurrency, clampFmpIntervalMs, getFmpDefaults } from "./services/fmpCompanyProfileProvider.js";
 import { fetchFinnhubProfilesBatch } from "./services/finnhubProfile2Provider.js";
-import { fetchYahooProfilesBatch, clampYahooConcurrency, clampYahooIntervalMs } from "./services/yahooCompanyProfileProvider.js";
+import { fetchYahooProfilesBatch, clampYahooConcurrency, clampYahooIntervalMs, getYahooDefaults } from "./services/yahooCompanyProfileProvider.js";
 import { upsertCompanyProfile, getCompanyProfileByTicker, countCompanyProfiles, upsertPeers, getPeersByTicker, getTickersWithFmpProfile, getTickersWithYahooProfile, getTickersWithExistingPeers, getTickersWithExistingIpoDate } from "./services/companyProfileRepository.js";
 import { fetchFinnhubPeersBatch } from "./services/finnhubPeersProvider.js";
 

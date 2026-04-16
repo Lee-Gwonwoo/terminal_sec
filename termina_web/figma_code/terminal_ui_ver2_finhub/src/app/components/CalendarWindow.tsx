@@ -10,6 +10,7 @@ import {
   X,
 } from 'lucide-react';
 import { getCompanyTickerDataAttrs } from '../companyDescription';
+import { CalendarFinancialDialog } from './CalendarFinancialDialog';
 
 interface CalendarWindowProps {
   onTickerClick?: (ticker: string) => void;
@@ -110,7 +111,7 @@ interface NumericFilterConfig {
 
 const FALLBACK_TYPES: CalendarTypeConfig[] = [
   { key: 'earnings', label: 'Earnings', supports: [], columns: ['report_date', 'ticker', 'name', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual', 'industry', 'float_pct', 'institutional_pct', 'insider_pct', 'session', 'source'] },
-  { key: 'ipos', label: 'IPOs', supports: [], columns: ['ipo_date', 'ticker', 'company_name', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'company_description', 'sec_form', 'sec_filing_date', 'sec_accepted_date', 'sec_owner_count', 'sec_max_owner_pct', 'sec_total_owner_pct', 'prospectus_url', 'disclosure_url', 'source'] },
+  { key: 'ipos', label: 'IPOs', supports: [], columns: ['ipo_date', 'ticker', 'company_name', 'industry', 'float_pct', 'institutional_pct', 'insider_pct', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'company_description', 'sec_form', 'sec_filing_date', 'sec_accepted_date', 'sec_owner_count', 'sec_max_owner_pct', 'sec_total_owner_pct', 'prospectus_url', 'disclosure_url', 'source'] },
   { key: 'dividends', label: 'Dividends', supports: [], columns: ['ex_date', 'ticker', 'name', 'amount', 'yield', 'pay_date', 'industry', 'market_cap', 'source'] },
   { key: 'splits', label: 'Splits', supports: [], columns: ['split_date', 'ticker', 'name', 'ratio', 'industry', 'market_cap', 'source'] },
   { key: 'analyst_ratings', label: 'Analyst Ratings', supports: [], columns: ['ticker', 'title', 'source'] },
@@ -120,14 +121,14 @@ const FALLBACK_TYPES: CalendarTypeConfig[] = [
 
 const TYPE_COLUMN_ORDER: Record<string, string[]> = {
   earnings: ['report_date', 'ticker', 'name', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual', 'industry', 'float_pct', 'institutional_pct', 'insider_pct', 'session', 'source'],
-  ipos: ['ipo_date', 'ticker', 'company_name', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'company_description', 'sec_form', 'sec_filing_date', 'sec_accepted_date', 'sec_owner_count', 'sec_max_owner_pct', 'sec_total_owner_pct', 'prospectus_url', 'disclosure_url', 'source'],
+  ipos: ['ipo_date', 'ticker', 'company_name', 'industry', 'float_pct', 'institutional_pct', 'insider_pct', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'company_description', 'sec_form', 'sec_filing_date', 'sec_accepted_date', 'sec_owner_count', 'sec_max_owner_pct', 'sec_total_owner_pct', 'prospectus_url', 'disclosure_url', 'source'],
   dividends: ['ex_date', 'ticker', 'name', 'amount', 'yield', 'pay_date', 'industry', 'market_cap', 'source'],
   splits: ['split_date', 'ticker', 'name', 'ratio', 'industry', 'market_cap', 'source'],
 };
 
 const VISIBLE_COLUMNS_BY_TYPE: Record<string, string[]> = {
   earnings: ['report_date', 'ticker', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual'],
-  ipos: ['ipo_date', 'ticker', 'company_name', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'sec_max_owner_pct', 'company_description'],
+  ipos: ['ipo_date', 'ticker', 'company_name', 'industry', 'institutional_pct', 'insider_pct', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'sec_max_owner_pct', 'company_description'],
   dividends: ['ex_date', 'ticker', 'amount', 'yield', 'pay_date'],
   splits: ['split_date', 'ticker', 'ratio'],
   analyst_ratings: ['event_date', 'ticker', 'title'],
@@ -379,6 +380,16 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const [floatPctMax, setFloatPctMax] = useState('');
   const [institutionalPctMin, setInstitutionalPctMin] = useState('');
   const [institutionalPctMax, setInstitutionalPctMax] = useState('');
+  const [tickerContextMenu, setTickerContextMenu] = useState<{
+    x: number;
+    y: number;
+    ticker: string;
+    companyName: string | null;
+  } | null>(null);
+  const [financialTarget, setFinancialTarget] = useState<{
+    ticker: string;
+    companyName: string | null;
+  } | null>(null);
 
   const currentTypeConfig = typeConfigs.find((item) => item.key === activeType) ?? FALLBACK_TYPES[0];
   const currentColumns = columnStates[activeType] ?? buildColumns(activeType, currentTypeConfig?.columns ?? []);
@@ -499,6 +510,30 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     };
   }, [jobId, jobStatus]);
 
+  useEffect(() => {
+    if (!tickerContextMenu) {
+      return;
+    }
+
+    const closeMenu = () => {
+      setTickerContextMenu(null);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeMenu();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('scroll', closeMenu, true);
+    window.addEventListener('resize', closeMenu);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('scroll', closeMenu, true);
+      window.removeEventListener('resize', closeMenu);
+    };
+  }, [tickerContextMenu]);
+
   const handleSort = (field: string) => {
     if (sortField === field) {
       setSortDirection((previous) =>
@@ -585,6 +620,19 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     institutionalPctMax,
   ]);
 
+  const earningsStatusSummary = useMemo(() => {
+    if (activeType !== 'earnings') {
+      return null;
+    }
+    const confirmedCount = filteredAndSortedEvents.filter((event) => Boolean(event.confirmed)).length;
+    const pendingCount = filteredAndSortedEvents.length - confirmedCount;
+    return {
+      confirmedCount,
+      pendingCount,
+      totalCount: filteredAndSortedEvents.length,
+    };
+  }, [activeType, filteredAndSortedEvents]);
+
   const hasActiveFilters = Boolean(
     searchQuery ||
     dateFrom ||
@@ -615,19 +663,23 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     url: string;
     label: string;
     failureMessage: string;
+    requestBody?: Record<string, unknown> | null;
   }) => {
     setActionError(null);
     setUpdatePending(true);
     setShowJobLogs(false);
     setJobLabel(params.label);
     try {
+      const requestBody = params.requestBody === undefined
+        ? {
+            from: dateFrom || undefined,
+            to: dateTo || undefined,
+          }
+        : params.requestBody;
       const response = await fetch(`${API_BASE}${params.url}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          from: dateFrom || undefined,
-          to: dateTo || undefined,
-        }),
+        body: requestBody == null ? undefined : JSON.stringify(requestBody),
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
@@ -663,6 +715,15 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
       url: '/api/fmp/calendar/ipos/sec-download',
       label: 'IPO SEC download',
       failureMessage: 'IPO SEC download failed',
+    });
+  };
+
+  const handleFinancialHistorySync = async () => {
+    await startCalendarJob({
+      url: '/api/fmp/calendar/financials/update',
+      label: 'FMP financial history sync',
+      failureMessage: 'FMP financial history sync failed',
+      requestBody: {},
     });
   };
 
@@ -711,10 +772,30 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
       if (!ticker) {
         return <span>-</span>;
       }
+      const companyName = typeof row.name === 'string' && row.name.trim()
+        ? row.name.trim()
+        : typeof row.company_name === 'string' && row.company_name.trim()
+          ? row.company_name.trim()
+          : null;
       return (
         <button
-          onClick={() => onTickerClick?.(ticker)}
+          onClick={(event) => {
+            event.stopPropagation();
+            setTickerContextMenu(null);
+            onTickerClick?.(ticker);
+          }}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setTickerContextMenu({
+              x: event.clientX,
+              y: event.clientY,
+              ticker,
+              companyName,
+            });
+          }}
           {...getCompanyTickerDataAttrs(ticker)}
+          title="Left click to link ticker. Right click for Financial."
           className="px-2 py-0.5 text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-200 dark:hover:bg-blue-800 font-medium"
         >
           {ticker}
@@ -805,6 +886,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                 setActiveType(typeConfig.key);
                 setSortField(getDefaultSortFieldForType(typeConfig.key));
                 setSortDirection('desc');
+                setTickerContextMenu(null);
               }}
               className={`px-4 py-2 text-sm font-medium rounded transition-colors ${
                 activeType === typeConfig.key
@@ -885,14 +967,24 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
           </div>
 
           {activeType === 'earnings' && (
-            <button
-              onClick={handleEarningsUpdate}
-              disabled={updatePending}
-              className={`flex items-center gap-2 px-3 py-2 text-sm rounded text-white ${updatePending ? 'bg-blue-400 cursor-wait' : 'bg-blue-600 hover:bg-blue-700'}`}
-            >
-              <RefreshCw className={`w-4 h-4 ${updatePending ? 'animate-spin' : ''}`} />
-              Update FMP Earnings Dates
-            </button>
+            <>
+              <button
+                onClick={handleEarningsUpdate}
+                disabled={updatePending}
+                className={`flex items-center gap-2 px-3 py-2 text-sm rounded text-white ${updatePending ? 'bg-blue-400 cursor-wait' : 'bg-blue-600 hover:bg-blue-700'}`}
+              >
+                <RefreshCw className={`w-4 h-4 ${updatePending ? 'animate-spin' : ''}`} />
+                Update FMP Earnings Dates
+              </button>
+              <button
+                onClick={handleFinancialHistorySync}
+                disabled={updatePending}
+                className={`flex items-center gap-2 px-3 py-2 text-sm rounded text-white ${updatePending ? 'bg-indigo-400 cursor-wait' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+              >
+                <RefreshCw className={`w-4 h-4 ${updatePending ? 'animate-spin' : ''}`} />
+                Sync Financial History
+              </button>
+            </>
           )}
 
           {activeType === 'ipos' && (
@@ -983,8 +1075,16 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
         )}
 
         {activeType === 'earnings' && (
-          <div className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded px-3 py-2">
-            FMP stable earnings source does not provide reliable time or session. Date, estimate/actual, and DB-based ownership columns are supported.
+          <div className="space-y-2">
+            <div className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded px-3 py-2">
+              FMP stable earnings source does not provide reliable time or session. Date, estimate/actual, and DB-based ownership columns are supported.
+            </div>
+            {hasRequiredDateRange && earningsStatusSummary && earningsStatusSummary.totalCount > 0 && (
+              <div className="text-xs text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded px-3 py-2">
+                Confirmed {earningsStatusSummary.confirmedCount} / Pending {earningsStatusSummary.pendingCount}
+                {earningsStatusSummary.pendingCount === 0 ? ' · 현재 선택 범위에는 이미 발표된 실적만 있습니다. pending estimate를 보려면 종료일을 더 미래로 늘리세요.' : ''}
+              </div>
+            )}
           </div>
         )}
 
@@ -1103,6 +1203,64 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
           ? `Showing ${filteredAndSortedEvents.length} of ${tabFilteredEvents.length} events`
           : 'Select a start and end date to load events'}
       </div>
+
+      {tickerContextMenu && (
+        <>
+          <div
+            className="fixed inset-0 z-30"
+            onClick={() => setTickerContextMenu(null)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setTickerContextMenu(null);
+            }}
+          />
+          <div
+            className="fixed z-40 min-w-[210px] overflow-hidden rounded-xl border border-gray-300 bg-white shadow-xl dark:border-gray-600 dark:bg-gray-800"
+            style={(() => {
+              const menuW = 220;
+              const menuH = tickerContextMenu.companyName ? 108 : 84;
+              const maxX = typeof window !== 'undefined' ? window.innerWidth - menuW - 8 : tickerContextMenu.x;
+              const maxY = typeof window !== 'undefined' ? window.innerHeight - menuH - 8 : tickerContextMenu.y;
+              return {
+                left: Math.max(8, Math.min(tickerContextMenu.x, maxX)),
+                top: Math.max(8, Math.min(tickerContextMenu.y, maxY)),
+              } as React.CSSProperties;
+            })()}
+          >
+            <div className="border-b border-gray-200 px-3 py-2 dark:border-gray-700">
+              <div className="text-[10px] uppercase tracking-[0.16em] text-gray-400">Ticker</div>
+              <div className="mt-1 text-sm font-semibold text-gray-900 dark:text-gray-100">{tickerContextMenu.ticker}</div>
+              {tickerContextMenu.companyName ? (
+                <div className="mt-1 truncate text-[11px] text-gray-500 dark:text-gray-400">{tickerContextMenu.companyName}</div>
+              ) : null}
+            </div>
+            <button
+              className="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+              onClick={() => {
+                setFinancialTarget({
+                  ticker: tickerContextMenu.ticker,
+                  companyName: tickerContextMenu.companyName,
+                });
+                setTickerContextMenu(null);
+              }}
+            >
+              <span>Financial</span>
+              <span className="text-xs text-gray-400">Charts</span>
+            </button>
+          </div>
+        </>
+      )}
+
+      <CalendarFinancialDialog
+        open={Boolean(financialTarget)}
+        ticker={financialTarget?.ticker ?? null}
+        companyName={financialTarget?.companyName ?? null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setFinancialTarget(null);
+          }
+        }}
+      />
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { htmlToPlainText } from "./fulltextExtractors.js";
 const MAX_RETRIES = 10;
 const BASE_DELAY_MS = 500;
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0";
+const SEC_EDGAR_UA = "terminal_sec admin@localhost";
 
 export interface IpoSecInsights {
   companyDescription: string | null;
@@ -12,6 +13,12 @@ export interface IpoSecInsights {
   ownershipValues: number[];
   documentUrl: string | null;
   sourceNote: string;
+}
+
+export interface SecSicInfo {
+  sicCode: string | null;
+  sicDescription: string | null;
+  secIndustry: string | null;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -306,4 +313,97 @@ export async function downloadIpoSecInsights(urls: Array<string | null | undefin
     documentUrl: candidates[0] ?? null,
     sourceNote: candidates.length > 0 ? "no-parseable-sec-insights" : "no-document-url",
   };
+}
+
+// ---------------------------------------------------------------------------
+// SIC code lookup via SEC EDGAR CIK metadata
+// ---------------------------------------------------------------------------
+
+const SIC_DIVISION_MAP: Record<string, string> = {
+  "01": "Agriculture", "02": "Agriculture", "07": "Agriculture", "08": "Agriculture", "09": "Agriculture",
+  "10": "Mining", "12": "Mining", "13": "Mining", "14": "Mining",
+  "15": "Construction", "16": "Construction", "17": "Construction",
+  "20": "Manufacturing", "21": "Manufacturing", "22": "Manufacturing", "23": "Manufacturing",
+  "24": "Manufacturing", "25": "Manufacturing", "26": "Manufacturing", "27": "Manufacturing",
+  "28": "Manufacturing", "29": "Manufacturing", "30": "Manufacturing", "31": "Manufacturing",
+  "32": "Manufacturing", "33": "Manufacturing", "34": "Manufacturing", "35": "Manufacturing",
+  "36": "Manufacturing", "37": "Manufacturing", "38": "Manufacturing", "39": "Manufacturing",
+  "40": "Transportation & Utilities", "41": "Transportation & Utilities", "42": "Transportation & Utilities",
+  "43": "Transportation & Utilities", "44": "Transportation & Utilities", "45": "Transportation & Utilities",
+  "46": "Transportation & Utilities", "47": "Transportation & Utilities", "48": "Transportation & Utilities",
+  "49": "Transportation & Utilities",
+  "50": "Wholesale Trade", "51": "Wholesale Trade",
+  "52": "Retail Trade", "53": "Retail Trade", "54": "Retail Trade", "55": "Retail Trade",
+  "56": "Retail Trade", "57": "Retail Trade", "58": "Retail Trade", "59": "Retail Trade",
+  "60": "Finance", "61": "Finance", "62": "Finance", "63": "Finance",
+  "64": "Finance", "65": "Real Estate", "67": "Finance",
+  "70": "Services", "72": "Services", "73": "Services", "75": "Services",
+  "76": "Services", "78": "Services", "79": "Services", "80": "Services",
+  "81": "Services", "82": "Services", "83": "Services", "84": "Services",
+  "86": "Services", "87": "Services", "88": "Services", "89": "Services",
+  "91": "Public Administration", "92": "Public Administration", "93": "Public Administration",
+  "94": "Public Administration", "95": "Public Administration", "96": "Public Administration",
+  "97": "Public Administration", "99": "Non-Classifiable",
+};
+
+function mapSicToIndustry(sicCode: string, sicDescription: string | null): string {
+  if (sicDescription && sicDescription.trim()) {
+    return sicDescription.trim();
+  }
+  const prefix = sicCode.slice(0, 2);
+  return SIC_DIVISION_MAP[prefix] ?? "Other";
+}
+
+export async function fetchSecSicByCik(cik: string | null | undefined): Promise<SecSicInfo> {
+  const empty: SecSicInfo = { sicCode: null, sicDescription: null, secIndustry: null };
+  if (!cik || !cik.trim()) {
+    return empty;
+  }
+
+  const paddedCik = cik.replace(/^0+/, "").padStart(10, "0");
+  const url = `https://data.sec.gov/submissions/CIK${paddedCik}.json`;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          "User-Agent": SEC_EDGAR_UA,
+          "Accept": "application/json",
+        },
+      });
+
+      if (response.status === 429 || response.status >= 500) {
+        if (attempt === MAX_RETRIES) {
+          return empty;
+        }
+        await sleep(BASE_DELAY_MS * attempt);
+        continue;
+      }
+
+      if (!response.ok) {
+        return empty;
+      }
+
+      const data = await response.json() as Record<string, unknown>;
+      const sicCode = data.sic != null ? String(data.sic) : null;
+      const sicDescription = typeof data.sicDescription === "string" ? data.sicDescription : null;
+
+      if (!sicCode) {
+        return empty;
+      }
+
+      return {
+        sicCode,
+        sicDescription,
+        secIndustry: mapSicToIndustry(sicCode, sicDescription),
+      };
+    } catch {
+      if (attempt === MAX_RETRIES) {
+        return empty;
+      }
+      await sleep(BASE_DELAY_MS * attempt);
+    }
+  }
+
+  return empty;
 }

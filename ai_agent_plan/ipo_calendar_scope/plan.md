@@ -40,6 +40,37 @@
     - `ownershipRows=0`
   - 즉 현재 phase 1은 “SEC enrich pipeline/저장소/UI는 구현 완료” 상태이고, “실제 sample future IPO row에 문서가 안정적으로 매칭되는지”는 추가 개선 후보로 남아 있다.
 
+### PLAN CHANGE — 2026-04-15 industry/description/profile fallback 보강
+
+- 사용자 피드백 기준으로 IPO 탭에서 `industry` 컬럼 자체가 빠져 있었고, `company_description`도 SEC enrich만 fallback으로 보던 문제가 확인됐다.
+- 이에 따라 phase 1.1 보강으로 아래를 추가한다.
+  - `ipos` 컬럼 목록에 `industry`, `float_pct`, `institutional_pct`, `insider_pct`를 다시 포함
+  - `company_description`은 `ipo_sec_enrichments`가 비어 있으면 최신 `company_profiles.description`을 fallback으로 사용
+  - `POST /api/fmp/calendar/ipos/update`가 direct IPO row 저장 후 FMP/Yahoo profile sync를 best-effort로 같이 수행해 `securities` / `company_profiles` metadata를 보강
+- 기대 효과
+  - profile이 존재하는 IPO ticker는 industry / description / 기존 ownership 컬럼이 IPO 탭에서도 보일 수 있다.
+  - 다만 provider가 해당 미래 IPO ticker profile 자체를 주지 않으면 값은 계속 `null`일 수 있다.
+
+### PLAN CHANGE — 2026-04-15 phase 1.1 검증 결과
+
+- fresh `POST /api/fmp/calendar/ipos/update` 재검증 결과, 후행 profile sync step이 실제로 실행됐다.
+  - job result: `requested=26`, `fmpFetched=10`, `yahooFetched=1`
+- `GET /api/calendar/events?type=ipos&from=2026-04-14&to=2026-04-30` 기준 coverage는 아래와 같다.
+  - total row: `26`
+  - `company_description` non-null: `6`
+  - `industry` non-null: `3`
+  - `sector` non-null: `4`
+  - `institutional_pct` / `insider_pct` / `float_pct` non-null: `0`
+- 실제 sample row 확인
+  - `EMI`: description 채워짐
+  - `MRCOU`, `MYXXU`, `NICM`: industry + description 채워짐
+- 브라우저 검증 결과
+  - IPO 탭 기본 visible 컬럼에 `Industry`, `Inst %`, `Insider %`가 표시된다.
+  - 날짜를 둘 다 선택하기 전에는 `Update FMP IPO`, `Download SEC Data` 버튼이 disabled다.
+- 결론
+  - 이번 보강으로 컬럼 누락/UI 누락/API fallback 누락은 해소됐다.
+  - 이후 남는 빈 값은 대부분 future IPO ticker에 대한 provider metadata coverage 한계다.
+
 ### 현재 레포 상태(중요, 확인됨)
 
 - backend calendar read/query 구조는 이미 일반형 `calendar_events` 테이블과 `GET /api/calendar/events`를 중심으로 존재한다.

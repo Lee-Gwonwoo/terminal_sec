@@ -90,6 +90,32 @@ export async function initDb(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_calendar_events_event_at ON calendar_events (event_at DESC);
     CREATE INDEX IF NOT EXISTS idx_calendar_events_type_time ON calendar_events (event_type, event_at DESC);
 
+    CREATE TABLE IF NOT EXISTS calendar_financial_series (
+      ticker TEXT NOT NULL,
+      period_type TEXT NOT NULL,
+      report_date TEXT NOT NULL,
+      fiscal_year TEXT,
+      fiscal_period TEXT,
+      label TEXT NOT NULL,
+      revenue REAL,
+      revenue_estimate REAL,
+      net_income REAL,
+      net_income_estimate REAL,
+      eps REAL,
+      eps_estimate REAL,
+      market_cap REAL,
+      pe_ratio REAL,
+      ps_ratio REAL,
+      num_analysts_revenue INTEGER,
+      num_analysts_eps INTEGER,
+      source TEXT NOT NULL DEFAULT 'FMP',
+      fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (ticker, period_type, report_date)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_calendar_financial_series_ticker_period
+      ON calendar_financial_series (ticker, period_type, report_date ASC);
+
     CREATE TABLE IF NOT EXISTS alert_rules (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -534,6 +560,11 @@ export async function initDb(): Promise<void> {
   `);
   await db.exec("CREATE INDEX IF NOT EXISTS idx_ipo_sec_enrichments_ticker_date ON ipo_sec_enrichments(ticker, ipo_date);");
   await db.exec("CREATE INDEX IF NOT EXISTS idx_ipo_sec_enrichments_fetched_at ON ipo_sec_enrichments(fetched_at DESC);");
+
+  // Phase 2: SEC SIC industry columns
+  await ensureColumn("ipo_sec_enrichments", "sic_code", "TEXT");
+  await ensureColumn("ipo_sec_enrichments", "sic_description", "TEXT");
+  await ensureColumn("ipo_sec_enrichments", "sec_industry", "TEXT");
 
   await migrateNewsItemsUniqueConstraint();
   await purgeLegacyFinnhubSecFilings();

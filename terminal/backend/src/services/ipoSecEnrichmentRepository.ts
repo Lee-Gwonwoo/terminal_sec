@@ -19,6 +19,9 @@ export interface IpoSecEnrichmentRow {
   ownership_values_json: string | null;
   raw_json: string | null;
   source_note: string | null;
+  sic_code: string | null;
+  sic_description: string | null;
+  sec_industry: string | null;
   fetched_at: string;
 }
 
@@ -40,6 +43,9 @@ export async function upsertIpoSecEnrichment(params: {
   ownershipValuesJson: string | null;
   rawJson: string | null;
   sourceNote: string | null;
+  sicCode: string | null;
+  sicDescription: string | null;
+  secIndustry: string | null;
 }): Promise<void> {
   const fetchedAt = new Date().toISOString();
   await getDb().run(
@@ -61,8 +67,11 @@ export async function upsertIpoSecEnrichment(params: {
        ownership_values_json,
        raw_json,
        source_note,
+       sic_code,
+       sic_description,
+       sec_industry,
        fetched_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(event_unique_key) DO UPDATE SET
        ticker = excluded.ticker,
        ipo_date = excluded.ipo_date,
@@ -80,6 +89,9 @@ export async function upsertIpoSecEnrichment(params: {
        ownership_values_json = excluded.ownership_values_json,
        raw_json = excluded.raw_json,
        source_note = excluded.source_note,
+       sic_code = excluded.sic_code,
+       sic_description = excluded.sic_description,
+       sec_industry = excluded.sec_industry,
        fetched_at = excluded.fetched_at`,
     [
       params.eventUniqueKey,
@@ -99,6 +111,9 @@ export async function upsertIpoSecEnrichment(params: {
       params.ownershipValuesJson,
       params.rawJson,
       params.sourceNote,
+      params.sicCode,
+      params.sicDescription,
+      params.secIndustry,
       fetchedAt,
     ],
   );

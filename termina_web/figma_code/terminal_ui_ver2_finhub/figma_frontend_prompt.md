@@ -1023,7 +1023,9 @@ API:
 - backend API 연동 있음
 - `GET /api/calendar/types`로 탭 목록을 읽는다.
 - `GET /api/calendar/events`로 현재 탭 + 날짜 범위 데이터를 읽는다.
+- ticker 우클릭 `Financial` dialog를 열 때 `GET /api/calendar/financials/:ticker`로 annual / quarterly 재무 series를 읽는다.
 - earnings 탭에서 `POST /api/fmp/calendar/earnings/update`를 실행하고 `GET /api/jobs/:jobId`로 polling 한다.
+- earnings 탭에서 `POST /api/fmp/calendar/financials/update`도 실행할 수 있고, 같은 `GET /api/jobs/:jobId` polling 패턴으로 default ticker financial history sync 상태를 보여준다.
 - IPO 탭에서 `POST /api/fmp/calendar/ipos/update`, `POST /api/fmp/calendar/ipos/sec-download`를 실행하고 같은 `GET /api/jobs/:jobId` polling 패턴을 사용한다.
 - industry / ownership(`float_pct`, `institutional_pct`, `insider_pct`)는 column selector에서 켜고 끌 수 있다.
 - IPO direct/SEC 컬럼(`ipo_date`, `company_name`, `exchange`, `status`, `price_range`, `shares`, `offer_amount`, `company_description`, `sec_max_owner_pct`, `sec_total_owner_pct`, `prospectus_url`, `disclosure_url`)도 column selector에서 켜고 끌 수 있다.
@@ -1039,18 +1041,33 @@ API:
 - 기본 날짜 정렬은 늦은 날짜 우선(`desc`)이다.
   - 초기 진입, 탭 전환, Reset 모두 이 기준을 사용한다.
 - search는 client-side로 `ticker`, `company`, `title`, `industry`, `source`, `status`, `company_description`을 대상으로 동작한다.
+- ticker chip interaction은 좌/우 클릭이 분리돼 있다.
+  - 좌클릭: 기존 linked ticker 동작
+  - 우클릭: context menu 열기
+  - context menu의 `Financial` action: annual / quarterly toggle dialog 열기
 - 숫자 범위 필터는 현재 fetch된 row 집합에 대해 client-side로 즉시 적용된다.
   - `Inst %`, `Float %`는 퍼센트 값 그대로 비교한다.
   - `Market Cap` 입력 단위는 `B$`이며, 프론트에서 내부 비교 시 실제 달러 값으로 환산한다.
   - 숫자 필터가 켜져 있을 때 해당 값이 `null`인 row는 결과에서 제외된다.
 - earnings stable source에는 reliable time/session이 없으므로, 관련 column 값은 비어 있을 수 있다.
-- update 버튼은 현재 date filter가 있으면 그 범위를 body에 같이 보낸다.
+- earnings `Update FMP Earnings Dates` 버튼은 현재 date filter가 있으면 그 범위를 body에 같이 보낸다.
+- earnings `Sync Financial History` 버튼은 현재 date filter와 무관하게 default universe 전체를 대상으로 실행된다.
 - IPO 탭의 `Download SEC Data` 버튼은 선택한 날짜 범위가 있어야 활성화된다.
+- IPO 탭 기본 visible 컬럼은 `IPO Date`, `Symbol`, `Company`, `Industry`, `Inst %`, `Insider %`, `Exchange`, `Status`, `Price Range`, `Shares`, `Offer Amount`, `Description`, `SEC Max %`다.
 - earnings update는 같은 범위에 대해 append가 아니라 snapshot replace다.
   - 즉 같은 범위를 다시 실행하면 기존 FMP earnings row를 해당 범위에서 먼저 정리한 뒤 현재 source snapshot으로 다시 채운다.
   - 따라서 earnings date가 바뀌었을 때 같은 범위를 재동기화하면 예전 날짜 row가 남아 누적되지 않는다.
 - IPO update도 같은 범위에서 snapshot replace다. 다만 SEC-derived description/ownership는 별도 저장소에 유지되므로 FMP snapshot refresh만으로 사라지지 않는다.
+- IPO update는 snapshot replace 뒤 best-effort FMP/Yahoo profile sync를 추가로 수행하므로, provider coverage가 있는 ticker는 `industry`나 `company_description`이 같은 refresh 직후 바로 보일 수 있다.
+- 반대로 future IPO ticker profile/holders source가 비어 있으면 `industry`, `institutional_pct`, `insider_pct`, `float_pct`는 계속 `null`일 수 있다.
 - IPO SEC ownership 컬럼은 post-listing public holders summary가 아니라 prospectus/disclosure 본문에서 파싱한 named-owner percentages다.
+- financial dialog는 3개 chart group을 표시한다.
+  - `Revenue`: actual revenue bar + estimate dashed line
+  - `Earnings`: actual net income/EPS + estimate dashed lines
+  - `Valuation`: `P/E`, `P/S` history
+- financial dialog summary card는 latest point 기준 actual 값을 우선 보여주고, estimate가 있으면 `Est.` 보조 텍스트를 함께 표시한다.
+- dialog subtitle에는 data source가 `income statement + key metrics + ratios + analyst estimates`임을 명시한다.
+- valuation ratio는 backend가 FMP `ratios` 값을 우선 사용하고, 비어 있으면 `marketCap / netIncome`, `marketCap / revenue` fallback을 계산해 내려준다.
 
 ## Case Description Window
 
@@ -1307,6 +1324,7 @@ API:
 - `src/app/components/CaseResearchWindow.tsx`: 연구 노트 창
 - `src/app/components/WatchlistWindow.tsx`: mock watchlist 창
 - `src/app/components/CalendarWindow.tsx`: API 기반 calendar 창
+- `src/app/components/CalendarFinancialDialog.tsx`: Calendar ticker 우클릭 financial chart dialog
 - `src/app/components/BraveNewsWindow.tsx`: 미연결 잔존 파일
 - `vite.config.ts`: `/api`, `/healthz` proxy 설정
 
@@ -1314,7 +1332,7 @@ API:
 
 - active window 중 backend와 완전히 맞물려 있는 것은 `Finnhub News`, `Default Ticker`, `Data Control`, `AI Research Window`, `Evidence Table` 중심이다.
 - `NewsWindow`는 일부 backend를 사용하지만 현재 운영 기준의 주력 뉴스 창은 아니다.
-- `CalendarWindow`는 backend `calendar_events` + FMP earnings update job과 연결되어 있다.
+- `CalendarWindow`는 backend `calendar_events`, FMP earnings / IPO job, ticker financial history API와 연결되어 있다.
 - `WatchlistWindow`는 여전히 UI만 있고 운영 데이터와 연결되어 있지 않다.
 - `keywords`는 backend 응답으로 내려오고 `DEFAULT_COLUMNS`에 포함되어 있으며 컬럼 매뉴에서 표시/숨김 가능하다. 단 기본 숨김 상태다.
 - `DataControlWindow`의 calendar 섹션은 backend가 `jobId`를 돌려준다고 가정하는 UI지만, 실제 backend는 현재 즉시 결과 응답형이다.

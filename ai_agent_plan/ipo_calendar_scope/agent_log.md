@@ -155,3 +155,44 @@
 - 상태
   - 구현 + build/test + live API 검증 완료
   - 사용자 확인 대기 (`awaiting user confirmation`)
+
+## 2026-04-15
+**작성 시각:** 2026-04-15 17:49:17 (local)
+
+### IPO 탭 industry / description / ownership 컬럼 보강
+
+- 작업 목적
+  - 사용자 피드백 기준으로 IPO 탭에서 빠져 있던 `industry` 및 기존 ownership 컬럼을 다시 노출
+  - `company_description`이 SEC enrich만 보던 문제를 profile fallback으로 보강
+  - IPO update 시점에 FMP/Yahoo company profile을 best-effort로 동기화해 metadata 누락을 줄임
+- 변경 파일
+  - `terminal/backend/src/server.ts`
+  - `terminal/backend/src/services/calendarRepository.ts`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx`
+  - `ai_agent_plan/ipo_calendar_scope/plan.md`
+  - `ai_agent_plan/ipo_calendar_scope/agent_log.md`
+- 구현 핵심
+  - `ipos` column config에 `industry`, `float_pct`, `institutional_pct`, `insider_pct` 추가
+  - IPO 탭 기본 visible 컬럼에 `industry`, `institutional_pct`, `insider_pct` 추가
+  - calendar metadata query에 최신 `company_profiles.description` fallback 추가
+  - `company_description = fields_json -> ipo_sec_enrichments -> company_profiles.description` 순으로 fallback
+  - `POST /api/fmp/calendar/ipos/update` 완료 후 unique ticker 집합에 대해 FMP profile batch, 미응답 ticker에 대해 Yahoo profile batch를 best-effort로 실행
+  - profile sync 결과는 `securities`와 `company_profiles`를 갱신해 이후 IPO calendar 조회에 재사용
+- 검증
+
+| 검증 항목 | 결과 | 비고 |
+|-----------|------|------|
+| backend build | ✅ | 기존 수정 포함 TypeScript build 재통과 |
+| frontend build | ✅ | Vite production build 재통과 |
+| backend tests | ✅ | `91/91` 통과 |
+| live IPO update + profile sync | ✅ | `requested=26`, `fmpFetched=10`, `yahooFetched=1` |
+| live IPO API field 확인 | ✅ | 총 `26` row 중 `company_description=6`, `industry=3`, `sector=4` |
+| browser UI 확인 | ✅ | IPO 탭 기본 컬럼에 `Industry`, `Inst %`, `Insider %` 표시, `EMI` description 표시 확인 |
+
+- 남은 한계
+  - 다수 future IPO ticker는 provider profile/holders coverage 자체가 없어 `industry`, `institutional_pct`, `insider_pct`, `float_pct`가 계속 `null`일 수 있다.
+  - 이번 보강은 누락된 컬럼/UI/API fallback 문제는 해결했지만, provider가 값을 안 주는 row까지 임의로 채우지는 않는다.
+
+- 상태
+  - 구현 + 검증 완료
+  - 사용자 확인 대기 (`awaiting user confirmation`)

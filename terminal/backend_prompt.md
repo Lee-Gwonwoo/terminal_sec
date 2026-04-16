@@ -302,12 +302,16 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `[][][]ownership_values_json[][][]`
 - `[][][]raw_json[][][]`
 - `[][][]source_note[][][]`
+- `[][][]sic_code[][][]` — SEC EDGAR CIK 메타데이터에서 조회한 SIC 코드 (예: "3711")
+- `[][][]sic_description[][][]` — SEC EDGAR에서 제공하는 SIC 설명 (예: "Motor Vehicles & Passenger Car Bodies")
+- `[][][]sec_industry[][][]` — SIC 기반으로 매핑된 industry 문자열. `calendarRepository.mapCalendarRow()`에서 `industry` fallback 체인에 포함됨
 - `[][][]fetched_at[][][]`
 
 의미:
 
-- IPO row 자체는 `calendar_events` snapshot으로 유지하고, SEC 기반 description/ownership는 별도 영속 테이블에 보관한다.
+- IPO row 자체는 `calendar_events` snapshot으로 유지하고, SEC 기반 description/ownership/industry는 별도 영속 테이블에 보관한다.
 - 이 분리 구조 덕분에 FMP IPO snapshot을 다시 받아도 SEC enrich 결과가 함께 사라지지 않는다.
+- `sec_industry`는 SEC EDGAR의 CIK 메타데이터(`https://data.sec.gov/submissions/CIK{padded}.json`)에서 SIC 코드를 조회 후, SIC description을 우선 사용하고 없으면 SIC division으로 매핑한다.
 
 #### `company_profiles`
 
@@ -532,6 +536,7 @@ SEC filing companion table.
 - `GET /api/calendar/events`
 - `GET /api/calendar/events/export.csv`
 - `GET /api/calendar/events/:id`
+- `GET /api/calendar/financials/:ticker`
 - `POST /api/fmp/calendar/earnings/update`
 - `POST /api/ibkr/calendar/update`
 - `POST /api/ibkr/calendar/update-custom/preflight`
@@ -1128,7 +1133,7 @@ Control Window / localStorage 공통 설정:
 - `CaseResearchWindow`는 `/api/research/*` 전체를 사용해 섹션/페이지 CRUD, reorder, 검색, 자동 저장을 수행한다.
 - `EvidenceTableWindow`는 `GET /api/model2/analyses`, `GET /api/model2/analyses/:analysisId/cases`, `GET /api/model2/analyses/:analysisId/evidence`를 사용한다.
 - `CaseDescriptionWindow`는 backend 호출 없이 `EvidenceTableWindow`가 보낸 case metadata를 같은 탭 안의 보조 창으로 렌더링한다.
-- `CalendarWindow`는 `GET /api/calendar/types`, `GET /api/calendar/events`, `POST /api/fmp/calendar/earnings/update`, `POST /api/fmp/calendar/ipos/update`, `POST /api/fmp/calendar/ipos/sec-download`, `GET /api/jobs/:jobId`를 사용한다.
+- `CalendarWindow`는 `GET /api/calendar/types`, `GET /api/calendar/events`, `GET /api/calendar/financials/:ticker`, `POST /api/fmp/calendar/earnings/update`, `POST /api/fmp/calendar/financials/update`, `POST /api/fmp/calendar/ipos/update`, `POST /api/fmp/calendar/ipos/sec-download`, `GET /api/jobs/:jobId`를 사용한다.
 - 현재 `WatchlistWindow`만 backend API와 직접 연결되어 있지 않다.
 
 ## Case Research API
@@ -2290,7 +2295,10 @@ query:
   - `[][][]institutional_pct[][][]`
   - `[][][]insider_pct[][][]`
   - source 컬럼: `[][][]market_cap_source[][][]`, `[][][]float_source[][][]`, `[][][]institutional_source[][][]`, `[][][]insider_source[][][]`
-- IPO row는 direct FMP field(`[][][]ipo_date[][][]`, `[][][]company_name[][][]`, `[][][]exchange[][][]`, `[][][]status[][][]`, `[][][]shares[][][]`, `[][][]price_range[][][]`, `[][][]offer_amount[][][]`)와 SEC enrich field(`[][][]company_description[][][]`, `[][][]sec_form[][][]`, `[][][]sec_filing_date[][][]`, `[][][]sec_accepted_date[][][]`, `[][][]sec_owner_count[][][]`, `[][][]sec_max_owner_pct[][][]`, `[][][]sec_total_owner_pct[][][]`, `[][][]prospectus_url[][][]`, `[][][]disclosure_url[][][]`)를 함께 내려준다.
+- IPO row는 direct FMP field(`[][][]ipo_date[][][]`, `[][][]company_name[][][]`, `[][][]exchange[][][]`, `[][][]status[][][]`, `[][][]shares[][][]`, `[][][]price_range[][][]`, `[][][]offer_amount[][][]`)와 SEC enrich field(`[][][]company_description[][][]`, `[][][]sec_form[][][]`, `[][][]sec_filing_date[][][]`, `[][][]sec_accepted_date[][][]`, `[][][]sec_owner_count[][][]`, `[][][]sec_max_owner_pct[][][]`, `[][][]sec_total_owner_pct[][][]`, `[][][]sec_sic_code[][][]`, `[][][]sec_sic_description[][][]`, `[][][]sec_industry[][][]`, `[][][]prospectus_url[][][]`, `[][][]disclosure_url[][][]`)를 함께 내려준다.
+- `[][][]company_description[][][]` fallback 순서는 `fields_json.company_description -> ipo_sec_enrichments.company_description -> 최신 company_profiles.description`이다.
+- `[][][]industry[][][]` fallback 순서는 `securities.industry -> ipo_sec_enrichments.sec_industry -> fields_json.industry`이다. 즉 SEC EDGAR SIC 기반 industry가 FMP/Yahoo profile이 없을 때도 채워진다.
+- `POST /api/fmp/calendar/ipos/update`는 direct IPO snapshot 저장 뒤 best-effort FMP/Yahoo profile sync를 한 번 더 수행해 `securities` / `company_profiles` metadata를 보강한다. 따라서 provider가 ticker profile을 주는 경우 IPO row의 `industry`, `company_description`, `institutional_pct`, `insider_pct`가 함께 채워질 수 있다.
 
 FMP earnings row 주의:
 
@@ -2308,6 +2316,84 @@ IPO SEC enrich 주의:
 ### `GET /api/calendar/events/:id`
 
 단일 event 조회.
+
+### `GET /api/calendar/financials/:ticker`
+
+CalendarWindow ticker 우클릭 `Financial` dialog용 read-only endpoint다.
+
+응답 구조:
+
+- top-level
+  - `[][][]ticker[][][]`
+  - `[][][]source[][][] = "FMP"`
+  - `[][][]annual[][][]`
+  - `[][][]quarterly[][][]`
+- 각 series point
+  - `[][][]date[][][]`
+  - `[][][]fiscalYear[][][]`
+  - `[][][]period[][][]`
+  - `[][][]label[][][]`
+  - `[][][]revenue[][][]`
+  - `[][][]revenueEstimate[][][]`
+  - `[][][]netIncome[][][]`
+  - `[][][]netIncomeEstimate[][][]`
+  - `[][][]eps[][][]`
+  - `[][][]epsEstimate[][][]`
+  - `[][][]marketCap[][][]`
+  - `[][][]peRatio[][][]`
+  - `[][][]psRatio[][][]`
+  - `[][][]numAnalystsRevenue[][][]`
+  - `[][][]numAnalystsEps[][][]`
+
+동작 규칙:
+
+1. 먼저 local DB `calendar_financial_series` cache를 조회한다.
+2. cache miss면 FMP stable `income-statement`, `key-metrics`, `ratios`, `analyst-estimates`를 annual / quarterly 각각 조회한 뒤 snapshot을 DB에 저장하고 반환한다.
+3. `date` 우선, 없으면 `fiscalYear + period`를 기준 key로 삼아 series를 merge 한다.
+4. revenue / earnings actual은 income statement에서, estimate는 analyst-estimates(`revenueAvg`, `netIncomeAvg`, `epsAvg`)에서, market cap은 key metrics에서, valuation ratio는 ratios에서 채운다.
+5. `peRatio`, `psRatio`가 비어 있으면 가능한 경우 `marketCap / netIncome`, `marketCap / revenue`로 fallback 계산한다.
+6. estimate-only future point도 유지하고, 모든 응답은 oldest -> latest 순으로 정렬한다.
+
+주의:
+
+- FMP stable financial statement 응답은 `calendarYear`가 아니라 `[][][]fiscalYear[][][]`, `[][][]period[][][]` 중심이다.
+- 일부 종목/기간에서는 ratio 값이 `null`일 수 있다.
+- estimate는 별도 endpoint라 actual series와 날짜/period가 완전히 일치하지 않을 수 있다.
+- annual/quarterly 모두 비어 있으면 `404`를 반환한다.
+
+### `POST /api/fmp/calendar/financials/update`
+
+default universe ticker 전체에 대해 financial history + analyst estimate snapshot을 미리 적재하는 background job endpoint다.
+
+요청 body:
+
+```json
+{}
+```
+
+- 현재 body 값은 사용하지 않는다.
+- 대상 ticker는 항상 `getDefaultUniverseTickers()` 결과다.
+
+응답(성공 시):
+
+```json
+{ "jobId": "uuid", "requestedTickers": 1699 }
+```
+
+동작:
+
+1. `FMP_API_KEY` 존재 여부를 확인한다.
+2. `getDefaultUniverseTickers()`로 대상 ticker를 가져온다.
+3. background job(`FMP Financial History Sync`)을 생성한다.
+4. 각 ticker마다 `income-statement`, `key-metrics`, `ratios`, `analyst-estimates`를 합쳐 annual / quarterly snapshot을 만든다.
+5. ticker별 기존 `calendar_financial_series` row를 먼저 지우고 새 snapshot으로 replace 저장한다.
+6. job progress/log/result에 synced ticker 수와 annual/quarterly row 수, estimate row 수를 남긴다.
+
+주의:
+
+- date range를 받지 않는다. 항상 default universe 전체를 돈다.
+- default universe가 비어 있으면 에러를 반환한다.
+- 이 endpoint는 즉시 `{ jobId }`만 반환하고 실제 적재는 background job에서 진행한다.
 
 ### `POST /api/ibkr/calendar/update`
 
@@ -2462,7 +2548,7 @@ job 완료 result 컬럼:
 
 ### `POST /api/fmp/calendar/ipos/sec-download`
 
-현재 저장된 IPO row를 기준으로 FMP `ipos-disclosure`, `ipos-prospectus`, 그리고 generic `sec-filings-search/symbol` fallback을 조회해 SEC-derived description/ownership를 `ipo_sec_enrichments`에 저장하는 background job이다.
+현재 저장된 IPO row를 기준으로 FMP `ipos-disclosure`, `ipos-prospectus`, 그리고 generic `sec-filings-search/symbol` fallback을 조회해 SEC-derived description/ownership/industry를 `ipo_sec_enrichments`에 저장하는 background job이다.
 
 요청 body:
 
@@ -2477,8 +2563,9 @@ job 완료 result 컬럼:
 3. `ipos-disclosure`, `ipos-prospectus`, generic SEC filing search를 함께 조회한다.
 4. 각 ticker에 대해 가장 적절한 filing URL을 골라 본문을 다운로드한다.
 5. beneficial ownership section과 company overview 문단을 heuristic하게 파싱한다.
-6. 결과를 `ipo_sec_enrichments`에 upsert 한다.
-7. `update_status.fmp_calendar_ipos_sec`를 갱신한다.
+6. CIK가 있으면 SEC EDGAR(`https://data.sec.gov/submissions/CIK{padded}.json`)에서 SIC 코드를 조회하여 industry를 결정한다.
+7. 결과를 `ipo_sec_enrichments`에 upsert 한다(sic_code, sic_description, sec_industry 포함).
+8. `update_status.fmp_calendar_ipos_sec`를 갱신한다.
 
 job 완료 result 컬럼:
 

@@ -36,6 +36,7 @@ export const CALENDAR_TYPE_CONFIG = [
       "ticker",
       "company_name",
       "exchange",
+      "industry",
       "status",
       "price_range",
       "shares",
@@ -47,6 +48,9 @@ export const CALENDAR_TYPE_CONFIG = [
       "sec_owner_count",
       "sec_max_owner_pct",
       "sec_total_owner_pct",
+      "sec_sic_code",
+      "sec_sic_description",
+      "sec_industry",
       "prospectus_url",
       "disclosure_url"
     ]
@@ -119,6 +123,7 @@ type CalendarTickerMetadataRow = {
   ticker: string;
   exchange: string | null;
   name: string | null;
+  description: string | null;
   sector: string | null;
   industry: string | null;
   market_cap: number | null;
@@ -343,7 +348,7 @@ function mapCalendarRow(
   const fieldsJson = parseFieldsJson(row.meta_json);
   const eventDate = getEventDate(row.event_at);
   const companyName = getStringField(fieldsJson.company_name) ?? metadata?.name ?? null;
-  const companyDescription = getStringField(fieldsJson.company_description) ?? ipoSec?.company_description ?? null;
+  const companyDescription = getStringField(fieldsJson.company_description) ?? ipoSec?.company_description ?? metadata?.description ?? null;
   const epsEstimated = getNumberField(fieldsJson.eps_est);
   const epsActual = getNumberField(fieldsJson.eps_actual);
   const revenueEstimated = getNumberField(fieldsJson.revenue_est);
@@ -375,7 +380,7 @@ function mapCalendarRow(
     name: metadata?.name ?? companyName ?? (row.ticker || null),
     exchange: metadata?.exchange ?? getStringField(fieldsJson.exchange) ?? null,
     sector: metadata?.sector ?? getStringField(fieldsJson.sector) ?? null,
-    industry: metadata?.industry ?? getStringField(fieldsJson.industry) ?? null,
+    industry: metadata?.industry ?? ipoSec?.sec_industry ?? getStringField(fieldsJson.industry) ?? null,
     market_cap: metadata?.market_cap ?? null,
     float_pct: metadata?.float_pct ?? null,
     institutional_pct: metadata?.institutional_pct ?? null,
@@ -403,6 +408,9 @@ function mapCalendarRow(
     sec_owner_count: ipoSec?.ownership_holder_count ?? null,
     sec_max_owner_pct: ipoSec?.ownership_max_pct ?? null,
     sec_total_owner_pct: ipoSec?.ownership_total_pct ?? null,
+    sec_sic_code: ipoSec?.sic_code ?? null,
+    sec_sic_description: ipoSec?.sic_description ?? null,
+    sec_industry: ipoSec?.sec_industry ?? null,
     sec_document_url: ipoSec?.document_url ?? null,
     prospectus_url: ipoSec?.prospectus_url ?? null,
     disclosure_url: ipoSec?.disclosure_url ?? null,
@@ -422,6 +430,13 @@ async function getCalendarTickerMetadataMap(
     `SELECT s.ticker,
             s.exchange,
             s.name,
+            (
+              SELECT cp.description
+              FROM company_profiles cp
+              WHERE cp.security_id = s.id AND cp.description IS NOT NULL AND cp.description != ''
+              ORDER BY cp.fetched_at DESC, cp.id DESC
+              LIMIT 1
+            ) AS description,
             s.sector,
             s.industry,
             (

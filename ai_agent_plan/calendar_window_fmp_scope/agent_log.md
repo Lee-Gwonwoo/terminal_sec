@@ -299,3 +299,96 @@
     - ratios: `priceToSalesRatio`, `priceToEarningsRatio`, `enterpriseValueMultiple`
 - 상태
   - plan 범위 확장 반영 완료, 구현 진행 중 (`awaiting user confirmation`)
+
+## 2026-04-15
+**작성 시각:** 2026-04-15 18:01 (local)
+
+### Calendar ticker 우클릭 Financial dialog 구현 + 검증 완료
+
+- 변경 파일
+  - `terminal/backend/src/services/fmpFinancialSeriesProvider.ts`
+  - `terminal/backend/src/server.ts`
+  - `terminal/backend/src/services/calendarRepository.ts`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarFinancialDialog.tsx`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/ui/dialog.tsx`
+  - `terminal/backend_prompt.md`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+- 구현 내용
+  - `GET /api/calendar/financials/:ticker` read-only endpoint 추가
+  - FMP stable `income-statement`, `key-metrics`, `ratios`를 합쳐 annual / quarterly financial series를 생성
+  - ratio 값이 비어 있으면 `marketCap / netIncome`, `marketCap / revenue` fallback으로 `P/E`, `P/S`를 계산
+  - `CalendarWindow` ticker cell 우클릭 menu에 `Financial` 액션 추가
+  - 새 `CalendarFinancialDialog`에서 `Revenue`, `Earnings`, `Valuation` 차트와 annual / quarterly toggle 렌더링
+  - dialog wrapper를 `forwardRef` 기반으로 정리해 Radix ref warning 없이 열리도록 수정
+  - backend test 재실행 과정에서 드러난 `calendarRepository.ts` stray fragment를 제거해 구문 오류 해소
+- 검증
+
+| 검증 항목 | 결과 | 비고 |
+|-----------|------|------|
+| backend 정적 분석 | ✅ | `fmpFinancialSeriesProvider.ts`, `server.ts`, `calendarRepository.ts` error 없음 |
+| frontend 정적 분석 | ✅ | `CalendarFinancialDialog.tsx`, `CalendarWindow.tsx`, `dialog.tsx` error 없음 |
+| backend build | ✅ | `terminal/backend`에서 `npm run build` 성공 |
+| backend tests | ✅ | vitest `15 files / 91 tests` 통과 |
+| live financial API | ✅ | `GET /api/calendar/financials/AAPL` 응답에서 `annualCount=6`, `quarterlyCount=8` 확인 |
+| browser runtime | ✅ | `KMX` 우클릭 menu 표시, `Financial` 클릭, dialog open, annual / quarterly toggle, summary/차트 렌더링 확인 |
+
+- 런타임 확인 메모
+  - annual 첫 sample: `2020`, `revenue=274.52B`, `netIncome=57.41B`, `P/E=33.94x`, `P/S=7.10x`
+  - quarterly 첫 sample: `Q2 '24`, `revenue=90.75B`, `netIncome=23.64B`, `P/E=27.94x`, `P/S=29.11x`
+  - browser에서 `KMX` dialog 요약 카드와 quarterly 전환 후 값 변경을 직접 확인함
+
+- 상태
+  - 구현 + build/test + live API + browser 검증 완료
+  - 사용자 확인 대기 (`awaiting user confirmation`)
+
+## 2026-04-15
+**작성 시각:** 2026-04-15 22:20 (local)
+
+### default ticker financial history sync + estimate overlay 구현 완료
+
+- 변경 파일
+  - `terminal/backend/src/db.ts`
+  - `terminal/backend/src/services/calendarFinancialRepository.ts`
+  - `terminal/backend/src/services/fmpFinancialSeriesProvider.ts`
+  - `terminal/backend/src/server.ts`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarFinancialDialog.tsx`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx`
+  - `terminal/backend_prompt.md`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+  - `ai_agent_plan/calendar_window_fmp_scope/plan.md`
+  - `ai_agent_plan/calendar_window_fmp_scope/agent_log.md`
+- 원인 확인
+  - estimate가 그래프에 안 보인 이유는 UI 문제가 아니라 backend/provider가 처음부터 `stable/analyst-estimates`를 읽지 않았기 때문이다.
+  - 기존 financial dialog는 `income-statement`, `key-metrics`, `ratios` actual series만 받아 actual-only chart를 그리고 있었다.
+- 구현 내용
+  - `calendar_financial_series` cache table 추가
+  - ticker별 annual / quarterly financial snapshot replace 저장용 repository 추가
+  - `GET /api/calendar/financials/:ticker`를 DB cache first + live fallback 구조로 변경
+  - `stable/analyst-estimates`를 annual / quarterly series에 merge해 `revenueEstimate`, `netIncomeEstimate`, `epsEstimate`, analyst coverage count를 함께 반환
+  - `POST /api/fmp/calendar/financials/update` background job 추가
+    - 대상은 항상 default universe ticker 전체
+    - job label: `FMP Financial History Sync`
+  - Calendar earnings toolbar에 `Sync Financial History` 버튼 추가
+  - `CalendarFinancialDialog`에 revenue / earnings estimate overlay legend와 dashed line, summary estimate 텍스트 추가
+- 검증
+
+| 검증 항목 | 결과 | 비고 |
+|-----------|------|------|
+| backend 정적 분석 | ✅ | `db.ts`, `calendarFinancialRepository.ts`, `fmpFinancialSeriesProvider.ts`, `server.ts` error 없음 |
+| frontend 정적 분석 | ✅ | `CalendarFinancialDialog.tsx`, `CalendarWindow.tsx` error 없음 |
+| backend build | ✅ | `terminal/backend`에서 `npm run build` 성공 |
+| backend tests | ✅ | vitest `15 files / 91 tests` 통과 |
+| frontend build | ✅ | `terminal_ui_ver2_finhub`에서 `npm run build` 성공 |
+| live financial API | ✅ | `GET /api/calendar/financials/AAPL` 응답에서 latest annual/quarterly point에 estimate 필드와 analyst count 확인 |
+| live sync job API | ✅ | `POST /api/fmp/calendar/financials/update`가 `{ jobId, requestedTickers=1699 }` 반환, 직후 job status `running` 확인 |
+| browser runtime | ✅ | earnings toolbar의 `Sync Financial History` 버튼 표시/실행, `FMP financial history sync: running` 상태 표시, financial dialog legend/estimate note 확인 |
+
+- 런타임 확인 메모
+  - `GET /api/calendar/financials/AAPL` latest annual sample: `date=2030-09-27`, `revenueEstimate=627849333333`, `netIncomeEstimate=196161355444`, `epsEstimate=13.07333`, `numAnalystsRevenue=16`, `numAnalystsEps=7`
+  - same endpoint latest quarterly sample: `date=2028-09-27`, `revenueEstimate=123401826658`, `epsEstimate=2.40481`
+  - browser에서 `Revenue Estimate`, `Net Income Estimate`, `EPS Estimate` legend text와 sync progress text를 직접 확인함
+
+- 상태
+  - 구현 + build/test + live API + browser 검증 완료
+  - 사용자 확인 대기 (`awaiting user confirmation`)

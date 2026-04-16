@@ -81,6 +81,28 @@
   - API 응답에서 valuation ratio가 비어 있으면, 가능한 경우 `marketCap / netIncome`, `marketCap / revenue`로 fallback 계산한다.
   - FMP stable income-statement 실제 응답은 `calendarYear`가 아니라 `fiscalYear`, `period` 중심이므로 label 생성 규칙을 별도로 둔다.
 
+### PLAN CHANGE #7 — 2026-04-15 financial history sync 버튼 + estimate overlay 추가
+
+- 사용자 추가 요구를 반영해 financial dialog 범위를 다음으로 확장한다.
+  - `default universe` 전체를 대상으로 financial history/estimate snapshot을 당기는 batch sync 버튼을 `CalendarWindow`에 추가한다.
+  - ticker dialog는 actual history만이 아니라 FMP stable `analyst-estimates`를 함께 읽어 revenue / EPS / net income estimate를 가능한 범위에서 같이 표시한다.
+- backend 구현 방향
+  - `GET /api/calendar/financials/:ticker`는 DB cache 우선, 없으면 live fetch fallback으로 유지한다.
+  - 새 batch route는 `default universe` ticker들을 순회하며 financial actual + estimate snapshot을 DB cache table에 저장한다.
+- frontend 구현 방향
+  - earnings 탭 툴바에 `Sync Financial History` 버튼을 추가한다.
+  - financial dialog의 revenue / earnings chart에 estimate overlay를 추가하고, 요약 카드에도 estimate 값을 함께 노출한다.
+- 확인된 원인
+  - 현재 구현은 `income-statement`, `key-metrics`, `ratios`만 merge하므로 actual series만 존재한다.
+  - estimate series는 아직 `stable/analyst-estimates`를 전혀 조회하지 않기 때문에 그래프에 표시될 데이터가 없다.
+
+### PLAN CHANGE #8 — 2026-04-15 historical estimate 표시 보강
+
+- 사용자의 추가 피드백을 반영해 annual financial series merge를 `date` 우선이 아니라 회계연도 기준으로 보정한다.
+- 이미 cache에 들어간 annual duplicate point도 read path에서 접어 past actual + estimate가 같은 period에 함께 보이게 한다.
+- earnings 화면에는 현재 범위의 `Confirmed / Pending` count를 노출해 confirmed-only 범위인지 즉시 알 수 있게 한다.
+- financial dialog에는 과거 period의 actual-vs-estimate 비교표를 추가해 future-only estimate가 아니라 historical estimate도 바로 읽히게 한다.
+
 ### 현재 레포 상태(중요, 확인됨)
 
 - backend에는 이미 일반형 calendar read API가 있다.
@@ -514,7 +536,8 @@
 | 3-1 | earnings row에 DB metadata(`industry`, ownership, company name)를 enrich | `terminal/backend/src/services/calendarRepository.ts` | `/api/calendar/events` 응답 확인 | ⏳ |
 | 3-2 | date-only `from/to` query를 inclusive day range로 정규화 | `terminal/backend/src/server.ts`, `terminal/backend/src/services/calendarRepository.ts` | query 조합 확인 | ⏳ |
 | 3-3 | CSV export와 type config가 새 필드 구조를 반영하도록 조정 | `terminal/backend/src/services/calendarRepository.ts` | export.csv 확인 | ⏳ |
-| 3-4 | ticker별 revenue / earnings / valuation series를 내려주는 read-only API 추가 | `terminal/backend/src/services/*`, `terminal/backend/src/server.ts` | `/api/calendar/financials/:ticker` 응답 확인 | ⬜ |
+| 3-4 | ticker별 revenue / earnings / valuation + estimate series를 내려주는 read-only API 추가 | `terminal/backend/src/services/*`, `terminal/backend/src/server.ts` | `/api/calendar/financials/:ticker` 응답 확인 | ⏳ |
+| 3-5 | default universe 대상 financial history/estimate snapshot sync job + DB cache 추가 | `terminal/backend/src/db.ts`, `terminal/backend/src/services/*`, `terminal/backend/src/server.ts` | `/api/fmp/calendar/financials/update` 실행 후 DB/API 확인 | ⏳ |
 
 3-1 목적: calendar row가 별도 external fetch 없이 DB metadata를 함께 보여주게 하기 위함.
 설명: `industry`, `float_pct`, `institutional_pct`, `insider_pct`를 existing DB에서 붙인다.
@@ -534,11 +557,17 @@
 사람 검증(비개발자): 화면과 CSV가 같은 의미의 컬럼을 가진다.
 흔한 문제/주의: `meta_json` key rename 후 export를 놓치기 쉽다.
 
-3-4 목적: CalendarWindow ticker 우클릭 dialog가 필요한 재무 시계열을 바로 읽게 하기 위함.
-설명: FMP stable `income-statement`, `key-metrics`, `ratios`를 묶어 annual / quarterly series를 반환하는 read-only endpoint를 만든다.
-완료 조건(눈으로 확인): 특정 ticker에 대해 revenue, net income, EPS, P/E, P/S series가 하나의 API payload로 내려온다.
-사람 검증(비개발자): ticker 하나를 지정했을 때 dialog에 그릴 데이터가 API에서 바로 보인다.
-흔한 문제/주의: `peRatio`가 비어 있는 응답이 있을 수 있으므로, `priceToEarningsRatio` 또는 `marketCap / netIncome` fallback 규칙이 필요하다.
+3-4 목적: CalendarWindow ticker 우클릭 dialog가 필요한 재무 시계열과 estimate를 바로 읽게 하기 위함.
+설명: FMP stable `income-statement`, `key-metrics`, `ratios`, `analyst-estimates`를 묶어 annual / quarterly series를 반환하는 read-only endpoint를 만든다.
+완료 조건(눈으로 확인): 특정 ticker에 대해 actual revenue / net income / EPS / P/E / P/S와 estimate revenue / net income / EPS가 하나의 API payload로 내려온다.
+사람 검증(비개발자): ticker 하나를 지정했을 때 dialog에 그릴 actual + estimate 데이터가 API에서 함께 보인다.
+흔한 문제/주의: `analyst-estimates`는 `date` 기반 response라 actual `fiscalYear/period` series와 merge key 규칙을 명확히 두어야 한다.
+
+3-5 목적: default ticker 전체에 대한 financial history/estimate를 미리 받아 둘 수 있게 하기 위함.
+설명: batch sync job이 `default universe` ticker를 순회하며 financial snapshot cache를 DB에 replace 저장한다.
+완료 조건(눈으로 확인): sync job 완료 후 여러 ticker가 live fetch 없이도 DB cache에서 financial dialog 데이터를 읽는다.
+사람 검증(비개발자): 캘린더 화면의 sync 버튼을 누르면 진행률이 보이고, 이후 ticker dialog가 미리 받아둔 데이터를 사용한다.
+흔한 문제/주의: stale row가 남지 않도록 ticker별 snapshot replace가 필요하고, default universe가 비어 있을 때는 명확한 에러가 필요하다.
 
 검증 훅:
 ```text
@@ -546,6 +575,8 @@
 - GET /api/calendar/events?type=earnings
 - GET /api/calendar/events/export.csv?type=earnings
 - GET /api/calendar/financials/AAPL
+- POST /api/fmp/calendar/financials/update
+- sync 후 GET /api/calendar/financials/AAPL 재확인
 ```
 사용자 확인 필요: **예**
 
@@ -559,7 +590,8 @@
 | 4-4 | `Inst %`, `Float %`, `Market Cap` min/max 숫자 필터 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx` | 브라우저에서 숫자 범위 입력 후 row 변화 확인 | ⏳ |
 | 4-5 | calendar 기본 날짜 정렬을 늦은 날짜 우선으로 전환 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx` | 브라우저 첫 row 날짜 확인 | ⏳ |
 | 4-6 | 날짜 범위 미지정 시 events fetch를 막고 안내 상태를 표시 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx` | 브라우저 초기 진입/Reset 후 빈 상태 확인 | ⏳ |
-| 4-7 | ticker 우클릭 context menu와 Financial dialog 차트 UI 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx` | 브라우저에서 우클릭 menu + dialog 확인 | ⬜ |
+| 4-7 | ticker 우클릭 context menu와 Financial dialog 차트 UI 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx`, `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarFinancialDialog.tsx` | 브라우저에서 우클릭 menu + dialog 확인 | ⏳ |
+| 4-8 | earnings 탭에 default ticker financial history sync 버튼과 estimate overlay UI 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx`, `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarFinancialDialog.tsx` | 브라우저에서 sync 버튼 + estimate line/card 확인 | ⏳ |
 
 4-1 목적: 현재 calendar 화면을 실데이터 기반으로 바꾸기 위함.
 설명: mock array 대신 backend response를 state source of truth로 삼는다.
@@ -603,6 +635,12 @@
 사람 검증(비개발자): 같은 캘린더 창에서 종목 재무 흐름을 추가 창 없이 바로 열어볼 수 있다.
 흔한 문제/주의: 좌클릭 linked-ticker 동작을 깨뜨리면 기존 window linkage UX가 회귀한다.
 
+4-8 목적: 사용자가 default ticker 전체 financial history를 batch로 받아 두고, dialog에서 estimate까지 함께 보게 하기 위함.
+설명: earnings 탭 툴바에 sync 버튼을 추가하고, dialog chart/card에 revenue / earnings estimate overlay를 렌더링한다.
+완료 조건(눈으로 확인): sync 버튼을 누르면 job progress가 보이고, dialog 차트에 estimate 선/값이 actual과 함께 표시된다.
+사람 검증(비개발자): earnings 화면에서 한 번 버튼을 누른 뒤 ticker dialog를 열면 estimate가 같이 보인다.
+흔한 문제/주의: actual 전용 차트 config를 그대로 두면 estimate series가 API에 있어도 화면에는 안 나타난다.
+
 검증 훅:
 ```text
 - backend dev + webui dev 실행
@@ -612,6 +650,7 @@
 - 기본 진입/Reset 후 첫 row 날짜가 늦은 날짜 우선인지 확인
 - 기본 진입/Reset 후 날짜 안내 상태이고 row가 비어 있는지 확인
 - ticker 우클릭 -> Financial menu -> dialog open -> annual/quarterly toggle 확인
+- earnings 탭 `Sync Financial History` 버튼 -> job progress -> 완료 후 dialog estimate 확인
 ```
 사용자 확인 필요: **예**
 
@@ -717,14 +756,16 @@ Legend:
   -> ⏳ 3-1 earnings row metadata enrich
   -> ⏳ 3-2 inclusive day range query 정규화
   -> ⏳ 3-3 export 동기화
-  -> ⬜ 3-4 ticker financial detail read API 추가
+  -> ⏳ 3-4 ticker financial detail read API 추가
+  -> ⏳ 3-5 financial snapshot sync job + DB cache
   -> ⏳ 4-1 mock 제거 + API fetch 연결
   -> ⏳ 4-2 탭/컬럼 backend canonical 정렬
   -> ⏳ 4-3 filter/sort/empty state 정리
   -> ⏳ 4-4 숫자 필터 추가
   -> ⏳ 4-5 기본 날짜 desc 정렬
   -> ⏳ 4-6 날짜 미지정 lazy load
-  -> ⬜ 4-7 ticker context menu + Financial dialog
+  -> ⏳ 4-7 ticker context menu + Financial dialog
+  -> ⏳ 4-8 financial sync 버튼 + estimate overlay
   -> ⏳ 5-1 backend 문서 동기화
   -> ⏳ 5-2 frontend 문서 동기화
   -> ⏳ 5-3 정적분석/빌드/테스트/runtime 검증
