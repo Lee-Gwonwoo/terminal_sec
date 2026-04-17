@@ -32,8 +32,9 @@
 - **full text 추출**: `fulltextExtractors.ts` + `fulltextUpdateService.ts` + `fulltextRepository.ts`
 - **AI 분석**: `aiAnalysisRepository.ts` (`news_ai_analysis` 테이블)
 - **Model 2 evidence**: `model2AnalysisRepository.ts` (`model2_analysis_runs`, `model2_case_summaries`, `model2_evidence_rows`)
+- **캘린더/재무/IPO SEC 보강**: `calendarIngestion.ts`, `calendarFinancialRepository.ts`, `ipoSecEnrichmentRepository.ts`, `ipoSecInsights.ts`
 - **기업 프로필**: `companyProfileRepository.ts`, `finnhubProfile2Provider.ts`, `fmpCompanyProfileProvider.ts`
-- **기타**: `industryLookup.ts`, `tickerCsvService.ts`, `tickerUniverseRepository.ts`, `calendarIngestion.ts`, `researchRepository.ts`, `jobManager.ts`
+- **기타**: `industryLookup.ts`, `tickerCsvService.ts`, `tickerUniverseRepository.ts`, `researchRepository.ts`, `jobManager.ts`
 
 #### Python 보조 스크립트 (`terminal/backend/scripts/`)
 - `ibkr_fetch_ohlc_batch.py`: IBKR TWS에서 다수 종목 OHLC 배치 조회 (stdin JSON → stdout NDJSON). TypeScript `ibkrOhlcBatchProvider.ts`가 child_process로 호출.
@@ -46,7 +47,7 @@
 - **앱 런타임 SQLite (terminal 백엔드 기본 DB)**
 	- 경로: `terminal/backend/backend/data/app.db`
 	- 용도: terminal 앱의 기본 영속 데이터
-	- **전체 테이블 목록 (2026-03-25 live inspect 기준)**:
+	- **전체 테이블 목록 (현재 코드 기준, 일부 row 수 표기는 2026-03-25 live inspect 참고)**:
 		| 테이블 | 용도 | 비고 |
 		|--------|------|------|
 		| `news_items` | 뉴스 메타데이터 (254,903 rows) | PK: `id` (UUID). live schema에는 `publisher`, `origin_url`, 일부 legacy inline change 컬럼이 남아 있다 |
@@ -63,6 +64,8 @@
 		| `ticker_universes` | ticker 유니버스 정의 (1 row) | |
 		| `ticker_universe_items` | 유니버스 소속 ticker (1,698 rows) | |
 		| `calendar_events` | 캘린더 이벤트 (0 rows) | |
+		| `calendar_financial_series` | 캘린더 재무 시계열 cache | PK: `(ticker, period_type, report_date)`. FMP actual/estimate snapshot 저장 |
+		| `ipo_sec_enrichments` | IPO SEC 보강 결과 | UNIQUE: `event_unique_key`. `calendar_events.unique_key` 기준 1:1 보강 |
 		| `update_status` | 업데이트 상태 추적 (14 rows) | PK: `source_key`. live columns는 `source_key`, `last_success_at`, `details_json`, `updated_at` |
 		| `research_tabs` | Case Research 탭 (3 rows) | `deleted_at` soft delete 포함 |
 		| `research_pages` | Case Research 페이지 (28 rows) | `deleted_at` soft delete 포함 |
@@ -73,9 +76,16 @@
 		| `users` | 사용자 (1 row) | |
 		| `watchlists` / `watchlist_items` | 관심종목 (0 rows) | `watchlist_items.security_id` FK 컬럼 포함 |
 		| `alert_rules` | 알림 규칙 (0 rows) | |
+	- **app.db 논리 구조 (현재 코드 기준)**
+		- 뉴스 ingestion / 후처리: `news_items`를 중심으로 `news_change_metrics`, `news_fulltext`, `news_ai_analysis`, `news_sentiment_snapshots`, `sec_filings`가 1:N 또는 1:1 보강 구조를 이룬다.
+		- 티커 / 기업 메타: `securities`가 ticker master이고, `company_profiles`가 `security_id` 기준 source별 다중 row를 가진다. `ticker_universes` / `ticker_universe_items`, `watchlists` / `watchlist_items`가 이를 참조한다.
+		- 캘린더 / 재무 / IPO SEC: `calendar_events`가 이벤트 snapshot 본체이고, `calendar_financial_series`가 재무 시계열 cache, `ipo_sec_enrichments`가 IPO 이벤트의 SEC-derived 보강 레이어다.
+		- 리서치 / Model 2: `research_tabs -> research_pages -> model2_analysis_runs -> model2_case_summaries / model2_evidence_rows` 순으로 연결된다.
+		- 사용자 / UI 보조: `users`, `news_saved_views`, `bookmark_folders`, `bookmark_items`, `alert_rules`, `update_status`가 앱 개인화와 job ledger를 담당한다.
 	- 현재 코드 기준 주의:
 		- `news_change_metrics`는 **영구 테이블**이다 (`CREATE TABLE IF NOT EXISTS`). 서버 재시작 시 삭제/재생성되지 않는다.
 		- `news_items` live schema에는 `[][][]ohlc_ticker[][][]`, `[][][]ohlc_date[][][]`, `[][][]change_1d_pct[][][]`, `[][][]change_from_open_pct[][][]`, `[][][]change_7d_pct[][][]`, `[][][]change_14d_pct[][][]`, `[][][]change_30d_pct[][][]`, `[][][]change_computed_at[][][]`, `[][][]publisher[][][]`, `[][][]origin_url[][][]`가 존재한다. 하지만 `newsChangeMerger`의 canonical 결과는 `news_change_metrics` 쪽을 사용한다.
+		- `news_items`의 dedupe 기준은 `UNIQUE (source, source_type, url)`이다. 같은 provider라도 `source_type`이 다르면 URL이 같아도 별도 row가 생길 수 있다.
 		- 실제 조회(`GET /api/news`)는 `news_items`에 `news_change_metrics` 8개 metric_key를 각각 LEFT JOIN + `news_fulltext` + `news_ai_analysis` + `news_sentiment_snapshots` + `company_profiles`/`securities`를 join해서 응답한다.
 		- `GET /api/news`는 company data enrich 단계에서 `[][][]marketCap[][][]`, `[][][]peers[][][]`, `[][][]companyDescription[][][]`, `[][][]ipoDate[][][]`를 대표 ticker 기준으로 보강한다.
 		- `GET /api/news`는 `[][][]hasFullText[][][]` 여부는 내려주지만 `news_fulltext.full_text` 본문 자체를 canonical source처럼 그대로 제공하는 endpoint로 가정하면 안 된다. full text 판독이 필요하면 raw DB에서 `news_fulltext`를 직접 JOIN한다.
@@ -87,7 +97,7 @@
 		- 현재 구현 기준 `market cap`은 FMP profile, `float`는 FMP shares-float, `institutional`과 `insider`는 Yahoo holders 기반으로 저장/재노출한다. legacy Finnhub institutional row는 현재 UI source로 쓰지 않는다.
 		- Finnhub company data 경로(`pull-peers`, `pull-ipo-date`)는 전역 throttle을 공유한다. 기본값은 `[][][]tickerConcurrency[][][]=1`이며, 서로 다른 Finnhub company-data job이 동시에 돌아도 실제 요청은 직렬화된다.
 		- `pull-market-cap`은 더 이상 Finnhub profile2가 아니라 FMP profile batch 경로를 사용한다. 현재 기본 concurrency는 `5`, clamp 범위는 `1..20`이다.
-		- `update_status` live source_key 전체 집합은 `company_profiles`, `company_profiles_ipo_date`, `company_profiles_market_cap`, `company_profiles_yahoo`, `company_profiles_holders_yahoo`, `finhub_news`, `fmp_press_release`, `fmp_sec_filing`, `ibkr_calendar`, `ibkr_ohlc_1d`, `news_change_7d`, `news_change_custom`, `news_change_recent`, `rtpr_press_release`, `tickers_csv`다.
+		- `update_status`는 기본 known key(`tickers_csv`, `finhub_news`, `ibkr_calendar`, `ibkr_ohlc_1d`, `ibkr_ohlc_turnover`, `fmp_ohlc_recent_missing`, `news_change_recent_fmp_missing`)를 항상 응답에 포함하고, 실제 DB에 적재된 추가 key(`news_change_recent`, `news_change_custom`, `fmp_calendar_financials`, `fmp_calendar_earnings`, `fmp_calendar_ipos`, `fmp_calendar_ipos_sec`, company profile 계열 등)를 동적으로 함께 노출한다.
 		- `news_items.source_type` live 분포는 `press_release=192,899`, `news=18,321`, `company_news=14,354`, `market_news=440`, `IBKR=25`다.
 		- 현재 코드 기준 `news_items.source_type`는 위 live 분포 외에도 `fmp_press_release`, `fmp_stock_news`, `fmp_sec_filing`, `investing_stock_market_news`, `investing_cryptocurrency_news`를 사용할 수 있다.
 		- Investing provider(`investingNewsProvider.ts`)는 category page에서 `title` + description teaser를 `news_items`로 저장하고, 기사 본문이 필요하면 별도 `news_fulltext` 추출 결과를 함께 봐야 한다.
@@ -153,7 +163,7 @@
 		- `fmp-concurrency`, `fmp-request-interval-ms`, `fmp-pr-page-limit`, `fmp-pr-max-pages`, `fmp-sec-max-pages`
 		- `fmp-skip-existing`, `peers-skip-existing`, `ipo-skip-existing`, `yahoo-concurrency`, `yahoo-request-interval-ms`, `yahoo-skip-existing`
 	- 의미: “앱을 껐다 켜도 마지막 상태 유지”, “탭 상태 유지”, “전역 글자 크기 유지” 같은 workspace/UI 복원 기능은 이미 `localStorage` 기준으로 동작한다. 다만 운영 데이터의 canonical source는 여전히 backend `app.db`다.
-	- 실제 창 상태: `Finnhub News`, `Investing News`, `Default Ticker`, `Data Control`, `Case Research`, `Evidence Table`, `Watchlist`는 backend API와 연결되어 있다. `Calendar`는 아직 mock data 기반이다.
+	- 실제 창 상태: `Finnhub News`, `Investing News`, `Calendar`, `Default Ticker`, `Data Control`, `Case Research`, `Evidence Table`, `Watchlist`는 backend API와 연결되어 있다. `Company Description`, `Case Description`, `Data Control How To Use`는 현재 탭에 동적으로 붙는 보조 창이다.
 	- 향후 원칙: 프론트 전용 UI state는 1차로 `localStorage`를 사용하고, runtime 데이터 source of truth(`app.db`)와 혼동하지 않는다.
 
 - **뉴스 실험 산출물 / 외부 export / 임시 정리본**

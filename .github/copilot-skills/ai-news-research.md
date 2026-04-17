@@ -85,6 +85,13 @@
   - `institutional ownership %`
   - `insider ownership %`
   - `short interest %`
+- `Model_1`에서 최종 분류가 `primary`이고 방향이 `🟢 Long`이면, **왜 long인지에 대한 구체적인 경제 경로 설명**을 별도로 남긴다. 아래 중 무엇이 핵심인지 빠뜨리면 설명 부족으로 간주한다.
+  - 이번 뉴스가 바꾼 것이 정확히 무엇인지: `asset ownership`, `control`, `approval`, `commercial access`, `pricing power`, `financing overhang removal`, `policy tone shift`
+  - 그 변화가 왜 positive repricing으로 이어질 수 있는지: `매출/이익 귀속`, `확률 상승`, `멀티플 재평가`, `후속 catalyst 기대`, `리스크 감소`
+  - 이것이 **회사 고유의 직접 성취**인지, 아니면 **정책/테마/환경 변화에 따른 간접 수혜 기대**인지
+  - same-ticker 대표 사례 1~2건이 왜 현재 뉴스와 진짜로 비슷한지, 그리고 무엇이 달라서 기대 강도를 보수적으로 조정해야 하는지
+  - `same-ticker avg`, `+5% 이상 건수`, `avg1d` 같은 통계는 보조 근거일 뿐이며, **통계 숫자만으로 long 결론을 닫으면 안 된다.**
+- 특히 `primary + 🟢 Long`이면서 현재 뉴스가 `정책 톤 변화`, `규제 완화 기대`, `테마 재점화`, `환경 변화 수혜` 같은 **간접형 catalyst**라면, `호재는 맞지만 직접성은 약하다` 또는 그와 동등한 수준의 문장을 명시해 **direct catalyst와 indirect catalyst를 구분해서** 설명한다.
 - 사용자가 **여러 날짜를 한 번에** 요청하면, `Model_1`의 기본 단위를 임의로 `날짜당 대표 뉴스 1건`으로 축소하지 않는다.
 - 여러 날짜 요청에서는 먼저 **각 날짜의 current-news 집합 전체**를 훑고, 날짜별로 아래 중 무엇인지 명시해야 한다.
   - `primary`: 그 날짜의 핵심 분석 대상으로 남길 뉴스

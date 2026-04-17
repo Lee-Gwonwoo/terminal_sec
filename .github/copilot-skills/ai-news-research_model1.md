@@ -257,6 +257,14 @@
 - `Direction`은 **트레이딩 지시를 직접 내리는 컬럼이 아니라**, 현재 뉴스의 가격 반응 방향을 요약하는 해석 태그다.
 - 즉 `primary` 안에도 `🟢 Long`과 `🔴 Short`가 모두 들어갈 수 있다. 중요한 악재도 `primary`가 될 수 있다.
 - 방향 태그는 headline 인상만으로 닫지 말고, 가능하면 same-ticker / other-ticker 분포와 현재 사건 성격을 함께 보고 확정한다.
+- `primary`이면서 `🟢 Long`으로 닫는 경우에는, 본문 어딘가에 반드시 `왜 long인가`를 **쉬운 말로 한 번 더 푼 문단 또는 소제목**을 남긴다. 아래 질문에 답하지 못하면 `primary long` 설명이 부족한 것으로 본다.
+  1. 이번 뉴스로 **무엇이 실제로 좋아졌는가**: `자산 가치 귀속`, `통제권`, `상업화 가능성`, `승인 확률`, `판매 가능 범위`, `자금조달 부담 감소`
+  2. 그 변화가 왜 **주가 재평가**로 이어질 수 있는가: `earnings power`, `future economics capture`, `probability uplift`, `multiple rerating`, `next-catalyst setup`
+  3. 이 뉴스가 **직접형 catalyst**인지, `정책/규제/테마 환경 변화`에 따른 **간접형 catalyst**인지
+  4. same-ticker 대표 사례가 왜 현재 뉴스와 진짜로 비슷한가, 그리고 무엇이 달라서 기대 강도를 조정해야 하는가
+  5. 무엇을 과하게 읽으면 안 되는가: 예를 들어 `직접 승인 아님`, `즉시 매출 아님`, `assay euphoria를 그대로 이식하면 과함`
+- 특히 `primary + 🟢 Long`이 `정책 톤 변화`, `규제 완화 기대`, `테마 내러티브 강화`, `환경 변화 수혜`처럼 **간접형 catalyst**에 가까우면, 본문에 반드시 `호재는 맞지만 직접성은 약하다` 또는 동등한 강도의 문장을 적어 **long 판단과 directness 약세를 동시에** 설명한다.
+- 반대로 `asset ownership/control`, `binding approval`, `signed contract`, `financing overhang removal`, `cash economics directly improve`처럼 **직접형 catalyst**라면, 본문에 그 직접성을 명시하고 왜 indirect theme 기사보다 더 높은 가중치를 주는지 설명한다.
 - 상단 표에서 `보류`, `임시 후보`, `watch`, `noise`처럼 아직 깊은 분석이 안 된 행은 `⚪ Unclear`를 기본값으로 둘 수 있다.
 
 **Model_1 상단 요약 표 이모티콘/별점 규칙 (필수)**
@@ -579,6 +587,10 @@
   - 다른 ticker에서는 비슷한 이슈가 **어떤 시총 구간에서 더 잘 먹혔는가**
   - 현재 뉴스는 과거 사례 중 **어느 쪽에 더 가까운가**
   - 그래서 현재 뉴스의 상승 가능성을 볼 때 **확신을 높여야 하는지, 낮춰야 하는지**
+- `primary + 🟢 Long`에서는 여기에 더해, **아래 3줄 요약을 권장 수준이 아니라 사실상 필수 규칙**으로 본다.
+  - `무슨 호재인가`: 이번 뉴스가 실제로 바꾼 경제 변수 1문장
+  - `왜 지금 long인가`: 그 변화가 positive repricing으로 이어지는 핵심 경로 1문장
+  - `무엇을 과하게 읽으면 안 되는가`: 직접성 한계나 과열 해석 금지선 1문장
 - 가능하면 최종 문장에는 아래 수준의 종합 해석을 남긴다.
   - `same-ticker에서는 과거 7건 중 5건이 7거래일 내 상승했지만, other-ticker 비교에서는 대형주보다 중소형주에서 반응이 더 컸다. 따라서 이번 건은 방향은 positive지만, 강한 재평가를 기대하려면 추가 상업화 확인이 필요하다.`
 - 즉 `Model_1` 최종 출력은 **현재 뉴스 요약 + 현재 ticker market cap + same-ticker 과거 반응 + other-ticker 유사사례 + 비교 ticker market cap 설명 + market cap 맥락 + 종합 해석**까지 포함해야 완료로 본다.

@@ -21,6 +21,9 @@
 - `GET /api/news`는 `news_items` 단독 조회가 아니라 `news_change_metrics`, `news_fulltext`, `news_ai_analysis`, sentiment snapshot, peers, company description, IPO date, market cap, industry를 join/병합해서 내려준다.
 - `POST /api/news/pull-investing`가 존재하며 Investing.com의 stock market / cryptocurrency category를 `news_items`에 적재한다.
 - `news_change_metrics`는 `CREATE TABLE IF NOT EXISTS`로 유지되는 영구 테이블이며, change update 작업이 metric 단위로 UPSERT 한다.
+- `news_items`의 dedupe/unique 기준은 `UNIQUE (source, source_type, url)`이다. 같은 URL이라도 `source_type`이 다르면 별도 row로 공존할 수 있다.
+- `app.db`는 뉴스 전용 DB가 아니라 calendar runtime cache(`calendar_events`, `calendar_financial_series`, `ipo_sec_enrichments`), ticker/company metadata, research/model2까지 함께 저장하는 통합 런타임 DB다.
+- `sec_filings`는 SEC filing 메타데이터를 `news_items`와 분리해 저장하는 companion table이다.
 - background job 상태와 로그는 메모리 기반이라 서버 재시작 시 유지되지 않는다.
 - `GET /api/jobs/active`, `GET /api/jobs/:jobId`는 뉴스 창 관련 장시간 작업에 대해 `category`, `scope`, `label`을 포함한다. 현재 핵심 category는 `news-update`, `news-fulltext`이고, scope는 `finnhub-news`, `investing-news`, fallback `other`를 사용한다.
 - default ticker universe는 서버 시작 시 CSV를 읽어 `securities`, `ticker_universes`, `ticker_universe_items`를 upsert하며, 이후 기본 경로 조회/수정은 DB-primary로 동작하고 CSV는 backup sync 성격이다.
@@ -126,7 +129,7 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 제약:
 
-- `UNIQUE (source, url)`
+- `UNIQUE (source, source_type, url)`
 - 인덱스 `(published_at DESC, id DESC)`
 
 주의:
@@ -851,7 +854,7 @@ FMP stock news를 수집한다. primary endpoint는 `stable/news/stock?symbols=T
 2. `recent` 모드면 `getTickerAnchorMap("fmp_stock_news", "FMP")`로 ticker별 마지막 anchor를 구한다.
 3. anchor가 없는 ticker는 최근 7일 fallback으로 돌고, `confirmed_empty_ranges`가 있으면 건너뛸 수 있다.
 4. ticker worker pool이 `fetchFmpStockNewsByTicker()`를 호출해 page를 순회한다.
-5. 수집된 row는 `insertNewsItem()`으로 `news_items`에 저장된다. dedupe 기준은 기존과 동일하게 `UNIQUE (source, url)`이다.
+5. 수집된 row는 `insertNewsItem()`으로 `news_items`에 저장된다. dedupe 기준은 기존과 동일하게 `UNIQUE (source, source_type, url)`이다.
 6. 새 row가 있으면 같은 pull job 안에서 `mergeChangeForNewItems()`를 바로 호출해 `news_change_metrics`를 채운다.
 7. 새 row가 있으면 같은 pull job 안에서 full text 추출도 이어서 수행한다.
 
@@ -905,7 +908,7 @@ Investing.com 기사 수집 job을 시작한다. backend는 stock market / crypt
   - crypto category는 `source='INVESTING'`, `source_type='investing_cryptocurrency_news'`
 - 동작:
   1. category별 page를 순회하며 기사 목록을 수집한다.
-  2. `UNIQUE (source, url)` 기준으로 `news_items`에 insert 한다.
+  2. `UNIQUE (source, source_type, url)` 기준으로 `news_items`에 insert 한다.
   3. 실제 새 row가 생기면 해당 id만 대상으로 후속 fulltext job 또는 inline fulltext 경로를 연결한다.
 
 응답 컬럼:
@@ -1315,7 +1318,7 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 제약:
 
-- `UNIQUE (source, url)`
+- `UNIQUE (source, source_type, url)`
 - 인덱스: `(published_at DESC, id DESC)`
 
 주의:
@@ -1861,7 +1864,7 @@ FMP stock / FMP PR fulltext 구조 차이:
 publisher 동작 주의:
 
 - 현재 FINNHUB 수집 경로는 raw `item.source`가 있으면 그 값을 publisher로 저장하고, 없으면 `url` 도메인으로 추론한다.
-- 하지만 `news_items`는 `UNIQUE (source, url)`에 `INSERT OR IGNORE`를 쓰므로, 같은 row가 다시 들어올 때 publisher가 자동으로 더 정확한 값으로 갱신되지는 않는다.
+- 하지만 `news_items`는 `UNIQUE (source, source_type, url)`에 `INSERT OR IGNORE`를 쓰므로, 같은 row가 다시 들어올 때 publisher가 자동으로 더 정확한 값으로 갱신되지는 않는다.
 - 또한 기본 backfill은 `publisher IS NULL OR 'UNKNOWN'`만 대상으로 하고, `url`이 `finnhub.io/api/news?id=...`이면 다시 `FINNHUB`로 판정될 수 있다.
 - 그래서 실제 기사 출처가 `YAHOO`여도, 과거에 generic `FINNHUB`로 저장된 row가 화면에 남을 수 있다.
 

@@ -7,10 +7,12 @@
 
 - 앱은 React + TypeScript + Vite 기반이다.
 - 창(window) 기반 데스크톱 스타일 UI이며, 각 창은 드래그/리사이즈/최대화/닫기를 지원한다.
-- 실제 API 연동이 살아 있는 주요 창은 `Finnhub News`, `Investing News`, `Default Ticker`, `Daily Change History`, `Data Control`, `AI Research Window`, `Evidence Table`, `Watchlist` 이다.
+- 실제 API 연동이 살아 있는 주요 창은 `Finnhub News`, `Investing News`, `Calendar`, `Default Ticker`, `Daily Change History`, `Data Control`, `AI Research Window`, `Evidence Table`, `Watchlist` 이다.
 - `News` 창도 `GET /api/news`, `POST /api/news/pull-eodhd`를 실제로 호출하지만, 현재 운영 기준의 주력 뉴스 창은 아니다.
 - `Watchlist` 창은 backend `watchlists` API와 연결되어 있고, 종목 이름/가격 일부는 프론트의 fallback lookup을 함께 사용한다.
 - `Calendar` 창은 backend `calendar_events` 기반의 실데이터 창이며, 현재 earnings + IPO 탭과 background job polling을 지원한다. IPO 탭에는 `Security Type` 컬럼과 dropdown 필터가 있고, 이 값은 FMP의 `ticker/company_name` 문자열에서 파생된다.
+- `App.tsx`는 `open-case-description`, `open-company-description`, `open-data-control-how-to-use` custom event를 받아 `case-description`, `company-description`, `data-control-how-to-use` 보조 창을 현재 탭에 동적으로 추가한다.
+- ticker가 있는 주요 창에서는 클릭으로 `Company Description` 창을 열 수 있고, ticker hover 3초 뒤 `CompanyDescriptionHoverPreview` overlay가 뜬다.
 - `BraveNewsWindow.tsx` 파일은 남아 있지만 현재 `WindowType`에 연결되어 있지 않아 UI에서 열 수 없다.
 - 탭/창 레이아웃, 다크 모드, 전역 글자 크기, 뉴스 제목/요약 글자 크기, linked ticker는 `terminal-workspace-v1`로 localStorage에 저장된다.
 - 추가 UI 상태로 `finhub-news-ui-state`, `investing-news-ui-state`, `finnhub-last-update-config`, `data-control-active-tab`, `ft-concurrency`, `fmp-pr-fulltext-concurrency`, `fmp-stock-fulltext-concurrency`, `change-fmp-concurrency`, `finnhub-ticker-concurrency`, `finnhub-request-interval-sec`, `finnhub-company-news-ticker-concurrency`, `finnhub-company-news-request-interval-sec`, `rtpr-ticker-concurrency`, `fmp-concurrency`, `fmp-request-interval-ms`, `fmp-pr-page-limit`, `fmp-pr-max-pages`, `fmp-sec-max-pages`, `fmp-skip-existing`, `peers-skip-existing`, `ipo-skip-existing`, `yahoo-concurrency`, `yahoo-request-interval-ms`, `yahoo-skip-existing`를 사용한다.
@@ -95,11 +97,15 @@ Vite dev proxy:
 - `case-research`
 - `evidence-table`
 - `case-description`
+- `company-description`
+- `data-control-how-to-use`
 
 주의:
 
 - `evidence-table`은 실제 렌더링되는 정식 창 타입이며 backend `model2` API를 사용한다.
 - `case-description`은 Add Tab Modal에서 직접 고르는 타입이 아니라, `EvidenceTableWindow`가 `open-case-description` 이벤트를 보낼 때 같은 탭 안에 동적으로 열리는 보조 설명 창이다.
+- `company-description`은 Add Tab Modal에서 직접 고르는 타입이 아니라, ticker 클릭 이벤트를 통해 현재 탭에 동적으로 열리는 회사 설명 창이다.
+- `data-control-how-to-use`는 Add Tab Modal에서 직접 고르는 타입이 아니라, `DataControlWindow` 또는 `FinnhubNewsWindow`의 `How To Use` 액션에서 동적으로 열리는 안내 창이다.
 - `brave-news`는 타입 정의에 없다. 즉 파일은 있지만 앱에서 선택/렌더링되지 않는다.
 
 ## Add Tab Modal
@@ -115,6 +121,12 @@ Vite dev proxy:
 - Data Control
 - AI Research Window
 - Evidence Table
+
+직접 선택되지 않는 보조 창:
+
+- `case-description`
+- `company-description`
+- `data-control-how-to-use`
 
 기본 선택값은 비어 있으며, 아무 창도 고르지 않으면 `Start` 버튼은 비활성화된다.
 
@@ -133,6 +145,8 @@ Vite dev proxy:
 - `case-research` → `AI Research Window`
 - `evidence-table` → `Evidence Table`
 - `case-description` → `Case Description`
+- `data-control-how-to-use` → `Data Control How To Use`
+- `company-description` → `Company Description: <TICKER>` 형태로 동적으로 생성
 - 나머지 → `<Type> Window`
 
 ## 창 연결(linked ticker)
