@@ -745,7 +745,7 @@ export function DataControlWindow({
       label: 'Recent Change% Update',
       statusKey: 'news_change_recent',
       group: 'Change Update',
-      description: `최근 7일 뉴스 change % 전체 재계산. DB에 OHLC가 없으면 FMP fallback을 사용합니다. (concurrency=${changeFmpConcurrency}, interval=${fmpRequestIntervalMs}ms)`,
+      description: `최근 7일 뉴스 change % 전체 재계산 + missing HV/Z Score fill. DB에 OHLC가 없으면 FMP fallback을 사용합니다. (concurrency=${changeFmpConcurrency}, interval=${fmpRequestIntervalMs}ms)`,
     },
     {
       key: 'fmpRecentChange',
@@ -759,7 +759,7 @@ export function DataControlWindow({
       label: 'Custom Change% Update',
       statusKey: 'news_change_custom',
       group: 'Change Update',
-      description: `선택한 날짜 범위 뉴스 change % 재계산. DB에 OHLC가 없으면 FMP fallback을 사용합니다. (concurrency=${changeFmpConcurrency}, interval=${fmpRequestIntervalMs}ms)`,
+      description: `선택한 날짜 범위 뉴스 change % 재계산 + missing HV/Z Score fill. DB에 OHLC가 없으면 FMP fallback을 사용합니다. (concurrency=${changeFmpConcurrency}, interval=${fmpRequestIntervalMs}ms)`,
       extra: (
         <div className="flex items-center gap-2 flex-wrap">
           <label className="text-[11px] text-gray-500 dark:text-gray-400">From:</label>

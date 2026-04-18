@@ -5,6 +5,15 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { getDb } from "../db.js";
 import { fetchFmpOhlcBatch } from "./fmpOhlcProvider.js";
+import {
+  buildOhlcHistory,
+  computeVolatilityMetricValues,
+  type ActualChangeMetricValues,
+  type OhlcHistory,
+  type VolatilityMetricValues,
+  VOLATILITY_FIELD_SPECS,
+  VOLATILITY_METRIC_KEYS,
+} from "./newsVolatilityMetrics.js";
 import { shouldExcludeCurrentEtDailyBar, upsertBars } from "./ohlcWatchlistRepository.js";
 
 /** Options for FMP fallback when OHLC DB has no data for a ticker. */
@@ -223,6 +232,221 @@ const STANDARD_METRIC_KEYS = [
   "change_30d_pct",
 ] as const;
 
+const ALL_CHANGE_METRIC_KEYS = [...STANDARD_METRIC_KEYS, ...VOLATILITY_METRIC_KEYS] as const;
+
+const UPSERT_SINGLE_METRIC_SQL = `INSERT INTO news_change_metrics
+  (news_id, metric_key, value_pct, ohlc_ticker, reference_date, target_date, forward_trading_days, computed_at)
+VALUES (?,?,?,?,?,?,?,?)
+ON CONFLICT(news_id, metric_key) DO UPDATE SET
+  value_pct = excluded.value_pct,
+  ohlc_ticker = excluded.ohlc_ticker,
+  reference_date = excluded.reference_date,
+  target_date = excluded.target_date,
+  forward_trading_days = excluded.forward_trading_days,
+  computed_at = excluded.computed_at`;
+
+type VolatilityMetricRow = {
+  newsId: string;
+  metricKey: (typeof VOLATILITY_METRIC_KEYS)[number];
+  value: number | null;
+  ticker: string;
+  referenceDate: string;
+  targetDate: string;
+  forwardTradingDays: number;
+};
+
+type TickerHistoryCache = Map<string, Promise<OhlcHistory>>;
+
+async function getTickerOhlcHistory(
+  ticker: string,
+  cache: TickerHistoryCache,
+): Promise<OhlcHistory> {
+  const cached = cache.get(ticker);
+  if (cached) return cached;
+
+  const pending = (async () => {
+    const db = await getOhlcConn();
+    const rows = await db.all<OhlcRow[]>(
+      `SELECT Symbol, Datetime, Open, High, Close FROM ohlc_1d
+       WHERE Symbol = ?
+       ORDER BY Datetime ASC`,
+      [ticker],
+    );
+    const currentEtDate = getCurrentEtParts().date;
+    const excludeCurrentEt = shouldExcludeCurrentEtDailyBar(currentEtDate);
+    const filtered = excludeCurrentEt
+      ? rows.filter((row) => row.Datetime !== currentEtDate)
+      : rows;
+    return buildOhlcHistory(filtered);
+  })();
+
+  cache.set(ticker, pending);
+  return pending;
+}
+
+function toActualChangeMetricValues(metrics: ComputedMetrics): ActualChangeMetricValues {
+  return {
+    changePct: metrics.changePct,
+    changeFromOpen: metrics.changeFromOpen,
+    changeOpenToHigh: metrics.changeOpenToHigh,
+    change1d: metrics.change1d,
+    change3d: metrics.change3d,
+    change7d: metrics.change7d,
+    change14d: metrics.change14d,
+    change30d: metrics.change30d,
+  };
+}
+
+function getMetricDateInfo(metrics: ComputedMetrics, actualField: keyof ActualChangeMetricValues): {
+  referenceDate: string;
+  targetDate: string;
+} {
+  switch (actualField) {
+    case "changePct":
+      return { referenceDate: metrics.prevDate, targetDate: metrics.anchorDate };
+    case "changeFromOpen":
+    case "changeOpenToHigh":
+      return { referenceDate: metrics.anchorDate, targetDate: metrics.anchorDate };
+    case "change1d":
+      return { referenceDate: metrics.prevDate, targetDate: metrics.fwd1Date };
+    case "change3d":
+      return { referenceDate: metrics.prevDate, targetDate: metrics.fwd3Date };
+    case "change7d":
+      return { referenceDate: metrics.prevDate, targetDate: metrics.fwd5Date };
+    case "change14d":
+      return { referenceDate: metrics.prevDate, targetDate: metrics.fwd10Date };
+    case "change30d":
+      return { referenceDate: metrics.prevDate, targetDate: metrics.fwd22Date };
+  }
+}
+
+function buildMissingVolatilityMetricRows(
+  metrics: ComputedMetrics,
+  values: VolatilityMetricValues,
+  missingKeys: Set<string>,
+): VolatilityMetricRow[] {
+  const rows: VolatilityMetricRow[] = [];
+  for (const spec of VOLATILITY_FIELD_SPECS) {
+    const { referenceDate, targetDate } = getMetricDateInfo(metrics, spec.actualField);
+    if (missingKeys.has(spec.hvKey)) {
+      rows.push({
+        newsId: metrics.newsId,
+        metricKey: spec.hvKey,
+        value: values[spec.hvField],
+        ticker: metrics.ticker,
+        referenceDate,
+        targetDate,
+        forwardTradingDays: spec.forwardTradingDays,
+      });
+    }
+    if (missingKeys.has(spec.zscoreKey)) {
+      rows.push({
+        newsId: metrics.newsId,
+        metricKey: spec.zscoreKey,
+        value: values[spec.zscoreField],
+        ticker: metrics.ticker,
+        referenceDate,
+        targetDate,
+        forwardTradingDays: spec.forwardTradingDays,
+      });
+    }
+  }
+  return rows;
+}
+
+async function getMissingVolatilityMetricKeysByNewsId(newsIds: string[]): Promise<Map<string, Set<string>>> {
+  const result = new Map<string, Set<string>>();
+  for (const newsId of newsIds) {
+    result.set(newsId, new Set<string>(VOLATILITY_METRIC_KEYS));
+  }
+  if (newsIds.length === 0) return result;
+
+  const db = getDb();
+  const NEWS_CHUNK_SIZE = 200;
+  const metricPlaceholders = VOLATILITY_METRIC_KEYS.map(() => "?").join(",");
+
+  for (let start = 0; start < newsIds.length; start += NEWS_CHUNK_SIZE) {
+    const chunk = newsIds.slice(start, start + NEWS_CHUNK_SIZE);
+    const newsPlaceholders = chunk.map(() => "?").join(",");
+    const rows = await db.all<{ news_id: string; metric_key: string; value_pct: number | null }[]>(
+      `SELECT news_id, metric_key, value_pct
+       FROM news_change_metrics
+       WHERE news_id IN (${newsPlaceholders})
+         AND metric_key IN (${metricPlaceholders})`,
+      [...chunk, ...VOLATILITY_METRIC_KEYS],
+    );
+
+    for (const row of rows) {
+      if (row.value_pct === null || row.value_pct === undefined) continue;
+      result.get(row.news_id)?.delete(row.metric_key);
+    }
+  }
+
+  return result;
+}
+
+async function computeMissingVolatilityRows(
+  metrics: ComputedMetrics[],
+  missingKeysByNewsId: Map<string, Set<string>>,
+  concurrency = DEFAULT_MERGE_CONCURRENCY,
+  isCancelled?: () => boolean,
+): Promise<VolatilityMetricRow[]> {
+  if (metrics.length === 0) return [];
+
+  const historyCache: TickerHistoryCache = new Map();
+  const rows: VolatilityMetricRow[] = [];
+
+  await poolRun(metrics, concurrency, async (metric) => {
+    const missingKeys = missingKeysByNewsId.get(metric.newsId);
+    if (!missingKeys || missingKeys.size === 0) return;
+
+    const history = await getTickerOhlcHistory(metric.ticker, historyCache);
+    const values = computeVolatilityMetricValues(history, metric.anchorDate, toActualChangeMetricValues(metric));
+    rows.push(...buildMissingVolatilityMetricRows(metric, values, missingKeys));
+  }, isCancelled);
+
+  return rows;
+}
+
+async function batchWriteVolatilityMetricRows(
+  rows: VolatilityMetricRow[],
+  onProgress?: (completed: number, total: number) => void,
+): Promise<void> {
+  if (rows.length === 0) {
+    onProgress?.(0, 0);
+    return;
+  }
+
+  const db = getDb();
+  const ts = now();
+  let written = 0;
+
+  for (let start = 0; start < rows.length; start += WRITE_CHUNK_SIZE) {
+    const chunk = rows.slice(start, start + WRITE_CHUNK_SIZE);
+    await db.run("BEGIN IMMEDIATE");
+    try {
+      for (const row of chunk) {
+        await db.run(UPSERT_SINGLE_METRIC_SQL, [
+          row.newsId,
+          row.metricKey,
+          row.value,
+          row.ticker,
+          row.referenceDate,
+          row.targetDate,
+          row.forwardTradingDays,
+          ts,
+        ]);
+        written += 1;
+        onProgress?.(written, rows.length);
+      }
+      await db.run("COMMIT");
+    } catch (error) {
+      await db.run("ROLLBACK");
+      throw error;
+    }
+  }
+}
+
 // ---------- Standard metrics for one news item (forward-looking) ----------
 
 /** Compute and upsert standard change metrics for a single news item.
@@ -240,6 +464,10 @@ export async function mergeChangeForNewsItem(
   const m = await computeMetricsForItem(newsId, ticker, publishedAt);
   if (!m) return false;
   await batchWriteMetrics([m]);
+  const missingKeysByNewsId = new Map<string, Set<string>>([
+    [newsId, new Set<string>(VOLATILITY_METRIC_KEYS)],
+  ]);
+  await fillMissingVolatilityMetrics([m], undefined, undefined, undefined, undefined, missingKeysByNewsId);
   return true;
 }
 
@@ -355,6 +583,7 @@ async function fmpFallbackFetch(
       concurrency: fmp.concurrency,
       requestIntervalMs: fmp.requestIntervalMs,
       onProgress,
+      onLog,
     },
   );
 
@@ -418,12 +647,15 @@ async function batchWriteMetrics(metrics: ComputedMetrics[]): Promise<void> {
   }
 }
 
-async function deleteMetricsForNewsIds(newsIds: string[]): Promise<void> {
+async function deleteMetricsForNewsIds(
+  newsIds: string[],
+  metricKeys: readonly string[] = STANDARD_METRIC_KEYS,
+): Promise<void> {
   if (newsIds.length === 0) return;
 
   const db = getDb();
   const NEWS_CHUNK_SIZE = 200;
-  const metricPlaceholders = STANDARD_METRIC_KEYS.map(() => "?").join(",");
+  const metricPlaceholders = metricKeys.map(() => "?").join(",");
 
   for (let start = 0; start < newsIds.length; start += NEWS_CHUNK_SIZE) {
     const chunk = newsIds.slice(start, start + NEWS_CHUNK_SIZE);
@@ -432,7 +664,7 @@ async function deleteMetricsForNewsIds(newsIds: string[]): Promise<void> {
       `DELETE FROM news_change_metrics
        WHERE news_id IN (${newsPlaceholders})
          AND metric_key IN (${metricPlaceholders})`,
-      [...chunk, ...STANDARD_METRIC_KEYS],
+      [...chunk, ...metricKeys],
     );
   }
 }
@@ -465,15 +697,47 @@ async function batchWriteMetricsWithProgress(
           m.newsId, "change_14d_pct", m.change14d, m.ticker, m.prevDate, m.fwd10Date, 10, ts,
           m.newsId, "change_30d_pct", m.change30d, m.ticker, m.prevDate, m.fwd22Date, 22, ts,
         ]);
-        written++;
+        written += 1;
         onProgress?.(written, metrics.length);
       }
       await db.run("COMMIT");
-    } catch (e) {
+    } catch (error) {
       await db.run("ROLLBACK");
-      throw e;
+      throw error;
     }
   }
+}
+
+async function fillMissingVolatilityMetrics(
+  metrics: ComputedMetrics[],
+  concurrency = DEFAULT_MERGE_CONCURRENCY,
+  isCancelled?: () => boolean,
+  onProgress?: (completed: number, total: number) => void,
+  onLog?: (msg: string) => void,
+  missingKeysByNewsId?: Map<string, Set<string>>,
+): Promise<{ written: number; targetedNewsRows: number }> {
+  if (metrics.length === 0) {
+    onProgress?.(0, 0);
+    return { written: 0, targetedNewsRows: 0 };
+  }
+
+  const effectiveMissingKeys = missingKeysByNewsId ?? await getMissingVolatilityMetricKeysByNewsId(metrics.map((metric) => metric.newsId));
+  const targetedMetrics = metrics.filter((metric) => (effectiveMissingKeys.get(metric.newsId)?.size ?? 0) > 0);
+
+  if (targetedMetrics.length === 0) {
+    onLog?.("[change] no missing HV/Z-score metrics to fill");
+    onProgress?.(0, 0);
+    return { written: 0, targetedNewsRows: 0 };
+  }
+
+  const rows = await computeMissingVolatilityRows(targetedMetrics, effectiveMissingKeys, concurrency, isCancelled);
+  if (isCancelled?.()) {
+    return { written: 0, targetedNewsRows: targetedMetrics.length };
+  }
+
+  await batchWriteVolatilityMetricRows(rows, onProgress);
+  onLog?.(`[change] wrote ${rows.length} HV/Z-score metric rows for ${targetedMetrics.length} news rows`);
+  return { written: rows.length, targetedNewsRows: targetedMetrics.length };
 }
 
 // ---------- Batch merge for newly inserted items ----------
@@ -498,6 +762,10 @@ export async function mergeChangeForNewItems(
 
   // Phase 2: batch write in chunked transactions
   await batchWriteMetrics(computed);
+  const missingKeysByNewsId = new Map<string, Set<string>>(
+    computed.map((metric) => [metric.newsId, new Set<string>(VOLATILITY_METRIC_KEYS)]),
+  );
+  await fillMissingVolatilityMetrics(computed, concurrency, isCancelled, undefined, undefined, missingKeysByNewsId);
 
   return { merged: computed.length, skipped };
 }
@@ -532,11 +800,13 @@ export async function bulkUpdateRecentChange(
   const invalidMetricNewsIds = new Set<string>();
   let skipped = 0;
   let completed = 0;
-  const totalUnits = Math.max(rows.length * 3, 1);
+  const totalUnits = Math.max(rows.length * 4, 1);
   const scanPhaseUnits = rows.length;
   const fallbackPhaseBase = scanPhaseUnits;
   const writePhaseBase = scanPhaseUnits * 2;
+  const writeVolatilityPhaseBase = scanPhaseUnits * 3;
 
+  onLog?.(`[change] Phase 1/4: scanning ${rows.length} recent news items for OHLC...`);
   // Phase 1: parallel OHLC reads + compute from DB
   await poolRun(rows, concurrency, async (row) => {
     const tickers = row.tickers_csv.split(",").map(t => t.trim()).filter(Boolean);
@@ -553,13 +823,14 @@ export async function bulkUpdateRecentChange(
       onProgress(completed, totalUnits);
     }
   }, isCancelled);
+  onLog?.(`[change] Phase 1 done: ${computed.length} computed, ${missingItems.length} missing OHLC, ${skipped} skipped`);
 
   if (isCancelled?.()) return { updated: computed.length, skipped };
 
   // Phase 1.5: FMP fallback for missing tickers
   if (fmpFallback?.enabled && missingItems.length > 0) {
     onProgress?.(fallbackPhaseBase, totalUnits);
-    onLog?.(`[change] ${missingItems.length} items missing OHLC, starting FMP fallback...`);
+    onLog?.(`[change] Phase 1.5/4: FMP fallback for ${missingItems.length} items...`);
     try {
       const fallbackMetrics = await fmpFallbackFetch(missingItems, fmpFallback, onLog, (fallbackDone, fallbackTotal) => {
         const phaseProgress = fallbackTotal > 0
@@ -585,17 +856,38 @@ export async function bulkUpdateRecentChange(
 
   if (isCancelled?.()) return { updated: computed.length, skipped };
 
-  await deleteMetricsForNewsIds([...invalidMetricNewsIds]);
+  await deleteMetricsForNewsIds([...invalidMetricNewsIds], ALL_CHANGE_METRIC_KEYS);
 
   // Phase 2: batch write
+  onLog?.(`[change] Phase 2/4: writing ${computed.length} change metrics...`);
   await batchWriteMetricsWithProgress(computed, (written, total) => {
     const phaseProgress = total > 0
       ? Math.floor((written / total) * scanPhaseUnits)
       : scanPhaseUnits;
     onProgress?.(writePhaseBase + phaseProgress, totalUnits);
   });
+  onLog?.(`[change] Phase 2 done: ${computed.length} metrics written`);
+
+  onProgress?.(writeVolatilityPhaseBase, totalUnits);
+
+  if (isCancelled?.()) return { updated: computed.length, skipped };
+
+  onLog?.(`[change] Phase 3/4: filling missing HV / Z-score...`);
+  await fillMissingVolatilityMetrics(
+    computed,
+    concurrency,
+    isCancelled,
+    (written, total) => {
+      const phaseProgress = total > 0
+        ? Math.floor((written / total) * scanPhaseUnits)
+        : scanPhaseUnits;
+      onProgress?.(writeVolatilityPhaseBase + phaseProgress, totalUnits);
+    },
+    onLog,
+  );
 
   onProgress?.(totalUnits, totalUnits);
+  onLog?.(`[change] Done: updated=${computed.length}, skipped=${skipped}`);
   return { updated: computed.length, skipped };
 }
 
@@ -629,11 +921,13 @@ export async function bulkUpdateRecentMissingChange(
   const invalidMetricNewsIds = new Set<string>();
   let skipped = 0;
   let completed = 0;
-  const totalUnits = Math.max(rows.length * 3, 1);
+  const totalUnits = Math.max(rows.length * 4, 1);
   const scanPhaseUnits = rows.length;
   const fallbackPhaseBase = scanPhaseUnits;
   const writePhaseBase = scanPhaseUnits * 2;
+  const writeVolatilityPhaseBase = scanPhaseUnits * 3;
 
+  onLog?.(`[change] Phase 1/4: scanning ${rows.length} missing news items for OHLC...`);
   await poolRun(rows, concurrency, async (row) => {
     const tickers = row.tickers_csv.split(",").map((ticker) => ticker.trim()).filter(Boolean);
     const ticker = tickers[0];
@@ -654,12 +948,13 @@ export async function bulkUpdateRecentMissingChange(
       onProgress(completed, totalUnits);
     }
   }, isCancelled);
+  onLog?.(`[change] Phase 1 done: ${computed.length} computed, ${missingItems.length} missing OHLC, ${skipped} skipped`);
 
   if (isCancelled?.()) return { updated: computed.length, skipped };
 
   if (fmpFallback?.enabled && missingItems.length > 0) {
     onProgress?.(fallbackPhaseBase, totalUnits);
-    onLog?.(`[change] ${missingItems.length} missing recent items need OHLC, starting FMP fallback...`);
+    onLog?.(`[change] Phase 1.5/4: FMP fallback for ${missingItems.length} missing items...`);
     try {
       const fallbackMetrics = await fmpFallbackFetch(missingItems, fmpFallback, onLog, (fallbackDone, fallbackTotal) => {
         const phaseProgress = fallbackTotal > 0
@@ -685,15 +980,36 @@ export async function bulkUpdateRecentMissingChange(
 
   if (isCancelled?.()) return { updated: computed.length, skipped };
 
-  await deleteMetricsForNewsIds([...invalidMetricNewsIds]);
+  await deleteMetricsForNewsIds([...invalidMetricNewsIds], ALL_CHANGE_METRIC_KEYS);
+  onLog?.(`[change] Phase 2/4: writing ${computed.length} change metrics...`);
   await batchWriteMetricsWithProgress(computed, (written, total) => {
     const phaseProgress = total > 0
       ? Math.floor((written / total) * scanPhaseUnits)
       : scanPhaseUnits;
     onProgress?.(writePhaseBase + phaseProgress, totalUnits);
   });
+  onLog?.(`[change] Phase 2 done: ${computed.length} metrics written`);
+
+  onProgress?.(writeVolatilityPhaseBase, totalUnits);
+
+  if (isCancelled?.()) return { updated: computed.length, skipped };
+
+  onLog?.(`[change] Phase 3/4: filling missing HV / Z-score...`);
+  await fillMissingVolatilityMetrics(
+    computed,
+    concurrency,
+    isCancelled,
+    (written, total) => {
+      const phaseProgress = total > 0
+        ? Math.floor((written / total) * scanPhaseUnits)
+        : scanPhaseUnits;
+      onProgress?.(writeVolatilityPhaseBase + phaseProgress, totalUnits);
+    },
+    onLog,
+  );
 
   onProgress?.(totalUnits, totalUnits);
+  onLog?.(`[change] Done: updated=${computed.length}, skipped=${skipped}`);
   return { updated: computed.length, skipped };
 }
 
@@ -723,11 +1039,13 @@ export async function bulkUpdateCustomChange(
   const invalidMetricNewsIds = new Set<string>();
   let skipped = 0;
   let completed = 0;
-  const totalUnits = Math.max(rows.length * 3, 1);
+  const totalUnits = Math.max(rows.length * 4, 1);
   const scanPhaseUnits = rows.length;
   const fallbackPhaseBase = scanPhaseUnits;
   const writePhaseBase = scanPhaseUnits * 2;
+  const writeVolatilityPhaseBase = scanPhaseUnits * 3;
 
+  onLog?.(`[change] Phase 1/4: scanning ${rows.length} news items (${from}~${to}) for OHLC...`);
   // Phase 1: parallel OHLC reads + compute from DB
   await poolRun(rows, concurrency, async (row) => {
     const tickers = row.tickers_csv.split(",").map(t => t.trim()).filter(Boolean);
@@ -744,13 +1062,14 @@ export async function bulkUpdateCustomChange(
       onProgress(completed, totalUnits);
     }
   }, isCancelled);
+  onLog?.(`[change] Phase 1 done: ${computed.length} computed, ${missingItems.length} missing OHLC, ${skipped} skipped`);
 
   if (isCancelled?.()) return { updated: computed.length, skipped };
 
   // Phase 1.5: FMP fallback for missing tickers
   if (fmpFallback?.enabled && missingItems.length > 0) {
     onProgress?.(fallbackPhaseBase, totalUnits);
-    onLog?.(`[change] ${missingItems.length} items missing OHLC, starting FMP fallback...`);
+    onLog?.(`[change] Phase 1.5/4: FMP fallback for ${missingItems.length} items...`);
     try {
       const fallbackMetrics = await fmpFallbackFetch(missingItems, fmpFallback, onLog, (fallbackDone, fallbackTotal) => {
         const phaseProgress = fallbackTotal > 0
@@ -776,16 +1095,37 @@ export async function bulkUpdateCustomChange(
 
   if (isCancelled?.()) return { updated: computed.length, skipped };
 
-  await deleteMetricsForNewsIds([...invalidMetricNewsIds]);
+  await deleteMetricsForNewsIds([...invalidMetricNewsIds], ALL_CHANGE_METRIC_KEYS);
 
   // Phase 2: batch write
+  onLog?.(`[change] Phase 2/4: writing ${computed.length} change metrics...`);
   await batchWriteMetricsWithProgress(computed, (written, total) => {
     const phaseProgress = total > 0
       ? Math.floor((written / total) * scanPhaseUnits)
       : scanPhaseUnits;
     onProgress?.(writePhaseBase + phaseProgress, totalUnits);
   });
+  onLog?.(`[change] Phase 2 done: ${computed.length} metrics written`);
+
+  onProgress?.(writeVolatilityPhaseBase, totalUnits);
+
+  if (isCancelled?.()) return { updated: computed.length, skipped };
+
+  onLog?.(`[change] Phase 3/4: filling missing HV / Z-score...`);
+  await fillMissingVolatilityMetrics(
+    computed,
+    concurrency,
+    isCancelled,
+    (written, total) => {
+      const phaseProgress = total > 0
+        ? Math.floor((written / total) * scanPhaseUnits)
+        : scanPhaseUnits;
+      onProgress?.(writeVolatilityPhaseBase + phaseProgress, totalUnits);
+    },
+    onLog,
+  );
 
   onProgress?.(totalUnits, totalUnits);
+  onLog?.(`[change] Done: updated=${computed.length}, skipped=${skipped}`);
   return { updated: computed.length, skipped };
 }

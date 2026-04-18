@@ -3,6 +3,7 @@ import { getDb } from "../db.js";
 import type { Model1NewsItem, NewsItem, NewsQuery } from "../types.js";
 import { canonicalizePublisherLabel } from "./finnhubNewsProvider.js";
 import { getIndustry } from "./industryLookup.js";
+import { VOLATILITY_METRIC_KEYS } from "./newsVolatilityMetrics.js";
 
 function clampInt(value: number, min: number, max: number): number {
   return Math.min(Math.max(Math.trunc(value), min), max);
@@ -94,6 +95,23 @@ function appendNumericRangeWhereClause(
     where.push(`${valueSql} <= ?`);
     values.push(maxValue);
   }
+}
+
+function buildMetricJoinAlias(metricKey: string): string {
+  return `cm_${metricKey}`;
+}
+
+function buildVolatilityMetricSql(newsAlias: string): { selectSql: string; joinSql: string } {
+  return {
+    selectSql: VOLATILITY_METRIC_KEYS
+      .map((metricKey) => `${buildMetricJoinAlias(metricKey)}.value_pct AS ${metricKey}`)
+      .join(",\n           "),
+    joinSql: VOLATILITY_METRIC_KEYS
+      .map(
+        (metricKey) => `LEFT JOIN news_change_metrics ${buildMetricJoinAlias(metricKey)} ON ${buildMetricJoinAlias(metricKey)}.news_id = ${newsAlias}.id AND ${buildMetricJoinAlias(metricKey)}.metric_key = '${metricKey}'`,
+      )
+      .join("\n    "),
+  };
 }
 
 export interface IsoDateRange {
@@ -246,6 +264,8 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
   const limit = clampInt(Math.min(requestedLimit, policyMax), 1, 500);
   values.push(limit + 1);
 
+  const volatilityMetricSql = buildVolatilityMetricSql("ni");
+
   const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
   const sql = `
     SELECT ni.id, ni.published_at, ni.source, ni.publisher, COALESCE(ni.origin_url, sf.filing_url, sf.report_url) AS origin_url, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
@@ -261,6 +281,7 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
            cm_7d.value_pct AS change_7d_pct,
            cm_14d.value_pct AS change_14d_pct,
            cm_30d.value_pct AS change_30d_pct,
+           ${volatilityMetricSql.selectSql},
            cm_1d.computed_at AS change_computed_at,
            CASE WHEN nf.extraction_status = 'success' THEN 1 ELSE 0 END AS has_full_text,
            nf.keywords_json, nf.keywords_status,
@@ -282,6 +303,7 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
     LEFT JOIN news_change_metrics cm_7d ON cm_7d.news_id = ni.id AND cm_7d.metric_key = 'change_7d_pct'
     LEFT JOIN news_change_metrics cm_14d ON cm_14d.news_id = ni.id AND cm_14d.metric_key = 'change_14d_pct'
     LEFT JOIN news_change_metrics cm_30d ON cm_30d.news_id = ni.id AND cm_30d.metric_key = 'change_30d_pct'
+    ${volatilityMetricSql.joinSql}
     LEFT JOIN news_ai_analysis naa ON naa.news_id = ni.id
     ${extraJoins}
     ${whereSql}
@@ -307,6 +329,7 @@ export async function getNewsById(id: string): Promise<NewsItem | null> {
     "cp.institutional_pct IS NOT NULL AND cp.institutional_source = 'yahoo'",
   );
   const insiderPctSql = buildLatestCompanyProfileScalarSql("ni", "insider_pct", "cp.insider_pct IS NOT NULL");
+  const volatilityMetricSql = buildVolatilityMetricSql("ni");
   const row = await getDb().get<any>(
     `SELECT ni.id, ni.published_at, ni.source, ni.publisher, COALESCE(ni.origin_url, sf.filing_url, sf.report_url) AS origin_url, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
             cm_1d.ohlc_ticker,
@@ -321,6 +344,7 @@ export async function getNewsById(id: string): Promise<NewsItem | null> {
             cm_7d.value_pct AS change_7d_pct,
             cm_14d.value_pct AS change_14d_pct,
             cm_30d.value_pct AS change_30d_pct,
+            ${volatilityMetricSql.selectSql},
             cm_1d.computed_at AS change_computed_at,
             CASE WHEN nf.extraction_status = 'success' THEN 1 ELSE 0 END AS has_full_text,
             nf.keywords_json, nf.keywords_status,
@@ -342,6 +366,7 @@ export async function getNewsById(id: string): Promise<NewsItem | null> {
      LEFT JOIN news_change_metrics cm_7d ON cm_7d.news_id = ni.id AND cm_7d.metric_key = 'change_7d_pct'
      LEFT JOIN news_change_metrics cm_14d ON cm_14d.news_id = ni.id AND cm_14d.metric_key = 'change_14d_pct'
      LEFT JOIN news_change_metrics cm_30d ON cm_30d.news_id = ni.id AND cm_30d.metric_key = 'change_30d_pct'
+     ${volatilityMetricSql.joinSql}
      LEFT JOIN news_ai_analysis naa ON naa.news_id = ni.id
      WHERE ni.id = ?`,
     [id]
@@ -718,6 +743,22 @@ function mapNewsRow(
     change_7d_pct: row.change_7d_pct ?? null,
     change_14d_pct: row.change_14d_pct ?? null,
     change_30d_pct: row.change_30d_pct ?? null,
+    hv_change_pct: row.hv_change_pct ?? null,
+    hv_change_from_open_pct: row.hv_change_from_open_pct ?? null,
+    hv_change_open_to_high_pct: row.hv_change_open_to_high_pct ?? null,
+    hv_change_1d_pct: row.hv_change_1d_pct ?? null,
+    hv_change_3d_pct: row.hv_change_3d_pct ?? null,
+    hv_change_7d_pct: row.hv_change_7d_pct ?? null,
+    hv_change_14d_pct: row.hv_change_14d_pct ?? null,
+    hv_change_30d_pct: row.hv_change_30d_pct ?? null,
+    zscore_change_pct: row.zscore_change_pct ?? null,
+    zscore_change_from_open_pct: row.zscore_change_from_open_pct ?? null,
+    zscore_change_open_to_high_pct: row.zscore_change_open_to_high_pct ?? null,
+    zscore_change_1d_pct: row.zscore_change_1d_pct ?? null,
+    zscore_change_3d_pct: row.zscore_change_3d_pct ?? null,
+    zscore_change_7d_pct: row.zscore_change_7d_pct ?? null,
+    zscore_change_14d_pct: row.zscore_change_14d_pct ?? null,
+    zscore_change_30d_pct: row.zscore_change_30d_pct ?? null,
     change_computed_at: row.change_computed_at ?? null,
     hasFullText: row.has_full_text === 1,
     keywords: aiKeywords,

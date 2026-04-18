@@ -84,3 +84,35 @@
   - plan/log 문서만 갱신
 - 상태
   - awaiting user confirmation
+
+**작성 시각:** 08:07 (local)
+
+### 구현 및 검증 진행
+
+- 구현 파일
+  - `terminal/backend/src/services/newsVolatilityMetrics.ts`
+  - `terminal/backend/tests/newsVolatilityMetrics.test.ts`
+  - `terminal/backend/src/services/newsChangeMerger.ts`
+  - `terminal/backend/src/services/newsRepository.ts`
+  - `terminal/backend/src/types.ts`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/DataControlWindow.tsx`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/dataControlHowToUse.ts`
+  - `terminal/backend_prompt.md`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+- 구현 내용
+  - change metric과 동일한 정의의 historical series로 `HV` / `Z Score`를 계산하는 helper를 추가했다.
+  - recent/new/custom change 흐름 뒤에 HV/Z Score missing-only fill 단계를 연결했다.
+  - `/api/news`, `/api/news/:id` 응답에 HV/Z Score field를 추가했다.
+  - Finnhub News window에 `HV`, `Z Score` 묶음 컬럼과 quick toggle 버튼을 추가했다.
+  - `Model_1 Safe` 모드에서는 `changes`, `hv`, `zscore` 세 derived price reaction 컬럼을 함께 숨기도록 맞췄다.
+  - Data Control / how-to / prompt 문서의 change update 설명을 `missing HV / Z Score fill` 기준으로 수정했다.
+- 실행/검증 상태
+  - `npm.cmd run build` in `terminal`: 통과
+  - `npm.cmd run build` in `termina_web/figma_code/terminal_ui_ver2_finhub`: 통과
+  - `npm.cmd run test` in `terminal`: `16 passed / 94 passed`
+  - local API 확인: `GET http://localhost:8080/api/news?limit=1` 응답에서 `hv_change_pct`, `zscore_change_pct`, `hv_change_1d_pct`, `zscore_change_1d_pct` field 존재 확인
+- 남은 확인
+  - 실제 데이터에서 change update 실행 후 HV/Z Score가 missing row만 채워지는지 사용자가 화면 기준으로 확인 필요
+- 상태
+  - awaiting user confirmation

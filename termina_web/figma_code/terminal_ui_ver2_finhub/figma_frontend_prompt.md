@@ -205,6 +205,7 @@ GET /api/news?source_names=FINNHUB,RTPR,FMP&limit=500
 - 하단 유틸리티 줄
   - item count / loading 상태
   - 에러 메시지 / `Model_1 safe payload active`
+  - `HV`, `Z Score` quick toggle 버튼
   - `Filters`, `Columns`, `Watch Lists`
 
 `Filters` 드롭다운은 `Default Ticker Window`와 같은 DB 기반 ownership 수치를 사용한다.
@@ -450,10 +451,16 @@ PTPR Press Release의 Custom은 `POST /api/news/pull-rtpr/preflight-custom`을 �
 
 Finnhub News 창 안에도 change 계산 버튼이 있다.
 
-- `7D Change Update` → `POST /api/news/change/update-recent`
+- `Recent Change% Update` → `POST /api/news/change/update-recent`
 - `Custom Change% Update` → 날짜 modal 후 `POST /api/news/change/update-custom`
 
 이 버튼들은 Data Control 창의 change update와 같은 backend job을 재사용한다.
+
+추가 동작:
+
+- base change metric은 기존처럼 재계산한다.
+- `HV`, `Z Score`는 같은 실행 안에서 이어서 채우지만, `metric_key row 없음` 또는 `value_pct IS NULL`인 경우만 대상으로 하는 missing-only fill이다.
+- 즉 이미 계산된 non-null HV/Z Score 값은 덮어쓰지 않는다.
 
 Change update 후 News Feed가 다시 `GET /api/news`를 읽으면, 날짜 관련 필드는 아래 의미로 사용해야 한다.
 
@@ -649,10 +656,29 @@ localStorage 사용:
 - `[][][]change_1d_pct[][][]`
 - `[][][]change_pct_ohlc_date[][][]`
 - `[][][]change_1d_target_date[][][]`
+- `[][][]change_pct[][][]`
 - `[][][]change_from_open_pct[][][]`
+- `[][][]change_open_to_high_pct[][][]`
+- `[][][]change_3d_pct[][][]`
 - `[][][]change_7d_pct[][][]`
 - `[][][]change_14d_pct[][][]`
 - `[][][]change_30d_pct[][][]`
+- `[][][]hv_change_pct[][][]`
+- `[][][]hv_change_from_open_pct[][][]`
+- `[][][]hv_change_open_to_high_pct[][][]`
+- `[][][]hv_change_1d_pct[][][]`
+- `[][][]hv_change_3d_pct[][][]`
+- `[][][]hv_change_7d_pct[][][]`
+- `[][][]hv_change_14d_pct[][][]`
+- `[][][]hv_change_30d_pct[][][]`
+- `[][][]zscore_change_pct[][][]`
+- `[][][]zscore_change_from_open_pct[][][]`
+- `[][][]zscore_change_open_to_high_pct[][][]`
+- `[][][]zscore_change_1d_pct[][][]`
+- `[][][]zscore_change_3d_pct[][][]`
+- `[][][]zscore_change_7d_pct[][][]`
+- `[][][]zscore_change_14d_pct[][][]`
+- `[][][]zscore_change_30d_pct[][][]`
 - `[][][]hasFullText[][][]`
 - `[][][]keywords[][][]`
 - `[][][]keywordsStatus[][][]`
@@ -673,6 +699,9 @@ localStorage 사용:
 - ticker는 `tickers[0]`만 사용
 - publisher가 없으면 빈 값
 - change 값이 `null`이면 `-`
+- `HV`, `Z Score` 묶음 컬럼도 기존 `Changes %`와 같은 8개 하위 metric 순서를 사용한다.
+- `HV`, `Z Score` 묶음 컬럼의 header sort 기준은 각 묶음의 첫 줄 `Chg` 값이다.
+- `Model_1 Safe` 모드에서는 `changes`, `hv`, `zscore` 세 derived price reaction 컬럼을 함께 숨긴다.
 - industry가 없으면 비어 보일 수 있음
 - score가 `null`이면 빈 셀
 - sentiment 파생: `sentimentBullishPct > 0.6` → Bullish, `< 0.4` → Bearish, else Neutral

@@ -513,6 +513,14 @@ Legend
   - source별 quick button은 만들지 않고, `HV`/`Z Score`는 전역 column toggle로 유지한다.
   - HV/Z-score는 이미 값이 있는 row/metric을 재계산하지 않고, 값이 없는 항목만 계산해 반영한다.
 
+- 2026-04-18 구현 진행 반영:
+  - backend는 `newsVolatilityMetrics.ts` helper를 추가해 `60 completed samples` 기준 `HV` / `Z Score` 계산 경로를 연결했다.
+  - `news_change_metrics`에 HV/Z Score metric key를 추가 저장하되, `metric_key row 없음` 또는 `value_pct IS NULL`일 때만 채우는 missing-only fill로 구현했다.
+  - `GET /api/news`, `GET /api/news/:id`는 HV/Z Score snake_case field를 함께 반환하도록 확장했다.
+  - Finnhub News window는 `HV`, `Z Score` 묶음 컬럼과 quick toggle 버튼을 추가했고, `Model_1 Safe`에서는 `changes`, `hv`, `zscore`를 함께 숨기도록 맞췄다.
+  - Data Control / how-to / backend/frontend prompt 문서 문구를 새 동작에 맞춰 동기화했다.
+  - 검증은 frontend build, backend build, backend test, local `GET /api/news?limit=1` field 확인까지 완료했지만, 최종 완료 표시는 아직 사용자 확인 전이므로 기존 단계 상태 표기는 유지한다.
+
 ### 결정 #1 — HV 정의 방식(상세)
 
 옵션 A: `daily sigma × sqrt(h)` 방식

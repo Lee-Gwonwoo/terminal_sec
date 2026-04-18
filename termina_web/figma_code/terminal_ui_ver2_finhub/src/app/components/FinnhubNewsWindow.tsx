@@ -32,7 +32,7 @@ type DisplayMode = 'title-only' | 'title-abstract';
 type NewsProjectionMode = 'full' | 'model1-safe';
 
 // ─── Column definition ───
-type ColumnId = 'date' | 'ticker' | 'time' | 'title' | 'publisher' | 'industry' | 'ipoDate' | 'marketCap' | 'floatPct' | 'institutionalPct' | 'insiderPct' | 'source' | 'changes' | 'fulltext' | 'keywords' | 'score' | 'scoreEvidence' | 'sentiment' | 'peers' | 'companyDesc';
+type ColumnId = 'date' | 'ticker' | 'time' | 'title' | 'publisher' | 'industry' | 'ipoDate' | 'marketCap' | 'floatPct' | 'institutionalPct' | 'insiderPct' | 'source' | 'changes' | 'hv' | 'zscore' | 'fulltext' | 'keywords' | 'score' | 'scoreEvidence' | 'sentiment' | 'peers' | 'companyDesc';
 
 interface ColumnDef {
   id: ColumnId;
@@ -57,6 +57,8 @@ const DEFAULT_COLUMNS: ColumnDef[] = [
   { id: 'source',       label: 'Sources',    defaultWidth: 90,  minWidth: 50 },
   { id: 'fulltext',     label: 'Full Text',  defaultWidth: 60,  minWidth: 40 },
   { id: 'changes',      label: 'Changes %',  defaultWidth: 280, minWidth: 160 },
+  { id: 'hv',           label: 'HV',         defaultWidth: 280, minWidth: 160 },
+  { id: 'zscore',       label: 'Z Score',    defaultWidth: 240, minWidth: 160 },
   { id: 'keywords',     label: 'Keywords',   defaultWidth: 160, minWidth: 80 },
   { id: 'score',        label: 'Score',      defaultWidth: 58,  minWidth: 40 },
   { id: 'scoreEvidence', label: 'Evidence',  defaultWidth: 200, minWidth: 80 },
@@ -66,8 +68,9 @@ const DEFAULT_COLUMNS: ColumnDef[] = [
 ];
 
 // Columns hidden by default — user can enable via Columns menu
-const HIDDEN_BY_DEFAULT: ColumnId[] = ['source', 'keywords', 'score', 'scoreEvidence', 'sentiment', 'peers', 'companyDesc'];
+const HIDDEN_BY_DEFAULT: ColumnId[] = ['source', 'hv', 'zscore', 'keywords', 'score', 'scoreEvidence', 'sentiment', 'peers', 'companyDesc'];
 const DEFAULT_VISIBLE: Set<ColumnId> = new Set(DEFAULT_COLUMNS.filter(c => !HIDDEN_BY_DEFAULT.includes(c.id)).map(c => c.id));
+const MODEL1_HIDDEN_CHANGE_COLUMNS: ColumnId[] = ['changes', 'hv', 'zscore'];
 
 // ─── Sort ───
 type SortDir = 'asc' | 'desc' | null;
@@ -296,6 +299,22 @@ interface BackendNewsItem {
   change_7d_pct?: number | null;
   change_14d_pct?: number | null;
   change_30d_pct?: number | null;
+  hv_change_pct?: number | null;
+  hv_change_from_open_pct?: number | null;
+  hv_change_open_to_high_pct?: number | null;
+  hv_change_1d_pct?: number | null;
+  hv_change_3d_pct?: number | null;
+  hv_change_7d_pct?: number | null;
+  hv_change_14d_pct?: number | null;
+  hv_change_30d_pct?: number | null;
+  zscore_change_pct?: number | null;
+  zscore_change_from_open_pct?: number | null;
+  zscore_change_open_to_high_pct?: number | null;
+  zscore_change_1d_pct?: number | null;
+  zscore_change_3d_pct?: number | null;
+  zscore_change_7d_pct?: number | null;
+  zscore_change_14d_pct?: number | null;
+  zscore_change_30d_pct?: number | null;
   change_computed_at?: string | null;
   hasFullText?: boolean;
   keywords?: string[];
@@ -338,6 +357,22 @@ interface DisplayItem {
   change7dPct: number | null;
   change14dPct: number | null;
   change30dPct: number | null;
+  hvChangePct: number | null;
+  hvChangeFromOpenPct: number | null;
+  hvChangeOpenToHighPct: number | null;
+  hvChange1dPct: number | null;
+  hvChange3dPct: number | null;
+  hvChange7dPct: number | null;
+  hvChange14dPct: number | null;
+  hvChange30dPct: number | null;
+  zscoreChangePct: number | null;
+  zscoreChangeFromOpenPct: number | null;
+  zscoreChangeOpenToHighPct: number | null;
+  zscoreChange1dPct: number | null;
+  zscoreChange3dPct: number | null;
+  zscoreChange7dPct: number | null;
+  zscoreChange14dPct: number | null;
+  zscoreChange30dPct: number | null;
   hasFullText: boolean;
   keywords: string[];
   keywordsStatus: string | null;
@@ -438,6 +473,22 @@ function mapBackendItem(item: BackendNewsItem): DisplayItem {
     change7dPct: item.change_7d_pct ?? null,
     change14dPct: item.change_14d_pct ?? null,
     change30dPct: item.change_30d_pct ?? null,
+    hvChangePct: item.hv_change_pct ?? null,
+    hvChangeFromOpenPct: item.hv_change_from_open_pct ?? null,
+    hvChangeOpenToHighPct: item.hv_change_open_to_high_pct ?? null,
+    hvChange1dPct: item.hv_change_1d_pct ?? null,
+    hvChange3dPct: item.hv_change_3d_pct ?? null,
+    hvChange7dPct: item.hv_change_7d_pct ?? null,
+    hvChange14dPct: item.hv_change_14d_pct ?? null,
+    hvChange30dPct: item.hv_change_30d_pct ?? null,
+    zscoreChangePct: item.zscore_change_pct ?? null,
+    zscoreChangeFromOpenPct: item.zscore_change_from_open_pct ?? null,
+    zscoreChangeOpenToHighPct: item.zscore_change_open_to_high_pct ?? null,
+    zscoreChange1dPct: item.zscore_change_1d_pct ?? null,
+    zscoreChange3dPct: item.zscore_change_3d_pct ?? null,
+    zscoreChange7dPct: item.zscore_change_7d_pct ?? null,
+    zscoreChange14dPct: item.zscore_change_14d_pct ?? null,
+    zscoreChange30dPct: item.zscore_change_30d_pct ?? null,
     hasFullText: !!item.hasFullText,
     keywords: item.keywords ?? [],
     keywordsStatus: item.keywordsStatus ?? null,
@@ -462,6 +513,11 @@ function mapBackendItem(item: BackendNewsItem): DisplayItem {
 const formatChange = (val: number | null) => {
   if (val === null || val === undefined) return '-';
   return `${val > 0 ? '+' : ''}${val.toFixed(2)}%`;
+};
+
+const formatZScore = (val: number | null) => {
+  if (val === null || val === undefined) return '-';
+  return `${val > 0 ? '+' : ''}${val.toFixed(2)}`;
 };
 
 const formatOwnershipPct = (val: number | null) => {
@@ -603,7 +659,7 @@ export function FinnhubNewsWindow({
   // Visible columns (filtered + preserving order)
   const isModel1SafeMode = newsProjection === 'model1-safe';
   const activeColumns = useMemo(
-    () => columns.filter(c => visibleCols.has(c.id) && !(isModel1SafeMode && c.id === 'changes')),
+    () => columns.filter(c => visibleCols.has(c.id) && !(isModel1SafeMode && MODEL1_HIDDEN_CHANGE_COLUMNS.includes(c.id))),
     [columns, visibleCols, isModel1SafeMode],
   );
   const activeColWidths = useMemo(() => {
@@ -1017,7 +1073,7 @@ export function FinnhubNewsWindow({
   }, [nextCursor, loadingMore, selectedBookmarkFolderId, sourceTypeFilter, fromDate, toDate, newsApiBase, applyOwnershipFilterParams]);
 
   useEffect(() => {
-    if (isModel1SafeMode && sort.column === 'changes') {
+    if (isModel1SafeMode && sort.column && MODEL1_HIDDEN_CHANGE_COLUMNS.includes(sort.column)) {
       setSort({ column: null, dir: null });
     }
   }, [isModel1SafeMode, sort.column]);
@@ -1752,6 +1808,8 @@ export function FinnhubNewsWindow({
       case 'source': return item.source.toLowerCase();
       case 'fulltext': return item.hasFullText ? 1 : 0;
       case 'changes': return item.changeFromOpenPct ?? 0;
+      case 'hv': return item.hvChangePct ?? 0;
+      case 'zscore': return item.zscoreChangePct ?? 0;
       case 'keywords': return item.keywords.length;
       case 'score': return item.score ?? -Infinity;
       case 'scoreEvidence': return (item.scoreEvidence ?? '').toLowerCase();
@@ -2071,6 +2129,70 @@ export function FinnhubNewsWindow({
             </div>
           </div>
         );
+      case 'hv':
+        return (
+          <div className="flex flex-col justify-center gap-0.5 w-full text-[11px] leading-tight">
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="text-gray-500 shrink-0">Chg:</span>
+              <span className={changeColor(newsItem.hvChangePct)}>{formatChange(newsItem.hvChangePct)}</span>
+              <span className="text-gray-400 mx-0.5">|</span>
+              <span className="text-gray-500 shrink-0">fr.O→C:</span>
+              <span className={changeColor(newsItem.hvChangeFromOpenPct)}>{formatChange(newsItem.hvChangeFromOpenPct)}</span>
+              <span className="text-gray-400 mx-0.5">|</span>
+              <span className="text-gray-500 shrink-0">fr.O→H:</span>
+              <span className={changeColor(newsItem.hvChangeOpenToHighPct)}>{formatChange(newsItem.hvChangeOpenToHighPct)}</span>
+            </div>
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="text-gray-500 shrink-0">+1D:</span>
+              <span className={changeColor(newsItem.hvChange1dPct)}>{formatChange(newsItem.hvChange1dPct)}</span>
+              <span className="text-gray-400 mx-0.5">|</span>
+              <span className="text-gray-500 shrink-0">+3D:</span>
+              <span className={changeColor(newsItem.hvChange3dPct)}>{formatChange(newsItem.hvChange3dPct)}</span>
+            </div>
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="text-gray-500 shrink-0">+7D:</span>
+              <span className={changeColor(newsItem.hvChange7dPct)}>{formatChange(newsItem.hvChange7dPct)}</span>
+              <span className="text-gray-400 mx-0.5">|</span>
+              <span className="text-gray-500 shrink-0">+14D:</span>
+              <span className={changeColor(newsItem.hvChange14dPct)}>{formatChange(newsItem.hvChange14dPct)}</span>
+              <span className="text-gray-400 mx-0.5">|</span>
+              <span className="text-gray-500 shrink-0">+30D:</span>
+              <span className={changeColor(newsItem.hvChange30dPct)}>{formatChange(newsItem.hvChange30dPct)}</span>
+            </div>
+          </div>
+        );
+      case 'zscore':
+        return (
+          <div className="flex flex-col justify-center gap-0.5 w-full text-[11px] leading-tight">
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="text-gray-500 shrink-0">Chg:</span>
+              <span className={changeColor(newsItem.zscoreChangePct)}>{formatZScore(newsItem.zscoreChangePct)}</span>
+              <span className="text-gray-400 mx-0.5">|</span>
+              <span className="text-gray-500 shrink-0">fr.O→C:</span>
+              <span className={changeColor(newsItem.zscoreChangeFromOpenPct)}>{formatZScore(newsItem.zscoreChangeFromOpenPct)}</span>
+              <span className="text-gray-400 mx-0.5">|</span>
+              <span className="text-gray-500 shrink-0">fr.O→H:</span>
+              <span className={changeColor(newsItem.zscoreChangeOpenToHighPct)}>{formatZScore(newsItem.zscoreChangeOpenToHighPct)}</span>
+            </div>
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="text-gray-500 shrink-0">+1D:</span>
+              <span className={changeColor(newsItem.zscoreChange1dPct)}>{formatZScore(newsItem.zscoreChange1dPct)}</span>
+              <span className="text-gray-400 mx-0.5">|</span>
+              <span className="text-gray-500 shrink-0">+3D:</span>
+              <span className={changeColor(newsItem.zscoreChange3dPct)}>{formatZScore(newsItem.zscoreChange3dPct)}</span>
+            </div>
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="text-gray-500 shrink-0">+7D:</span>
+              <span className={changeColor(newsItem.zscoreChange7dPct)}>{formatZScore(newsItem.zscoreChange7dPct)}</span>
+              <span className="text-gray-400 mx-0.5">|</span>
+              <span className="text-gray-500 shrink-0">+14D:</span>
+              <span className={changeColor(newsItem.zscoreChange14dPct)}>{formatZScore(newsItem.zscoreChange14dPct)}</span>
+              <span className="text-gray-400 mx-0.5">|</span>
+              <span className="text-gray-500 shrink-0">+30D:</span>
+              <span className={changeColor(newsItem.zscoreChange30dPct)}>{formatZScore(newsItem.zscoreChange30dPct)}</span>
+            </div>
+          </div>
+        );
       case 'keywords':
         return newsItem.keywords.length > 0 ? (
           <div className="flex flex-wrap gap-0.5 overflow-hidden" title={newsItem.keywords.join(', ')}>
@@ -2188,7 +2310,7 @@ export function FinnhubNewsWindow({
                   'shrink-0 px-2 flex overflow-hidden',
                   col.id === 'title' ? 'px-3 items-start pt-2' : 'items-center',
                   !isLast ? 'border-r border-gray-200 dark:border-gray-700' : '',
-                  col.id === 'changes' ? 'py-1' : '',
+                  ['changes', 'hv', 'zscore'].includes(col.id) ? 'py-1' : '',
                 ].join(' ')}
                 style={{ width: activeColWidths[colIdx], minWidth: col.minWidth }}
               >
@@ -2618,11 +2740,11 @@ export function FinnhubNewsWindow({
                       <div className="px-2 py-1 text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Change Update</div>
                       <button onClick={() => { setShowUpdateMenu(false); handleRecentChangeUpdate(); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <TrendingUp className="w-3.5 h-3.5 shrink-0 text-teal-500" />
-                        <div><div className="font-medium">Recent Change% Update</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Recalculate all change % for news from last 7 days</div></div>
+                        <div><div className="font-medium">Recent Change% Update</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Recalculate change % and fill missing HV / Z Score for news from last 7 days</div></div>
                       </button>
                       <button onClick={() => { setShowUpdateMenu(false); setChangeCustomFrom(''); setChangeCustomTo(new Date().toISOString().slice(0, 10)); setShowChangeCustomDateModal(true); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <TrendingUp className="w-3.5 h-3.5 shrink-0 text-indigo-500" />
-                        <div><div className="font-medium">Custom Change% Update</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick date range · recalculate all change % for news in range</div></div>
+                        <div><div className="font-medium">Custom Change% Update</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick date range · recalculate change % and fill missing HV / Z Score in range</div></div>
                       </button>
 
                       {/* ── Calendar Update ── */}
@@ -2908,6 +3030,32 @@ export function FinnhubNewsWindow({
           )}
 
           <div className="flex items-center gap-2 lg:ml-auto">
+            <div className="flex items-center gap-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 p-1">
+              {([
+                { id: 'hv' as ColumnId, label: 'HV' },
+                { id: 'zscore' as ColumnId, label: 'Z Score' },
+              ]).map((quickCol) => {
+                const active = !isModel1SafeMode && visibleCols.has(quickCol.id);
+                return (
+                  <button
+                    key={quickCol.id}
+                    onClick={() => toggleColumnVisibility(quickCol.id)}
+                    disabled={isModel1SafeMode}
+                    className={`px-2.5 py-1 text-[11px] rounded-md transition-colors ${
+                      isModel1SafeMode
+                        ? 'cursor-not-allowed text-gray-400 dark:text-gray-600'
+                        : active
+                          ? 'bg-blue-500 text-white'
+                          : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                    }`}
+                    title={isModel1SafeMode ? 'Model_1 safe mode hides derived price-reaction columns' : `${quickCol.label} column toggle`}
+                  >
+                    {quickCol.label}
+                  </button>
+                );
+              })}
+            </div>
+
             <div className="relative" ref={filterMenuRef}>
               <button
                 onClick={() => { setShowFilterMenu(!showFilterMenu); setShowColumnMenu(false); setShowLoadMenu(false); setShowDisplayModeMenu(false); setShowWatchlistMenu(false); }}
@@ -3019,16 +3167,16 @@ export function FinnhubNewsWindow({
                   {columns.map(col => (
                     <label
                       key={col.id}
-                      className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs rounded ${isModel1SafeMode && col.id === 'changes' ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer'}`}
+                      className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs rounded ${isModel1SafeMode && MODEL1_HIDDEN_CHANGE_COLUMNS.includes(col.id) ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer'}`}
                     >
                       <input
                         type="checkbox"
-                        checked={col.id === 'changes' && isModel1SafeMode ? false : visibleCols.has(col.id)}
+                        checked={isModel1SafeMode && MODEL1_HIDDEN_CHANGE_COLUMNS.includes(col.id) ? false : visibleCols.has(col.id)}
                         onChange={() => {
-                          if (isModel1SafeMode && col.id === 'changes') return;
+                          if (isModel1SafeMode && MODEL1_HIDDEN_CHANGE_COLUMNS.includes(col.id)) return;
                           toggleColumnVisibility(col.id);
                         }}
-                        disabled={isModel1SafeMode && col.id === 'changes'}
+                        disabled={isModel1SafeMode && MODEL1_HIDDEN_CHANGE_COLUMNS.includes(col.id)}
                         className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
                       />
                       <span>{col.label}</span>
@@ -3036,7 +3184,7 @@ export function FinnhubNewsWindow({
                   ))}
                   {isModel1SafeMode && (
                     <div className="px-3 py-1 text-[10px] text-emerald-600 dark:text-emerald-400">
-                      Model_1 safe mode hides current-news change columns.
+                      Model_1 safe mode hides current-news change, HV, and Z Score columns.
                     </div>
                   )}
                 </div>
@@ -3597,7 +3745,8 @@ export function FinnhubNewsWindow({
                 onChange={(e) => setChangeCustomTo(e.target.value)}
                 className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
-              <p className="text-[10px] text-gray-400">Recalculate all change % for news published within selected date range.</p>
+              <p className="text-[10px] text-gray-400">Recalculate change % for news published within selected date range and fill missing HV / Z Score metrics.</p>
+              <p className="text-[10px] text-gray-400">Existing non-null HV / Z Score values are kept as-is and only missing derived metric rows are filled.</p>
             </div>
             <div className="flex justify-end gap-2 mt-4">
               <button onClick={() => setShowChangeCustomDateModal(false)} className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>

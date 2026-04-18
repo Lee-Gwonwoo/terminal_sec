@@ -45,6 +45,22 @@ export type NewsItem = {
   change_7d_pct?: number | null;
   change_14d_pct?: number | null;
   change_30d_pct?: number | null;
+  hv_change_pct?: number | null;
+  hv_change_from_open_pct?: number | null;
+  hv_change_open_to_high_pct?: number | null;
+  hv_change_1d_pct?: number | null;
+  hv_change_3d_pct?: number | null;
+  hv_change_7d_pct?: number | null;
+  hv_change_14d_pct?: number | null;
+  hv_change_30d_pct?: number | null;
+  zscore_change_pct?: number | null;
+  zscore_change_from_open_pct?: number | null;
+  zscore_change_open_to_high_pct?: number | null;
+  zscore_change_1d_pct?: number | null;
+  zscore_change_3d_pct?: number | null;
+  zscore_change_7d_pct?: number | null;
+  zscore_change_14d_pct?: number | null;
+  zscore_change_30d_pct?: number | null;
   change_computed_at?: string | null;
   // fulltext columns (Step 10)
   hasFullText?: boolean;
@@ -85,5 +101,21 @@ export type Model1NewsItem = Omit<
   | "change_7d_pct"
   | "change_14d_pct"
   | "change_30d_pct"
+  | "hv_change_pct"
+  | "hv_change_from_open_pct"
+  | "hv_change_open_to_high_pct"
+  | "hv_change_1d_pct"
+  | "hv_change_3d_pct"
+  | "hv_change_7d_pct"
+  | "hv_change_14d_pct"
+  | "hv_change_30d_pct"
+  | "zscore_change_pct"
+  | "zscore_change_from_open_pct"
+  | "zscore_change_open_to_high_pct"
+  | "zscore_change_1d_pct"
+  | "zscore_change_3d_pct"
+  | "zscore_change_7d_pct"
+  | "zscore_change_14d_pct"
+  | "zscore_change_30d_pct"
   | "change_computed_at"
 >;

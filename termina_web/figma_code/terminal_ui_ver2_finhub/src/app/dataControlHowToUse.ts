@@ -249,8 +249,8 @@ export const dataControlHowToUseRegistry: Record<DataControlHowToUseKey, DataCon
   recent: {
     key: 'recent',
     title: 'Recent Change% Update',
-    summary: '최근 7일 뉴스에 대해 change metrics를 재계산합니다.',
-    purpose: '일상 운영에서 최근 뉴스의 change% 컬럼만 빠르게 최신화하는 버튼입니다.',
+    summary: '최근 7일 뉴스에 대해 change metrics를 재계산하고, HV/Z Score는 missing row/metric만 추가로 채웁니다.',
+    purpose: '일상 운영에서 최근 뉴스의 change%를 최신화하면서, 아직 비어 있는 HV/Z Score 컬럼도 함께 보강하는 버튼입니다.',
     whenToRun: [
       '최근 뉴스 change%가 비어 있거나 stale하다고 판단될 때 실행합니다.',
       'OHLC DB를 먼저 최신화한 뒤 실행하는 편이 안전합니다.',
@@ -261,11 +261,13 @@ export const dataControlHowToUseRegistry: Record<DataControlHowToUseKey, DataCon
     ],
     cautions: [
       '이 버튼은 custom 누락 구간 보정용이 아니라 최근 운영용입니다.',
+      'HV/Z Score는 missing-only fill이라 이미 저장된 non-null 값은 덮어쓰지 않습니다.',
       'OHLC가 많이 비어 있으면 fallback 때문에 느려질 수 있습니다.',
     ],
     verify: [
       '완료 후 merged/skipped 또는 update summary를 확인합니다.',
       '뉴스 리스트에서 최근 기사 change%가 채워졌는지 확인합니다.',
+      'HV/Z Score 컬럼을 켰을 때 비어 있던 칸이 채워졌는지 확인합니다.',
     ],
     route: '/api/news/change/update-recent',
   },
@@ -295,8 +297,8 @@ export const dataControlHowToUseRegistry: Record<DataControlHowToUseKey, DataCon
   custom: {
     key: 'custom',
     title: 'Custom Change% Update',
-    summary: '사용자 지정 날짜 범위 뉴스에 대해 change metrics를 다시 계산합니다.',
-    purpose: '특정 기간 뉴스만 골라 change% 누락분을 보정하거나 과거 범위를 다시 계산하는 버튼입니다.',
+    summary: '사용자 지정 날짜 범위 뉴스에 대해 change metrics를 다시 계산하고, HV/Z Score는 missing row/metric만 채웁니다.',
+    purpose: '특정 기간 뉴스의 change%를 다시 계산하면서, 아직 비어 있는 HV/Z Score 칸만 추가 보강하는 버튼입니다.',
     whenToRun: [
       '특정 구간의 뉴스 change%만 다시 계산하고 싶을 때 실행합니다.',
       'preflight에서 totalRowsInRange / rowsExpectedToUpdate를 먼저 보고 범위를 조정하는 것이 좋습니다.',
@@ -307,11 +309,13 @@ export const dataControlHowToUseRegistry: Record<DataControlHowToUseKey, DataCon
     ],
     cautions: [
       '범위를 넓게 잡으면 처리 대상 rows가 급격히 늘 수 있습니다.',
+      'HV/Z Score는 missing-only fill이라 이미 계산된 non-null 값은 그대로 유지됩니다.',
       '이미 계산된 row가 많으면 실제 updated보다 scanned rows가 훨씬 클 수 있습니다.',
     ],
     verify: [
       'preflight에서 rowsExpectedToUpdate를 먼저 확인합니다.',
       '실행 후 Log/result summary에서 rowsUpdated, rowsSkipped를 확인합니다.',
+      'HV/Z Score 컬럼을 켰을 때 range 안의 빈 derived 칸이 채워졌는지 확인합니다.',
     ],
     route: '/api/news/change/update-custom',
   },

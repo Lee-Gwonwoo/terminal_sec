@@ -24,6 +24,7 @@ export interface FmpOhlcBatchOptions {
   concurrency?: number;
   requestIntervalMs?: number;
   onProgress?: (done: number, total: number) => void;
+  onLog?: (msg: string) => void;
   shouldCancel?: () => boolean;
 }
 
@@ -135,6 +136,7 @@ export async function fetchFmpOhlcBatch(
   let idx = 0;
   let done = 0;
   let cancelled = false;
+  const logInterval = Math.max(50, Math.floor(uniqueTickers.length / 10)); // log every ~10%
 
   const worker = async () => {
     while (!cancelled) {
@@ -153,6 +155,9 @@ export async function fetchFmpOhlcBatch(
       }
       done++;
       opts.onProgress?.(done, uniqueTickers.length);
+      if (opts.onLog && (done % logInterval === 0 || done === uniqueTickers.length)) {
+        opts.onLog(`[FMP fetch] ${done}/${uniqueTickers.length} tickers (${Math.round(done / uniqueTickers.length * 100)}%), errors=${errors.size}`);
+      }
     }
   };
 

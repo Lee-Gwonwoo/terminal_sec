@@ -165,6 +165,25 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `[][][]change_14d_pct[][][]`
 - `[][][]change_30d_pct[][][]`
 
+파생 metric key:
+
+- `[][][]hv_change_pct[][][]`
+- `[][][]hv_change_from_open_pct[][][]`
+- `[][][]hv_change_open_to_high_pct[][][]`
+- `[][][]hv_change_1d_pct[][][]`
+- `[][][]hv_change_3d_pct[][][]`
+- `[][][]hv_change_7d_pct[][][]`
+- `[][][]hv_change_14d_pct[][][]`
+- `[][][]hv_change_30d_pct[][][]`
+- `[][][]zscore_change_pct[][][]`
+- `[][][]zscore_change_from_open_pct[][][]`
+- `[][][]zscore_change_open_to_high_pct[][][]`
+- `[][][]zscore_change_1d_pct[][][]`
+- `[][][]zscore_change_3d_pct[][][]`
+- `[][][]zscore_change_7d_pct[][][]`
+- `[][][]zscore_change_14d_pct[][][]`
+- `[][][]zscore_change_30d_pct[][][]`
+
 운영적 정의:
 
 - `change_pct`: 전일 종가 → 뉴스 기준일 종가 (Chg)
@@ -175,6 +194,14 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `change_7d_pct`: 전일 종가 → 5거래일 후 종가
 - `change_14d_pct`: 전일 종가 → 10거래일 후 종가
 - `change_30d_pct`: 전일 종가 → 22거래일 후 종가
+
+파생 metric 운영적 정의:
+
+- `hv_*`: 현재 뉴스 row의 대응 change metric과 같은 정의를 과거 OHLC history에 적용해 만든 **matching historical series**의 최근 `60 completed samples` 표준편차다.
+- `zscore_*`: `actual_change_pct / hv_change_pct` 이다.
+- `hv_*`는 annualized volatility가 아니라 현재 change 값과 직접 비교 가능한 비연율화 sigma다.
+- `zscore_*`도 기존 테이블 컬럼 `[][][]value_pct[][][]`에 저장된다. 컬럼명은 legacy지만 실제 단위는 percent가 아니라 unitless다.
+- HV/Z Score는 `metric_key row 없음` 또는 `value_pct IS NULL`인 경우에만 채우며, 이미 저장된 non-null 값은 덮어쓰지 않는다.
 
 조회 필드 의미:
 
@@ -983,7 +1010,8 @@ Control Window / localStorage 공통 설정:
 - Phase 1.5 (FMP fallback): OHLC DB에 없는 티커는 FMP 일봉 OHLC를 가져와 DB에 upsert → 재계산
 - Phase 2: 계산 결과 일괄 저장
 - 당일 뉴스는 **ET 시장일** 기준으로 판정하며, ET `16:00:00` 이전에는 `[][][]change_pct[][][]`, `[][][]change_from_open_pct[][][]`, `[][][]change_open_to_high_pct[][][]`를 비워 둔다.
-- 재계산 결과 조건을 만족하지 못한 뉴스는 기존 `news_change_metrics` 표준 8개 metric도 삭제하여 stale 값을 남기지 않는다.
+- 재계산 결과 조건을 만족하지 못한 뉴스는 기존 `news_change_metrics` 표준 metric과 파생 HV/Z Score metric도 함께 삭제하여 stale 값을 남기지 않는다.
+- recent/custom change update는 base change metric을 재계산한 뒤, HV/Z Score는 missing row/metric만 추가로 계산해 채운다.
 - 응답 컬럼: `[][][]jobId[][][]`
 
 ### `POST /api/news/change/update-recent-fmp-missing`
