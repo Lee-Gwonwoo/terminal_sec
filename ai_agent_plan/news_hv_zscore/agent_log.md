@@ -64,3 +64,23 @@
   - plan/log 문서만 갱신
 - 상태
   - awaiting user confirmation
+
+**작성 시각:** 07:44 (local)
+
+### missing-only 계산 규칙 반영
+
+- 사용자 결정 반영
+  - HV/Z Score는 이미 값이 있는 row/metric을 다시 계산하지 않고, 값이 없는 항목만 계산해 반영하는 방향으로 고정
+- 문서 수정
+  - `plan.md` 목표 문구를 `missing-only fill` 기준으로 갱신
+  - 경계 규칙과 결정표에 `값이 비어 있는 metric_key만 대상` 규칙 추가
+  - Step 1 저장 경로 설명을 `skip existing` 기준으로 수정
+  - Step 4를 recent/custom `missing-only HV/Z-score backfill` 기준으로 수정
+  - `PLAN CHANGE` 섹션에 새 사용자 결정을 추가
+- 코드 변경
+  - 없음
+- 실행/검증 상태
+  - 빌드/테스트/서버 실행 없음
+  - plan/log 문서만 갱신
+- 상태
+  - awaiting user confirmation

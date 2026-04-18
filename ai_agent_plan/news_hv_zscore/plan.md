@@ -4,7 +4,7 @@
 - 기존 `Changes %` 묶음 컬럼은 유지하고, 별도의 묶음 컬럼 `HV`, `Z Score`를 추가하는 방향을 확정한다.
 - 현재 표시 중인 각 change metric(`Chg`, `fr.O→C`, `fr.O→H`, `+1D`, `+3D`, `+7D`, `+14D`, `+30D`)에 대응하는 변동성 값과 z-score를 계산한다.
 - 새 컬럼은 `Columns` 메뉴와 quick toggle 버튼 양쪽에서 켜고 끌 수 있게 한다.
-- 최근/커스텀 change update 흐름이 기존 change%뿐 아니라 HV/Z-score도 함께 계산하도록 확장한다.
+- 기존 change update 흐름을 재사용하되, HV/Z-score는 값이 비어 있는 row/metric만 계산해 채우는 방향으로 고정한다.
 - 이번 단계에서는 구현하지 않고, 설계/범위/검증 계획만 문서화한다.
 
 ### 현재 레포 상태(중요, 확인됨)
@@ -82,9 +82,10 @@
   1. 기존과 동일하게 news row별 base change metric을 계산한다.
   2. 같은 ticker의 과거 OHLC row를 더 많이 읽어, 각 metric에 대응하는 historical sample series를 만든다.
   3. 각 series의 최근 `60`개 완결 sample 표준편차를 계산해 HV로 저장한다.
-  4. `zscore = actual_change / matching_hv` 로 저장한다.
-  5. `GET /api/news`가 base change + HV + z-score를 함께 반환한다.
-  6. Finnhub News window는 `Changes %`, `HV`, `Z Score` 세 묶음 컬럼을 독립적으로 토글한다.
+  4. `zscore = actual_change / matching_hv` 를 계산한다.
+  5. HV/Z-score metric_key가 비어 있는 경우에만 저장하고, 이미 값이 있는 metric은 덮어쓰지 않는다.
+  6. `GET /api/news`가 base change + HV + z-score를 함께 반환한다.
+  7. Finnhub News window는 `Changes %`, `HV`, `Z Score` 세 묶음 컬럼을 독립적으로 토글한다.
 
 #### Glossary
 
@@ -147,6 +148,7 @@ zscore_metric      = actual_metric_pct / hv_metric_pct
 - HV 계산은 **look-ahead bias**가 없어야 하므로, 현재 뉴스 anchor 이후 데이터가 필요한 historical sample은 제외한다.
 - history가 부족하면 해당 HV/Z-score는 `null`로 남긴다. 억지로 `0` 또는 fallback 상수를 넣지 않는다.
 - `hv_metric_pct = 0` 이거나 `null`이면 `zscore_metric`도 `null`로 둔다.
+- HV/Z-score backfill 대상은 **값이 비어 있는 metric_key만** 이다. 이미 저장된 HV/Z-score는 이번 plan 범위에서 재계산/덮어쓰기하지 않는다.
 
 #### 계획상 신규 API 응답 필드
 
@@ -185,6 +187,7 @@ zscore_metric      = actual_metric_pct / hv_metric_pct
 | D8 | intraday metric 포함 여부 | 포함 (`fr.O→C`, `fr.O→H`도 계산) | 사용자 요청이 “각 change 데이터 대응”이므로 제외하면 요구사항이 줄어든다. |
 | D9 | grouped column sort 기준 | 첫 표시 항목(`Chg`) 기준 | 사용자 결정 사항으로 고정한다. HV/Z Score 묶음 컬럼 header를 누르면 각 묶음의 `Chg` 줄 값을 대표값으로 써서 정렬한다. |
 | D10 | source별 quick button 분리 여부 | 분리하지 않음 | 컬럼 토글과 source filter는 역할이 다르다. source 구분은 기존 source filter / source별 update 버튼에서 처리하고, HV/Z Score 버튼은 전역 column toggle로 두는 편이 UI가 덜 복잡하다. |
+| D11 | HV/Z-score update 범위 | missing-only fill | 사용자 결정 사항으로 고정한다. 이미 저장된 HV/Z-score는 그대로 두고, 값이 없는 row/metric만 계산해 반영한다. |
 
 ### 계획 중간 필수 확인
 
@@ -195,6 +198,7 @@ zscore_metric      = actual_metric_pct / hv_metric_pct
 - 기존 localStorage의 `visibleCols` 배열에 새 column ID가 없더라도 crash 없이 기본 숨김으로 동작해야 한다.
 - model1-safe mode에서 새 컬럼까지 함께 숨기지 않으면 기존 safety 설명과 불일치가 생긴다.
 - history 부족, 휴장일, ticker OHLC 부재, same-day defer rule 때문에 일부 row는 HV/Z-score가 계속 `null`일 수 있다. 이를 정상 상태로 처리할지 error로 처리할지 문구가 필요하다.
+- missing-only 범위의 기준을 명확히 해야 한다. 기본 기준은 `metric_key row 없음` 또는 `value_pct IS NULL`인 경우만 대상에 포함하고, 값이 채워진 metric은 skip한다.
 - 묶음 컬럼 sort 기준의 뜻: `HV` 또는 `Z Score` 컬럼 안에는 `Chg`, `fr.O→C`, `fr.O→H`, `+1D`, `+3D`, `+7D`, `+14D`, `+30D`가 같이 들어가므로, 사용자가 컬럼 header를 눌러 정렬할 때 어떤 하위 줄을 대표값으로 삼을지 정해야 한다. 이번 plan에서는 `Chg`를 대표값으로 고정한다.
 - source별 버튼 분리 관련 판단: 현재 News window에는 이미 source filter와 source별 update 액션이 있다. 따라서 `HV`/`Z Score` 버튼까지 `Company News`, `FMP PR`, `FMP SEC`로 쪼개면 “무엇을 보여줄지”와 “어떤 source만 볼지”가 섞여 버튼 수만 늘어난다. source를 빠르게 바꾸고 싶다면 별도의 source chip/segmented control을 고려할 수 있지만, HV/Z Score quick button 자체는 전역 toggle이 더 적절하다.
 
@@ -271,10 +275,10 @@ zscore_metric      = actual_metric_pct / hv_metric_pct
 흔한 문제/주의: `+30D` sample은 더 긴 과거 bar가 필요하므로 단순 recent 20일 조회로는 부족하다.
 
 1-3 목적: 신규 row와 기존 backfill이 같은 저장 구조를 쓰게 하기 위함.
-설명: 기존 8 metric write 뒤에 HV 8개와 z-score 8개를 같은 트랜잭션 안에서 저장한다.
-완료 조건(눈으로 확인): 한 news_id에 대해 base/HV/Z-score metric_key가 함께 저장된다.
-사람 검증(비개발자): 나중에 재계산해도 세 값이 한 세트로 갱신된다.
-흔한 문제/주의: `value_pct` 컬럼에 z-score를 넣는 legacy semantics는 문서화가 필요하다.
+설명: 기존 8 metric write 흐름을 재사용하되, HV 8개와 z-score 8개는 현재 값이 비어 있는 metric_key만 같은 트랜잭션 안에서 저장한다.
+완료 조건(눈으로 확인): 한 news_id에서 비어 있던 HV/Z-score metric_key만 새로 채워지고, 이미 값이 있던 metric은 그대로 유지된다.
+사람 검증(비개발자): 일부 값만 비어 있던 기사도 필요한 칸만 채워지고, 기존 값은 덮어써지지 않는다.
+흔한 문제/주의: `value_pct` 컬럼에 z-score를 넣는 legacy semantics는 문서화가 필요하고, skip 조건이 느슨하면 의도치 않은 overwrite가 생길 수 있다.
 
 1-4 목적: recent/custom update가 지나치게 느려지는 것을 막기 위함.
 설명: ticker별 OHLC history를 한 번 불러와 여러 news row가 재사용하도록 cache 구조를 둔다.
@@ -365,25 +369,25 @@ zscore_metric      = actual_metric_pct / hv_metric_pct
 ```
 사용자 확인 필요: **예**
 
-#### ⬜ Step 4 — recent/custom change update와 기존 row backfill 연결
+#### ⬜ Step 4 — recent/custom change update와 missing-only HV/Z-score backfill 연결
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 4-1 | recent change update가 base/HV/Z-score를 함께 계산하도록 연결 | `terminal/backend/src/services/newsChangeMerger.ts`, `terminal/backend/src/server.ts` | recent route 실행 결과 확인 | ⬜ |
-| 4-2 | custom change update가 과거 범위 backfill에 그대로 쓰이도록 연결 | `terminal/backend/src/services/newsChangeMerger.ts`, `terminal/backend/src/server.ts` | custom route 실행 결과 확인 | ⬜ |
+| 4-1 | recent change update 경로에서 HV/Z-score missing row/metric만 계산하도록 연결 | `terminal/backend/src/services/newsChangeMerger.ts`, `terminal/backend/src/server.ts` | recent route 실행 결과 확인 | ⬜ |
+| 4-2 | custom change update가 선택 범위 내 missing HV/Z-score만 채우도록 연결 | `terminal/backend/src/services/newsChangeMerger.ts`, `terminal/backend/src/server.ts` | custom route 실행 결과 확인 | ⬜ |
 | 4-3 | history 부족/null rule과 log 메시지 정리 | `terminal/backend/src/services/newsChangeMerger.ts` | job log / null row 확인 | ⬜ |
 
 4-1 목적: 신규 incoming 뉴스와 최근 운영 구간이 같은 계산 경로를 쓰게 하기 위함.
-설명: 기존 recent route 실행 시 HV/Z-score metric_key도 함께 적재되게 한다.
-완료 조건(눈으로 확인): recent route 후 최근 row에 새 metric이 채워진다.
-사람 검증(비개발자): 최근 뉴스 화면에서 버튼만 눌러도 새 컬럼 값이 채워진다.
-흔한 문제/주의: 계산량 증가로 job 시간이 길어질 수 있다.
+설명: 기존 recent route 실행 시 HV/Z-score 중 비어 있는 metric_key만 적재하고, 이미 값이 있는 metric은 skip한다.
+완료 조건(눈으로 확인): recent route 후 최근 row 중 HV/Z-score가 비어 있던 칸만 채워진다.
+사람 검증(비개발자): 최근 뉴스 화면에서 빈 칸만 메워지고, 기존 값은 그대로 유지된다.
+흔한 문제/주의: 계산량 증가로 job 시간이 길어질 수 있고, missing 판정이 부정확하면 overwrite가 발생할 수 있다.
 
 4-2 목적: 이미 DB에 있는 과거 뉴스도 backfill 가능하게 하기 위함.
-설명: 새 전용 route를 만들지 않고 기존 custom update를 재사용해 범위별 재계산을 수행한다.
-완료 조건(눈으로 확인): custom route 후 지정 범위 row에 새 metric이 채워진다.
-사람 검증(비개발자): 원하는 날짜 범위를 다시 계산해 과거 기사도 비교할 수 있다.
-흔한 문제/주의: 아주 긴 범위를 한 번에 돌리면 FMP fallback/DB write가 느려질 수 있다.
+설명: 새 전용 route를 만들지 않고 기존 custom update를 재사용하되, 선택 범위 안에서도 HV/Z-score가 비어 있는 row/metric만 채운다.
+완료 조건(눈으로 확인): custom route 후 지정 범위 row 중 HV/Z-score 빈 칸만 채워진다.
+사람 검증(비개발자): 원하는 날짜 범위를 돌려도 이미 계산된 값은 건드리지 않고, 비어 있던 기사만 보강된다.
+흔한 문제/주의: 아주 긴 범위를 한 번에 돌리면 FMP fallback/DB write가 느려질 수 있고, 범위 내 일부 metric만 missing인 row 처리 기준을 명확히 해야 한다.
 
 4-3 목적: null을 오류로 오해하지 않게 하기 위함.
 설명: history 부족, OHLC 없음, same-day defer 같은 정상 null 사유를 log와 UI 문서에 남긴다.
@@ -395,6 +399,7 @@ zscore_metric      = actual_metric_pct / hv_metric_pct
 ```text
 - POST /api/news/change/update-recent 후 최근 row 확인
 - POST /api/news/change/update-custom 후 지정 범위 row 확인
+- 이미 HV/Z-score 값이 있던 row는 unchanged인지 확인
 - job log에서 insufficient-history / same-day-defer 구분 확인
 ```
 사용자 확인 필요: **예**
@@ -506,6 +511,7 @@ Legend
   - 따라서 `U1`은 미확정 사항에서 제거한다.
   - `grouped column sort 기준`은 `Chg 기준`으로 고정한다.
   - source별 quick button은 만들지 않고, `HV`/`Z Score`는 전역 column toggle로 유지한다.
+  - HV/Z-score는 이미 값이 있는 row/metric을 재계산하지 않고, 값이 없는 항목만 계산해 반영한다.
 
 ### 결정 #1 — HV 정의 방식(상세)
 
