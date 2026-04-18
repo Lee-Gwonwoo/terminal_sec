@@ -90,7 +90,7 @@
 
 | 항목 | 설명 |
 | --- | --- |
-| 날짜 | published_at 또는 event_at (ISO 형식) |
+| 날짜 | **event_date**(실제 이벤트 발생일)와 **published_at**(기사 게시일)를 구분 표기. 동일하면 한 번만 쓰고, 다르면 반드시 둘 다 표기한다. ISO 형식. 상세 규칙은 아래 「이벤트 날짜 vs 기사 날짜 구분 규칙」 참조. |
 | 티커 | 해당 이슈의 주체 종목 |
 | 데이터 소스 | `company_news`, `fmp_pr`, `fmp_sec`, `investing`, `calendar_events` 중 어디서 왔는지 |
 | headline/제목 | 원문 headline 또는 filing type |
@@ -140,6 +140,69 @@
    - 7d/14d/30d change는 이슈의 지속력, Turnover 급등은 기관 자금 유입 시그널로 해석한다.
 
 **분석 원칙:** 바스켓 내 종목 간 비교에서는 change와 z-score를 항상 짝으로 본다. change가 큰데 z-score가 낮으면 원래 변동성이 큰 종목의 통상 범위일 수 있고, change가 상대적으로 작아도 z-score가 높으면 저변동성 종목에서 나온 강한 신호일 수 있다.
+
+---
+
+### 이벤트 날짜 vs 기사 날짜 구분 규칙 (필수)
+
+company_news 분석 시, **이벤트가 실제로 발생한 날짜(event_date)**와 **기사가 게시된 날짜(published_at)**가 다른 경우가 빈번하다. 후속 기사의 change를 이벤트 첫 반응으로 착각하면 분석이 왜곡되므로, 아래 규칙을 적용한다.
+
+#### 핵심 용어
+
+| 용어 | 정의 | 예시 |
+|------|------|------|
+| **event_date** | 이벤트가 실제 발생한 날짜 (어닝 발표, 계약 체결, SEC filing 등) | 4/12에 어닝 발표 |
+| **published_at** | 해당 이벤트를 보도/분석한 기사의 게시 시각 (DB 저장 값) | 4/13에 후속 분석 기사 게시 |
+| **first_public_at** | 시장이 해당 이벤트를 **처음** 인지한 시점 | 4/12 16:05 ET (어닝 발표 직후) |
+| **change_anchor** | change 지표 계산 시 기준으로 삼는 첫 거래일 | first_public_at이 16:00 ET 이후면 다음 거래일 |
+
+#### 운영 규칙
+
+1. **change_anchor는 항상 first_public_at 기준이다.**
+   - "시장이 언제 처음 알았는가"가 가격 반응의 기준점이다. 이벤트 발생일 자체가 아니다.
+   - 예: 4/12 장 마감 후 어닝 발표 → first_public_at = 4/12 16:05 → change_anchor = 4/13 (다음 거래일).
+
+2. **후속 기사의 change를 이벤트 첫 반응으로 사용하지 않는다.**
+   - 4/12에 어닝이 발표되고 4/13에 분석 기사가 나온 경우:
+     - 기사 row의 `news_change_metrics`는 **4/13 기준** change를 담고 있다 (4/12 종가 대비 4/13 종가 등).
+     - 이것은 **후속 반응(2일차)**이지, 이벤트 첫 반응이 아니다.
+   - 이벤트 첫 반응은 `ohlc_1d`에서 change_anchor 날짜의 change를 직접 조회해야 한다.
+
+3. **분석 문서에 기록할 때 날짜를 구분해서 명시한다.**
+   - `이벤트 날짜(event_date)`: 실제 이벤트 발생일.
+   - `기사 날짜(published_at)`: DB에 저장된 기사 게시일.
+   - `가격 기준일(change_anchor)`: change 계산에 사용할 첫 거래일.
+   - 세 날짜가 동일하면 한 번만 쓰되, **다를 때는 반드시 구분 표기**한다.
+
+4. **event_date 판별 방법 (우선순위):**
+   - ① `calendar_events.event_at` (어닝, SEC filing 등 구조화 데이터)
+   - ② 기사 본문/headline에 명시된 날짜 ("reported on April 12", "filed on 4/12")
+   - ③ 같은 이벤트에 대한 가장 이른 기사의 published_at
+   - ④ 판별 불가 시 `(event_date 미확인, published_at 기준 사용)` 태그 표기
+
+#### 구체 예시
+
+**예시 A — 어닝 후속 분석 기사:**
+- 4/12(금) 16:05 ET: AAPL 어닝 발표 (event_date = 4/12)
+- 4/13(토): 분석 기사 게시 (published_at = 4/13) → 주말이므로 change 의미 없음
+- change_anchor = 4/14(월, 첫 거래일)
+- ✅ 이벤트 반응 = ohlc_1d에서 4/14의 Change_1d_Pct 등
+- ❌ 4/13 기사 row의 news_change_metrics를 "어닝 반응"으로 사용하면 안 됨
+
+**예시 B — 당일 보도 (세 날짜 동일):**
+- 4/15(화) 09:30 ET: 대형 계약 발표 (event_date = 4/15)
+- 4/15(화) 10:15 ET: 기사 게시 (published_at = 4/15)
+- change_anchor = 4/15 (세 날짜 동일)
+- ✅ 기사 row의 news_change_metrics를 그대로 이벤트 반응으로 사용 가능
+
+**예시 C — 전날 장 후 이벤트, 다음날 보도:**
+- 4/12(월) 17:00 ET: CEO 사임 발표 (event_date = 4/12)
+- 4/13(화) 06:30 ET: 기사 게시 (published_at = 4/13)
+- first_public_at = 4/12 17:00, change_anchor = 4/13
+- ✅ 기사 row의 news_change_metrics (4/13 기준)가 이벤트 첫 반응과 일치 → 사용 가능
+- ⚠️ 단, change_from_open_pct로 장 시작 후 갭 반응과 장중 추가 반응을 별도 확인
+
+---
 
 ### 3단계: 메인 촉매 분석 및 정당성 판정
 
@@ -423,3 +486,4 @@
 4. **어닝 날짜 누락 금지**: 확산 타임라인의 각 이벤트에서 직전 어닝과 다음 어닝 날짜를 모두 조회하지 않으면 미완료로 간주한다.
 5. **티어 판정 근거 생략 금지**: 티어를 부여할 때 판정 조건(파동 횟수, 지속 기간, 개별 확인 이벤트)을 명시하지 않으면 미완료로 간주한다.
 6. **축약 금지**: `Model_100`은 `ai-news-research.md`의 축약 금지 / 미완료 판정 규칙을 동일하게 적용한다.
+7. **이벤트 날짜 / 기사 날짜 혼동 금지**: 후속 기사의 published_at 기준 change를 이벤트 첫 반응으로 기록하지 않는다. event_date ≠ published_at인 경우 반드시 event_date, published_at, change_anchor를 구분 표기한다. 날짜를 1개만 쓰면서 "이 날 +8% 반응"처럼 적으면, 그것이 이벤트 반응인지 후속 기사 반응인지 알 수 없으므로 미완료로 간주한다.
