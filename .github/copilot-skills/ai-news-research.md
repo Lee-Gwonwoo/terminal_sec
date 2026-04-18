@@ -7,18 +7,21 @@
 - UI/DB/API에서 AI 뉴스 분석 결과를 같은 의미로 다뤄야 할 때.
 
 ### 목적
-이 지침은 AI 뉴스 리서치/분석 작업을 아래 4개 모델로 나눠서 정의한다.
+이 지침은 AI 뉴스 리서치/분석 작업을 아래 5개 모델로 나눠서 정의한다.
 
 1. `🟦 Model_1_new news analysis`
 2. `🟧 Model_2_case analysis`
 3. `🟥 Model_3_single-news scoring analysis`
 4. `🟩 Model_4_watchlists analysis`
+5. `🟪 Model_100_issue tier analysis`
 
 기존에 문서에 있던 단일 뉴스 `Score / Score Evidence / Keywords` 생성 방식은 이제 `Model_3`로 분류한다.
 
 추가로 `Model_1`에는 필요시 **간접 영향 전파 점검 단계**인 `model_1_2_investing`을 붙일 수 있다. 이는 별도 4번째 모델이 아니라, `Model_1`의 DB 기반 분석을 끝낸 뒤 Investing 웹사이트의 시황/정책/테마 기사를 추가 조사해 **ticker 직접 매핑이 약한 외부 이슈가 어떤 공개 ticker 바스켓과 watchlist 내부 종목에 readthrough를 만들 수 있는지 구조적으로 점검하는 규칙**이다. 상세 정의는 [ai-news-research_model1.md](ai-news-research_model1.md)에 둔다.
 
 `Model_4_watchlists`는 `Model_1`과 같은 분석 프레임을 사용하되, **현재 뉴스 직접 분석 대상을 사용자가 지정한 watchlist ticker 집합으로 제한**하는 모델이다. 상세 정의는 [ai-news-research_model4_watchlists.md](ai-news-research_model4_watchlists.md)에 둔다.
+
+`Model_100_issue tier analysis`는 개별 뉴스가 아니라 **이슈 1개가 만들어낸 종목 바스켓 전체의 형성·확산·분화 라이프사이클**을 분석하는 모델이다. 관련주 정리, 오너십, 선행 이슈, 메인 촉매, 순환매 패턴, 티어 판정(1/2/3/fail tier)을 포함한다. 상세 정의는 [ai-news-research_model100_issue_analysis.md](ai-news-research_model100_issue_analysis.md)에 둔다.
 
 ### plan / log 문서 작성 예외
 
