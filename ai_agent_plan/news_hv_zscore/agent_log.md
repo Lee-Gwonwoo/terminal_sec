@@ -25,3 +25,42 @@
   - 문서 생성만 수행
 - 상태
   - awaiting user confirmation
+
+**작성 시각:** 07:31 (local)
+
+### PLAN CHANGE 반영
+
+- 사용자 결정 반영
+  - 변동성 계산 lookback은 `60 completed samples`로 고정
+- 문서 수정
+  - `plan.md`의 lookback 기본값을 `20` → `60`으로 변경
+  - `U1` 미확정 항목 제거
+  - `묶음 컬럼 sort 기준` 설명을 본문에 추가
+- 코드 변경
+  - 없음
+- 실행/검증 상태
+  - 빌드/테스트/서버 실행 없음
+  - plan/log 문서만 갱신
+- 상태
+  - awaiting user confirmation
+
+**작성 시각:** 07:36 (local)
+
+### 추가 사용자 결정 반영
+
+- 사용자 결정 반영
+  - 묶음 컬럼 sort 기준은 `Chg 기준`으로 고정
+- 계획 판단 추가
+  - `HV`/`Z Score` quick button은 source별(`Company News`, `FMP PR`, `FMP SEC`)로 분리하지 않음
+  - source 구분은 기존 source filter / source별 update 버튼에서 처리하고, HV/Z Score는 전역 column toggle로 유지하는 방향으로 정리
+- 문서 수정
+  - `plan.md`에서 `U2` 미확정 항목 제거
+  - `D9`, `D10` 결정 항목 갱신
+  - source별 버튼 분리 비권장 이유 추가
+- 코드 변경
+  - 없음
+- 실행/검증 상태
+  - 빌드/테스트/서버 실행 없음
+  - plan/log 문서만 갱신
+- 상태
+  - awaiting user confirmation

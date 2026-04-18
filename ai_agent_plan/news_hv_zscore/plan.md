@@ -81,7 +81,7 @@
 - 계산 개요
   1. 기존과 동일하게 news row별 base change metric을 계산한다.
   2. 같은 ticker의 과거 OHLC row를 더 많이 읽어, 각 metric에 대응하는 historical sample series를 만든다.
-  3. 각 series의 최근 `N`개 완결 sample 표준편차를 계산해 HV로 저장한다.
+  3. 각 series의 최근 `60`개 완결 sample 표준편차를 계산해 HV로 저장한다.
   4. `zscore = actual_change / matching_hv` 로 저장한다.
   5. `GET /api/news`가 base change + HV + z-score를 함께 반환한다.
   6. Finnhub News window는 `Changes %`, `HV`, `Z Score` 세 묶음 컬럼을 독립적으로 토글한다.
@@ -90,7 +90,7 @@
 
 - `lookback sample count`
   - HV를 추정할 때 사용하는 과거 완결 sample 개수.
-  - 기본 제안값: `20`.
+  - 사용자 결정값: `60`.
 - `matching historical series`
   - 현재 보여주는 change metric과 **정의가 같은 과거 수익률 시퀀스**.
   - 단순히 `daily sigma × sqrt(h)`로 환산하지 않고, metric 자체 정의를 그대로 과거에 적용한 시리즈를 쓴다.
@@ -137,7 +137,7 @@ hist_30d(t)        = (Close[t+22] / Close[t-1] - 1) * 100
 - HV / Z-score 정의
 
 ```text
-hv_metric_pct      = std(last N completed samples of matching historical series)
+hv_metric_pct      = std(last 60 completed samples of matching historical series)
 zscore_metric      = actual_metric_pct / hv_metric_pct
 ```
 
@@ -175,7 +175,7 @@ zscore_metric      = actual_metric_pct / hv_metric_pct
 
 | 결정 ID | 내용 | 기본값 제안 | 이유 |
 |---------|------|-------------|------|
-| D1 | HV lookback sample count | 20 completed samples | 뉴스 반응 정규화에는 최근 regime 반영이 더 중요하고, 사용자 참고자료도 20~60을 허용한다. |
+| D1 | HV lookback sample count | 60 completed samples | 사용자 결정 사항으로 고정한다. |
 | D2 | 변동성 정의 방식 | metric별 matching historical series | intraday metric과 event-day-inclusive forward metric이 섞여 있어 `σ√h`보다 정의 일치성이 높다. |
 | D3 | 저장 위치 | 기존 `news_change_metrics` 재사용 + 새 `metric_key` prefix | 최근/custom update, `/api/news` join 구조를 최소 수정으로 확장할 수 있다. |
 | D4 | UI 컬럼 구조 | 묶음 컬럼 `HV`, 묶음 컬럼 `Z Score` | 사용자가 “HV, Z score 컬럼 따로”를 원했고, 기존 `Changes %` 레이아웃과 일관된다. |
@@ -183,17 +183,20 @@ zscore_metric      = actual_metric_pct / hv_metric_pct
 | D6 | 기본 visibility | `HV`, `Z Score` 둘 다 기본 숨김 | 기본 화면 폭 증가를 막고, 원하는 사용자만 켜게 한다. |
 | D7 | model1-safe 처리 | `changes`, `hv`, `zscore` 모두 숨김 | 현재 `changes`만 숨기는데, 같은 계열 derived price reaction column은 함께 숨기는 편이 맞다. |
 | D8 | intraday metric 포함 여부 | 포함 (`fr.O→C`, `fr.O→H`도 계산) | 사용자 요청이 “각 change 데이터 대응”이므로 제외하면 요구사항이 줄어든다. |
-| D9 | grouped column sort 기준 | 첫 표시 항목(`Chg`) 기준 | 묶음 컬럼을 유지하면서도 sort 기능을 끊지 않는 가장 단순한 규칙이다. |
+| D9 | grouped column sort 기준 | 첫 표시 항목(`Chg`) 기준 | 사용자 결정 사항으로 고정한다. HV/Z Score 묶음 컬럼 header를 누르면 각 묶음의 `Chg` 줄 값을 대표값으로 써서 정렬한다. |
+| D10 | source별 quick button 분리 여부 | 분리하지 않음 | 컬럼 토글과 source filter는 역할이 다르다. source 구분은 기존 source filter / source별 update 버튼에서 처리하고, HV/Z Score 버튼은 전역 column toggle로 두는 편이 UI가 덜 복잡하다. |
 
 ### 계획 중간 필수 확인
 
-- longest horizon(`+30D = +22 trading days`)와 `lookback=20` 조합에서, 각 뉴스 row마다 최소 몇 개의 과거 bar가 필요한지 계산량을 먼저 확정해야 한다.
+- longest horizon(`+30D = +22 trading days`)와 `lookback=60` 조합에서, 각 뉴스 row마다 최소 몇 개의 과거 bar가 필요한지 계산량을 먼저 확정해야 한다.
 - recent/custom change update가 HV/Z-score까지 같이 계산하면 ticker별 반복 OHLC 조회가 늘어나므로, per-item query 구조로 두면 느려질 가능성이 높다.
 - `news_change_metrics.value_pct`에 z-score를 저장할 때 단위명이 legacy라는 점을 문서에 명시해야 한다.
 - `Columns` 메뉴와 quick buttons가 같은 state(`visibleCols`)를 바라보도록 해야 UI drift가 없다.
 - 기존 localStorage의 `visibleCols` 배열에 새 column ID가 없더라도 crash 없이 기본 숨김으로 동작해야 한다.
 - model1-safe mode에서 새 컬럼까지 함께 숨기지 않으면 기존 safety 설명과 불일치가 생긴다.
 - history 부족, 휴장일, ticker OHLC 부재, same-day defer rule 때문에 일부 row는 HV/Z-score가 계속 `null`일 수 있다. 이를 정상 상태로 처리할지 error로 처리할지 문구가 필요하다.
+- 묶음 컬럼 sort 기준의 뜻: `HV` 또는 `Z Score` 컬럼 안에는 `Chg`, `fr.O→C`, `fr.O→H`, `+1D`, `+3D`, `+7D`, `+14D`, `+30D`가 같이 들어가므로, 사용자가 컬럼 header를 눌러 정렬할 때 어떤 하위 줄을 대표값으로 삼을지 정해야 한다. 이번 plan에서는 `Chg`를 대표값으로 고정한다.
+- source별 버튼 분리 관련 판단: 현재 News window에는 이미 source filter와 source별 update 액션이 있다. 따라서 `HV`/`Z Score` 버튼까지 `Company News`, `FMP PR`, `FMP SEC`로 쪼개면 “무엇을 보여줄지”와 “어떤 source만 볼지”가 섞여 버튼 수만 늘어난다. source를 빠르게 바꾸고 싶다면 별도의 source chip/segmented control을 고려할 수 있지만, HV/Z Score quick button 자체는 전역 toggle이 더 적절하다.
 
 ### 제안하는 구현 순서(이유)
 
@@ -217,7 +220,7 @@ zscore_metric      = actual_metric_pct / hv_metric_pct
 | 세부 단계 | 작업 | 상태 |
 |-----------|------|------|
 | 0-1 | 현재 `Changes %` 묶음의 실제 하위 metric 정의와 horizon 매핑을 문서화 | ⏳ |
-| 0-2 | HV/Z-score 수식과 기본 lookback(`20`) 제안안을 문서화 | ⏳ |
+| 0-2 | HV/Z-score 수식과 고정 lookback(`60`) 기준을 문서화 | ⏳ |
 | 0-3 | `HV`, `Z Score` 버튼을 quick visibility toggle로 두는 UI 기본안을 고정 | ⏳ |
 
 0-1 목적: 기존 metric 의미를 잘못 읽어서 HV를 엉뚱한 분모로 계산하는 실수를 막기 위함.
@@ -227,8 +230,8 @@ zscore_metric      = actual_metric_pct / hv_metric_pct
 흔한 문제/주의: `1일 변동성`을 lookback 길이와 horizon 길이로 혼동하기 쉽다.
 
 0-2 목적: z-score 분모를 통일하기 위함.
-설명: annualized HV가 아니라 현재 change와 바로 나눌 수 있는 non-annualized sigma를 쓴다는 기본안을 고정한다.
-완료 조건(눈으로 확인): `zscore = actual / hv` 정의와 `hv = std(last N completed samples)` 정의가 문서에 있다.
+설명: annualized HV가 아니라 현재 change와 바로 나눌 수 있는 non-annualized sigma를 쓰고, lookback은 60 completed samples로 고정한다.
+완료 조건(눈으로 확인): `zscore = actual / hv` 정의와 `hv = std(last 60 completed samples)` 정의가 문서에 있다.
 사람 검증(비개발자): 2배 강한 움직임이라는 해석이 가능한 구조임을 이해할 수 있다.
 흔한 문제/주의: `std` 계산에 미래 bar가 섞이면 수치가 지나치게 좋아 보일 수 있다.
 
@@ -435,14 +438,8 @@ zscore_metric      = actual_metric_pct / hv_metric_pct
 
 | ID | 결정 필요 사항 | 선택지 | 차단 대상 Step |
 |----|----------------|--------|----------------|
-| U1 | HV lookback sample count | `20` / `60` / user-configurable | Step 1 |
-| U2 | 묶음 컬럼 sort 대표값 | `Chg 기준` / `+1D 기준` / `정렬 비활성` | Step 3 |
 | U3 | UI 라벨 표현 | `HV`, `Z Score` / `HV(σ)`, `Z Score` | Step 3, Step 5 |
 
-- U1 기본 제안: `20`
-  - 이유: 최근 regime 반영과 계산량 균형이 가장 좋다.
-- U2 기본 제안: `Chg 기준`
-  - 이유: 묶음 컬럼 첫 줄과 sort 의미를 맞추기 쉽다.
 - U3 기본 제안: 버튼/컬럼 제목은 `HV`, `Z Score`, 문서 설명에서만 `비연율화 sigma`를 명시
   - 이유: UI는 짧게, 문서는 정확하게 가져가는 방식이 가장 실용적이다.
 
@@ -459,7 +456,7 @@ Legend
 
 ```text
 ⏳ 0-1 현재 changes metric 정의 고정
-⏳ 0-2 HV/Z-score 수식 및 lookback 기본안 고정
+⏳ 0-2 HV/Z-score 수식 및 60-sample lookback 고정
 
 ⬜ 1-1 metric key naming 정의
 ⬜ 1-2 matching historical series helper 추가
@@ -480,9 +477,9 @@ Legend
 ```text
 ⏳ 0-3 HV/Z Score 버튼 의미 고정
 
-🚫 3-1 hv/zscore column ID 추가            (U1, Step 2 선행)
+🚫 3-1 hv/zscore column ID 추가            (Step 2 선행)
 🚫 3-2 row model field 매핑 추가           (Step 2 선행)
-🚫 3-3 HV/Z Score 묶음 렌더 + sort 추가    (U2 선행)
+🚫 3-3 HV/Z Score 묶음 렌더 + sort 추가    (Step 2 선행)
 🚫 3-4 quick toggle + persistence 추가     (Step 3-1 선행)
 
 🚫 5-1 backend prompt 문서 갱신            (Step 2, Step 4 선행)
@@ -500,9 +497,15 @@ Legend
 
 | 결정 | 차단 대상 | 선택지 |
 |------|-----------|--------|
-| U1 lookback sample count | Step 1-1, 1-2 | `20` / `60` / user-configurable |
-| U2 grouped column sort 기준 | Step 3-3 | `Chg 기준` / `+1D 기준` / `정렬 비활성` |
 | U3 UI 라벨 표현 | Step 3, Step 5 | `HV`, `Z Score` / `HV(σ)`, `Z Score` |
+
+### PLAN CHANGE
+
+- 2026-04-18 user decision 반영:
+  - HV lookback은 `60 completed samples`로 고정한다.
+  - 따라서 `U1`은 미확정 사항에서 제거한다.
+  - `grouped column sort 기준`은 `Chg 기준`으로 고정한다.
+  - source별 quick button은 만들지 않고, `HV`/`Z Score`는 전역 column toggle로 유지한다.
 
 ### 결정 #1 — HV 정의 방식(상세)
 
