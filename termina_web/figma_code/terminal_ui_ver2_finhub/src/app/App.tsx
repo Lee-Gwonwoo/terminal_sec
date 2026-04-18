@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Plus, Edit2, Moon, Sun } from "lucide-react";
+import { Plus, Edit2, Moon, Sun, RotateCw } from "lucide-react";
 import { TabData, WindowInstance, WindowType } from "./types";
 import { AddTabModal } from "./components/AddTabModal";
 import { DraggableWindow } from "./components/DraggableWindow";
@@ -8,9 +8,44 @@ import type { CompanyDescriptionWindowData } from "./companyDescription";
 import { CompanyDescriptionHoverPreview } from "./components/CompanyDescriptionHoverPreview";
 import { OPEN_COMPANY_DESCRIPTION_EVENT, normalizeTickerSymbol } from "./companyDescription";
 
+const API_BASE = "";
+
+type BackendRestartState = "idle" | "requesting" | "waiting" | "done" | "error";
+
 function clampNumber(value: unknown, fallback: number, min: number, max: number) {
   if (typeof value !== "number" || Number.isNaN(value)) return fallback;
   return Math.min(max, Math.max(min, value));
+}
+
+async function readResponsePayload(response: Response): Promise<unknown> {
+  const text = await response.text();
+  if (!text) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { message: text };
+  }
+}
+
+function extractResponseMessage(payload: unknown, fallback: string): string {
+  if (payload && typeof payload === "object") {
+    if ("error" in payload && typeof payload.error === "string" && payload.error.trim()) {
+      return payload.error;
+    }
+    if ("message" in payload && typeof payload.message === "string" && payload.message.trim()) {
+      return payload.message;
+    }
+  }
+  return fallback;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }
 
 export default function App() {
@@ -38,6 +73,8 @@ export default function App() {
   const [dragOverTabId, setDragOverTabId] = useState<string | null>(null);
   const [workspaceHydrated, setWorkspaceHydrated] = useState(false);
   const [hoverPreview, setHoverPreview] = useState<{ ticker: string; x: number; y: number } | null>(null);
+  const [backendRestartState, setBackendRestartState] = useState<BackendRestartState>("idle");
+  const [backendRestartMessage, setBackendRestartMessage] = useState<string | null>(null);
 
   const openCompanyDescriptionWindow = React.useCallback((ticker: string) => {
     const normalizedTicker = normalizeTickerSymbol(ticker);
@@ -522,6 +559,82 @@ export default function App() {
     }
   };
 
+  const handleBackendRestart = async () => {
+    if (backendRestartState === "requesting" || backendRestartState === "waiting") {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Restart backend now?\n\nRunning jobs and in-memory job logs will be cleared.",
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setBackendRestartState("requesting");
+    setBackendRestartMessage("Requesting backend restart...");
+
+    const waitForBackendReady = async (timeoutMs = 30000): Promise<boolean> => {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        try {
+          const response = await fetch(`${API_BASE}/healthz?ts=${Date.now()}`, { cache: "no-store" });
+          if (response.ok) {
+            return true;
+          }
+        } catch {
+          // Backend is expected to be unavailable briefly while restarting.
+        }
+        await sleep(1000);
+      }
+      return false;
+    };
+
+    try {
+      const response = await fetch(`${API_BASE}/api/dev/restart-backend`, {
+        method: "POST",
+      });
+      const payload = await readResponsePayload(response);
+
+      if (!response.ok) {
+        throw new Error(
+          extractResponseMessage(payload, "Failed to request backend restart."),
+        );
+      }
+
+      setBackendRestartState("waiting");
+      setBackendRestartMessage(
+        extractResponseMessage(payload, "Backend restart requested. Waiting for reconnect..."),
+      );
+
+      const ready = await waitForBackendReady();
+      if (!ready) {
+        throw new Error(
+          "Restart request was sent, but the backend did not come back within 30 seconds. If the process is fully down, run the VS Code task 'backend: dev (npm.cmd)'.",
+        );
+      }
+
+      setBackendRestartState("done");
+      setBackendRestartMessage("Backend restarted. Reloading...");
+      window.setTimeout(() => {
+        window.location.reload();
+      }, 800);
+    } catch (error) {
+      let message = error instanceof Error ? error.message : "Failed to restart backend.";
+      if (message === "Failed to fetch" || /NetworkError/i.test(message)) {
+        message = "Backend is unreachable. This button can request a restart only while the dev server still responds. If the backend is already fully down, run the VS Code task 'backend: dev (npm.cmd)'.";
+      }
+      setBackendRestartState("error");
+      setBackendRestartMessage(message);
+    }
+  };
+
+  const backendRestartMessageClassName = backendRestartState === "error"
+    ? "hidden xl:flex items-center rounded-full border border-red-200 bg-red-50 px-3 py-1 text-[11px] text-red-700 dark:border-red-900/60 dark:bg-red-950/60 dark:text-red-200"
+    : backendRestartState === "done"
+      ? "hidden xl:flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/60 dark:text-emerald-200"
+      : "hidden xl:flex items-center rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[11px] text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/60 dark:text-amber-200";
+
   return (
     <div className="h-screen flex flex-col bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100">
       {/* Top Bar */}
@@ -532,16 +645,32 @@ export default function App() {
           </h1>
         </div>
 
-        <button
-          onClick={() => setIsDarkMode(!isDarkMode)}
-          className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
-        >
-          {isDarkMode ? (
-            <Sun className="w-5 h-5" />
-          ) : (
-            <Moon className="w-5 h-5" />
-          )}
-        </button>
+        <div className="flex items-center gap-2">
+          {backendRestartMessage ? (
+            <div className={backendRestartMessageClassName}>
+              {backendRestartMessage}
+            </div>
+          ) : null}
+          <button
+            onClick={handleBackendRestart}
+            disabled={backendRestartState === "requesting" || backendRestartState === "waiting"}
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+            title="Restart the local backend dev server. If the backend is already fully down, use the VS Code task list instead."
+          >
+            <RotateCw className={`h-4 w-4 ${(backendRestartState === "requesting" || backendRestartState === "waiting") ? "animate-spin" : ""}`} />
+            <span className="hidden sm:inline">Restart Backend</span>
+          </button>
+          <button
+            onClick={() => setIsDarkMode(!isDarkMode)}
+            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+          >
+            {isDarkMode ? (
+              <Sun className="w-5 h-5" />
+            ) : (
+              <Moon className="w-5 h-5" />
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}

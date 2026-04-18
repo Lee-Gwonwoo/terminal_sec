@@ -33,6 +33,7 @@
 - `update_status`의 현재 핵심 컬럼은 `source_key`, `last_success_at`, `details_json`, `updated_at` 이다.
 - research API, bookmarks API, alerts API는 현재 고정 demo user id를 기준으로 동작한다.
 - `GET /api/news/stream` SSE endpoint가 존재하며 새 뉴스 insert 시 필터를 만족하는 클라이언트에 push 한다.
+- `POST /api/dev/restart-backend`는 local dev에서만 열리며, 현재 실행 중인 `src/server.ts`를 같은 내용으로 다시 써서 `tsx watch` 재실행을 유도한다. 내용 diff는 남기지 않지만 watcher 입장에서는 파일 변경 이벤트가 발생한다. 이미 backend 프로세스가 완전히 죽은 경우에는 이 endpoint 자체에 도달할 수 없으므로 VS Code task 재실행이 필요하다.
 
 ## 실행과 환경
 
@@ -42,6 +43,8 @@
 npm install
 npm run dev
 ```
+
+`npm run dev`는 `tsx watch src/server.ts`로 실행된다. 따라서 local UI의 backend restart 버튼은 현재 실행 중인 `src/server.ts`를 같은 내용으로 다시 써서 watcher 재실행을 유도한다. 최종 파일 내용은 동일하므로 git diff는 남지 않는다.
 
 검증/배포용 명령:
 
@@ -2101,6 +2104,29 @@ publisher 동작 주의:
 - `status=running` 동안 `[][][]progress.pct[][][]`는 최대 99까지만 올라간다. `100`은 `completeJob()`으로 최종 완료 처리된 뒤에만 노출된다.
 - 현재 프론트 `FinnhubNewsWindow`, `InvestingNewsWindow`는 `GET /api/jobs/active` 결과에서 자기 scope job만 유지하고, 그 안에서 running job이 2개 이상일 때 선택 dropdown을 띄운다.
 - 따라서 foreign scope job은 같은 창의 `View Log` 대상이 아니고, 버튼 disable 상태에도 반영되지 않는다.
+
+## Dev Control API
+
+### `POST /api/dev/restart-backend`
+
+local dev 백엔드 재시작을 watcher에 요청한다.
+
+응답 출력 컬럼:
+
+- `[][][]ok[][][]`
+- `[][][]restartAccepted[][][]`
+- `[][][]mode[][][]`
+- `[][][]requiresReconnect[][][]`
+- `[][][]message[][][]`
+
+현재 동작 규칙:
+
+- local loopback(`127.0.0.1`, `::1`) 요청만 허용한다.
+- `npm run dev`처럼 `tsx watch src/server.ts`로 기동된 경우에만 성공한다.
+- 성공 시 응답을 먼저 반환한 뒤 현재 실행 중인 `src/server.ts` 파일을 동일 내용으로 다시 쓴다.
+- watcher가 이 변경을 감지하면 현재 backend 프로세스를 다시 실행한다.
+- background job 상태/로그는 메모리 기반이므로 재시작 후 모두 비워진다.
+- backend 프로세스가 이미 완전히 죽어 있으면 이 API에 도달할 수 없다. 이 경우 프런트 버튼만으로는 복구할 수 없고 VS Code task `backend: dev (npm.cmd)`를 다시 실행해야 한다.
 
 ## Ticker CSV API
 

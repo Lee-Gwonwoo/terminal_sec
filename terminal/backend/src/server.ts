@@ -2,6 +2,8 @@ import express from "express";
 import cors from "cors";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
+import fs from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { config } from "./config.js";
 import { initDb } from "./db.js";
 import { deleteBlockedFinnhubCompanyNews, getModel1News, getModel1NewsById, getNews, getNewsById, getNewsIdBySourceUrl, getTickerNewsCoverage, type IsoDateRange } from "./services/newsRepository.js";
@@ -136,6 +138,10 @@ app.use(cors({ origin: config.frontendOrigin }));
 app.use(express.json({ limit: "1mb" }));
 
 const DEMO_USER_ID = "11111111-1111-1111-1111-111111111111";
+const DEV_BACKEND_RESTART_ENABLED =
+  process.env.npm_lifecycle_event === "dev" ||
+  process.argv.some((arg) => arg.includes("tsx"));
+const DEV_BACKEND_RESTART_TOUCH_PATH = fileURLToPath(import.meta.url);
 
 const DEFAULT_FINNHUB_TICKER_CONCURRENCY = 5;
 const DEFAULT_FINNHUB_REQUEST_INTERVAL_MS = 1000;
@@ -661,6 +667,19 @@ function parseNewsQuery(query: Record<string, unknown>): NewsQuery {
   };
 }
 
+function isLoopbackAddress(remoteAddress: string | undefined): boolean {
+  return (
+    remoteAddress === "127.0.0.1" ||
+    remoteAddress === "::1" ||
+    remoteAddress === "::ffff:127.0.0.1"
+  );
+}
+
+async function requestDevBackendRestart(): Promise<void> {
+  const source = await fs.readFile(DEV_BACKEND_RESTART_TOUCH_PATH, "utf8");
+  await fs.writeFile(DEV_BACKEND_RESTART_TOUCH_PATH, source, "utf8");
+}
+
 app.get("/healthz", (_req, res) => {
   res.json({ ok: true });
 });
@@ -670,6 +689,38 @@ app.get("/api/config", (_req, res) => {
     realtime: "sse",
     pollingFallbackSeconds: 10,
     demoUserId: DEMO_USER_ID
+  });
+});
+
+app.post("/api/dev/restart-backend", (req, res) => {
+  if (!DEV_BACKEND_RESTART_ENABLED) {
+    res.status(409).json({
+      error: "Backend restart is available only when the server runs via local dev watch mode.",
+    });
+    return;
+  }
+
+  if (!isLoopbackAddress(req.socket.remoteAddress ?? undefined)) {
+    res.status(403).json({
+      error: "Backend restart accepts localhost requests only.",
+    });
+    return;
+  }
+
+  res.json({
+    ok: true,
+    restartAccepted: true,
+    mode: "tsx-watch-trigger",
+    requiresReconnect: true,
+    message: "Backend restart requested. Waiting for tsx watch to reload the server...",
+  });
+
+  res.on("finish", () => {
+    setTimeout(() => {
+      void requestDevBackendRestart().catch((error) => {
+        console.error("[dev-control] failed to request backend restart", error);
+      });
+    }, 150);
   });
 });
 
