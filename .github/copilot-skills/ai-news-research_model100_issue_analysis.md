@@ -44,6 +44,8 @@
 
 ## 분석 절차 (5단계)
 
+**작성 순서 고정 규칙 (필수):** 실제 조사 순서는 유연할 수 있어도, `research_pages.body` 작성 순서는 고정한다. 즉 `## 오너십 데이터` 바로 아래에는 반드시 **핵심 분석이슈(메인 촉매 / 메인 파동 anchor)** 를 먼저 배치하고, 그 다음에 선행/관련이슈를 배치한다. 오너십 아래에서 곧바로 선행 이슈부터 길게 전개하는 방식은 최신 Model_100 기준과 맞지 않는다.
+
 ### 1단계: 이슈 정의 및 관련주 정리
 
 **목적:** 분석 대상 이슈의 핵심 내용을 확정하고, 그 이슈에 연결된 종목 바스켓을 정의한다.
@@ -70,7 +72,33 @@
 - `institutional_pct`가 100% 초과할 수 있음 (중복 집계 특성). 이를 그대로 기록하고 `원래의 집계 특성 그대로`라고 주석 표기.
 - 오너십 해석을 별도 문단으로 추가: 대형캡 vs 소형캡의 반응 차이, float 크기와 변동성 관계, insider 보유율이 시사하는 것 등.
 
-### 2단계: 선행 이슈 조사
+오너십 데이터 바로 아래에 반드시 이어져야 하는 것:
+- **핵심 분석이슈 고정 블록**을 먼저 쓴다. 여기서 `이슈 티어가 만들어진 날`, `event_date`, `published_at`, `change_anchor`, 대표 headline/structured catalyst, 핵심 가격 반응 테이블을 먼저 제시한다.
+- 그 다음에야 `이전에 같은 이슈가 있었나`, 같은 티커/다른 티커 관련이슈, 배경 이벤트를 쓴다.
+- 즉 독자가 page를 위에서 아래로 읽을 때, "지금 무엇이 핵심 anchor인가"를 먼저 이해한 뒤 관련이슈 비교로 내려가야 한다.
+
+### 2단계: 핵심 분석이슈 고정
+
+**목적:** 오너십 데이터 바로 아래에서 이번 page의 중심 anchor가 되는 분석이슈를 먼저 고정한다. 관련이슈/선행이슈는 이 anchor와의 비교 자료로 배치한다.
+
+핵심 분석이슈 블록에 반드시 포함할 항목:
+
+| 항목 | 설명 |
+| --- | --- |
+| 메인 촉매 날짜 | `이슈 티어가 만들어진 날` 또는 page의 중심 anchor 날짜. 복수일이면 `2026-02-25~2026-02-26`처럼 범위를 쓰되, event/published/change_anchor는 별도 표기한다. |
+| 날짜 3줄 | `event_date:`, `published_at:`, `change_anchor:`를 별도 줄로 정확히 쓴다. |
+| 대표 headline / structured catalyst | 원문 headline, earnings, SEC filing, PR 등 이번 anchor를 대표하는 핵심 사건 1~2개. |
+| 핵심 가격 반응 표 | 최소 `same-day`, `from-open`, `next day`, `7d`, `14d`, `30d`에 대해 **change + HV + z-score 삼중항** 을 정확한 숫자로 적는다. 필요 시 `open_to_high`도 추가한다. |
+| 메인 촉매 판정 이유 | 왜 이 이슈가 바스켓을 대표하는 anchor인지, 왜 다른 이벤트보다 우선인지 설명한다. |
+| 직접성 / 간접성 | 메인 종목과 peer 종목이 direct benefit인지 read-through인지 구분한다. |
+
+핵심 분석이슈 블록 작성 규칙:
+- 이 블록은 `오너십 데이터` 다음에 바로 와야 한다.
+- 선행 이슈를 장황하게 쓰기 전에, 독자가 **먼저 분석 대상 anchor를 정확히 이해**할 수 있어야 한다.
+- page 전체의 판정(`1 tier`, `fail tier` 등)은 이 블록에서 고정한 anchor를 기준으로 후속 비교가 이루어져야 한다.
+- 이 블록의 가격 반응은 **당일 change만이 아니라 change/HV/z-score 전 구간 삼중항** 을 기준으로 쓴다.
+
+### 3단계: 선행 이슈 조사
 
 **목적:** 메인 촉매 이전에 같은 테마의 선행 신호가 있었는지 조사한다.
 
@@ -94,8 +122,8 @@
 | 티커 | 해당 이슈의 주체 종목 |
 | 데이터 소스 | `company_news`, `fmp_pr`, `fmp_sec`, `investing`, `calendar_events` 중 어디서 왔는지 |
 | headline/제목 | 원문 headline 또는 filing type |
-| 가격 반응 (전체 change + z-score) | 해당 뉴스의 첫 반응 거래일 기준 **모든 change 컬럼**과 **대응 z-score 컬럼**을 함께 기록한다. 장 후(16:00 이후) 발표면 다음 거래일 기준. change는 절대 반응, z-score는 HV 대비 초과반응이다. 필요 시 대응 `hv_*`도 함께 적는다. |
-| 다음 거래일 반응 | 첫 반응 거래일 바로 다음 거래일의 동일 change/z-score 컬럼 전체 |
+| 가격 반응 (전체 change + HV + z-score) | 해당 뉴스의 첫 반응 거래일 기준 **모든 주요 change 컬럼**과 **대응 HV, z-score 컬럼**을 함께 기록한다. 장 후(16:00 이후) 발표면 다음 거래일 기준. `change만 있고 HV/z-score가 없는 표`는 미완료다. |
+| 다음 거래일 반응 | 첫 반응 거래일 바로 다음 거래일의 동일 **change/HV/z-score 삼중항** 전체 |
 | 직전 어닝 / 다음 어닝 | 해당 이벤트 시점 기준 **가장 최근 과거 어닝 날짜** + **가장 가까운 미래 어닝 날짜**를 함께 기록한다. (상세는 아래 "어닝 날짜 연동 규칙" 참고) |
 | 해석 | 이 이슈가 바스켓 전체에 미친 영향, 스필오버 여부, 지속성. change는 절대 상승폭, z-score는 HV 대비 얼마나 비정상적으로 강했는지 판단한다. 7d/14d/30d change로 유지 기간을 보고, z-score로 고변동성 종목의 착시를 걸러낸다. Turnover 급등은 기관/대형 자금 유입 가능성을 시사. |
 
@@ -131,15 +159,26 @@
    - `zscore_* = actual_change / hv_*`: unitless 값이며, 절대값이 클수록 평소 변동성 대비 더 큰 움직임이다.
 - 뉴스 published_at 시각이 16:00 이후(장 마감 후)이면, 다음 거래일을 "첫 거래일 반응"으로 사용한다.
 - 뉴스 published_at 시각이 16:00 이전이면, 당일을 "첫 거래일 반응"으로 사용한다.
+- **최소 기재 세트 (필수):** 아래 window는 값이 있으면 반드시 숫자로 적는다.
+  - same-day close: `change_pct`, `hv_change_pct`, `zscore_change_pct`
+  - same-day from open: `change_from_open_pct`, `hv_change_from_open_pct`, `zscore_change_from_open_pct`
+  - next trading day close: `change_1d_pct`, `hv_change_1d_pct`, `zscore_change_1d_pct`
+  - 1 week: `change_7d_pct`, `hv_change_7d_pct`, `zscore_change_7d_pct`
+  - 2 weeks: `change_14d_pct`, `hv_change_14d_pct`, `zscore_change_14d_pct`
+  - 1 month: `change_30d_pct`, `hv_change_30d_pct`, `zscore_change_30d_pct`
+- `change_open_to_high_pct`, `hv_change_open_to_high_pct`, `zscore_change_open_to_high_pct`는 intraday squeeze 해석이 중요할 때 추가한다. 장중 과열/되밀림이 핵심인 fail-tier 사례에서는 사실상 필수에 가깝다.
+- 값이 DB/API에 없으면 `(DB/API 미제공)`으로 명시하고, 가능한 경우 `ohlc_1d`로 절대 change를 보완한다. 하지만 **change만 적고 HV/z-score를 묵시적으로 생략**하면 안 된다.
 - **해석 가이드**:
    - change는 **절대 반응 크기**를 보여준다.
+   - HV는 **그 change가 평소 어느 정도 흔한지의 분모**를 보여준다.
    - z-score는 **HV 대비 초과반응**을 보여준다. 같은 +10%라도 고변동성 종목의 `zscore 0.8`과 저변동성 종목의 `zscore 2.4`는 질적으로 다르다.
    - `|zscore| < 1`: 대체로 평소 변동성 범위.
    - `1 <= |zscore| < 2`: 의미 있는 초과반응 가능.
    - `|zscore| >= 2`: 평소 변동성 대비 뚜렷한 비정상 반응.
-   - 7d/14d/30d change는 이슈의 지속력, Turnover 급등은 기관 자금 유입 시그널로 해석한다.
+   - 7d/14d/30d change와 대응 HV/z-score는 이슈의 지속력과 fade 속도를 해석한다.
+   - Turnover 급등은 기관 자금 유입 시그널로 해석한다.
 
-**분석 원칙:** 바스켓 내 종목 간 비교에서는 change와 z-score를 항상 짝으로 본다. change가 큰데 z-score가 낮으면 원래 변동성이 큰 종목의 통상 범위일 수 있고, change가 상대적으로 작아도 z-score가 높으면 저변동성 종목에서 나온 강한 신호일 수 있다.
+**분석 원칙:** 바스켓 내 종목 간 비교에서는 change, HV, z-score를 항상 삼중항으로 본다. change가 큰데 HV도 크고 z-score가 낮으면 원래 변동성이 큰 종목의 통상 범위일 수 있고, change가 상대적으로 작아도 HV가 낮아 z-score가 높으면 저변동성 종목에서 나온 강한 신호일 수 있다. 숫자는 가능하면 반올림 규칙을 일관되게 적용하되, page 전체에서 같은 자릿수 체계를 유지한다.
 
 ---
 
@@ -204,27 +243,6 @@ company_news 분석 시, **이벤트가 실제로 발생한 날짜(event_date)**
 
 ---
 
-### 3단계: 메인 촉매 분석 및 정당성 판정
-
-**목적:** 이슈 티어를 만든 핵심 촉매 이벤트를 식별하고, 그것이 주가를 움직일 만한 이슈였는지 판정한다.
-
-메인 촉매 식별 기준:
-- 관련주 바스켓 전체가 **처음으로 동시에 의미 있는 반응**을 보인 날의 이벤트.
-- "의미 있는 반응" = 바스켓 내 최소 3개 종목이 같은 방향으로 5% 이상 등락.
-
-정당성 판정에서 반드시 답해야 하는 질문:
-
-1. **이 이슈가 정말 주가를 올릴(내릴) 만한 이슈였나?**
-   - 각 종목별로 `예/아니오/일부` + 근거를 적는다.
-   - 근거는 `Model_1`의 가치 경로 설명과 동일한 수준으로 적는다:
-     - 무엇이 바뀌었는가 (asset ownership, approval, commercial access, pricing power, spending commitment 등)
-     - 왜 repricing으로 이어질 수 있는가 (매출/이익 귀속, 확률 상승, 멀티플 재평가, 후속 catalyst 기대, 리스크 감소)
-     - 직접 성취인지 간접 수혜 기대인지
-
-2. **왜 이 날이 메인 촉매인가?**
-   - 선행 이슈와 비교하여 이 이벤트만의 차별점 설명.
-   - 금액 규모, 계약 상대방, 구체성, 지속성, 밸류체인 파급 범위 등.
-
 ### 4단계: 확산 타임라인
 
 **목적:** 메인 촉매 이후 이슈가 어떻게 확산·강화·분화되었는지를 시간순으로 정리한다.
@@ -236,8 +254,8 @@ company_news 분석 시, **이벤트가 실제로 발생한 날짜(event_date)**
 | 날짜/기준일 | `event_date`, `published_at`, `change_anchor`를 구분 표기한다. 복수일이면 범위 표기 가능 (예: `2026-02-03~2026-02-06`), 단 기사 날짜와 가격 기준일이 다르면 반드시 별도 줄로 명시한다. |
 | 촉매 이벤트 | 해당 시점의 핵심 뉴스/공시/어닝 내용 |
 | 데이터 소스 | `company_news`, `fmp_pr`, `fmp_sec`, `calendar_events` 등 |
-| 가격 반응 (전체 change + z-score) | 바스켓 내 주요 종목의 당일 **전체 change 컬럼**과 **대응 z-score 컬럼** 테이블. change로 절대 반응을, z-score로 HV 대비 초과반응을 본다. 이전 파동 대비 7d/14d change와 z-score 수준이 어떻게 달라졌는지도 비교. 필요 시 `hv_*`를 같이 붙여 분모를 보여준다. |
-| 의미 | 이 이벤트가 이슈 확산에서 어떤 역할을 했는지. Turnover 변화로 자금 유입/이탈을 판단하고, z-score로 "평소 변동성 대비 정말 강한 파동이었는지"를 판단한다. |
+| 가격 반응 (전체 change + HV + z-score) | 바스켓 내 주요 종목의 당일 **전체 change 컬럼**과 **대응 HV, z-score 컬럼** 테이블. `same-day`, `from-open`, `1d`, `7d`, `14d`, `30d`를 원칙적으로 모두 본다. |
+| 의미 | 이 이벤트가 이슈 확산에서 어떤 역할을 했는지. Turnover 변화로 자금 유입/이탈을 판단하고, **change/HV/z-score 삼중항** 으로 평소 변동성 대비 정말 강한 파동이었는지 판단한다. |
 
 어닝 날짜 연동 규칙:
 - 각 타임라인 이벤트(및 선행 이슈)마다, 해당 시점에서 **직전 어닝**(가장 최근 과거)과 **다음 어닝**(가장 가까운 미래)을 **모두** 기록한다.
@@ -258,6 +276,8 @@ company_news 분석 시, **이벤트가 실제로 발생한 날짜(event_date)**
 5. 🟡 **개별 확인**: 소형캡 개별 종목이 자체 수주/어닝으로 테마를 확인한 시점.
 
 **그룹 구조 (필수):** 확산 타임라인도 선행 이슈와 동일하게 **분석이슈 → 관련이슈** 그룹 형태로 작성한다. 각 파동/이벤트를 먼저 쓰고, 바로 아래에 같은 티커 관련이슈 → 다른 티커 관련이슈를 들여쓰기로 묶는다.
+
+**핵심 분석이슈 우선 규칙 (필수):** 확산 타임라인 이전에 이미 `오너십 데이터 -> 핵심 분석이슈 고정 블록`이 나와 있어야 한다. 즉 타임라인의 첫 🔴 항목은 page의 첫 메인 anchor와 연결되어야 하며, 독자가 이전 섹션에서 이미 그 anchor의 의미와 가격 반응을 이해한 상태여야 한다.
 
 **날짜 표기 규칙 (필수):** 각 타임라인 이벤트 블록 안에 아래 3줄을 기본으로 둔다.
 - `event_date:` 실제 이벤트 발생일
@@ -331,40 +351,47 @@ company_news 분석 시, **이벤트가 실제로 발생한 날짜(event_date)**
 ## 한줄 결론
 ## 관련주 정리
 ## 오너십 데이터
+## 🔴 핵심 분석이슈: {메인 촉매 날짜} {티커}
+  - event_date: {실제 이벤트 날짜}
+  - published_at: {기사/공시 시각}
+  - change_anchor: {첫 가격 반응 기준일}
+  - 대표 headline / structured catalyst
+  [핵심 가격 반응 테이블: same-day / from-open / 1d / 7d / 14d / 30d의 change + hv + z-score]
+  - 왜 이 이벤트가 이슈 티어를 만들었는가
+  - 이 이슈가 정말 주가를 올릴 만한 이슈였나
 ## 🔴 {메인 촉매 날짜} 이전에 같은 이슈가 있었나
   (각 선행 이슈를 시간순으로 나열하되, 분석이슈 → 관련이슈 그룹 구조)
   🟡 {날짜} {티커} — {이벤트 제목}
      - event_date: {실제 이벤트 날짜}
      - published_at: {기사/공시 시각}
      - change_anchor: {첫 가격 반응 기준일}
+     [가격 반응 테이블: same-day / from-open / 1d / 7d / 14d / 30d의 change + hv + z-score]
      → 🟡 같은 티커 관련이슈
      → 🔵 다른 티커 관련이슈
      → ⚪ 배경
   🔵 {날짜} {티커} — {이벤트 제목}
      → ...
-## 🔴 왜 {메인 촉매 날짜} {티커}가 첫 메인 촉매인가
-## 이 이슈가 정말 주가를 올릴 만한 이슈였나
 ## 🟢 확산 타임라인
   (각 파동/이벤트를 시간순으로 나열하되, 분석이슈 → 관련이슈 그룹 구조)
   🔴 {날짜} {티커} — {메인 촉매}
      - event_date: {실제 이벤트 날짜}
      - published_at: {기사/공시 시각}
      - change_anchor: {첫 가격 반응 기준일}
-     [가격 반응 테이블: change + z-score (+ 필요시 hv)]
+     [가격 반응 테이블: same-day / from-open / 1d / 7d / 14d / 30d의 change + hv + z-score]
      → 🟡 같은 티커 관련이슈
      → 🔵 다른 티커 관련이슈
   🟢 {날짜} 파동 — {파동 설명}
      - event_date: {실제 이벤트 날짜 또는 기간}
      - published_at: {대표 기사/공시 시각}
      - change_anchor: {파동 기준 거래일}
-     [가격 반응 테이블: change + z-score (+ 필요시 hv)]
+     [가격 반응 테이블: same-day / from-open / 1d / 7d / 14d / 30d의 change + hv + z-score]
      → 🟡 같은 티커 관련이슈
      → 🔵 다른 티커 관련이슈
   🟡 {날짜} {티커} — {개별 확인 이벤트}
      - event_date: {실제 이벤트 날짜}
      - published_at: {기사/공시 시각}
      - change_anchor: {첫 가격 반응 기준일}
-     [가격 반응 테이블: change + z-score (+ 필요시 hv)]
+     [가격 반응 테이블: same-day / from-open / 1d / 7d / 14d / 30d의 change + hv + z-score]
      → 🔵 다른 티커 연쇄 반응
 ## 최종 판정
 ```
@@ -410,6 +437,7 @@ company_news 분석 시, **이벤트가 실제로 발생한 날짜(event_date)**
 ### news_change_metrics / `/api/news` (뉴스 파생 가격 반응, HV, z-score)
 - 기본 저장소는 `news_change_metrics` 테이블이고, `GET /api/news`, `GET /api/news/:id`는 이를 JOIN한 snake_case field를 함께 반환한다.
 - `reference_date`, `target_date`, `forward_trading_days`는 저장된 metric window를 검증하는 보조 필드다. `event_date ≠ published_at`인 경우, 이 값들과 `published_at`을 함께 보고 현재 row metric이 이벤트 첫 반응인지 후속 기사 반응인지 확인한다.
+- page 작성 시에는 **가능한 한 change/HV/z-score를 같은 줄 또는 같은 표에서 나란히** 적는다. `change만 적고 HV/z-score는 본문 다른 곳에 흩어두는 방식`은 최신 기준과 맞지 않는다.
 - base change metric key:
    - `change_pct`
    - `change_from_open_pct`
@@ -450,6 +478,7 @@ company_news 분석 시, **이벤트가 실제로 발생한 날짜(event_date)**
    - `hv_*`: 해당 change 정의와 같은 historical series의 비연율화 sigma.
    - `zscore_* = actual_change / hv_*`: HV 대비 초과반응 강도. unitless.
    - 바스켓 종목 간 "누가 평소 변동성 대비 더 강했는가" 비교에는 `zscore_*`를 우선 참고한다.
+   - 단, **최종 서술은 change/HV/z-score를 함께** 본다. `zscore만 높다`, `change만 컸다`처럼 하나만 떼어 결론내리지 않는다.
 
 ### ohlc_1d (OHLC DB - 별도 SQLite)
 - 경로: `OHLC_data/ohlc_1d_watchlist.sqlite`
@@ -526,10 +555,12 @@ company_news 분석 시, **이벤트가 실제로 발생한 날짜(event_date)**
 
 ## 금지 규칙
 
-1. **가격 반응 없이 정당성 판정 금지**: change/z-score 데이터 없이 "주가 영향이 있었다/없었다"를 판단하지 않는다.
+1. **가격 반응 없이 정당성 판정 금지**: change/HV/z-score 데이터 없이 "주가 영향이 있었다/없었다"를 판단하지 않는다.
 2. **선행 이슈 생략 금지**: 메인 촉매 이전의 선행 이슈를 조사하지 않고 바로 메인 촉매부터 시작하지 않는다.
 3. **바스켓 종목 임의 추가/제거 금지**: 1단계에서 확정한 관련주를 분석 도중에 설명 없이 바꾸지 않는다. 추가/제거 시 근거를 명시한다.
 4. **어닝 날짜 누락 금지**: 확산 타임라인의 각 이벤트에서 직전 어닝과 다음 어닝 날짜를 모두 조회하지 않으면 미완료로 간주한다.
 5. **티어 판정 근거 생략 금지**: 티어를 부여할 때 판정 조건(파동 횟수, 지속 기간, 개별 확인 이벤트)을 명시하지 않으면 미완료로 간주한다.
 6. **축약 금지**: `Model_100`은 `ai-news-research.md`의 축약 금지 / 미완료 판정 규칙을 동일하게 적용한다.
 7. **이벤트 날짜 / 기사 날짜 혼동 금지**: 후속 기사의 published_at 기준 change를 이벤트 첫 반응으로 기록하지 않는다. event_date ≠ published_at인 경우 반드시 event_date, published_at, change_anchor를 구분 표기한다. 날짜를 1개만 쓰면서 "이 날 +8% 반응"처럼 적으면, 그것이 이벤트 반응인지 후속 기사 반응인지 알 수 없으므로 미완료로 간주한다.
+8. **오너십 아래에서 선행 이슈부터 시작 금지**: `## 오너십 데이터` 아래에 핵심 분석이슈 anchor를 먼저 고정하지 않고 곧바로 관련이슈/선행이슈부터 길게 전개하면 최신 Model_100 기준과 맞지 않는다.
+9. **당일 change만으로 파동 판정 금지**: `change_pct` 또는 장중 등락만 보고 파동/실패/지속형을 판단하지 않는다. 최소 `same-day`, `from-open`, `1d`, `7d`, `14d`, `30d`의 change/HV/z-score를 함께 보고, 값이 없으면 그 부재를 명시해야 한다.

@@ -21,7 +21,7 @@
 
 `Model_4_watchlists`는 `Model_1`과 같은 분석 프레임을 사용하되, **현재 뉴스 직접 분석 대상을 사용자가 지정한 watchlist ticker 집합으로 제한**하는 모델이다. 상세 정의는 [ai-news-research_model4_watchlists.md](ai-news-research_model4_watchlists.md)에 둔다.
 
-`Model_100_issue tier analysis`는 개별 뉴스가 아니라 **이슈 1개가 만들어낸 종목 바스켓 전체의 형성·확산·분화 라이프사이클**을 분석하는 모델이다. 관련주 정리, 오너십, 선행 이슈, 메인 촉매, 순환매 패턴, 티어 판정(1/2/3/fail tier)을 포함한다. 상세 정의는 [ai-news-research_model100_issue_analysis.md](ai-news-research_model100_issue_analysis.md)에 둔다.
+`Model_100_issue tier analysis`는 개별 뉴스가 아니라 **이슈 1개가 만들어낸 종목 바스켓 전체의 형성·확산·분화 라이프사이클**을 분석하는 모델이다. 관련주 정리 후 **오너십 데이터 바로 아래에서 핵심 분석이슈 anchor를 먼저 고정**하고, 그 다음 선행/관련 이슈와 확산 타임라인을 비교한다. 가격 반응은 `change / HV / z-score`를 same-day, from-open, 1d, 7d, 14d, 30d window로 함께 본다. 상세 정의는 [ai-news-research_model100_issue_analysis.md](ai-news-research_model100_issue_analysis.md)에 둔다.
 
 ### plan / log 문서 작성 예외
 
