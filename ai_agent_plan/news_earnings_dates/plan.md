@@ -11,6 +11,10 @@
 - freshness gate의 “당일” 기준은 **ET 날짜**로 고정한다.
 - 컬럼 라벨은 축약형 `C/U`가 아니라 **`Confirmed / Unconfirmed` 풀텍스트**를 사용한다.
 - News Window의 기존 IBKR calendar shortcut 3개(`Initial Calendar Backfill`, `Refresh Upcoming Calendar`, `Custom Calendar Update`)는 제거한다.
+- 새 earnings update 진입점은 News Window 상단의 **기존 Update 메뉴 하위 항목**으로 넣는다.
+- multi-ticker 기사에서는 대표 ticker를 **`ohlc_ticker -> 첫 ticker`** 규칙으로 고정한다.
+- earnings update mode는 `Recent`를 두지 않고, **`Custom Earning Date Update` + `Check Unconfirmed Earning Date`** 두 가지로 구성한다.
+- `Check Unconfirmed Earning Date`는 News Window에 보이는 unconfirmed earnings context를 다시 확인하고 수정하는 전용 버튼으로 둔다.
 
 ## 목표
 
@@ -65,7 +69,7 @@ News Window에서 사용자가 컬럼 선택 메뉴로 **어닝 날짜 컨텍스
 - 기사별 recent/upcoming earnings context 계산 및 저장
 - recent/upcoming 각각의 `confirmed / unconfirmed` 상태 계산 및 저장
 - DB 우선 조회 + 부족한 경우 FMP fallback
-- 기존 데이터가 있으면 skip하는 업데이트 버튼 추가
+- 기존 데이터가 있으면 skip하되, unconfirmed row는 별도 check mode에서 재확인하는 업데이트 버튼 추가
 - News earnings update 실행 전 `fmp_calendar_earnings` 당일 freshness gate 추가
 - freshness gate 실패 시 사용자에게 선행 액션을 알려주는 오류 메시지 표시
 - News Window Update 메뉴에서 기존 IBKR calendar shortcut 3개 제거
@@ -114,7 +118,15 @@ News Window에서 사용자가 컬럼 선택 메뉴로 **어닝 날짜 컨텍스
 
 ### 2. 기사의 대표 ticker 결정 규칙
 
-기본 규칙 초안:
+설명:
+
+- 일부 뉴스 row는 ticker가 2개 이상 붙어 있다.
+- 그런데 이번 기능의 earnings column은 한 셀에 **한 세트의 recent/upcoming earnings context**만 표시한다.
+- 그래서 multi-ticker 기사에서는 “이 row를 대표하는 ticker 1개”를 먼저 정해야 한다.
+- 예를 들어 기사 ticker가 `[META, GLW]`면, 두 회사의 earnings를 한 셀에 동시에 넣지 않고 대표 ticker 1개 기준으로 계산하자는 뜻이다.
+- 여기서 묻고 있는 것은 “대표 ticker를 어떤 규칙으로 고를지”다.
+
+확정 규칙:
 
 - 1순위: `ohlc_ticker`
 - 2순위: `tickers_csv`의 첫 ticker
@@ -124,8 +136,6 @@ News Window에서 사용자가 컬럼 선택 메뉴로 **어닝 날짜 컨텍스
 
 - change column과 최대한 같은 대표 ticker를 쓰면 사용자가 셀 간 의미를 맞춰 보기 쉽다.
 - 한 컬럼 안에 recent/upcoming 둘 다 보여줘야 하므로 multi-ticker 복합 표시는 1차 버전에서 복잡도가 너무 높다.
-
-이 항목은 구현 전 사용자 확인이 필요하다.
 
 ### 3. FMP fallback 방식
 
@@ -143,7 +153,7 @@ News Window에서 사용자가 컬럼 선택 메뉴로 **어닝 날짜 컨텍스
 
 ### 4. confirmed / unconfirmed 의미
 
-권장 규칙:
+확정 규칙:
 
 - `recent_earnings_confirmed = 1`이면 `Confirmed`
 - `recent_earnings_confirmed = 0`이면 `Unconfirmed`
@@ -164,14 +174,14 @@ News Window에서 사용자가 컬럼 선택 메뉴로 **어닝 날짜 컨텍스
 
 ### 5. freshness gate 규칙
 
-권장 규칙:
+확정 규칙:
 
-- `POST /api/news/earnings/update-recent`
 - `POST /api/news/earnings/update-custom`
+- `POST /api/news/earnings/check-unconfirmed`
 
 위 두 endpoint는 job 생성 전에 `update_status.source_key = 'fmp_calendar_earnings'`를 먼저 확인한다.
 
-pass 조건 초안:
+pass 조건:
 
 - `last_success_at`가 존재한다.
 - `last_success_at`를 ET 기준 날짜로 변환했을 때 현재 ET 날짜와 같다.
@@ -182,7 +192,7 @@ pass 조건 초안:
 - frontend는 backend message를 그대로 error banner / modal에 노출한다.
 - 자동으로 calendar update를 대신 실행하지 않는다.
 
-권장 에러 메시지 초안:
+권장 에러 메시지:
 
 - `오늘 FMP Earnings Calendar Update가 아직 실행되지 않았습니다. Calendar Window에서 Update FMP Earnings Dates를 먼저 실행한 뒤 다시 시도하세요.`
 
@@ -197,15 +207,17 @@ pass 조건 초안:
 기본 skip 규칙:
 
 - `news_earnings_context` row가 없으면 처리
-- row가 있고 `lookup_status = resolved`면 skip
+- row가 있고 `lookup_status = resolved`이며 recent/upcoming이 모두 confirmed 또는 빈 값이면 skip
 - row가 있고 `lookup_status = missing`이어도 기본은 skip
 - row가 있고 `lookup_status = partial`면 missing side만 재시도
+- `recent_earnings_confirmed = 0` 또는 `upcoming_earnings_confirmed = 0`인 row는 `Check Unconfirmed Earning Date` mode에서 재확인 대상이 된다.
 - 강제 재계산은 별도 옵션이 없으면 제공하지 않음
 
 이유:
 
 - 사용자가 요구한 “데이터가 이미 있으면 넘어가기”를 충족한다.
 - `missing`도 하나의 계산 결과로 취급해야 같은 row를 매번 다시 FMP로 때리지 않는다.
+- unconfirmed earnings date는 나중에 확정되거나 날짜가 바뀔 수 있으므로, 일반 skip과 분리된 재확인 경로가 필요하다.
 
 ## 읽는 방법
 
@@ -385,8 +397,8 @@ News Window button click
 
 권장 endpoint 초안:
 
-- `POST /api/news/earnings/update-recent`
 - `POST /api/news/earnings/update-custom`
+- `POST /api/news/earnings/check-unconfirmed`
 - 선택사항: `POST /api/news/earnings/update-custom/preflight`
 
 선행 gate:
@@ -397,19 +409,29 @@ News Window button click
 
 처리 순서:
 
+`update-custom` 순서:
+
 1. `fmp_calendar_earnings` freshness 검사
-2. range 안의 `news_items` 조회
+2. custom range 안의 `news_items` 조회
 3. 대표 ticker 계산
 4. existing `news_earnings_context` 조회
-5. skip 대상 제외
+5. 일반 skip 규칙 적용
 6. calendar-first lookup
 7. 부족 row만 FMP targeted fallback
 8. `news_earnings_context` upsert
 9. job progress/log 반환
 
-기본 recent 범위 권장안:
+`check-unconfirmed` 순서:
 
-- 기존 change update와 맞춰 최근 7일
+1. `fmp_calendar_earnings` freshness 검사
+2. 현재 News Window filter 기준으로 earnings context가 있는 기사 후보 조회
+3. `recent_earnings_confirmed = 0` 또는 `upcoming_earnings_confirmed = 0` row만 추출
+4. 대표 ticker 계산
+5. calendar-first 재조회
+6. 여전히 불충분한 row만 FMP targeted fallback
+7. `news_earnings_context` upsert
+8. `resolved / partial / missing` 재판정
+9. job progress/log 반환
 
 검증:
 
@@ -417,6 +439,7 @@ News Window button click
 - 같은 job 중복 실행 방지 패턴이 기존 change update와 같아야 함
 - 로그에 `processed / skipped / fallbackUsed / missing` 집계가 남아야 함
 - `fmp_calendar_earnings`가 당일 기준 stale이면 `412`와 선행 액션 메시지가 나와야 함
+- `check-unconfirmed`는 confirmed row를 다시 훑지 않고 unconfirmed row만 대상으로 해야 함
 
 리스크 / 완화:
 
@@ -427,8 +450,7 @@ News Window button click
 
 확인 포인트:
 
-- recent가 7일이면 충분한지
-- preflight가 필요한지
+- custom에 preflight가 필요한지
 
 ### ⬜ Step 5. `/api/news` join 및 응답 확장
 
@@ -449,16 +471,16 @@ News Window button click
 
 권장 표시 형식:
 
-- 값 둘 다 있으면: `R 2026-02-19 (C) | U 2026-04-30 (U)`
-- recent만 있으면: `R 2026-02-19 (C) | U -`
-- upcoming만 있으면: `R - | U 2026-04-30 (U)`
-- 둘 다 없고 `missing`이면: `R - | U -`
+- 값 둘 다 있으면: `Recent 2026-02-19 (Confirmed) | Upcoming 2026-04-30 (Unconfirmed)`
+- recent만 있으면: `Recent 2026-02-19 (Confirmed) | Upcoming -`
+- upcoming만 있으면: `Recent - | Upcoming 2026-04-30 (Unconfirmed)`
+- 둘 다 없고 `missing`이면: `Recent - | Upcoming -`
 
 표시 규칙:
 
-- `C = Confirmed`
-- `U = Unconfirmed`
-- tooltip 또는 hover text에는 full label을 노출한다.
+- 축약형 `C/U`는 사용하지 않는다.
+- 컬럼 본문에서 `Confirmed / Unconfirmed`를 풀텍스트로 직접 노출한다.
+- 필요 시 tooltip은 같은 문자열의 줄바꿈 버전을 제공한다.
 
 검증:
 
@@ -489,7 +511,7 @@ News Window button click
 - Columns menu label 추가
 - render cell 추가
 - 기본 visible column에는 넣지 말고 selectable only로 시작하는 안을 우선 권장
-- 셀은 recent/upcoming 날짜와 `C/U` 상태를 함께 렌더링한다.
+- 셀은 recent/upcoming 날짜와 `Confirmed / Unconfirmed` 풀텍스트를 함께 렌더링한다.
 
 권장 컬럼 id / label:
 
@@ -513,7 +535,6 @@ News Window button click
 확인 포인트:
 
 - 기본 숨김 컬럼으로 둘지
-- 셀 포맷을 `R/U` 약어로 둘지 `Recent/Upcoming` 전체 표기로 둘지
 
 ### ⬜ Step 7. News Window update 버튼 추가
 
@@ -528,12 +549,16 @@ News Window button click
 구현 메모:
 
 - 기존 Change Update / Fulltext Update 패턴을 그대로 따른다.
-- 권장 UI:
-	- `Earnings Dates` dropdown 또는 submenu
-	- `Recent`
-	- `Custom`
+- 확정 UI:
+	- News Window 상단의 기존 `Update` 메뉴 하위 항목
+	- `Custom Earning Date Update`
+	- `Check Unconfirmed Earning Date`
 - job category는 기존 `news-update` 재사용 또는 세분화 검토
 - stale 상태에서 backend가 `412`를 반환하면, UI는 `Calendar Window에서 Update FMP Earnings Dates를 먼저 실행`하라는 error banner / modal을 띄운다.
+- 기존 `Initial Calendar Backfill`, `Refresh Upcoming Calendar`, `Custom Calendar Update` 3개는 News Window Update 메뉴에서 제거한다.
+- IBKR calendar 유지보수 진입점은 Data Control 쪽에 남기고, earnings freshness 관련 사용자 액션은 Calendar Window의 `Update FMP Earnings Dates`로 수렴한다.
+- `Custom Earning Date Update`는 사용자가 지정한 날짜 범위의 기사에 대해 earnings context를 계산한다.
+- `Check Unconfirmed Earning Date`는 현재 News Window 결과 중 unconfirmed earnings context row만 다시 확인하고 수정한다.
 
 검증:
 
@@ -541,6 +566,8 @@ News Window button click
 - 완료 후 reload 시 새 컬럼 값이 채워져야 함
 - 중복 실행 시 existing job 안내가 떠야 함
 - 당일 `fmp_calendar_earnings` 미실행 상태에서는 job이 시작되지 않고 오류 메시지가 보여야 함
+- News Window Update 메뉴에서 기존 calendar shortcut 3개가 보이지 않아야 함
+- `Check Unconfirmed Earning Date` 실행 시 confirmed row는 건드리지 않고 unconfirmed row만 재확인해야 함
 
 리스크 / 완화:
 
@@ -551,7 +578,7 @@ News Window button click
 
 확인 포인트:
 
-- 독립 버튼으로 둘지, 기존 Update 메뉴 하위로 넣을지
+- `Check Unconfirmed Earning Date`라는 문구를 그대로 쓸지, 더 짧게 줄일지
 
 ### ⬜ Step 8. 검증, 문서, 회귀 점검
 
@@ -572,6 +599,7 @@ News Window button click
 - multi-ticker 기사에서 대표 ticker가 기대와 맞는지 샘플 확인
 - recent/upcoming의 confirmed 값이 Calendar Window row와 동일한지 샘플 확인
 - stale `fmp_calendar_earnings` 상태에서 News earnings update가 차단되는지 확인
+- `Check Unconfirmed Earning Date` 실행 후 unconfirmed row 일부가 confirmed 또는 새 날짜로 갱신되는지 확인
 
 예시 수동 체크:
 
@@ -598,23 +626,21 @@ News Window button click
 
 - News Window Columns 메뉴에 `Earnings Dates`가 보인다.
 - 컬럼 1개 안에서 recent/upcoming과 confirmed/unconfirmed가 같이 보인다.
-- update 버튼이 기사 range를 대상으로 job을 시작한다.
+- `Custom Earning Date Update` 버튼이 기사 range를 대상으로 job을 시작한다.
+- `Check Unconfirmed Earning Date` 버튼이 현재 News Window의 unconfirmed row만 대상으로 job을 시작한다.
 - `calendar_events`만으로 가능한 row는 FMP를 치지 않는다.
 - `calendar_events`로 부족한 row만 FMP fallback을 탄다.
 - 이미 계산된 row는 재실행 시 skip된다.
 - 당일 `fmp_calendar_earnings`가 없으면 update 버튼은 backend에서 차단되고, 선행 액션 오류 메시지가 보인다.
+- News Window Update 메뉴에서 기존 IBKR calendar shortcut 3개는 제거되어야 한다.
 - `/api/news` 응답에 earnings context 필드가 안정적으로 포함된다.
 
 ## 미확정 사항
 
 구현 전 사용자 확인이 필요한 질문:
 
-1. multi-ticker 기사에서 대표 ticker를 `ohlc_ticker -> 첫 ticker` 규칙으로 고정해도 되는가?
-2. recent/upcoming 계산을 1차로 `date + confirmed`까지만 출시해도 되는가, 아니면 session(pre/after market) 보정이 필수인가?
-3. News Window 상단에 독립 버튼을 둘지, 기존 Update 메뉴 하위 항목으로 넣을지?
-4. recent update 기본 범위를 기존 패턴대로 최근 7일로 둘지, 30일로 넓힐지?
-5. freshness gate의 “당일” 기준을 ET 날짜로 고정해도 되는가?
-6. 셀 포맷을 `R 2026-02-19 (C)` 같은 compact 형식으로 둘지, `Confirmed/Unconfirmed` 풀텍스트로 둘지?
+1. recent/upcoming 계산을 1차로 `date + confirmed`까지만 출시해도 되는가, 아니면 session(pre/after market) 보정이 필수인가?
+2. `Check Unconfirmed Earning Date` 문구를 그대로 쓸지, 더 짧게 줄일지?
 
 ## 실행 의존성 그래프
 
