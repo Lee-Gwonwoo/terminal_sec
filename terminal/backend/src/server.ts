@@ -3481,6 +3481,7 @@ app.get("/api/jobs/active", (_req, res) => {
     id: j.id,
       category: j.category,
       label: j.label,
+    scope: j.scope,
     status: j.status,
     progress: j.progress,
     createdAt: j.createdAt,
@@ -3500,6 +3501,7 @@ app.get("/api/jobs/:jobId", (req, res) => {
     id: job.id,
     category: job.category,
     label: job.label,
+    scope: job.scope,
     status: job.status,
     progress: job.progress,
     logs: job.logs,
@@ -3698,6 +3700,19 @@ app.get("/api/news/fulltext/:newsId", async (req, res, next) => {
 
 app.post("/api/news/change/update-recent", async (req, res, next) => {
   try {
+    const jobKey = "news_change_recent";
+    const existingJobId = activePullJobs.get(jobKey);
+    if (existingJobId) {
+      const existingJob = getJob(existingJobId);
+      if (existingJob && existingJob.status === "running") {
+        res.status(409).json({
+          error: `A recent change update job is already running (jobId=${existingJobId}). Wait for it to finish or cancel it first.`,
+          existingJobId,
+        });
+        return;
+      }
+      activePullJobs.delete(jobKey);
+    }
     const concurrencyRaw = Number(req.body?.fmpConcurrency ?? req.body?.ibkrConcurrency);
     const intervalRaw = Number(req.body?.fmpRequestIntervalMs);
     const fmpFallback: FmpFallbackOptions = {
@@ -3708,17 +3723,21 @@ app.post("/api/news/change/update-recent", async (req, res, next) => {
     const jobId = createJob(0, {
       category: "news-update",
       label: "News Change Update (Recent)",
+      scope: "finnhub-news",
     }); // total unknown upfront
+    activePullJobs.set(jobKey, jobId);
     (async () => {
       try {
         await bulkUpdateRecentChange((done, total) => {
           updateProgress(jobId, done, total);
         }, undefined, () => isJobCancelled(jobId), fmpFallback, (msg) => appendLog(jobId, msg));
-        if (isJobCancelled(jobId)) return;
+        if (isJobCancelled(jobId)) { activePullJobs.delete(jobKey); return; }
         await setLastSuccess("news_change_recent", new Date().toISOString());
         completeJob(jobId);
+        activePullJobs.delete(jobKey);
       } catch (err: any) {
         failJob(jobId, err?.message ?? String(err));
+        activePullJobs.delete(jobKey);
       }
     })();
     res.json({ jobId });
@@ -3753,6 +3772,7 @@ app.post("/api/news/change/update-recent-fmp-missing", async (req, res, next) =>
     const jobId = createJob(0, {
       category: "news-update",
       label: "FMP Recent Change Fill",
+      scope: "finnhub-news",
     });
     activePullJobs.set(jobKey, jobId);
     appendLog(jobId, `Starting FMP recent missing change update with concurrency=${fmpFallback.concurrency}, interval=${fmpFallback.requestIntervalMs ?? 250}ms`);
@@ -3831,6 +3851,19 @@ app.post("/api/news/change/update-custom/preflight", async (req, res, next) => {
 
 app.post("/api/news/change/update-custom", async (req, res, next) => {
   try {
+    const jobKey = "news_change_custom";
+    const existingJobId = activePullJobs.get(jobKey);
+    if (existingJobId) {
+      const existingJob = getJob(existingJobId);
+      if (existingJob && existingJob.status === "running") {
+        res.status(409).json({
+          error: `A custom change update job is already running (jobId=${existingJobId}). Wait for it to finish or cancel it first.`,
+          existingJobId,
+        });
+        return;
+      }
+      activePullJobs.delete(jobKey);
+    }
     const { from, to, fmpConcurrency, fmpRequestIntervalMs, ibkrConcurrency } = customChangeSchema.parse(req.body);
     const counts = await getDb().get<{
       totalRowsInRange: number;
@@ -3861,13 +3894,15 @@ app.post("/api/news/change/update-custom", async (req, res, next) => {
     const jobId = createJob(0, {
       category: "news-update",
       label: "News Change Update (Custom)",
+      scope: "finnhub-news",
     });
+    activePullJobs.set(jobKey, jobId);
     (async () => {
       try {
         const result = await bulkUpdateCustomChange(from, to, (done, total) => {
           updateProgress(jobId, done, total);
         }, undefined, () => isJobCancelled(jobId), fmpFallback, (msg) => appendLog(jobId, msg));
-        if (isJobCancelled(jobId)) return;
+        if (isJobCancelled(jobId)) { activePullJobs.delete(jobKey); return; }
         await setLastSuccess("news_change_custom", new Date().toISOString(), { from, to });
         completeJob(jobId, {
           ...preflightSummary,
@@ -3875,8 +3910,10 @@ app.post("/api/news/change/update-custom", async (req, res, next) => {
           rowsSkipped: result.skipped,
           fmpConcurrencyUsed: fmpFallback.concurrency,
         });
+        activePullJobs.delete(jobKey);
       } catch (err: any) {
         failJob(jobId, err?.message ?? String(err));
+        activePullJobs.delete(jobKey);
       }
     })();
     res.json({ jobId });

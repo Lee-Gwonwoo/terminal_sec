@@ -1412,6 +1412,12 @@ export function FinnhubNewsWindow({
         headers: { 'Content-Type': 'application/json' },
       });
       const data = await res.json();
+      if (res.status === 409 && data.existingJobId) {
+        // Already running — just show the existing job in View Log
+        registerJob(data.existingJobId, 'news-update');
+        setShowLogPanel(true);
+        return;
+      }
       if (!res.ok) {
         setError(data.error || `HTTP ${res.status}`);
         setUpdating(false);
@@ -1435,6 +1441,11 @@ export function FinnhubNewsWindow({
         body: JSON.stringify({ from, to }),
       });
       const data = await res.json();
+      if (res.status === 409 && data.existingJobId) {
+        registerJob(data.existingJobId, 'news-update');
+        setShowLogPanel(true);
+        return;
+      }
       if (!res.ok) {
         setError(data.error || `HTTP ${res.status}`);
         setUpdating(false);
@@ -1676,7 +1687,7 @@ export function FinnhubNewsWindow({
       }
     };
     poll();
-    const timer = setInterval(poll, 2500);
+    const timer = setInterval(poll, 1000);
     return () => { cancelled = true; clearInterval(timer); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pullJobId, syncJobState]);
@@ -1697,7 +1708,7 @@ export function FinnhubNewsWindow({
       }
     };
     poll();
-    const timer = setInterval(poll, 2500);
+    const timer = setInterval(poll, 1000);
     return () => { cancelled = true; clearInterval(timer); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ftJobId, syncJobState]);
@@ -1735,7 +1746,7 @@ export function FinnhubNewsWindow({
       } catch { /* ignore — server may be down */ }
     };
     refreshActiveJobs();
-    const timer = setInterval(refreshActiveJobs, 5000);
+    const timer = setInterval(refreshActiveJobs, 2000);
     return () => { cancelled = true; clearInterval(timer); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedJobId]);
