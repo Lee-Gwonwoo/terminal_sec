@@ -233,7 +233,7 @@ company_news 분석 시, **이벤트가 실제로 발생한 날짜(event_date)**
 
 | 항목 | 설명 |
 | --- | --- |
-| 날짜/기간 | ISO 형식. 복수일이면 범위 표기 (예: `2026-02-03~2026-02-06`) |
+| 날짜/기준일 | `event_date`, `published_at`, `change_anchor`를 구분 표기한다. 복수일이면 범위 표기 가능 (예: `2026-02-03~2026-02-06`), 단 기사 날짜와 가격 기준일이 다르면 반드시 별도 줄로 명시한다. |
 | 촉매 이벤트 | 해당 시점의 핵심 뉴스/공시/어닝 내용 |
 | 데이터 소스 | `company_news`, `fmp_pr`, `fmp_sec`, `calendar_events` 등 |
 | 가격 반응 (전체 change + z-score) | 바스켓 내 주요 종목의 당일 **전체 change 컬럼**과 **대응 z-score 컬럼** 테이블. change로 절대 반응을, z-score로 HV 대비 초과반응을 본다. 이전 파동 대비 7d/14d change와 z-score 수준이 어떻게 달라졌는지도 비교. 필요 시 `hv_*`를 같이 붙여 분모를 보여준다. |
@@ -259,21 +259,36 @@ company_news 분석 시, **이벤트가 실제로 발생한 날짜(event_date)**
 
 **그룹 구조 (필수):** 확산 타임라인도 선행 이슈와 동일하게 **분석이슈 → 관련이슈** 그룹 형태로 작성한다. 각 파동/이벤트를 먼저 쓰고, 바로 아래에 같은 티커 관련이슈 → 다른 티커 관련이슈를 들여쓰기로 묶는다.
 
+**날짜 표기 규칙 (필수):** 각 타임라인 이벤트 블록 안에 아래 3줄을 기본으로 둔다.
+- `event_date:` 실제 이벤트 발생일
+- `published_at:` 기사 게시 시각 또는 공시 수집 시각
+- `change_anchor:` 첫 가격 반응 기준 거래일
+- 세 값이 모두 같으면 한 줄로 축약 가능하지만, 하나라도 다르면 반드시 분리 표기한다.
+
 예시 구조:
 ```
 🔴 2026-01-27 GLW — Meta-Corning $6B fiber-optic 계약 발표
+   - event_date: 2026-01-27
+   - published_at: 2026-01-27 02:30 ET
+   - change_anchor: 2026-01-27
    [가격 반응 테이블: 전체 change + z-score (+ 필요시 hv)]
    → 🟡 같은 티커: GLW Q4 earnings (1/28) — EPS beat
    → 🔵 다른 티커: LITE +11.49%, COHR +8.21%, AAOI +7.17% 스필오버
    → ⚪ 배경: Meta AI capex $65B 발표 동일 주
 
 🟢 2026-02-06 파동 — LITE 어닝 beat → 바스켓 전체 2차 급등
+   - event_date: 2026-02-03
+   - published_at: 2026-02-03 16:03 ET
+   - change_anchor: 2026-02-04
    [가격 반응 테이블: 전체 change + z-score (+ 필요시 hv)]
    → 🟡 같은 티커: LITE Q2 guidance raise, revenue $800M beat
    → 🔵 다른 티커: AXTI +17.77%, AAOI +16.18%, AEHR +14.74%
    → 🔵 다른 티커: FN +13.84% (AI photonics read-through)
 
 🟡 2026-03-09 AAOI — 1.6T transceiver volume order
+   - event_date: 2026-03-09
+   - published_at: 2026-03-09 07:00 ET
+   - change_anchor: 2026-03-09
    [가격 반응 테이블: 전체 change + z-score (+ 필요시 hv)]
    → 🔵 다른 티커: AXTI +19.12%, LITE +14.73% 연쇄 반응
 ```
@@ -319,6 +334,9 @@ company_news 분석 시, **이벤트가 실제로 발생한 날짜(event_date)**
 ## 🔴 {메인 촉매 날짜} 이전에 같은 이슈가 있었나
   (각 선행 이슈를 시간순으로 나열하되, 분석이슈 → 관련이슈 그룹 구조)
   🟡 {날짜} {티커} — {이벤트 제목}
+     - event_date: {실제 이벤트 날짜}
+     - published_at: {기사/공시 시각}
+     - change_anchor: {첫 가격 반응 기준일}
      → 🟡 같은 티커 관련이슈
      → 🔵 다른 티커 관련이슈
      → ⚪ 배경
@@ -329,14 +347,23 @@ company_news 분석 시, **이벤트가 실제로 발생한 날짜(event_date)**
 ## 🟢 확산 타임라인
   (각 파동/이벤트를 시간순으로 나열하되, 분석이슈 → 관련이슈 그룹 구조)
   🔴 {날짜} {티커} — {메인 촉매}
+     - event_date: {실제 이벤트 날짜}
+     - published_at: {기사/공시 시각}
+     - change_anchor: {첫 가격 반응 기준일}
      [가격 반응 테이블: change + z-score (+ 필요시 hv)]
      → 🟡 같은 티커 관련이슈
      → 🔵 다른 티커 관련이슈
   🟢 {날짜} 파동 — {파동 설명}
+     - event_date: {실제 이벤트 날짜 또는 기간}
+     - published_at: {대표 기사/공시 시각}
+     - change_anchor: {파동 기준 거래일}
      [가격 반응 테이블: change + z-score (+ 필요시 hv)]
      → 🟡 같은 티커 관련이슈
      → 🔵 다른 티커 관련이슈
   🟡 {날짜} {티커} — {개별 확인 이벤트}
+     - event_date: {실제 이벤트 날짜}
+     - published_at: {기사/공시 시각}
+     - change_anchor: {첫 가격 반응 기준일}
      [가격 반응 테이블: change + z-score (+ 필요시 hv)]
      → 🔵 다른 티커 연쇄 반응
 ## 최종 판정
@@ -356,9 +383,18 @@ company_news 분석 시, **이벤트가 실제로 발생한 날짜(event_date)**
 - PR 전문에서 계약 금액, 상대방, 제품 상세 등 추출.
 
 ### sec_filings (fmp_sec)
-- `SELECT * FROM sec_filings WHERE ticker=? AND filed_at BETWEEN ? AND ?`
-- `filing_type`: 8-K, 10-Q, 10-K, S-1 등.
-- 어닝 전후 SEC filing은 실적 공시의 근거.
+- `sec_filings` 테이블 자체에는 `ticker` 컬럼이 없다. ticker 기준으로 보려면 `news_items`와 `news_id`로 JOIN한다.
+- 예시:
+   ```sql
+   SELECT sf.*, ni.tickers_csv, ni.title, ni.published_at
+   FROM sec_filings sf
+   JOIN news_items ni ON ni.id = sf.news_id
+   WHERE ni.tickers_csv LIKE '%,{TICKER},%'
+      AND sf.filed_at BETWEEN ? AND ?
+   ORDER BY sf.filed_at
+   ```
+- filing type 컬럼명은 `filing_type`이 아니라 `form_type`이다. 값 예: `8-K`, `10-Q`, `10-K`, `S-1`.
+- `accepted_at`과 `filed_at`이 다를 수 있으므로 장중/장후 판단이 중요하면 두 컬럼을 같이 본다.
 
 ### calendar_events (earnings)
 - `SELECT * FROM calendar_events WHERE ticker=? AND event_type='earnings' ORDER BY event_at`
@@ -373,6 +409,7 @@ company_news 분석 시, **이벤트가 실제로 발생한 날짜(event_date)**
 
 ### news_change_metrics / `/api/news` (뉴스 파생 가격 반응, HV, z-score)
 - 기본 저장소는 `news_change_metrics` 테이블이고, `GET /api/news`, `GET /api/news/:id`는 이를 JOIN한 snake_case field를 함께 반환한다.
+- `reference_date`, `target_date`, `forward_trading_days`는 저장된 metric window를 검증하는 보조 필드다. `event_date ≠ published_at`인 경우, 이 값들과 `published_at`을 함께 보고 현재 row metric이 이벤트 첫 반응인지 후속 기사 반응인지 확인한다.
 - base change metric key:
    - `change_pct`
    - `change_from_open_pct`
@@ -438,9 +475,18 @@ company_news 분석 시, **이벤트가 실제로 발생한 날짜(event_date)**
 - `ohlc_1d` 자체에는 `hv_*`, `zscore_*` 컬럼이 없다. HV / z-score는 `news_change_metrics` 또는 `/api/news` 응답에서 가져온다.
 
 ### company_profiles (기업 컨텍스트)
-- `SELECT * FROM company_profiles WHERE ticker=?`
-- 시총, float, institutional_pct, insider_pct, description, industry, sector, ipo_date.
-- `GET /api/tickers` 엔드포인트로도 조회 가능.
+- `company_profiles` 테이블 자체에는 `ticker` 컬럼이 없다. `securities`와 `security_id`로 JOIN해서 조회한다.
+- 예시:
+   ```sql
+   SELECT cp.*, s.ticker, s.industry, s.sector
+   FROM company_profiles cp
+   JOIN securities s ON s.id = cp.security_id
+   WHERE s.ticker = ?
+   ORDER BY cp.fetched_at DESC, cp.id DESC
+   ```
+- 시총, float, institutional_pct, insider_pct, description, industry, sector, ipo_date를 본다.
+- `company_profiles`는 source별 다중 row이며 컬럼이 sparse할 수 있으므로, ownership table 작성 시에는 **필드별 latest non-null merge**가 필요할 수 있다.
+- `GET /api/tickers` 엔드포인트로도 조회 가능하다.
 
 ---
 
