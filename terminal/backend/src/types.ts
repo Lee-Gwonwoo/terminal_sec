@@ -73,6 +73,14 @@ export type NewsItem = {
   floatPct?: number | null;
   institutionalPct?: number | null;
   insiderPct?: number | null;
+  // earnings context (Step 1)
+  earnings_context_ticker?: string | null;
+  recent_earnings_date?: string | null;
+  recent_earnings_confirmed?: boolean | null;
+  upcoming_earnings_date?: string | null;
+  upcoming_earnings_confirmed?: boolean | null;
+  earnings_context_display?: string | null;
+  earnings_lookup_status?: string | null;
   // ver3: AI analysis
   score?: number | null;
   scoreEvidence?: string | null;

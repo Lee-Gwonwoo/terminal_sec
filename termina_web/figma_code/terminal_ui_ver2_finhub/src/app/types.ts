@@ -43,6 +43,13 @@ export interface NewsItem {
   url?: string; // Article URL
   date: string;
   content?: string;
+  earningsContextTicker?: string | null;
+  recentEarningsDate?: string | null;
+  recentEarningsConfirmed?: boolean | null;
+  upcomingEarningsDate?: string | null;
+  upcomingEarningsConfirmed?: boolean | null;
+  earningsContextDisplay?: string | null;
+  earningsLookupStatus?: string | null;
 }
 
 export interface WatchlistItem {

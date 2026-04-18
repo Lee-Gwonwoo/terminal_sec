@@ -252,7 +252,7 @@ News Window button click
 
 ## 단계별 계획
 
-### ⬜ Step 1. 스키마와 타입 계약 추가
+### ⏳ Step 1. 스키마와 타입 계약 추가
 
 목표:
 
@@ -297,7 +297,6 @@ News Window button click
 확인 포인트:
 
 - separate table 유지가 맞는지
-- 단일 대표 ticker 규칙을 그대로 갈지
 
 ### ⬜ Step 2. Calendar-first 조회 서비스 추가
 

@@ -180,6 +180,45 @@ export async function initDb(): Promise<void> {
     "CREATE INDEX IF NOT EXISTS idx_ncm_news_id ON news_change_metrics (news_id);"
   );
 
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS news_earnings_context (
+      news_id TEXT PRIMARY KEY REFERENCES news_items(id) ON DELETE CASCADE,
+      context_ticker TEXT,
+      anchor_published_at TEXT NOT NULL,
+      recent_earnings_date TEXT,
+      recent_earnings_confirmed INTEGER,
+      upcoming_earnings_date TEXT,
+      upcoming_earnings_confirmed INTEGER,
+      recent_calendar_event_id TEXT,
+      upcoming_calendar_event_id TEXT,
+      recent_source TEXT NOT NULL DEFAULT 'none',
+      upcoming_source TEXT NOT NULL DEFAULT 'none',
+      lookup_status TEXT NOT NULL DEFAULT 'missing',
+      fmp_fallback_used INTEGER NOT NULL DEFAULT 0,
+      last_checked_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+  await db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_nec_context_ticker ON news_earnings_context (context_ticker);"
+  );
+  await db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_nec_lookup_status ON news_earnings_context (lookup_status);"
+  );
+
+  await ensureColumn("news_earnings_context", "context_ticker", "TEXT");
+  await ensureColumn("news_earnings_context", "anchor_published_at", "TEXT");
+  await ensureColumn("news_earnings_context", "recent_earnings_date", "TEXT");
+  await ensureColumn("news_earnings_context", "recent_earnings_confirmed", "INTEGER");
+  await ensureColumn("news_earnings_context", "upcoming_earnings_date", "TEXT");
+  await ensureColumn("news_earnings_context", "upcoming_earnings_confirmed", "INTEGER");
+  await ensureColumn("news_earnings_context", "recent_calendar_event_id", "TEXT");
+  await ensureColumn("news_earnings_context", "upcoming_calendar_event_id", "TEXT");
+  await ensureColumn("news_earnings_context", "recent_source", "TEXT NOT NULL DEFAULT 'none'");
+  await ensureColumn("news_earnings_context", "upcoming_source", "TEXT NOT NULL DEFAULT 'none'");
+  await ensureColumn("news_earnings_context", "lookup_status", "TEXT NOT NULL DEFAULT 'missing'");
+  await ensureColumn("news_earnings_context", "fmp_fallback_used", "INTEGER NOT NULL DEFAULT 0");
+  await ensureColumn("news_earnings_context", "last_checked_at", "TEXT NOT NULL DEFAULT (datetime('now'))");
+
   await db.exec("DROP VIEW IF EXISTS model1_current_news_view;");
   await db.exec(`
     CREATE VIEW model1_current_news_view AS
