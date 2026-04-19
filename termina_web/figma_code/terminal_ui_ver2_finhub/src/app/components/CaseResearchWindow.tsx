@@ -2,6 +2,18 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Plus, Search, Trash2, Copy, FileText, FolderOpen, Check, RefreshCw, RotateCcw, X } from 'lucide-react';
 
 const API_BASE = '';
+const HIGHLIGHT_CLOSE_TOKEN = '[[/hl]]';
+const HIGHLIGHT_OPEN_PATTERN = /\[\[hl=(#[0-9A-Fa-f]{6})\]\]/g;
+const HIGHLIGHT_BLOCK_PATTERN = /\[\[hl=(#[0-9A-Fa-f]{6})\]\]([\s\S]*?)\[\[\/hl\]\]/g;
+const HIGHLIGHT_TOKEN_PATTERN = /\[\[hl=#[0-9A-Fa-f]{6}\]\]|\[\[\/hl\]\]/g;
+
+const HIGHLIGHT_PRESETS = [
+  { label: 'Amber', value: '#FDE68A' },
+  { label: 'Mint', value: '#BBF7D0' },
+  { label: 'Sky', value: '#BAE6FD' },
+  { label: 'Rose', value: '#FDA4AF' },
+  { label: 'Lavender', value: '#DDD6FE' },
+];
 
 // ── Types ──
 
@@ -48,6 +60,377 @@ interface ResearchTrashResponse {
   pages: TrashedResearchPage[];
 }
 
+interface EditorSelectionRange {
+  start: number;
+  end: number;
+}
+
+interface HighlightRange {
+  start: number;
+  end: number;
+  color: string;
+}
+
+interface EditorDocument {
+  text: string;
+  highlights: HighlightRange[];
+}
+
+interface EditorSnapshot {
+  document: EditorDocument;
+  selection: EditorSelectionRange;
+}
+
+type EditorViewMode = 'edit' | 'split' | 'preview';
+
+function normalizeHighlightColor(value: string): string {
+  const trimmed = value.trim().toUpperCase();
+  return /^#[0-9A-F]{6}$/.test(trimmed) ? trimmed : HIGHLIGHT_PRESETS[0].value;
+}
+
+function stripHighlightMarkup(value: string): string {
+  const parsed = parseEditorDocument(value);
+  return parsed.text;
+}
+
+function normalizeSelectionRange(range: EditorSelectionRange): EditorSelectionRange {
+  return range.start <= range.end ? range : { start: range.end, end: range.start };
+}
+
+function cloneHighlightRanges(ranges: HighlightRange[]): HighlightRange[] {
+  return ranges.map(range => ({ ...range }));
+}
+
+function cloneEditorDocument(document: EditorDocument): EditorDocument {
+  return {
+    text: document.text,
+    highlights: cloneHighlightRanges(document.highlights),
+  };
+}
+
+function cloneEditorSnapshot(snapshot: EditorSnapshot): EditorSnapshot {
+  return {
+    document: cloneEditorDocument(snapshot.document),
+    selection: { ...snapshot.selection },
+  };
+}
+
+function areEditorDocumentsEqual(left: EditorDocument, right: EditorDocument): boolean {
+  if (left.text !== right.text || left.highlights.length !== right.highlights.length) {
+    return false;
+  }
+  for (let index = 0; index < left.highlights.length; index += 1) {
+    const leftRange = left.highlights[index];
+    const rightRange = right.highlights[index];
+    if (
+      leftRange.start !== rightRange.start ||
+      leftRange.end !== rightRange.end ||
+      leftRange.color !== rightRange.color
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function normalizeHighlightRanges(ranges: HighlightRange[], textLength: number): HighlightRange[] {
+  const sorted = ranges
+    .map(range => ({
+      start: Math.max(0, Math.min(textLength, range.start)),
+      end: Math.max(0, Math.min(textLength, range.end)),
+      color: normalizeHighlightColor(range.color),
+    }))
+    .filter(range => range.end > range.start)
+    .sort((left, right) => left.start - right.start || left.end - right.end);
+
+  const merged: HighlightRange[] = [];
+  for (const range of sorted) {
+    const previous = merged[merged.length - 1];
+    if (previous && previous.color === range.color && range.start <= previous.end) {
+      previous.end = Math.max(previous.end, range.end);
+      continue;
+    }
+    if (previous && previous.color === range.color && range.start === previous.end) {
+      previous.end = range.end;
+      continue;
+    }
+    merged.push({ ...range });
+  }
+  return merged;
+}
+
+function parseEditorDocument(body: string): EditorDocument {
+  const textParts: string[] = [];
+  const highlights: HighlightRange[] = [];
+  let rawCursor = 0;
+  let textCursor = 0;
+  let match: RegExpExecArray | null;
+
+  HIGHLIGHT_BLOCK_PATTERN.lastIndex = 0;
+  while ((match = HIGHLIGHT_BLOCK_PATTERN.exec(body)) !== null) {
+    const [fullMatch, color, content] = match;
+    const prefix = body.slice(rawCursor, match.index);
+    textParts.push(prefix);
+    textCursor += prefix.length;
+
+    if (content.length > 0) {
+      highlights.push({
+        start: textCursor,
+        end: textCursor + content.length,
+        color: normalizeHighlightColor(color),
+      });
+    }
+    textParts.push(content);
+    textCursor += content.length;
+    rawCursor = match.index + fullMatch.length;
+  }
+
+  if (rawCursor < body.length) {
+    textParts.push(body.slice(rawCursor));
+  }
+
+  const text = textParts.join('');
+  return {
+    text,
+    highlights: normalizeHighlightRanges(highlights, text.length),
+  };
+}
+
+function serializeEditorDocument(document: EditorDocument): string {
+  const normalizedHighlights = normalizeHighlightRanges(document.highlights, document.text.length);
+  const output: string[] = [];
+  let cursor = 0;
+
+  for (const range of normalizedHighlights) {
+    if (range.start > cursor) {
+      output.push(document.text.slice(cursor, range.start));
+    }
+    output.push(`[[hl=${range.color}]]`);
+    output.push(document.text.slice(range.start, range.end));
+    output.push(HIGHLIGHT_CLOSE_TOKEN);
+    cursor = range.end;
+  }
+
+  if (cursor < document.text.length) {
+    output.push(document.text.slice(cursor));
+  }
+
+  return output.join('');
+}
+
+function getContrastTextColor(hexColor: string): string {
+  const normalized = normalizeHighlightColor(hexColor).slice(1);
+  const red = Number.parseInt(normalized.slice(0, 2), 16);
+  const green = Number.parseInt(normalized.slice(2, 4), 16);
+  const blue = Number.parseInt(normalized.slice(4, 6), 16);
+  const luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
+  return luminance > 0.6 ? '#0F172A' : '#F8FAFC';
+}
+
+function renderHighlightedText(text: string, ranges: HighlightRange[]): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  const highlights = normalizeHighlightRanges(ranges, text.length);
+  let cursor = 0;
+
+  for (const range of highlights) {
+    if (range.start > cursor) {
+      nodes.push(text.slice(cursor, range.start));
+    }
+    nodes.push(
+      <span
+        key={`${range.start}-${range.end}-${range.color}`}
+        className="rounded px-0.5 py-px"
+        style={{ backgroundColor: normalizeHighlightColor(range.color), color: getContrastTextColor(range.color) }}
+      >
+        {text.slice(range.start, range.end)}
+      </span>,
+    );
+    cursor = range.end;
+  }
+
+  if (cursor < text.length) {
+    nodes.push(text.slice(cursor));
+  }
+
+  return nodes;
+}
+
+function findHighlightRangeAtSelection(
+  ranges: HighlightRange[],
+  start: number,
+  end: number,
+): HighlightRange | null {
+  const selection = normalizeSelectionRange({ start, end });
+  if (selection.start === selection.end) {
+    return ranges.find(range => selection.start > range.start && selection.start < range.end) ?? null;
+  }
+  return ranges.find(range => range.start < selection.end && range.end > selection.start) ?? null;
+}
+
+function applyHighlightRange(
+  ranges: HighlightRange[],
+  start: number,
+  end: number,
+  color: string,
+  textLength: number,
+): HighlightRange[] {
+  const selection = normalizeSelectionRange({ start, end });
+  if (selection.start === selection.end) {
+    return normalizeHighlightRanges(ranges, textLength);
+  }
+
+  const nextRanges: HighlightRange[] = [];
+  for (const range of ranges) {
+    if (range.end <= selection.start || range.start >= selection.end) {
+      nextRanges.push({ ...range });
+      continue;
+    }
+    if (range.start < selection.start) {
+      nextRanges.push({
+        start: range.start,
+        end: selection.start,
+        color: range.color,
+      });
+    }
+    if (range.end > selection.end) {
+      nextRanges.push({
+        start: selection.end,
+        end: range.end,
+        color: range.color,
+      });
+    }
+  }
+
+  nextRanges.push({
+    start: selection.start,
+    end: selection.end,
+    color: normalizeHighlightColor(color),
+  });
+
+  return normalizeHighlightRanges(nextRanges, textLength);
+}
+
+function removeHighlightRange(
+  ranges: HighlightRange[],
+  start: number,
+  end: number,
+  textLength: number,
+): HighlightRange[] {
+  const selection = normalizeSelectionRange({ start, end });
+  const effectiveSelection = selection.start === selection.end
+    ? (() => {
+        const target = findHighlightRangeAtSelection(ranges, selection.start, selection.end);
+        return target ? { start: target.start, end: target.end } : selection;
+      })()
+    : selection;
+
+  if (effectiveSelection.start === effectiveSelection.end) {
+    return normalizeHighlightRanges(ranges, textLength);
+  }
+
+  const nextRanges: HighlightRange[] = [];
+  for (const range of ranges) {
+    if (range.end <= effectiveSelection.start || range.start >= effectiveSelection.end) {
+      nextRanges.push({ ...range });
+      continue;
+    }
+    if (range.start < effectiveSelection.start) {
+      nextRanges.push({
+        start: range.start,
+        end: effectiveSelection.start,
+        color: range.color,
+      });
+    }
+    if (range.end > effectiveSelection.end) {
+      nextRanges.push({
+        start: effectiveSelection.end,
+        end: range.end,
+        color: range.color,
+      });
+    }
+  }
+
+  return normalizeHighlightRanges(nextRanges, textLength);
+}
+
+function updateHighlightRangesForTextChange(
+  previousText: string,
+  nextText: string,
+  ranges: HighlightRange[],
+): HighlightRange[] {
+  if (previousText === nextText) {
+    return normalizeHighlightRanges(ranges, nextText.length);
+  }
+
+  let prefixLength = 0;
+  const maxPrefixLength = Math.min(previousText.length, nextText.length);
+  while (
+    prefixLength < maxPrefixLength &&
+    previousText[prefixLength] === nextText[prefixLength]
+  ) {
+    prefixLength += 1;
+  }
+
+  let previousSuffix = previousText.length;
+  let nextSuffix = nextText.length;
+  while (
+    previousSuffix > prefixLength &&
+    nextSuffix > prefixLength &&
+    previousText[previousSuffix - 1] === nextText[nextSuffix - 1]
+  ) {
+    previousSuffix -= 1;
+    nextSuffix -= 1;
+  }
+
+  const oldChangeEnd = previousSuffix;
+  const newChangeEnd = nextSuffix;
+  const delta = nextText.length - previousText.length;
+  const nextRanges: HighlightRange[] = [];
+
+  for (const range of ranges) {
+    if (range.end <= prefixLength) {
+      nextRanges.push({ ...range });
+      continue;
+    }
+
+    if (range.start >= oldChangeEnd) {
+      nextRanges.push({
+        start: range.start + delta,
+        end: range.end + delta,
+        color: range.color,
+      });
+      continue;
+    }
+
+    if (range.start < prefixLength && range.end > oldChangeEnd) {
+      nextRanges.push({
+        start: range.start,
+        end: range.end + delta,
+        color: range.color,
+      });
+      continue;
+    }
+
+    if (range.start < prefixLength) {
+      nextRanges.push({
+        start: range.start,
+        end: prefixLength,
+        color: range.color,
+      });
+    }
+
+    if (range.end > oldChangeEnd) {
+      nextRanges.push({
+        start: newChangeEnd,
+        end: range.end + delta,
+        color: range.color,
+      });
+    }
+  }
+
+  return normalizeHighlightRanges(nextRanges, nextText.length);
+}
+
 // ── Component ──
 
 export function CaseResearchWindow() {
@@ -76,10 +459,29 @@ export function CaseResearchWindow() {
   const [trashedPages, setTrashedPages] = useState<TrashedResearchPage[]>([]);
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [restoringKey, setRestoringKey] = useState<string | null>(null);
+  const [editorDocument, setEditorDocument] = useState<EditorDocument>({ text: '', highlights: [] });
+  const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>('split');
+  const [selectedHighlightColor, setSelectedHighlightColor] = useState<string>(HIGHLIGHT_PRESETS[0].value);
+  const [selectionRange, setSelectionRange] = useState<EditorSelectionRange>({ start: 0, end: 0 });
+  const [, setHistoryVersion] = useState(0);
 
   const titleRef = useRef<HTMLInputElement>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const editorOverlayRef = useRef<HTMLDivElement>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suppressEditorHydrationRef = useRef(false);
+  const undoStackRef = useRef<EditorSnapshot[]>([]);
+  const redoStackRef = useRef<EditorSnapshot[]>([]);
+  const editorDocumentRef = useRef<EditorDocument>({ text: '', highlights: [] });
+  const selectionRangeRef = useRef<EditorSelectionRange>({ start: 0, end: 0 });
+
+  useEffect(() => {
+    editorDocumentRef.current = editorDocument;
+  }, [editorDocument]);
+
+  useEffect(() => {
+    selectionRangeRef.current = selectionRange;
+  }, [selectionRange]);
 
   // ─── Fetch tabs ───
   const fetchTabs = useCallback(async () => {
@@ -193,6 +595,34 @@ export function CaseResearchWindow() {
     };
   }, [contextMenu]);
 
+  useEffect(() => {
+    if (suppressEditorHydrationRef.current) {
+      suppressEditorHydrationRef.current = false;
+      return;
+    }
+
+    const parsedDocument = parseEditorDocument(activePage?.body ?? '');
+    editorDocumentRef.current = parsedDocument;
+    setEditorDocument(parsedDocument);
+    undoStackRef.current = [];
+    redoStackRef.current = [];
+    setHistoryVersion(version => version + 1);
+    const initialSelection = { start: 0, end: 0 };
+    selectionRangeRef.current = initialSelection;
+    setSelectionRange(initialSelection);
+
+    requestAnimationFrame(() => {
+      if (bodyRef.current) {
+        bodyRef.current.scrollTop = 0;
+        bodyRef.current.scrollLeft = 0;
+      }
+      if (editorOverlayRef.current) {
+        editorOverlayRef.current.scrollTop = 0;
+        editorOverlayRef.current.scrollLeft = 0;
+      }
+    });
+  }, [activePage?.id, activePage?.body]);
+
   // ─── Auto-save with debounce ───
   const scheduleSave = useCallback((pageId: string, title: string, body: string) => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -215,6 +645,196 @@ export function CaseResearchWindow() {
       }
     }, 500);
   }, []);
+
+  const syncEditorScroll = useCallback(() => {
+    if (!bodyRef.current || !editorOverlayRef.current) {
+      return;
+    }
+    editorOverlayRef.current.scrollTop = bodyRef.current.scrollTop;
+    editorOverlayRef.current.scrollLeft = bodyRef.current.scrollLeft;
+  }, []);
+
+  const syncSelectionRange = useCallback(() => {
+    const textarea = bodyRef.current;
+    if (!textarea) {
+      return;
+    }
+    setSelectionRange({
+      start: textarea.selectionStart ?? 0,
+      end: textarea.selectionEnd ?? 0,
+    });
+  }, []);
+
+  const commitEditorDocument = useCallback((
+    nextDocument: EditorDocument,
+    nextSelection: EditorSelectionRange,
+    options?: { pushHistory?: boolean; restoreSelection?: boolean },
+  ) => {
+    if (!activePage) {
+      return;
+    }
+
+    const normalizedDocument: EditorDocument = {
+      text: nextDocument.text,
+      highlights: normalizeHighlightRanges(nextDocument.highlights, nextDocument.text.length),
+    };
+    const normalizedSelection = normalizeSelectionRange(nextSelection);
+
+    if (options?.pushHistory !== false) {
+      const currentSnapshot: EditorSnapshot = {
+        document: cloneEditorDocument(editorDocumentRef.current),
+        selection: { ...normalizeSelectionRange(selectionRangeRef.current) },
+      };
+      const nextSnapshot: EditorSnapshot = {
+        document: cloneEditorDocument(normalizedDocument),
+        selection: { ...normalizedSelection },
+      };
+      if (
+        !areEditorDocumentsEqual(currentSnapshot.document, nextSnapshot.document) ||
+        currentSnapshot.selection.start !== nextSnapshot.selection.start ||
+        currentSnapshot.selection.end !== nextSnapshot.selection.end
+      ) {
+        undoStackRef.current.push(currentSnapshot);
+        redoStackRef.current = [];
+        setHistoryVersion(version => version + 1);
+      }
+    }
+
+    editorDocumentRef.current = normalizedDocument;
+    setEditorDocument(normalizedDocument);
+    selectionRangeRef.current = normalizedSelection;
+    setSelectionRange(normalizedSelection);
+
+    const serializedBody = serializeEditorDocument(normalizedDocument);
+    suppressEditorHydrationRef.current = true;
+    setActivePage(prev => prev && prev.id === activePage.id ? { ...prev, body: serializedBody } : prev);
+    scheduleSave(activePage.id, activePage.title, serializedBody);
+
+    if (options?.restoreSelection) {
+      requestAnimationFrame(() => {
+        const textarea = bodyRef.current;
+        if (!textarea) {
+          return;
+        }
+        textarea.focus();
+        textarea.setSelectionRange(normalizedSelection.start, normalizedSelection.end);
+        syncEditorScroll();
+      });
+    }
+  }, [activePage, scheduleSave, syncEditorScroll]);
+
+  const handleUndo = useCallback(() => {
+    if (!activePage) {
+      return;
+    }
+    const previousSnapshot = undoStackRef.current.pop();
+    if (!previousSnapshot) {
+      return;
+    }
+    redoStackRef.current.push({
+      document: cloneEditorDocument(editorDocumentRef.current),
+      selection: { ...selectionRangeRef.current },
+    });
+    setHistoryVersion(version => version + 1);
+    commitEditorDocument(previousSnapshot.document, previousSnapshot.selection, {
+      pushHistory: false,
+      restoreSelection: true,
+    });
+  }, [activePage, commitEditorDocument]);
+
+  const handleRedo = useCallback(() => {
+    if (!activePage) {
+      return;
+    }
+    const nextSnapshot = redoStackRef.current.pop();
+    if (!nextSnapshot) {
+      return;
+    }
+    undoStackRef.current.push({
+      document: cloneEditorDocument(editorDocumentRef.current),
+      selection: { ...selectionRangeRef.current },
+    });
+    setHistoryVersion(version => version + 1);
+    commitEditorDocument(nextSnapshot.document, nextSnapshot.selection, {
+      pushHistory: false,
+      restoreSelection: true,
+    });
+  }, [activePage, commitEditorDocument]);
+
+  const handleEditorKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const key = event.key.toLowerCase();
+    const isModifierPressed = event.ctrlKey || event.metaKey;
+    const isUndo = isModifierPressed && !event.shiftKey && key === 'z';
+    const isRedo = isModifierPressed && (key === 'y' || (event.shiftKey && key === 'z'));
+
+    if (isUndo) {
+      event.preventDefault();
+      handleUndo();
+      return;
+    }
+
+    if (isRedo) {
+      event.preventDefault();
+      handleRedo();
+    }
+  }, [handleRedo, handleUndo]);
+
+  const applyHighlightToSelection = useCallback(() => {
+    const textarea = bodyRef.current;
+    if (!textarea || !activePage) {
+      return;
+    }
+
+    const start = textarea.selectionStart ?? 0;
+    const end = textarea.selectionEnd ?? 0;
+    if (start === end) {
+      return;
+    }
+
+    const nextHighlights = applyHighlightRange(
+      editorDocumentRef.current.highlights,
+      start,
+      end,
+      selectedHighlightColor,
+      editorDocumentRef.current.text.length,
+    );
+    commitEditorDocument(
+      { text: editorDocumentRef.current.text, highlights: nextHighlights },
+      { start, end },
+      { restoreSelection: true },
+    );
+  }, [activePage, commitEditorDocument, selectedHighlightColor]);
+
+  const removeHighlightFromSelection = useCallback(() => {
+    const textarea = bodyRef.current;
+    if (!textarea || !activePage) {
+      return;
+    }
+
+    const start = textarea.selectionStart ?? 0;
+    const end = textarea.selectionEnd ?? 0;
+    const targetHighlight = findHighlightRangeAtSelection(editorDocumentRef.current.highlights, start, end);
+    if (!targetHighlight) {
+      return;
+    }
+
+    const normalizedSelection = normalizeSelectionRange({ start, end });
+    const effectiveSelection = normalizedSelection.start === normalizedSelection.end
+      ? { start: targetHighlight.start, end: targetHighlight.end }
+      : normalizedSelection;
+    const nextHighlights = removeHighlightRange(
+      editorDocumentRef.current.highlights,
+      effectiveSelection.start,
+      effectiveSelection.end,
+      editorDocumentRef.current.text.length,
+    );
+
+    commitEditorDocument(
+      { text: editorDocumentRef.current.text, highlights: nextHighlights },
+      { start: effectiveSelection.start, end: effectiveSelection.start },
+      { restoreSelection: true },
+    );
+  }, [activePage, commitEditorDocument]);
 
   // ─── Handlers ───
   const handleCreateTab = async () => {
@@ -342,13 +962,20 @@ export function CaseResearchWindow() {
     if (!activePage) return;
     setActivePage(prev => prev ? { ...prev, title: value } : null);
     setPages(prev => prev.map(p => p.id === activePage.id ? { ...p, title: value } : p));
-    scheduleSave(activePage.id, value, activePage.body);
+    scheduleSave(activePage.id, value, serializeEditorDocument(editorDocumentRef.current));
   };
 
-  const handleBodyChange = (value: string) => {
+  const handleBodyChange = (value: string, nextStart: number, nextEnd: number) => {
     if (!activePage) return;
-    setActivePage(prev => prev ? { ...prev, body: value } : null);
-    scheduleSave(activePage.id, activePage.title, value);
+    const nextDocument: EditorDocument = {
+      text: value,
+      highlights: updateHighlightRangesForTextChange(
+        editorDocumentRef.current.text,
+        value,
+        editorDocumentRef.current.highlights,
+      ),
+    };
+    commitEditorDocument(nextDocument, { start: nextStart, end: nextEnd });
   };
 
   const handleCopyId = () => {
@@ -549,6 +1176,15 @@ export function CaseResearchWindow() {
     }
   };
 
+  const hasSelectedText = selectionRange.start !== selectionRange.end;
+  const canUndo = undoStackRef.current.length > 0;
+  const canRedo = redoStackRef.current.length > 0;
+  const canRemoveHighlight = Boolean(findHighlightRangeAtSelection(
+    editorDocument.highlights,
+    selectionRange.start,
+    selectionRange.end,
+  ));
+
   // ─── Render ───
   return (
     <div className="relative flex flex-col h-full bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100" style={{ minHeight: 0 }}>
@@ -643,7 +1279,7 @@ export function CaseResearchWindow() {
             >
               <div className="truncate text-xs font-medium text-blue-600 dark:text-blue-400">{r.title || '(Untitled)'}</div>
               <div className="truncate text-[10px] text-slate-500 dark:text-slate-400">
-                <span className="text-amber-600 dark:text-amber-400">[{r.tab_name}]</span> {r.body.slice(0, 80)}…
+                <span className="text-amber-600 dark:text-amber-400">[{r.tab_name}]</span> {stripHighlightMarkup(r.body).slice(0, 80)}…
               </div>
             </button>
           ))}
@@ -769,15 +1405,142 @@ export function CaseResearchWindow() {
               </div>
 
               {/* Body */}
-              <div className="flex-1 min-h-0 overflow-y-auto">
-                <textarea
-                  ref={bodyRef}
-                  value={activePage.body}
-                  onChange={e => handleBodyChange(e.target.value)}
-                  placeholder="Write your notes here..."
-                  className="w-full h-full bg-transparent px-6 py-5 text-sm leading-relaxed text-slate-800 resize-none outline-none placeholder-slate-400 dark:text-slate-200 dark:placeholder-slate-600"
-                  style={{ minHeight: '100%' }}
-                />
+              <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/70 px-6 py-3 dark:border-slate-800 dark:bg-slate-900/40">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">Text Highlight</div>
+                  {HIGHLIGHT_PRESETS.map(option => {
+                    const isActive = selectedHighlightColor === option.value;
+                    return (
+                      <button
+                        key={option.value}
+                        onClick={() => setSelectedHighlightColor(option.value)}
+                        className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-medium transition-colors ${isActive ? 'border-slate-900 text-slate-900 dark:border-slate-100 dark:text-slate-100' : 'border-slate-300 text-slate-600 hover:border-slate-400 hover:text-slate-900 dark:border-slate-700 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:text-slate-100'}`}
+                        title={`Use ${option.label} highlight`}
+                      >
+                        <span className="h-3 w-3 rounded-full border border-slate-300 dark:border-slate-600" style={{ backgroundColor: option.value }} />
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                  <label className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-2.5 py-1 text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
+                    <span>Custom</span>
+                    <input
+                      type="color"
+                      value={selectedHighlightColor}
+                      onChange={event => setSelectedHighlightColor(normalizeHighlightColor(event.target.value))}
+                      className="h-5 w-6 cursor-pointer border-0 bg-transparent p-0"
+                      title="Pick custom highlight color"
+                    />
+                  </label>
+                  <button
+                    onClick={applyHighlightToSelection}
+                    disabled={!hasSelectedText}
+                    className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 text-[11px] font-semibold text-amber-800 transition-colors hover:border-amber-400 hover:bg-amber-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:border-amber-700 dark:hover:bg-amber-950/50 dark:disabled:border-slate-800 dark:disabled:bg-slate-900 dark:disabled:text-slate-500"
+                    title="Wrap the selected text with highlight markup"
+                  >
+                    Apply to selection
+                  </button>
+                  <button
+                    onClick={removeHighlightFromSelection}
+                    disabled={!canRemoveHighlight}
+                    className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:border-slate-500 dark:hover:bg-slate-900 dark:disabled:border-slate-800 dark:disabled:bg-slate-900 dark:disabled:text-slate-500"
+                    title="Remove highlight from the current selection or the current highlighted block"
+                  >
+                    Remove highlight
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={handleUndo}
+                    disabled={!canUndo}
+                    className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:border-slate-500 dark:hover:bg-slate-900 dark:disabled:border-slate-800 dark:disabled:bg-slate-900 dark:disabled:text-slate-500"
+                    title="Undo the last text or highlight change (Ctrl+Z)"
+                  >
+                    Undo
+                  </button>
+                  <button
+                    onClick={handleRedo}
+                    disabled={!canRedo}
+                    className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:border-slate-500 dark:hover:bg-slate-900 dark:disabled:border-slate-800 dark:disabled:bg-slate-900 dark:disabled:text-slate-500"
+                    title="Redo the last undone change (Ctrl+Y)"
+                  >
+                    Redo
+                  </button>
+                  {(['edit', 'split', 'preview'] as EditorViewMode[]).map(mode => {
+                    const isActive = editorViewMode === mode;
+                    return (
+                      <button
+                        key={mode}
+                        onClick={() => setEditorViewMode(mode)}
+                        className={`rounded-full border px-3 py-1.5 text-[11px] font-semibold capitalize transition-colors ${isActive ? 'border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-400 dark:bg-blue-950/40 dark:text-blue-300' : 'border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:text-slate-100'}`}
+                      >
+                        {mode}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className={`flex-1 min-h-0 ${editorViewMode === 'split' ? 'flex flex-col xl:flex-row' : 'flex'}`}>
+                {(editorViewMode === 'edit' || editorViewMode === 'split') && (
+                  <div className={`flex min-h-0 flex-col ${editorViewMode === 'split' ? 'flex-1 border-b border-slate-200 xl:border-b-0 xl:border-r dark:border-slate-800' : 'w-full'}`}>
+                    <div className="border-b border-slate-200 bg-white px-6 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-500">
+                      Editor
+                    </div>
+                    <div className="relative flex-1 min-h-0 overflow-hidden">
+                      <div
+                        ref={editorOverlayRef}
+                        aria-hidden="true"
+                        className="pointer-events-none absolute inset-0 overflow-auto px-6 py-5 text-sm leading-relaxed whitespace-pre-wrap break-words text-slate-800 dark:text-slate-100"
+                      >
+                        {editorDocument.text.length > 0 ? renderHighlightedText(editorDocument.text, editorDocument.highlights) : (
+                          <span className="text-slate-400 dark:text-slate-600">Write your notes here...</span>
+                        )}
+                        {'\n'}
+                      </div>
+                      <textarea
+                        ref={bodyRef}
+                        value={editorDocument.text}
+                        onChange={e => handleBodyChange(e.target.value, e.target.selectionStart ?? 0, e.target.selectionEnd ?? 0)}
+                        onSelect={syncSelectionRange}
+                        onKeyUp={syncSelectionRange}
+                        onMouseUp={syncSelectionRange}
+                        onKeyDown={handleEditorKeyDown}
+                        onScroll={syncEditorScroll}
+                        placeholder="Write your notes here..."
+                        className="absolute inset-0 h-full w-full resize-none overflow-auto bg-transparent px-6 py-5 text-sm leading-relaxed outline-none placeholder:text-transparent selection:bg-blue-200/70 caret-slate-900 dark:selection:bg-blue-500/30 dark:caret-slate-100"
+                        style={{
+                          minHeight: '100%',
+                          color: 'transparent',
+                          WebkitTextFillColor: 'transparent',
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {(editorViewMode === 'preview' || editorViewMode === 'split') && (
+                  <div className={`flex min-h-0 flex-col ${editorViewMode === 'split' ? 'flex-1 bg-slate-50/70 dark:bg-slate-900/30' : 'w-full bg-slate-50/70 dark:bg-slate-900/30'}`}>
+                    <div className="border-b border-slate-200 bg-slate-50/90 px-6 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-500">
+                      Preview
+                    </div>
+                    <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5">
+                      {editorDocument.text.trim() ? (
+                        <div className="whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-800 dark:text-slate-100">
+                          {renderHighlightedText(editorDocument.text, editorDocument.highlights)}
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl border border-dashed border-slate-300 bg-white/80 px-4 py-5 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-400">
+                          Highlight preview appears here. Select text in the editor, choose a color, then apply it.
+                        </div>
+                      )}
+                      <div className="mt-4 rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-[11px] text-slate-500 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-400">
+                        Stored format: <span className="font-mono text-slate-700 dark:text-slate-200">{`[[hl=${selectedHighlightColor}]]text[[/hl]]`}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </>
           ) : (
