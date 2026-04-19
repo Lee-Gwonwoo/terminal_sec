@@ -53,34 +53,51 @@
 필수 산출물:
 
 1. **이슈 한줄 정의**: 어떤 이슈인지 1~2문장으로. 예: `AI 데이터센터 fiber-optic / optical component 밸류체인 이슈`.
-2. **관련주 분류 테이블**: 아래 `분류 축`과 `관련성 정도 등급 축`을 **동시에** 사용해 종목을 정리한다.
+2. **관련주 분류 테이블**: `사업 유사성 축`과 `이슈 연결 방식 축`을 **분리해서** 사용한다. Model_100에서 사용자가 말하는 `관련주`의 기본 뜻은 **핵심 이슈가 발생한 티커와 가장 유사한 사업을 하는 종목들**이다.
+
+관련주 분류(사업 유사성 기준):
 
 | 분류 | 설명 |
 | --- | --- |
-| 1차 직접 수혜 | 이슈의 직접 당사자 또는 핵심 밸류체인 상의 종목 |
-| 2차 read-through | 직접 당사자는 아니지만 밸류체인/원재료/장비 등으로 간접 수혜 |
-| 참고 peer | 같은 산업이지만 이번 이슈의 직접 수혜 경로가 약한 종목 |
+| 핵심 동종 peer | 핵심 이슈 티커와 **주요 제품, 주요 고객, 해결하는 전력/인프라 문제, capex budget 경쟁 상대**가 거의 같은 종목 |
+| 인접 사업 peer | 정확히 같은 회사는 아니지만, **같은 고객의 같은 문제를 다른 기술/아키텍처로 푸는** 인접 경쟁 종목 |
+| 약한 테마/read-through | 넓은 테마나 밸류체인은 겹치지만, 핵심 사업축이 달라 direct peer로 보기 어려운 종목 |
 
-관련성 정도 등급 규칙:
+사업 유사도 등급 규칙:
 
 | 등급 | 의미 | 운영적 정의 |
 | --- | --- | --- |
-| A | 매우 높음 | 이 이슈를 설명할 때 사실상 빠질 수 없는 종목. 직접 당사자, 핵심 counterparty, 핵심 고객/공급자처럼 **이슈의 경제적 성립에 직접 연결**된다. |
-| B | 높음 | 직접 계약 당사자는 아니지만 **1차 read-through**가 강하다. 같은 밸류체인에 있어 수요/발주/증설의 1차 파급을 받을 가능성이 높다. |
-| C | 보통 | 산업/테마는 같지만 **2차 read-through 또는 조건부 연관**이다. 이슈가 확산될 때 따라올 수는 있으나, 해당 종목을 빼도 메인 thesis는 대부분 유지된다. |
-| D | 낮음/참고 | 비교·검증용 peer 또는 sentiment gauge에 가깝다. 같은 산업/테마라는 이유로 같이 보되, **이번 이슈의 직접 설명력은 약하다**. |
+| A | 매우 높음 | 핵심 이슈 티커와 **사실상 같은 사업을 비교**할 수 있는 종목. 같은 고객군, 같은 설치 레이어, 같은 예산 항목을 두고 경쟁하거나 대체될 수 있다. |
+| B | 높음 | 완전한 동종은 아니지만, **같은 고객 문제를 직접 경쟁 기술로 해결**하는 인접 peer다. 같은 뉴스에서 read-through가 붙어도 이상하지 않다. |
+| C | 보통 | 산업/테마는 겹치지만 핵심 사업축이 달라 **조건부 read-through** 정도로 보는 것이 맞다. |
+| D | 낮음/참고 | sentiment gauge 또는 약한 테마 peer 수준이다. 같은 broad theme에 묶일 수는 있어도 `핵심 이슈 티커와 유사한 사업`으로 보긴 어렵다. |
 
-- 각 종목에 대해 `티커`, `분류`, `관련성 정도 등급`, `설명(왜 이 분류/등급인지)` 4개를 반드시 적는다.
-- `분류`는 **바스켓 안에서의 역할**을, `관련성 정도 등급`은 **이번 이슈가 그 종목을 얼마나 직접 설명하는지**를 뜻한다. 두 축을 섞지 않는다.
-- 분류 기준은 **이번 이슈와의 비즈니스 연결성**이지, 주가 반응 크기가 아니다. 관련성 정도 등급도 **당일 상승률**이 아니라 directness, revenue attribution, counterparty relevance, value-chain distance로 판단한다.
-- 같은 종목이라도 `분류`와 `관련성 정도 등급`은 다르게 나올 수 있다. 예를 들어 `참고 peer`라도 이번 이슈의 핵심 counterparty면 `관련성 정도 등급 A`가 가능하고, `2차 read-through`라도 실제 설명력이 약하면 `C`가 가능하다.
+이슈 연결 방식 태그:
+
+| 태그 | 설명 |
+| --- | --- |
+| direct beneficiary | 이번 이벤트의 직접 수혜 당사자 |
+| read-through | 같은 사업/인접 사업이라 sympathy가 번질 수 있는 종목 |
+| validator / counterparty | 고객, utility, hyperscaler, 공급자, 계약 상대방처럼 **상업성 검증에는 중요하지만 같은 사업을 하지는 않는** 종목 |
+| background | 매크로/정책/인프라 배경 설명용 |
+
+- 각 관련주에 대해 `티커`, `관련주 분류`, `사업 유사도 등급`, `이슈 연결 방식`, `설명(왜 이 분류/등급인지)` 5개를 반드시 적는다.
+- `관련주 분류`와 `사업 유사도 등급`은 **핵심 이슈 티커와의 사업 유사성**을 기준으로 판단한다. 계약 상대방인지, headline에 직접 등장했는지는 별도 축인 `이슈 연결 방식`에서 처리한다.
+- `validator / counterparty`는 중요해도 **관련주 고등급의 근거가 아니다.** 예를 들어 `Oracle`, `AEP`처럼 이번 계약/검증에는 핵심이어도, 핵심 이슈 티커와 같은 사업을 하지 않으면 관련주 표에서 `A`나 `B`를 주지 않는다.
+- `관련주`와 `검증자`를 섞지 않는다. 사용자가 `관련주`를 물으면 먼저 **동종/인접 사업 peer**를 정리하고, customer/utility/hyperscaler는 별도 `검증자 / counterparty` 표로 뺀다.
+- `3개 이상 종목 동시 +5%` 같은 basket 확인 규칙도 **관련주 표에 들어간 same-business / adjacent-business basket** 기준으로만 계산한다. validator / counterparty는 이 분모에 넣지 않는다.
 - 기본 예시:
-   - `1차 직접 수혜 + A`: 직접 수주 당사자, 핵심 공급자, 직접 revenue 귀속 종목
-   - `2차 read-through + B`: 1차 밸류체인 수혜가 명확한 종목
-   - `2차 read-through + C`: sympathy는 가능하지만 사건 단독으로는 약한 종목
-   - `참고 peer + D`: 비교/검증용 산업 peer
+   - `핵심 동종 peer + A + read-through`: BE 이슈에서 FCEL처럼 같은 데이터센터 onsite power / distributed generation 문제를 푸는 종목
+   - `인접 사업 peer + B + read-through`: 같은 고객 예산을 놓고 다른 전력 아키텍처로 경쟁하는 엔진/터빈 계열
+   - `약한 테마/read-through + C`: 수소/연료전지 broad theme는 겹치지만 핵심 사업축이 다른 종목
+   - `validator / counterparty`: ORCL, AEP처럼 계약 검증에는 중요하지만 같은 사업을 하지는 않는 종목
 
-3. **오너십 데이터 테이블**: 각 종목의 시총, Float %, Institutional %, Insider % 를 포함한다.
+3. **검증자 / counterparty 표**: customer, utility, hyperscaler, 공급자, 핵심 계약 상대방처럼 **이슈의 진위와 사업성을 검증**해 주지만 같은 사업을 하는 것은 아닌 종목이 있으면, 관련주 표와 분리해서 적는다.
+
+- 이 표에는 `티커`, `역할`, `왜 관련주가 아닌가`, `이번 이슈에서 왜 중요한가`를 적는다.
+- 이 표의 종목은 page 설명에는 중요할 수 있지만, related-stock ranking이나 basket propagation count에는 넣지 않는다.
+
+4. **오너십 데이터 테이블**: 각 종목의 시총, Float %, Institutional %, Insider % 를 포함한다.
 
 오너십 데이터 조회 규칙:
 - 출처: `GET /api/tickers` 또는 app DB의 `company_profiles` 테이블.
@@ -101,7 +118,7 @@
 
 | 항목 | 설명 |
 | --- | --- |
-| 메인 촉매 날짜 | `이슈 티어가 만들어진 날` 또는 page의 중심 anchor 날짜. 복수일이면 `2026-02-25~2026-02-26`처럼 범위를 쓰되, event/published/change_anchor는 별도 표기한다. |
+| 메인 축 날짜 | page 상단의 `축 1`, `축 2` 같은 canonical axis 날짜. **기본값은 `change_anchor`** 이며, 장후 PR/공시/earnings면 다음 거래일을 쓴다. `event_date`, `published_at`는 아래 날짜 3줄에서 따로 적는다. |
 | 날짜 3줄 | `event_date:`, `published_at:`, `change_anchor:`를 별도 줄로 정확히 쓴다. |
 | 대표 headline / structured catalyst | 원문 headline, earnings, SEC filing, PR 등 이번 anchor를 대표하는 핵심 사건 1~2개. |
 | 핵심 가격 반응 표 | 최소 `same-day`, `from-open`, `next day`, `7d`, `14d`, `30d`에 대해 **change + HV + z-score 삼중항** 을 정확한 숫자로 적는다. 필요 시 `open_to_high`도 추가한다. |
@@ -113,6 +130,9 @@
 - 선행 이슈를 장황하게 쓰기 전에, 독자가 **먼저 분석 대상 anchor를 정확히 이해**할 수 있어야 한다.
 - page 전체의 판정(`1 tier`, `fail tier` 등)은 이 블록에서 고정한 anchor를 기준으로 후속 비교가 이루어져야 한다.
 - 이 블록의 가격 반응은 **당일 change만이 아니라 change/HV/z-score 전 구간 삼중항** 을 기준으로 쓴다.
+- 사용자가 축 날짜를 지정했더라도, 그 날짜에 direct headline / filing / PR이 없고 단순 pre-bid 또는 선행 관찰일에 불과하면 **그 날짜를 canonical `축 1`로 승격하지 않는다.** 이런 경우에는 `선행 axis`, `pre-bid 관찰일`로만 적고, 실제 `축 날짜`는 first hard catalyst의 `change_anchor`로 옮긴다.
+- 예를 들어 `2024-11-14` 장후 PR이라면 summary/table의 `축 날짜`는 `2024-11-15`가 기본값이다. 단, 본문 3줄에는 `event_date: 2024-11-14`, `published_at: ...`, `change_anchor: 2024-11-15`를 모두 남긴다.
+- validator / counterparty는 `핵심 분석이슈`의 상업성 검증 근거로는 활용하지만, related-stock basket confirmation이나 tier 분모에는 넣지 않는다.
 
 ### 3단계: 선행 이슈 조사
 
@@ -290,6 +310,11 @@ company_news 분석 시, **이벤트가 실제로 발생한 날짜(event_date)**
 3. 🟢 **2차 파동**: 어닝/추가 딜/analyst 상향 등으로 두 번째 급등이 온 시점.
 4. 🔵 **테마 확장**: 이슈 주제가 원래 범위에서 인접 테마로 확장된 시점.
 5. 🟡 **개별 확인**: 소형캡 개별 종목이 자체 수주/어닝으로 테마를 확인한 시점.
+
+**바스켓 판정 모수 규칙 (필수):**
+- `바스켓 전체`, `3개 이상 동시 +5%`, `peer propagation` 같은 판정은 **1단계 관련주 표에 들어간 same-business / adjacent-business peer**만을 기준으로 계산한다.
+- customer, utility, hyperscaler, 계약 상대방 같은 `validator / counterparty`는 설명에는 중요하지만, basket count를 올리거나 내리는 종목으로 세지 않는다.
+- 따라서 ORCL, AEP처럼 `상업성 검증자`인 종목은 strong validator일 수 있어도, `관련주가 잘 움직였는가`를 판단하는 숫자 계산에는 넣지 않는다.
 
 **그룹 구조 (필수):** 확산 타임라인도 선행 이슈와 동일하게 **분석이슈 → 관련이슈** 그룹 형태로 작성한다. 각 파동/이벤트를 먼저 쓰고, 바로 아래에 같은 티커 관련이슈 → 다른 티커 관련이슈를 들여쓰기로 묶는다.
 
