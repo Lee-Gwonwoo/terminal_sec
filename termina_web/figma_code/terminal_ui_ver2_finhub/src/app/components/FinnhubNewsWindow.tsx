@@ -32,7 +32,7 @@ type DisplayMode = 'title-only' | 'title-abstract';
 type NewsProjectionMode = 'full' | 'model1-safe';
 
 // ─── Column definition ───
-type ColumnId = 'date' | 'ticker' | 'time' | 'title' | 'publisher' | 'industry' | 'ipoDate' | 'marketCap' | 'floatPct' | 'institutionalPct' | 'insiderPct' | 'source' | 'changes' | 'hv' | 'zscore' | 'fulltext' | 'keywords' | 'score' | 'scoreEvidence' | 'sentiment' | 'peers' | 'companyDesc';
+type ColumnId = 'date' | 'ticker' | 'time' | 'title' | 'publisher' | 'industry' | 'ipoDate' | 'marketCap' | 'floatPct' | 'institutionalPct' | 'insiderPct' | 'earningsDates' | 'source' | 'changes' | 'hv' | 'zscore' | 'fulltext' | 'keywords' | 'score' | 'scoreEvidence' | 'sentiment' | 'peers' | 'companyDesc';
 
 interface ColumnDef {
   id: ColumnId;
@@ -54,6 +54,7 @@ const DEFAULT_COLUMNS: ColumnDef[] = [
   { id: 'floatPct',     label: 'Float %',    defaultWidth: 90,  minWidth: 68 },
   { id: 'institutionalPct', label: 'Inst %', defaultWidth: 90,  minWidth: 68 },
   { id: 'insiderPct',   label: 'Insider %',  defaultWidth: 90,  minWidth: 68 },
+  { id: 'earningsDates', label: 'Earnings Dates', defaultWidth: 220, minWidth: 160 },
   { id: 'source',       label: 'Sources',    defaultWidth: 90,  minWidth: 50 },
   { id: 'fulltext',     label: 'Full Text',  defaultWidth: 60,  minWidth: 40 },
   { id: 'changes',      label: 'Changes %',  defaultWidth: 280, minWidth: 160 },
@@ -68,7 +69,7 @@ const DEFAULT_COLUMNS: ColumnDef[] = [
 ];
 
 // Columns hidden by default — user can enable via Columns menu
-const HIDDEN_BY_DEFAULT: ColumnId[] = ['source', 'hv', 'zscore', 'keywords', 'score', 'scoreEvidence', 'sentiment', 'peers', 'companyDesc'];
+const HIDDEN_BY_DEFAULT: ColumnId[] = ['earningsDates', 'source', 'hv', 'zscore', 'keywords', 'score', 'scoreEvidence', 'sentiment', 'peers', 'companyDesc'];
 const DEFAULT_VISIBLE: Set<ColumnId> = new Set(DEFAULT_COLUMNS.filter(c => !HIDDEN_BY_DEFAULT.includes(c.id)).map(c => c.id));
 const MODEL1_HIDDEN_CHANGE_COLUMNS: ColumnId[] = ['changes', 'hv', 'zscore'];
 
@@ -325,6 +326,13 @@ interface BackendNewsItem {
   floatPct?: number | null;
   institutionalPct?: number | null;
   insiderPct?: number | null;
+  earnings_context_ticker?: string | null;
+  recent_earnings_date?: string | null;
+  recent_earnings_confirmed?: boolean | null;
+  upcoming_earnings_date?: string | null;
+  upcoming_earnings_confirmed?: boolean | null;
+  earnings_context_display?: string | null;
+  earnings_lookup_status?: string | null;
   score?: number | null;
   scoreEvidence?: string | null;
   analysisStatus?: string | null;
@@ -382,6 +390,13 @@ interface DisplayItem {
   floatPct: number | null;
   institutionalPct: number | null;
   insiderPct: number | null;
+  earningsContextTicker: string | null;
+  recentEarningsDate: string | null;
+  recentEarningsConfirmed: boolean | null;
+  upcomingEarningsDate: string | null;
+  upcomingEarningsConfirmed: boolean | null;
+  earningsContextDisplay: string | null;
+  earningsLookupStatus: string | null;
   score: number | null;
   scoreEvidence: string | null;
   sentiment: number | null;
@@ -498,6 +513,13 @@ function mapBackendItem(item: BackendNewsItem): DisplayItem {
     floatPct: item.floatPct ?? null,
     institutionalPct: item.institutionalPct ?? null,
     insiderPct: item.insiderPct ?? null,
+    earningsContextTicker: item.earnings_context_ticker ?? null,
+    recentEarningsDate: item.recent_earnings_date ?? null,
+    recentEarningsConfirmed: item.recent_earnings_confirmed ?? null,
+    upcomingEarningsDate: item.upcoming_earnings_date ?? null,
+    upcomingEarningsConfirmed: item.upcoming_earnings_confirmed ?? null,
+    earningsContextDisplay: item.earnings_context_display ?? null,
+    earningsLookupStatus: item.earnings_lookup_status ?? null,
     score: item.score ?? null,
     scoreEvidence: item.scoreEvidence ?? null,
     sentiment: item.sentimentBullishPct ?? null,
@@ -538,6 +560,8 @@ const changeColor = (val: number | null) => {
   if (val === null || val === undefined) return 'text-gray-400';
   return val > 0 ? 'text-green-600 dark:text-green-400' : val < 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-500';
 };
+
+const formatEarningsStatus = (confirmed: boolean | null) => confirmed ? 'Confirmed' : 'Unconfirmed';
 
 // ═══════════════════════════════════════════════
 // Component
@@ -784,6 +808,66 @@ export function FinnhubNewsWindow({
     if (insiderPctMin.trim()) params.set('insiderPctMin', insiderPctMin.trim());
     if (insiderPctMax.trim()) params.set('insiderPctMax', insiderPctMax.trim());
   }, [floatPctMin, floatPctMax, institutionalPctMin, institutionalPctMax, insiderPctMin, insiderPctMax]);
+
+  const buildCurrentNewsQueryPayload = useCallback((overrides?: { from?: string; to?: string }) => {
+    const payload: Record<string, unknown> = {
+      source_names: (sourceTypeFilter === 'fmp_press_release' || sourceTypeFilter === 'fmp_stock_news' || sourceTypeFilter === 'fmp_sec_filing')
+        ? ['FMP']
+        : ['FINNHUB', 'RTPR', 'FMP'],
+    };
+
+    if (selectedBookmarkFolderId) {
+      payload.bookmarkFolderId = selectedBookmarkFolderId;
+    }
+    if (sourceTypeFilter === 'fmp_press_release') {
+      payload.source_type = 'fmp_press_release';
+    } else if (sourceTypeFilter === 'fmp_stock_news') {
+      payload.source_type = 'fmp_stock_news';
+    } else if (sourceTypeFilter === 'fmp_sec_filing') {
+      payload.source_type = 'fmp_sec_filing';
+    } else if (sourceTypeFilter !== 'all') {
+      payload.source_type = sourceTypeFilter;
+    }
+
+    const keyword = searchQueryRef.current.trim();
+    if (keyword) {
+      payload.keyword = keyword;
+    }
+
+    const currentTicker = tickerQueryRef.current.trim();
+    if (currentTicker) {
+      payload.tickers = [currentTicker.toUpperCase()];
+    }
+
+    const effectiveFrom = overrides?.from ?? fromDate;
+    const effectiveTo = overrides?.to ?? toDate;
+    if (effectiveFrom) {
+      payload.from = effectiveFrom;
+    }
+    if (effectiveTo) {
+      payload.to = effectiveTo;
+    }
+
+    if (floatPctMin.trim()) payload.floatPctMin = floatPctMin.trim();
+    if (floatPctMax.trim()) payload.floatPctMax = floatPctMax.trim();
+    if (institutionalPctMin.trim()) payload.institutionalPctMin = institutionalPctMin.trim();
+    if (institutionalPctMax.trim()) payload.institutionalPctMax = institutionalPctMax.trim();
+    if (insiderPctMin.trim()) payload.insiderPctMin = insiderPctMin.trim();
+    if (insiderPctMax.trim()) payload.insiderPctMax = insiderPctMax.trim();
+
+    return payload;
+  }, [
+    floatPctMax,
+    floatPctMin,
+    fromDate,
+    insiderPctMax,
+    insiderPctMin,
+    institutionalPctMax,
+    institutionalPctMin,
+    selectedBookmarkFolderId,
+    sourceTypeFilter,
+    toDate,
+  ]);
 
   const clearNumericFilters = useCallback(() => {
     setFloatPctMin('');
@@ -1458,44 +1542,62 @@ export function FinnhubNewsWindow({
     }
   };
 
-  // ─── Calendar Update: backfill or refresh ───
-  const handleCalendarUpdate = async (mode: 'backfill' | 'refresh') => {
+  // ─── Earnings Date Update: custom date range ───
+  const handleCustomEarningDateUpdate = async (from: string, to: string) => {
     setUpdating(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/ibkr/calendar/update`, {
+      const res = await fetch(`${API_BASE}/api/news/earnings/update-custom`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode }),
+        body: JSON.stringify(buildCurrentNewsQueryPayload({ from, to })),
       });
       const data = await res.json();
+      if (res.status === 409 && data.existingJobId) {
+        registerJob(data.existingJobId, 'news-update');
+        setShowLogPanel(true);
+        setUpdating(false);
+        return;
+      }
       if (!res.ok) {
         setError(data.error || `HTTP ${res.status}`);
+        setUpdating(false);
+        return;
       }
+      registerJob(data.jobId, 'news-update');
+      setUpdating(false);
     } catch (err: any) {
-      setError(err.message || 'Failed to start calendar update');
-    } finally {
+      setError(err.message || 'Failed to start custom earning date update');
       setUpdating(false);
     }
   };
 
-  // ─── Calendar Custom Update ───
-  const handleCalendarUpdateCustom = async (from: string, to: string) => {
+  // ─── Earnings Date Update: re-check unconfirmed rows ───
+  const handleCheckUnconfirmedEarningDate = async () => {
     setUpdating(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/ibkr/calendar/update-custom`, {
+      const res = await fetch(`${API_BASE}/api/news/earnings/check-unconfirmed`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ from, to }),
+        body: JSON.stringify(buildCurrentNewsQueryPayload()),
       });
       const data = await res.json();
+      if (res.status === 409 && data.existingJobId) {
+        registerJob(data.existingJobId, 'news-update');
+        setShowLogPanel(true);
+        setUpdating(false);
+        return;
+      }
       if (!res.ok) {
         setError(data.error || `HTTP ${res.status}`);
+        setUpdating(false);
+        return;
       }
+      registerJob(data.jobId, 'news-update');
+      setUpdating(false);
     } catch (err: any) {
-      setError(err.message || 'Failed to start custom calendar update');
-    } finally {
+      setError(err.message || 'Failed to start unconfirmed earning date check');
       setUpdating(false);
     }
   };
@@ -1816,6 +1918,7 @@ export function FinnhubNewsWindow({
       case 'floatPct': return item.floatPct ?? -Infinity;
       case 'institutionalPct': return item.institutionalPct ?? -Infinity;
       case 'insiderPct': return item.insiderPct ?? -Infinity;
+      case 'earningsDates': return item.earningsContextDisplay?.toLowerCase() ?? '';
       case 'source': return item.source.toLowerCase();
       case 'fulltext': return item.hasFullText ? 1 : 0;
       case 'changes': return item.changeFromOpenPct ?? 0;
@@ -2092,6 +2195,23 @@ export function FinnhubNewsWindow({
         return <span className="truncate text-gray-600 dark:text-gray-400 tabular-nums">{formatOwnershipPct(newsItem.institutionalPct)}</span>;
       case 'insiderPct':
         return <span className="truncate text-gray-600 dark:text-gray-400 tabular-nums">{formatOwnershipPct(newsItem.insiderPct)}</span>;
+      case 'earningsDates': {
+        if (!newsItem.earningsContextDisplay && !newsItem.recentEarningsDate && !newsItem.upcomingEarningsDate) {
+          return <span className="text-gray-300 dark:text-gray-600">—</span>;
+        }
+        const recentLabel = newsItem.recentEarningsDate
+          ? `${newsItem.recentEarningsDate} (${formatEarningsStatus(newsItem.recentEarningsConfirmed)})`
+          : '-';
+        const upcomingLabel = newsItem.upcomingEarningsDate
+          ? `${newsItem.upcomingEarningsDate} (${formatEarningsStatus(newsItem.upcomingEarningsConfirmed)})`
+          : '-';
+        return (
+          <div className="flex min-w-0 flex-col gap-0.5 leading-tight" title={newsItem.earningsContextDisplay ?? `Recent ${recentLabel} | Upcoming ${upcomingLabel}`}>
+            <span className="truncate text-gray-600 dark:text-gray-400">Recent {recentLabel}</span>
+            <span className="truncate text-gray-600 dark:text-gray-400">Upcoming {upcomingLabel}</span>
+          </div>
+        );
+      }
       case 'source': {
         const sourceHref = newsItem.originUrl || (newsItem.url?.startsWith('http') ? newsItem.url : null);
         return renderLinkCell(newsItem.source, 'text-gray-600 dark:text-gray-400', sourceHref);
@@ -2758,20 +2878,16 @@ export function FinnhubNewsWindow({
                         <div><div className="font-medium">Custom Change% Update</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick date range · recalculate change % and fill missing HV / Z Score in range</div></div>
                       </button>
 
-                      {/* ── Calendar Update ── */}
+                      {/* ── Earnings Date Update ── */}
                       <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
-                      <div className="px-2 py-1 text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Calendar Update</div>
-                      <button onClick={() => { setShowUpdateMenu(false); handleCalendarUpdate('backfill'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                      <div className="px-2 py-1 text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Earning Date Update</div>
+                      <button onClick={() => { setShowUpdateMenu(false); setCalendarCustomFrom(fromDate || ''); setCalendarCustomTo(toDate || new Date().toISOString().slice(0, 10)); setShowCalendarCustomDateModal(true); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <Calendar className="w-3.5 h-3.5 shrink-0 text-rose-500" />
-                        <div><div className="font-medium">Initial Calendar Backfill</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Past 2 years + future 180 days · run once for initial setup</div></div>
+                        <div><div className="font-medium">Custom Earning Date Update</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick article date range · calendar DB first, FMP fallback only for missing context</div></div>
                       </button>
-                      <button onClick={() => { setShowUpdateMenu(false); handleCalendarUpdate('refresh'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                      <button onClick={() => { setShowUpdateMenu(false); handleCheckUnconfirmedEarningDate(); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <RotateCw className="w-3.5 h-3.5 shrink-0 text-rose-400" />
-                        <div><div className="font-medium">Refresh Upcoming Calendar</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Last 30 days overlap + next 90 days · does not re-fetch full history</div></div>
-                      </button>
-                      <button onClick={() => { setShowUpdateMenu(false); setCalendarCustomFrom(''); setCalendarCustomTo(new Date().toISOString().slice(0, 10)); setShowCalendarCustomDateModal(true); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
-                        <Calendar className="w-3.5 h-3.5 shrink-0 text-rose-300" />
-                        <div><div className="font-medium">Custom Calendar Update</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">사용자 지정 날짜 범위로 캘린더 이벤트를 수집합니다</div></div>
+                        <div><div className="font-medium">Check Unconfirmed Earning Date</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">현재 결과 중 unconfirmed earnings context만 다시 확인합니다</div></div>
                       </button>
                       {/* ── PTPR Press Release ── */}
                       <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
@@ -2793,13 +2909,13 @@ export function FinnhubNewsWindow({
                           key: 'finnhubNewsUpdate',
                           title: 'Finnhub News — Update 드롭다운 사용법',
                           summary: 'Custom Co. 버튼 드롭다운의 6개 카테고리 중 특히 Custom 계열이 어떻게 동작하는지 설명합니다. Custom은 무조건 지정한 전체 날짜를 다시 받는 것이 아니라, 버튼 종류에 따라 gap-only, fully-covered-skip, summary-only, preflight-only 방식으로 다르게 동작합니다.',
-                          purpose: '워치리스트 종목에 대한 뉴스·캘린더·PR 데이터를 수집하거나, 이미 저장된 뉴스의 change%를 다시 계산할 때 어떤 버튼을 눌러야 하는지와 Custom 실행 시 실제로 무엇이 다시 다운로드되는지를 구체적으로 안내합니다.',
+                          purpose: '워치리스트 종목에 대한 뉴스·earning date·PR 데이터를 수집하거나, 이미 저장된 뉴스의 change%를 다시 계산할 때 어떤 버튼을 눌러야 하는지와 Custom 실행 시 실제로 무엇이 다시 다운로드되는지를 구체적으로 안내합니다.',
                           whenToRun: [
                             '7d Update — 초기 세팅 직후 최근 7일 구간을 빠르게 채울 때 사용합니다. 최근 구간을 통째로 한번 받아오는 성격입니다.',
                             'Recent Update — 매일 또는 수시로 최신 뉴스만 증분 수집할 때 사용합니다. 운영 중에는 보통 이 버튼이 기본입니다.',
                             'Custom Update — 과거 특정 날짜 범위를 직접 지정할 때 사용합니다. Finnhub company news / press release, FMP PR / FMP stock news는 gap-only로 동작합니다.',
                             'Change Update — 뉴스를 다시 받는 버튼이 아니라, 이미 저장된 뉴스 행의 1D/5D 등 change%를 다시 계산할 때 사용합니다.',
-                            'Calendar Update — Earnings, IPO, analyst/event 달력 데이터를 초기 적재하거나 특정 구간만 다시 채울 때 사용합니다.',
+                            'Earning Date Update — News Window 기사에 recent/upcoming earning date context를 붙이거나, 기존 unconfirmed row를 다시 확인할 때 사용합니다.',
                             'PTPR Press Release — RTPR press release를 ticker 기준으로 수집할 때 사용합니다. provider 제약 때문에 일반 custom gap-only와는 다르게 동작합니다.',
                           ],
                           inputs: [
@@ -2811,7 +2927,7 @@ export function FinnhubNewsWindow({
                             'Custom fully-covered-skip = PTPR. provider가 from/to 원격 조회를 직접 지원하지 않아, 요청 범위가 이미 fully covered면 skip하고 아니면 ticker별 custom 조회를 실행합니다.',
                             'Custom summary-only = FMP SEC Filing / Market News 계열. ticker별 gap 계산 대신 preflight에서 existingItemsInRange 같은 요약 수치를 보여주고, 실행은 요청 범위를 기준으로 진행합니다.',
                             'Change Update: Recent는 최근 7일 재계산, Custom은 지정 날짜 범위 재계산입니다. 뉴스 원문을 다시 받지 않습니다.',
-                            'Calendar Update: Backfill은 과거 2년 + 미래 180일 초기 적재, Refresh는 최근 30일 + 미래 90일 유지보수, Custom은 지정 범위 수집입니다.',
+                            'Earning Date Update: Custom은 지정한 기사 날짜 범위에 대해 calendar DB 기준 earning date context를 계산하고, Check Unconfirmed는 현재 결과 중 unconfirmed row만 다시 검사합니다.',
                           ],
                           cautions: [
                             'Custom의 핵심은 gap-only가 가능한 버튼과 아닌 버튼을 구분해서 보는 것입니다. 모든 Custom 버튼이 missing gap만 받는 것은 아닙니다.',
@@ -2819,16 +2935,16 @@ export function FinnhubNewsWindow({
                             '같은 범위를 두 번 연속 실행하면 gap-only 대상 버튼은 두 번째 실행에서 많은 ticker가 fully covered로 판정되어 skip될 수 있습니다.',
                             '넓은 날짜 범위(예: 6개월~1년)를 주면 preflight의 totalMissingDays, totalMissingRanges를 먼저 보고 규모를 확인해야 합니다. 요약 수치가 크면 소스별로 나눠 실행하는 편이 안전합니다.',
                             'Change Update는 뉴스 다운로드가 아니라 재계산입니다. inserted가 늘지 않아도 정상일 수 있습니다.',
-                            'Calendar Backfill은 초기 1회용에 가깝습니다. 이미 데이터가 있는 상태에서 반복 실행하면 불필요하게 무거울 수 있습니다.',
+                            'Earning Date Update는 당일 FMP Earnings Calendar Update가 먼저 실행되어 있어야 합니다. backend가 stale 상태를 감지하면 412 오류로 차단합니다.',
                           ],
                           verify: [
                             'Custom 실행 전 preflight 모달에서 executionMode가 무엇인지 먼저 확인합니다. gap-only / fully-covered-skip / summary-only / preflight-only 중 어떤 방식인지 여기서 드러납니다.',
                             'gap-only 대상 버튼이면 preflight JSON에서 fullyCoveredTickers, tickersWithMissingGaps, totalMissingRanges, totalMissingDays를 확인합니다. 이 값이 작을수록 실제 API 호출이 줄어든 것입니다.',
                             'Examples에 AAPL 같은 샘플 ticker가 보이면 coveredRanges와 missingRanges가 앞뒤 gap 형태로만 나오는지 확인합니다. 중간 빈 날짜가 잘게 쪼개져 보이면 비정상입니다.',
                             'Continue 후에는 View Log에서 fullyCoveredSkipped, gapRangesFetched, inserted, skippedExisting 같은 summary를 확인합니다. fullyCoveredSkipped가 보이면 gap 절약 로직이 실제 실행에도 반영된 것입니다.',
-                            'Change Update 완료 후에는 뉴스 행의 1D/5D 등 변동률 컬럼 값이 채워졌는지 확인하고, Calendar Update 완료 후에는 해당 날짜 범위의 이벤트가 늘었는지 확인합니다.',
+                            'Change Update 완료 후에는 뉴스 행의 1D/5D 등 변동률 컬럼 값이 채워졌는지 확인하고, Earning Date Update 완료 후에는 Earnings Dates 컬럼 값이 채워졌는지 확인합니다.',
                           ],
-                          route: 'POST /api/news/pull-finhub, /api/news/pull-fmp-press-release, /api/news/pull-fmp-stock-news, /api/news/pull-rtpr, /api/news/pull-investing, /api/news/change/update-custom, /api/ibkr/calendar/update-custom',
+                          route: 'POST /api/news/pull-finhub, /api/news/pull-fmp-press-release, /api/news/pull-fmp-stock-news, /api/news/pull-rtpr, /api/news/pull-investing, /api/news/change/update-custom, /api/news/earnings/update-custom, /api/news/earnings/check-unconfirmed',
                         };
                         window.dispatchEvent(new CustomEvent('open-data-control-how-to-use', { detail: payload }));
                       }} className="w-full text-left px-3 py-2 text-xs hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded flex items-center gap-2 text-blue-600 dark:text-blue-400">
@@ -3408,27 +3524,27 @@ export function FinnhubNewsWindow({
       {showCalendarCustomDateModal && (
         <div className="absolute inset-0 bg-black/30 flex items-center justify-center z-50">
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-4 w-80 border border-gray-200 dark:border-gray-700">
-            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><Calendar className="w-4 h-4 text-rose-500" />Custom Calendar Update — Date Range</h3>
+            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><Calendar className="w-4 h-4 text-rose-500" />Custom Earning Date Update — Date Range</h3>
             <div className="space-y-3">
               <div>
-                <label className="block text-xs text-gray-500 mb-1">From</label>
+                <label className="block text-xs text-gray-500 mb-1">Article Date From</label>
                 <input type="date" value={calendarCustomFrom} onChange={(e) => setCalendarCustomFrom(e.target.value)}
                   className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500" />
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">To</label>
+                <label className="block text-xs text-gray-500 mb-1">Article Date To</label>
                 <input type="date" value={calendarCustomTo} onChange={(e) => setCalendarCustomTo(e.target.value)}
                   className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500" />
               </div>
-              <p className="text-[10px] text-gray-400">IBKR WSH bulk filter로 전체 default 유니버스를 한번에 조회합니다.</p>
+              <p className="text-[10px] text-gray-400">calendar DB를 먼저 사용하고, 부족한 earnings context만 FMP로 보강합니다.</p>
             </div>
             <div className="flex justify-end gap-2 mt-4">
               <button onClick={() => setShowCalendarCustomDateModal(false)} className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
               <button
-                onClick={() => { if (!calendarCustomFrom || !calendarCustomTo) return; setShowCalendarCustomDateModal(false); handleCalendarUpdateCustom(calendarCustomFrom, calendarCustomTo); }}
+                onClick={() => { if (!calendarCustomFrom || !calendarCustomTo) return; setShowCalendarCustomDateModal(false); handleCustomEarningDateUpdate(calendarCustomFrom, calendarCustomTo); }}
                 disabled={!calendarCustomFrom || !calendarCustomTo}
                 className="px-3 py-1.5 text-xs bg-rose-600 text-white rounded hover:bg-rose-700 disabled:opacity-50"
-              >Start Update</button>
+              >Run Custom Earning Date Update</button>
             </div>
           </div>
         </div>

@@ -6,7 +6,7 @@ import fs from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { config } from "./config.js";
 import { initDb } from "./db.js";
-import { deleteBlockedFinnhubCompanyNews, getModel1News, getModel1NewsById, getNews, getNewsById, getNewsIdBySourceUrl, getTickerNewsCoverage, type IsoDateRange } from "./services/newsRepository.js";
+import { deleteBlockedFinnhubCompanyNews, getModel1News, getModel1NewsById, getNews, getNewsById, getNewsIdBySourceUrl, getTickerNewsCoverage, listNewsEarningsCandidates, type IsoDateRange } from "./services/newsRepository.js";
 import { createSavedView, deleteSavedView, listSavedViews } from "./services/savedViewRepository.js";
 import { createWatchlist, deleteWatchlist, listWatchlists, updateWatchlist, backfillWatchlistSecurityIds } from "./services/watchlistRepository.js";
 import {
@@ -25,7 +25,7 @@ import { pullIbkrCalendar, pullIbkrCalendarCustom, getCalendarDateRange } from "
 import type { CalendarUpdateMode } from "./services/calendarIngestion.js";
 import { pullEodhdNews, pullEodhdNewsAll } from "./services/eodhdNewsProvider.js";
 import { insertNewsItem, insertSecFilingCompanion, updateNewsBodyById } from "./services/newsRepository.js";
-import { listUpdateStatuses, setLastSuccess } from "./services/updateStatusRepository.js";
+import { getUpdateStatus, listUpdateStatuses, setLastSuccess } from "./services/updateStatusRepository.js";
 import { readTickersFromCsv, appendTickerToCsv, removeTickerFromCsv, readTickerRowsFromCsv, CsvServiceError } from "./services/tickerCsvService.js";
 import {
   fetchCompanyNewsRaw,
@@ -130,6 +130,7 @@ import {
   getFinnhubCompanyDataDefaults,
 } from "./services/finnhubCompanyDataThrottle.js";
 import { normalizeFmpSymbol } from "./utils/fmpSymbol.js";
+import { runNewsEarningsContextUpdate } from "./services/newsEarningsContextService.js";
 
 const app = express();
 const streamHub = new StreamHub();
@@ -324,9 +325,18 @@ type TickerListRow = {
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function parseList(input: unknown): string[] | undefined {
+  if (Array.isArray(input)) {
+    const values = input
+      .map((value) => (typeof value === "string" ? value : String(value ?? "")))
+      .map((value) => value.trim())
+      .filter(Boolean);
+    return values.length > 0 ? values : undefined;
+  }
+
   if (typeof input !== "string" || input.trim() === "") {
     return undefined;
   }
+
   return input
     .split(",")
     .map((value) => value.trim())
@@ -629,6 +639,9 @@ async function listStoredIpoEventsForRange(from: string, to: string): Promise<Ar
 }
 
 function parseFiniteQueryNumber(value: unknown): number | undefined {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : undefined;
+  }
   if (typeof value !== "string") {
     return undefined;
   }
@@ -665,6 +678,15 @@ function parseNewsQuery(query: Record<string, unknown>): NewsQuery {
     cursor: typeof query.cursor === "string" ? query.cursor : undefined,
     bookmarkFolderId: typeof query.bookmarkFolderId === "string" ? query.bookmarkFolderId : undefined,
   };
+}
+
+async function getNewsEarningsFreshnessError(): Promise<string | null> {
+  const status = await getUpdateStatus("fmp_calendar_earnings");
+  const todayEt = getEtDateString(new Date());
+  if (!status?.lastSuccessAt || getEtDateString(status.lastSuccessAt) !== todayEt) {
+    return "오늘 FMP Earnings Calendar Update가 아직 실행되지 않았습니다. Calendar Window에서 Update FMP Earnings Dates를 먼저 실행한 뒤 다시 시도하세요.";
+  }
+  return null;
 }
 
 function isLoopbackAddress(remoteAddress: string | undefined): boolean {
@@ -3968,6 +3990,149 @@ app.post("/api/news/change/update-custom", async (req, res, next) => {
       }
     })();
     res.json({ jobId });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/news/earnings/update-custom", async (req, res, next) => {
+  try {
+    const jobKey = "news_earnings_custom";
+    const existingJobId = activePullJobs.get(jobKey);
+    if (existingJobId) {
+      const existingJob = getJob(existingJobId);
+      if (existingJob && existingJob.status === "running") {
+        res.status(409).json({
+          error: `A custom earnings date update job is already running (jobId=${existingJobId}). Wait for it to finish or cancel it first.`,
+          existingJobId,
+        });
+        return;
+      }
+      activePullJobs.delete(jobKey);
+    }
+
+    const filters = parseNewsQuery(req.body ?? {});
+    if (!filters.from || !filters.to || !ISO_DATE_RE.test(filters.from) || !ISO_DATE_RE.test(filters.to)) {
+      res.status(400).json({ error: "Custom earning date update requires from/to in YYYY-MM-DD format" });
+      return;
+    }
+    if (filters.to < filters.from) {
+      res.status(400).json({ error: "to must be greater than or equal to from" });
+      return;
+    }
+
+    const freshnessError = await getNewsEarningsFreshnessError();
+    if (freshnessError) {
+      res.status(412).json({ error: freshnessError });
+      return;
+    }
+
+    const candidates = await listNewsEarningsCandidates(filters);
+    const jobId = createJob(candidates.length, {
+      category: "news-update",
+      label: "News Earnings Dates Update (Custom)",
+      scope: "finnhub-news",
+    });
+    activePullJobs.set(jobKey, jobId);
+    appendLog(jobId, `Starting custom earnings date update for ${filters.from}~${filters.to}`);
+    appendLog(jobId, `Candidates=${candidates.length}`);
+    res.json({ jobId, requestedRange: { from: filters.from, to: filters.to }, candidateCount: candidates.length });
+
+    void (async () => {
+      try {
+        const result = await runNewsEarningsContextUpdate({
+          candidates,
+          mode: "custom",
+          requestIntervalMs: DEFAULT_FMP_CALENDAR_REQUEST_INTERVAL_MS,
+          shouldCancel: () => isJobCancelled(jobId),
+          onProgress: (completed, total) => updateProgress(jobId, completed, total),
+          onLog: (message) => appendLog(jobId, message),
+        });
+        if (isJobCancelled(jobId)) {
+          activePullJobs.delete(jobKey);
+          return;
+        }
+
+        await setLastSuccess("news_earnings_custom", new Date().toISOString(), {
+          from: filters.from,
+          to: filters.to,
+          candidateCount: candidates.length,
+        });
+        completeJob(jobId, {
+          requestedRange: { from: filters.from, to: filters.to },
+          ...result,
+        });
+        activePullJobs.delete(jobKey);
+      } catch (error) {
+        failJob(jobId, error instanceof Error ? error.message : String(error));
+        activePullJobs.delete(jobKey);
+      }
+    })();
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/news/earnings/check-unconfirmed", async (req, res, next) => {
+  try {
+    const jobKey = "news_earnings_check_unconfirmed";
+    const existingJobId = activePullJobs.get(jobKey);
+    if (existingJobId) {
+      const existingJob = getJob(existingJobId);
+      if (existingJob && existingJob.status === "running") {
+        res.status(409).json({
+          error: `An unconfirmed earnings date check job is already running (jobId=${existingJobId}). Wait for it to finish or cancel it first.`,
+          existingJobId,
+        });
+        return;
+      }
+      activePullJobs.delete(jobKey);
+    }
+
+    const freshnessError = await getNewsEarningsFreshnessError();
+    if (freshnessError) {
+      res.status(412).json({ error: freshnessError });
+      return;
+    }
+
+    const filters = parseNewsQuery(req.body ?? {});
+    const candidates = await listNewsEarningsCandidates(filters, { onlyUnconfirmed: true });
+    const jobId = createJob(candidates.length, {
+      category: "news-update",
+      label: "Check Unconfirmed Earning Date",
+      scope: "finnhub-news",
+    });
+    activePullJobs.set(jobKey, jobId);
+    appendLog(jobId, `Starting unconfirmed earnings date check for ${candidates.length} candidates`);
+    res.json({ jobId, candidateCount: candidates.length });
+
+    void (async () => {
+      try {
+        const result = await runNewsEarningsContextUpdate({
+          candidates,
+          mode: "check-unconfirmed",
+          requestIntervalMs: DEFAULT_FMP_CALENDAR_REQUEST_INTERVAL_MS,
+          shouldCancel: () => isJobCancelled(jobId),
+          onProgress: (completed, total) => updateProgress(jobId, completed, total),
+          onLog: (message) => appendLog(jobId, message),
+        });
+        if (isJobCancelled(jobId)) {
+          activePullJobs.delete(jobKey);
+          return;
+        }
+
+        await setLastSuccess("news_earnings_check_unconfirmed", new Date().toISOString(), {
+          candidateCount: candidates.length,
+          from: filters.from ?? null,
+          to: filters.to ?? null,
+        });
+        completeJob(jobId, { ...result });
+        activePullJobs.delete(jobKey);
+      } catch (error) {
+        failJob(jobId, error instanceof Error ? error.message : String(error));
+        activePullJobs.delete(jobKey);
+      }
+    })();
   } catch (error) {
     next(error);
   }

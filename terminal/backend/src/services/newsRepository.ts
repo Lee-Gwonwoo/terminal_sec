@@ -119,6 +119,19 @@ export interface IsoDateRange {
   to: string;
 }
 
+export interface NewsEarningsCandidate {
+  id: string;
+  publishedAt: string;
+  tickers: string[];
+  ohlcTicker: string | null;
+  existingLookupStatus: string | null;
+  existingRecentEarningsDate: string | null;
+  existingRecentEarningsConfirmed: boolean | null;
+  existingUpcomingEarningsDate: string | null;
+  existingUpcomingEarningsConfirmed: boolean | null;
+  existingLastCheckedAt: string | null;
+}
+
 export interface TickerNewsCoverage {
   /** min/max envelope: single range from earliest to latest existing data date, or empty */
   coveredRanges: IsoDateRange[];
@@ -268,7 +281,13 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
 
   const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
   const sql = `
-    SELECT ni.id, ni.published_at, ni.source, ni.publisher, COALESCE(ni.origin_url, sf.filing_url, sf.report_url) AS origin_url, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
+        SELECT ni.id, ni.published_at, ni.source, ni.publisher, COALESCE(ni.origin_url, sf.filing_url, sf.report_url) AS origin_url, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
+          nec.context_ticker AS earnings_context_ticker,
+          nec.recent_earnings_date,
+          nec.recent_earnings_confirmed,
+          nec.upcoming_earnings_date,
+          nec.upcoming_earnings_confirmed,
+          nec.lookup_status AS earnings_lookup_status,
            cm_1d.ohlc_ticker,
            cm_chg.target_date AS ohlc_date,
            cm_chg.target_date AS change_pct_ohlc_date,
@@ -295,6 +314,7 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
     FROM news_items ni
     LEFT JOIN sec_filings sf ON sf.news_id = ni.id
     LEFT JOIN news_fulltext nf ON nf.news_id = ni.id
+    LEFT JOIN news_earnings_context nec ON nec.news_id = ni.id
     LEFT JOIN news_change_metrics cm_chg ON cm_chg.news_id = ni.id AND cm_chg.metric_key = 'change_pct'
     LEFT JOIN news_change_metrics cm_1d ON cm_1d.news_id = ni.id AND cm_1d.metric_key = 'change_1d_pct'
     LEFT JOIN news_change_metrics cm_open ON cm_open.news_id = ni.id AND cm_open.metric_key = 'change_from_open_pct'
@@ -331,7 +351,13 @@ export async function getNewsById(id: string): Promise<NewsItem | null> {
   const insiderPctSql = buildLatestCompanyProfileScalarSql("ni", "insider_pct", "cp.insider_pct IS NOT NULL");
   const volatilityMetricSql = buildVolatilityMetricSql("ni");
   const row = await getDb().get<any>(
-    `SELECT ni.id, ni.published_at, ni.source, ni.publisher, COALESCE(ni.origin_url, sf.filing_url, sf.report_url) AS origin_url, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
+        `SELECT ni.id, ni.published_at, ni.source, ni.publisher, COALESCE(ni.origin_url, sf.filing_url, sf.report_url) AS origin_url, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
+          nec.context_ticker AS earnings_context_ticker,
+          nec.recent_earnings_date,
+          nec.recent_earnings_confirmed,
+          nec.upcoming_earnings_date,
+          nec.upcoming_earnings_confirmed,
+          nec.lookup_status AS earnings_lookup_status,
             cm_1d.ohlc_ticker,
             cm_chg.target_date AS ohlc_date,
             cm_chg.target_date AS change_pct_ohlc_date,
@@ -358,6 +384,7 @@ export async function getNewsById(id: string): Promise<NewsItem | null> {
      FROM news_items ni
     LEFT JOIN sec_filings sf ON sf.news_id = ni.id
      LEFT JOIN news_fulltext nf ON nf.news_id = ni.id
+    LEFT JOIN news_earnings_context nec ON nec.news_id = ni.id
      LEFT JOIN news_change_metrics cm_chg ON cm_chg.news_id = ni.id AND cm_chg.metric_key = 'change_pct'
      LEFT JOIN news_change_metrics cm_1d ON cm_1d.news_id = ni.id AND cm_1d.metric_key = 'change_1d_pct'
      LEFT JOIN news_change_metrics cm_open ON cm_open.news_id = ni.id AND cm_open.metric_key = 'change_from_open_pct'
@@ -424,6 +451,120 @@ export async function getNewsById(id: string): Promise<NewsItem | null> {
   }
 
   return mapNewsRow(row, sentimentMap, undefined, undefined, marketCapMap, ipoMap);
+}
+
+export async function listNewsEarningsCandidates(
+  query: NewsQuery,
+  options?: { onlyUnconfirmed?: boolean },
+): Promise<NewsEarningsCandidate[]> {
+  const where: string[] = [];
+  const values: unknown[] = [];
+  let extraJoins = "";
+
+  if (query.bookmarkFolderId) {
+    extraJoins += ` INNER JOIN bookmark_items bi ON bi.news_id = ni.id AND bi.folder_id = ?`;
+    values.push(query.bookmarkFolderId);
+  }
+
+  if (query.keyword) {
+    values.push(`%${query.keyword.toLowerCase()}%`);
+    where.push(`LOWER(ni.title || ' ' || ni.body) LIKE ?`);
+  }
+
+  if (query.tickers?.length) {
+    const tickerClauses = query.tickers.map(() => "ni.tickers_csv LIKE ?");
+    for (const ticker of query.tickers) {
+      values.push(`%,${ticker.toUpperCase()},%`);
+    }
+    where.push(`(${tickerClauses.join(" OR ")})`);
+  }
+
+  if (query.sources?.length) {
+    const sourcePlaceholders = query.sources.map(() => "?").join(",");
+    values.push(...query.sources);
+    where.push(`ni.source_type IN (${sourcePlaceholders})`);
+  }
+
+  if (query.sourceNames?.length) {
+    const sourcePlaceholders = query.sourceNames.map(() => "?").join(",");
+    values.push(...query.sourceNames);
+    where.push(`ni.source IN (${sourcePlaceholders})`);
+  }
+
+  if (query.tags?.length) {
+    const tagClauses = query.tags.map(() => "ni.tags_csv LIKE ?");
+    for (const tag of query.tags) {
+      values.push(`%,${tag.toLowerCase()},%`);
+    }
+    where.push(`(${tagClauses.join(" OR ")})`);
+  }
+
+  if (query.from) {
+    values.push(query.from);
+    where.push(`ni.published_at >= ?`);
+  }
+
+  if (query.to) {
+    values.push(`${query.to}T23:59:59.999Z`);
+    where.push(`ni.published_at <= ?`);
+  }
+
+  const floatPctSql = buildLatestCompanyProfileScalarSql("ni", "float_pct", "cp.float_pct IS NOT NULL");
+  const institutionalPctSql = buildLatestCompanyProfileScalarSql(
+    "ni",
+    "institutional_pct",
+    "cp.institutional_pct IS NOT NULL AND cp.institutional_source = 'yahoo'",
+  );
+  const insiderPctSql = buildLatestCompanyProfileScalarSql("ni", "insider_pct", "cp.insider_pct IS NOT NULL");
+
+  appendNumericRangeWhereClause(where, values, floatPctSql, query.floatPctMin, query.floatPctMax);
+  appendNumericRangeWhereClause(
+    where,
+    values,
+    institutionalPctSql,
+    query.institutionalPctMin,
+    query.institutionalPctMax,
+  );
+  appendNumericRangeWhereClause(where, values, insiderPctSql, query.insiderPctMin, query.insiderPctMax);
+
+  if (options?.onlyUnconfirmed) {
+    where.push(`nec.news_id IS NOT NULL`);
+    where.push(`(nec.recent_earnings_confirmed = 0 OR nec.upcoming_earnings_confirmed = 0)`);
+  }
+
+  const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+  const rows = await getDb().all<any[]>(
+    `SELECT ni.id,
+            ni.published_at,
+            ni.tickers_csv,
+            cm_1d.ohlc_ticker,
+            nec.lookup_status AS existing_lookup_status,
+            nec.recent_earnings_date AS existing_recent_earnings_date,
+            nec.recent_earnings_confirmed AS existing_recent_earnings_confirmed,
+            nec.upcoming_earnings_date AS existing_upcoming_earnings_date,
+            nec.upcoming_earnings_confirmed AS existing_upcoming_earnings_confirmed,
+            nec.last_checked_at AS existing_last_checked_at
+     FROM news_items ni
+     LEFT JOIN news_change_metrics cm_1d ON cm_1d.news_id = ni.id AND cm_1d.metric_key = 'change_1d_pct'
+     LEFT JOIN news_earnings_context nec ON nec.news_id = ni.id
+     ${extraJoins}
+     ${whereSql}
+     ORDER BY ni.published_at DESC, ni.id DESC`,
+    values,
+  );
+
+  return rows.map((row) => ({
+    id: row.id,
+    publishedAt: row.published_at,
+    tickers: splitCsvEnvelope(row.tickers_csv ?? ""),
+    ohlcTicker: row.ohlc_ticker ?? null,
+    existingLookupStatus: row.existing_lookup_status ?? null,
+    existingRecentEarningsDate: row.existing_recent_earnings_date ?? null,
+    existingRecentEarningsConfirmed: toNullableBoolean(row.existing_recent_earnings_confirmed),
+    existingUpcomingEarningsDate: row.existing_upcoming_earnings_date ?? null,
+    existingUpcomingEarningsConfirmed: toNullableBoolean(row.existing_upcoming_earnings_confirmed),
+    existingLastCheckedAt: row.existing_last_checked_at ?? null,
+  }));
 }
 
 export async function getModel1News(query: NewsQuery): Promise<{ items: Model1NewsItem[]; nextCursor?: string }> {
@@ -511,7 +652,13 @@ export async function getModel1News(query: NewsQuery): Promise<{ items: Model1Ne
 
   const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
   const sql = `
-    SELECT mn.id, mn.published_at, mn.source, mn.publisher, COALESCE(mn.origin_url, sf.filing_url, sf.report_url) AS origin_url, mn.source_type, mn.title, mn.body, mn.url, mn.tickers_csv, mn.tags_csv, mn.created_at,
+        SELECT mn.id, mn.published_at, mn.source, mn.publisher, COALESCE(mn.origin_url, sf.filing_url, sf.report_url) AS origin_url, mn.source_type, mn.title, mn.body, mn.url, mn.tickers_csv, mn.tags_csv, mn.created_at,
+          nec.context_ticker AS earnings_context_ticker,
+          nec.recent_earnings_date,
+          nec.recent_earnings_confirmed,
+          nec.upcoming_earnings_date,
+          nec.upcoming_earnings_confirmed,
+          nec.lookup_status AS earnings_lookup_status,
           mn.has_full_text, mn.keywords_json, mn.keywords_status,
           mn.ai_score, mn.ai_score_evidence, mn.ai_analysis_status, mn.ai_keywords_json,
           ${floatPctSql} AS float_pct,
@@ -519,6 +666,7 @@ export async function getModel1News(query: NewsQuery): Promise<{ items: Model1Ne
           ${insiderPctSql} AS insider_pct
     FROM model1_current_news_view mn
     LEFT JOIN sec_filings sf ON sf.news_id = mn.id
+        LEFT JOIN news_earnings_context nec ON nec.news_id = mn.id
     ${extraJoins}
     ${whereSql}
     ORDER BY mn.published_at DESC, mn.id DESC
@@ -544,7 +692,13 @@ export async function getModel1NewsById(id: string): Promise<Model1NewsItem | nu
   );
   const insiderPctSql = buildLatestCompanyProfileScalarSql("mn", "insider_pct", "cp.insider_pct IS NOT NULL");
   const row = await getDb().get<any>(
-    `SELECT mn.id, mn.published_at, mn.source, mn.publisher, COALESCE(mn.origin_url, sf.filing_url, sf.report_url) AS origin_url, mn.source_type, mn.title, mn.body, mn.url, mn.tickers_csv, mn.tags_csv, mn.created_at,
+        `SELECT mn.id, mn.published_at, mn.source, mn.publisher, COALESCE(mn.origin_url, sf.filing_url, sf.report_url) AS origin_url, mn.source_type, mn.title, mn.body, mn.url, mn.tickers_csv, mn.tags_csv, mn.created_at,
+          nec.context_ticker AS earnings_context_ticker,
+          nec.recent_earnings_date,
+          nec.recent_earnings_confirmed,
+          nec.upcoming_earnings_date,
+          nec.upcoming_earnings_confirmed,
+          nec.lookup_status AS earnings_lookup_status,
             mn.has_full_text, mn.keywords_json, mn.keywords_status,
             mn.ai_score, mn.ai_score_evidence, mn.ai_analysis_status, mn.ai_keywords_json,
             ${floatPctSql} AS float_pct,
@@ -552,6 +706,7 @@ export async function getModel1NewsById(id: string): Promise<Model1NewsItem | nu
             ${insiderPctSql} AS insider_pct
      FROM model1_current_news_view mn
      LEFT JOIN sec_filings sf ON sf.news_id = mn.id
+         LEFT JOIN news_earnings_context nec ON nec.news_id = mn.id
      WHERE mn.id = ?`,
     [id],
   );
@@ -772,6 +927,13 @@ function mapNewsRow(
     floatPct: row.float_pct ?? null,
     institutionalPct: row.institutional_pct ?? null,
     insiderPct: row.insider_pct ?? null,
+    earnings_context_ticker: row.earnings_context_ticker ?? null,
+    recent_earnings_date: row.recent_earnings_date ?? null,
+    recent_earnings_confirmed: toNullableBoolean(row.recent_earnings_confirmed),
+    upcoming_earnings_date: row.upcoming_earnings_date ?? null,
+    upcoming_earnings_confirmed: toNullableBoolean(row.upcoming_earnings_confirmed),
+    earnings_context_display: formatEarningsContextDisplay(row),
+    earnings_lookup_status: row.earnings_lookup_status ?? null,
     // AI analysis
     score: row.ai_score ?? null,
     scoreEvidence: row.ai_score_evidence ?? null,
@@ -827,6 +989,13 @@ function mapModel1NewsRow(
     floatPct: row.float_pct ?? null,
     institutionalPct: row.institutional_pct ?? null,
     insiderPct: row.insider_pct ?? null,
+    earnings_context_ticker: row.earnings_context_ticker ?? null,
+    recent_earnings_date: row.recent_earnings_date ?? null,
+    recent_earnings_confirmed: toNullableBoolean(row.recent_earnings_confirmed),
+    upcoming_earnings_date: row.upcoming_earnings_date ?? null,
+    upcoming_earnings_confirmed: toNullableBoolean(row.upcoming_earnings_confirmed),
+    earnings_context_display: formatEarningsContextDisplay(row),
+    earnings_lookup_status: row.earnings_lookup_status ?? null,
     score: row.ai_score ?? null,
     scoreEvidence: row.ai_score_evidence ?? null,
     analysisStatus: row.ai_analysis_status ?? null,
@@ -843,6 +1012,51 @@ function parseKeywords(row: { ai_analysis_status?: string | null; ai_keywords_js
     return JSON.parse(row.ai_keywords_json);
   }
   return row.keywords_json ? JSON.parse(row.keywords_json) : [];
+}
+
+function toNullableBoolean(value: unknown): boolean | null {
+  if (value == null) {
+    return null;
+  }
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) {
+      return null;
+    }
+    return normalized === "1" || normalized === "true";
+  }
+  return null;
+}
+
+function formatEarningsContextDisplay(row: {
+  recent_earnings_date?: string | null;
+  recent_earnings_confirmed?: unknown;
+  upcoming_earnings_date?: string | null;
+  upcoming_earnings_confirmed?: unknown;
+  earnings_lookup_status?: string | null;
+}): string | null {
+  const recentDate = row.recent_earnings_date ?? null;
+  const upcomingDate = row.upcoming_earnings_date ?? null;
+  const lookupStatus = row.earnings_lookup_status ?? null;
+  if (!lookupStatus && !recentDate && !upcomingDate) {
+    return null;
+  }
+
+  const recentConfirmed = toNullableBoolean(row.recent_earnings_confirmed);
+  const upcomingConfirmed = toNullableBoolean(row.upcoming_earnings_confirmed);
+  const recentLabel = recentDate
+    ? `${recentDate} (${recentConfirmed ? "Confirmed" : "Unconfirmed"})`
+    : "-";
+  const upcomingLabel = upcomingDate
+    ? `${upcomingDate} (${upcomingConfirmed ? "Confirmed" : "Unconfirmed"})`
+    : "-";
+  return `Recent ${recentLabel} | Upcoming ${upcomingLabel}`;
 }
 
 async function loadNewsEnrichmentMaps(rows: any[]): Promise<{

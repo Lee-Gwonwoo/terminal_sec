@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell($env:Path += \";C:\\\\Program Files\\\\sqlite3;C:\\\\sqlite\"; Get-Command sqlite3 -ErrorAction SilentlyContinue; Get-Command python -ErrorAction SilentlyContinue | Select-Object Source)"
+    ]
+  }
+}

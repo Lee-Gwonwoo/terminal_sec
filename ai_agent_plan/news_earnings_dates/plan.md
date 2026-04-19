@@ -252,7 +252,15 @@ News Window button click
 
 ## 단계별 계획
 
-### ⏳ Step 1. 스키마와 타입 계약 추가
+## 구현 상태 스냅샷 (2026-04-18)
+
+- Step 1~8 구현을 완료했고, backend/frontend 정적 검사와 빌드, backend 테스트, 런타임 API 검증까지 마쳤다.
+- backend는 `newsEarningsContextService.ts`를 중심으로 calendar-first lookup, unresolved ticker 대상 FMP fallback, `news_earnings_context` upsert, freshness gate endpoint를 모두 연결했다.
+- frontend는 News Window에 `Earnings Dates` 컬럼과 `Custom Earning Date Update`, `Check Unconfirmed Earning Date` 메뉴를 추가했고, 기존 IBKR calendar shortcut 3개는 제거했다.
+- 런타임 검증에서는 stale 상태의 `POST /api/news/earnings/update-custom`가 `412 Precondition Failed`를 반환했고, 같은 날 `POST /api/fmp/calendar/earnings/update`를 1일 범위로 먼저 실행한 뒤에는 custom/unconfirmed endpoint 둘 다 `jobId`를 정상 반환했다.
+- `2026-04-17` 기사 범위 custom job 샘플 결과는 `processed=707`, `resolved=373`, `partial=171`, `missing=163`, `fallbackTickers=135`, `fallbackMatchedRows=9`였고, `/api/news` 응답에서 `earnings_context_display`가 `Recent ... | Upcoming ...` 형식으로 채워지는 것을 확인했다.
+
+### ✅ Step 1. 스키마와 타입 계약 추가
 
 목표:
 
@@ -298,7 +306,7 @@ News Window button click
 
 - separate table 유지가 맞는지
 
-### ⬜ Step 2. Calendar-first 조회 서비스 추가
+### ✅ Step 2. Calendar-first 조회 서비스 추가
 
 목표:
 
@@ -319,9 +327,15 @@ News Window button click
 
 운영적 정의:
 
-- 기사 anchor는 `published_at`의 UTC 시각을 기준으로 날짜 비교한다.
+- 기사 anchor는 `published_at`를 ET 날짜로 변환한 값(`getEtDateString`)을 기준으로 recent/upcoming을 판정한다.
 - 1차 구현에서는 session(pre-market / after-market)까지 세밀 보정하지 않고 `date + confirmed` 기준 recent/upcoming만 계산한다.
-- 같은 날짜 다중 row가 있으면 가장 최근 `updated_at` 또는 가장 명시적 row를 우선하는 규칙을 추가한다.
+- 같은 날짜 다중 row가 있으면 `confirmed 우선 -> source=FMP 우선 -> event_at 최신 -> id 최신` 순서로 deterministic tie-break를 적용한다.
+
+실제 구현 결과:
+
+- `terminal/backend/src/services/newsEarningsContextService.ts`에 calendar-first resolver를 추가했다.
+- 대표 ticker는 `ohlc_ticker -> 첫 ticker` 규칙으로 고정했다.
+- `lookup_status`는 `resolved / partial / missing`으로 계산하고 `error`는 재시도 대상으로 남긴다.
 
 검증:
 
@@ -340,7 +354,7 @@ News Window button click
 - `date + confirmed` 계산으로 1차 구현하는지
 - session-aware 보정이 필요한지
 
-### ⬜ Step 3. FMP targeted fallback 서비스 추가
+### ✅ Step 3. FMP targeted fallback 서비스 추가
 
 목표:
 
@@ -354,16 +368,17 @@ News Window button click
 
 구현 메모:
 
-- 기존 `POST /api/fmp/calendar/earnings/update`는 default universe 전체 범위 sync 용도로 유지
-- News earnings 버튼은 별도 service를 호출
-- fallback은 `context_ticker`별로 좁은 날짜 범위를 조회
-- fallback 결과는 `calendar_events`에 upsert 후 재조회
-- 최종 저장값은 fallback raw payload가 아니라 재조회된 `date + confirmed` 결과를 사용
+- 기존 `POST /api/fmp/calendar/earnings/update`는 default universe 전체 범위 sync 용도로 유지한다.
+- News earnings 버튼은 별도 service를 호출한다.
+- fallback 대상은 calendar-first 이후 unresolved가 남은 ticker만 추린다.
+- 실제 호출 범위는 각 대상 기사의 anchor date를 기준으로 `-180일 ~ +180일` window를 만든 뒤, 그 전체를 덮는 단일 global range로 병합한다.
+- fallback 결과는 `calendar_events`에 upsert 후 재조회하고, 최종 저장값은 raw FMP payload가 아니라 재조회된 `date + confirmed` 결과를 사용한다.
 
-권장 범위 초안:
+실제 구현 결과:
 
-- `anchor date - 180일`
-- `anchor date + 180일`
+- `newsEarningsContextService.ts`가 unresolved ticker 집합과 merged range를 계산한 뒤 `fetchFmpEarningsCalendarChunk(...)`를 한 번 호출하는 구조로 구현됐다.
+- fallback row는 `calendar_events`에 `source='FMP'`, `unique_key='FMP:earnings:TICKER:DATE'`로 upsert된다.
+- custom job 샘플 검증에서 `fallbackTickers=135`, `fallbackFetchedRows=4000`, `fallbackMatchedRows=9`, `fallbackUpsertedRows=9`를 확인했다.
 
 검증:
 
@@ -382,7 +397,7 @@ News Window button click
 - fallback window를 180일로 둘지
 - fallback이 실패한 row를 `missing`으로 고정할지
 
-### ⬜ Step 4. News earnings update job / endpoint 추가
+### ✅ Step 4. News earnings update job / endpoint 추가
 
 목표:
 
@@ -399,6 +414,12 @@ News Window button click
 - `POST /api/news/earnings/update-custom`
 - `POST /api/news/earnings/check-unconfirmed`
 - 선택사항: `POST /api/news/earnings/update-custom/preflight`
+
+실제 구현 결과:
+
+- 이번 구현에서는 preflight endpoint 없이 바로 job을 생성하는 방식으로 마감했다.
+- 두 endpoint 모두 `fmp_calendar_earnings` freshness를 ET 날짜 기준으로 검사하고 stale/missing이면 `412`를 즉시 반환한다.
+- custom job은 `label = News Earnings Dates Update (Custom)`, unconfirmed job은 `label = Check Unconfirmed Earning Date`로 분리했다.
 
 선행 gate:
 
@@ -451,7 +472,7 @@ News Window button click
 
 - custom에 preflight가 필요한지
 
-### ⬜ Step 5. `/api/news` join 및 응답 확장
+### ✅ Step 5. `/api/news` join 및 응답 확장
 
 목표:
 
@@ -491,9 +512,15 @@ News Window button click
 - join 추가로 응답이 느려질 수 있음
 - 완화: `news_earnings_context.news_id` PK 인덱스 사용, 필요 시 `context_ticker` 보조 인덱스 추가
 
+실제 구현 결과:
+
+- `/api/news`, `/api/news/:id`, `/api/model1/news`, `/api/model1/news/:id`에 모두 `LEFT JOIN news_earnings_context`를 연결했다.
+- backend가 `earnings_context_display`를 직접 조합해서 전달하도록 고정했다.
+- 런타임 검증에서 `/api/news?from=2026-04-17&to=2026-04-17&pageSize=10` 응답에 `Recent 2026-01-28 (Confirmed) | Upcoming 2026-04-22 (Unconfirmed)` 형식이 포함되는 것을 확인했다.
+
 사용자 확인 필요: 아니오
 
-### ⬜ Step 6. News Window 컬럼 추가
+### ✅ Step 6. News Window 컬럼 추가
 
 목표:
 
@@ -511,6 +538,12 @@ News Window button click
 - render cell 추가
 - 기본 visible column에는 넣지 말고 selectable only로 시작하는 안을 우선 권장
 - 셀은 recent/upcoming 날짜와 `Confirmed / Unconfirmed` 풀텍스트를 함께 렌더링한다.
+
+실제 구현 결과:
+
+- `earningsDates` 컬럼 id와 `Earnings Dates` label을 추가했다.
+- 기본 숨김 컬럼으로 두고, Columns 메뉴에서 선택해서 켜는 방식으로 마감했다.
+- 정렬 키와 cell renderer를 함께 추가해 API 문자열과 개별 raw 필드 둘 다 활용할 수 있게 했다.
 
 권장 컬럼 id / label:
 
@@ -535,7 +568,7 @@ News Window button click
 
 - 기본 숨김 컬럼으로 둘지
 
-### ⬜ Step 7. News Window update 버튼 추가
+### ✅ Step 7. News Window update 버튼 추가
 
 목표:
 
@@ -573,13 +606,19 @@ News Window button click
 - 버튼이 많아져 상단 툴바가 복잡해질 수 있음
 - 완화: 기존 Update 메뉴 안 하위 항목으로 넣기
 
+실제 구현 결과:
+
+- News Window Update 메뉴에 `Custom Earning Date Update`, `Check Unconfirmed Earning Date`를 추가했다.
+- 기존 `Initial Calendar Backfill`, `Refresh Upcoming Calendar`, `Custom Calendar Update` 3개는 제거했다.
+- 기존 custom calendar 모달은 기사 날짜 범위를 입력받는 earnings-date 모달로 재사용했고, How To Use 문구도 earnings 흐름에 맞게 수정했다.
+
 사용자 확인 필요: 예
 
 확인 포인트:
 
 - `Check Unconfirmed Earning Date`라는 문구를 그대로 쓸지, 더 짧게 줄일지
 
-### ⬜ Step 8. 검증, 문서, 회귀 점검
+### ✅ Step 8. 검증, 문서, 회귀 점검
 
 목표:
 
@@ -599,6 +638,17 @@ News Window button click
 - recent/upcoming의 confirmed 값이 Calendar Window row와 동일한지 샘플 확인
 - stale `fmp_calendar_earnings` 상태에서 News earnings update가 차단되는지 확인
 - `Check Unconfirmed Earning Date` 실행 후 unconfirmed row 일부가 confirmed 또는 새 날짜로 갱신되는지 확인
+
+실제 검증 결과:
+
+- 정적 분석: 수정된 backend/frontend 대상 파일 `get_errors` 기준 0 errors
+- backend 빌드: `npm run build -w backend` 성공
+- backend 테스트: `vitest run` 94/94 pass
+- frontend 빌드: `npm run build` 성공
+- freshness gate: stale 상태의 `POST /api/news/earnings/update-custom`가 `412`와 선행 액션 메시지를 반환하는 것 확인
+- same-day refresh 후 success path: `POST /api/fmp/calendar/earnings/update` 1일 범위 job 성공 후 `POST /api/news/earnings/update-custom`, `POST /api/news/earnings/check-unconfirmed`가 모두 `jobId`를 반환하는 것 확인
+- custom runtime sample: `processed=707`, `resolved=373`, `partial=171`, `missing=163`, `fallbackTickers=135`
+- `/api/news` payload sample: `earnings_context_ticker`, `recent_earnings_date`, `upcoming_earnings_date`, `earnings_context_display`, `earnings_lookup_status`가 함께 응답되는 것 확인
 
 예시 수동 체크:
 
