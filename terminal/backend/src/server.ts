@@ -130,7 +130,7 @@ import {
   getFinnhubCompanyDataDefaults,
 } from "./services/finnhubCompanyDataThrottle.js";
 import { normalizeFmpSymbol } from "./utils/fmpSymbol.js";
-import { runNewsEarningsContextUpdate } from "./services/newsEarningsContextService.js";
+import { clampNewsEarningsWorkerConcurrency, runNewsEarningsContextUpdate } from "./services/newsEarningsContextService.js";
 
 const app = express();
 const streamHub = new StreamHub();
@@ -301,8 +301,8 @@ function summarizeTickerGapPlans(params: {
   };
 }
 
-// Track running pull-finhub jobs to prevent duplicate concurrent pulls
-const activePullJobs = new Map<string, string>(); // sourceType → jobId
+// Track running pull/update jobs to prevent duplicate concurrent requests.
+const activePullJobs = new Map<string, string>(); // request fingerprint → jobId
 
 type TickerListRow = {
   ticker: string;
@@ -677,6 +677,53 @@ function parseNewsQuery(query: Record<string, unknown>): NewsQuery {
     limit,
     cursor: typeof query.cursor === "string" ? query.cursor : undefined,
     bookmarkFolderId: typeof query.bookmarkFolderId === "string" ? query.bookmarkFolderId : undefined,
+  };
+}
+
+function normalizeJobFingerprintList(values: string[] | undefined): string[] | null {
+  const normalized = Array.from(new Set(
+    (values ?? [])
+      .map((value) => value.trim().toLowerCase())
+      .filter((value) => value.length > 0),
+  )).sort((left, right) => left.localeCompare(right));
+  return normalized.length > 0 ? normalized : null;
+}
+
+function buildNewsEarningsActiveJobKey(mode: "custom" | "check-unconfirmed" | "full-scan", query: NewsQuery): string {
+  return JSON.stringify({
+    scope: `news_earnings_${mode}`,
+    keyword: query.keyword?.trim().toLowerCase() || null,
+    tickers: normalizeJobFingerprintList(query.tickers),
+    sources: normalizeJobFingerprintList(query.sources),
+    sourceNames: normalizeJobFingerprintList(query.sourceNames),
+    tags: normalizeJobFingerprintList(query.tags),
+    from: query.from ?? null,
+    to: query.to ?? null,
+    floatPctMin: query.floatPctMin ?? null,
+    floatPctMax: query.floatPctMax ?? null,
+    institutionalPctMin: query.institutionalPctMin ?? null,
+    institutionalPctMax: query.institutionalPctMax ?? null,
+    insiderPctMin: query.insiderPctMin ?? null,
+    insiderPctMax: query.insiderPctMax ?? null,
+    bookmarkFolderId: query.bookmarkFolderId ?? null,
+  });
+}
+
+function parseNewsEarningsUpdateRuntimeOptions(body: Record<string, unknown>): {
+  workerConcurrency: number;
+  requestIntervalMs: number;
+} {
+  const workerConcurrency = clampNewsEarningsWorkerConcurrency(
+    parseFiniteQueryNumber(body.workerConcurrency ?? body.earningsWorkerConcurrency ?? body.concurrency),
+  );
+  const requestIntervalMs = clampFmpIntervalMs(
+    parseFiniteQueryNumber(body.requestIntervalMs ?? body.fmpRequestIntervalMs)
+    ?? DEFAULT_FMP_CALENDAR_REQUEST_INTERVAL_MS,
+  );
+
+  return {
+    workerConcurrency,
+    requestIntervalMs,
   };
 }
 
@@ -3997,13 +4044,15 @@ app.post("/api/news/change/update-custom", async (req, res, next) => {
 
 app.post("/api/news/earnings/update-custom", async (req, res, next) => {
   try {
-    const jobKey = "news_earnings_custom";
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const filters = parseNewsQuery(body);
+    const jobKey = buildNewsEarningsActiveJobKey("custom", filters);
     const existingJobId = activePullJobs.get(jobKey);
     if (existingJobId) {
       const existingJob = getJob(existingJobId);
       if (existingJob && existingJob.status === "running") {
         res.status(409).json({
-          error: `A custom earnings date update job is already running (jobId=${existingJobId}). Wait for it to finish or cancel it first.`,
+          error: `The same custom earnings date update request is already running (jobId=${existingJobId}). Wait for it to finish or cancel it first.`,
           existingJobId,
         });
         return;
@@ -4011,7 +4060,6 @@ app.post("/api/news/earnings/update-custom", async (req, res, next) => {
       activePullJobs.delete(jobKey);
     }
 
-    const filters = parseNewsQuery(req.body ?? {});
     if (!filters.from || !filters.to || !ISO_DATE_RE.test(filters.from) || !ISO_DATE_RE.test(filters.to)) {
       res.status(400).json({ error: "Custom earning date update requires from/to in YYYY-MM-DD format" });
       return;
@@ -4027,6 +4075,8 @@ app.post("/api/news/earnings/update-custom", async (req, res, next) => {
       return;
     }
 
+    const { workerConcurrency, requestIntervalMs } = parseNewsEarningsUpdateRuntimeOptions(body);
+
     const candidates = await listNewsEarningsCandidates(filters);
     const jobId = createJob(candidates.length, {
       category: "news-update",
@@ -4036,14 +4086,22 @@ app.post("/api/news/earnings/update-custom", async (req, res, next) => {
     activePullJobs.set(jobKey, jobId);
     appendLog(jobId, `Starting custom earnings date update for ${filters.from}~${filters.to}`);
     appendLog(jobId, `Candidates=${candidates.length}`);
-    res.json({ jobId, requestedRange: { from: filters.from, to: filters.to }, candidateCount: candidates.length });
+    appendLog(jobId, `Worker concurrency=${workerConcurrency}, fallback interval=${requestIntervalMs}ms`);
+    res.json({
+      jobId,
+      requestedRange: { from: filters.from, to: filters.to },
+      candidateCount: candidates.length,
+      workerConcurrency,
+      requestIntervalMs,
+    });
 
     void (async () => {
       try {
         const result = await runNewsEarningsContextUpdate({
           candidates,
           mode: "custom",
-          requestIntervalMs: DEFAULT_FMP_CALENDAR_REQUEST_INTERVAL_MS,
+          workerConcurrency,
+          requestIntervalMs,
           shouldCancel: () => isJobCancelled(jobId),
           onProgress: (completed, total) => updateProgress(jobId, completed, total),
           onLog: (message) => appendLog(jobId, message),
@@ -4057,9 +4115,102 @@ app.post("/api/news/earnings/update-custom", async (req, res, next) => {
           from: filters.from,
           to: filters.to,
           candidateCount: candidates.length,
+          workerConcurrency,
+          requestIntervalMs,
         });
         completeJob(jobId, {
           requestedRange: { from: filters.from, to: filters.to },
+          requestIntervalMs,
+          ...result,
+        });
+        activePullJobs.delete(jobKey);
+      } catch (error) {
+        failJob(jobId, error instanceof Error ? error.message : String(error));
+        activePullJobs.delete(jobKey);
+      }
+    })();
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/news/earnings/update-full-scan", async (req, res, next) => {
+  try {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const filters: NewsQuery = {};
+    const jobKey = buildNewsEarningsActiveJobKey("full-scan", filters);
+    const existingJobId = activePullJobs.get(jobKey);
+    if (existingJobId) {
+      const existingJob = getJob(existingJobId);
+      if (existingJob && existingJob.status === "running") {
+        res.status(409).json({
+          error: `The same full-scan earnings date update request is already running (jobId=${existingJobId}). Wait for it to finish or cancel it first.`,
+          existingJobId,
+        });
+        return;
+      }
+      activePullJobs.delete(jobKey);
+    }
+
+    const freshnessError = await getNewsEarningsFreshnessError();
+    if (freshnessError) {
+      res.status(412).json({ error: freshnessError });
+      return;
+    }
+
+    const { workerConcurrency, requestIntervalMs } = parseNewsEarningsUpdateRuntimeOptions(body);
+    const jobId = createJob(0, {
+      category: "news-update",
+      label: "News Earnings Dates Update (Full Scan)",
+      scope: "finnhub-news",
+    });
+    activePullJobs.set(jobKey, jobId);
+    appendLog(jobId, "Starting full-scan earnings date update across all stored news rows");
+    appendLog(jobId, "Current News Window filters are ignored for this route");
+    appendLog(jobId, "Loading candidates from news_items before earnings context processing");
+    appendLog(jobId, `Worker concurrency=${workerConcurrency}, fallback interval=${requestIntervalMs}ms`);
+    res.json({
+      jobId,
+      candidateCount: null,
+      candidateCountPending: true,
+      workerConcurrency,
+      requestIntervalMs,
+      scope: "all-news",
+    });
+
+    void (async () => {
+      try {
+        const candidates = await listNewsEarningsCandidates(filters);
+        appendLog(jobId, `Candidates=${candidates.length}`);
+        updateProgress(jobId, 0, candidates.length);
+        if (isJobCancelled(jobId)) {
+          activePullJobs.delete(jobKey);
+          return;
+        }
+
+        const result = await runNewsEarningsContextUpdate({
+          candidates,
+          mode: "full-scan",
+          workerConcurrency,
+          requestIntervalMs,
+          shouldCancel: () => isJobCancelled(jobId),
+          onProgress: (completed, total) => updateProgress(jobId, completed, total),
+          onLog: (message) => appendLog(jobId, message),
+        });
+        if (isJobCancelled(jobId)) {
+          activePullJobs.delete(jobKey);
+          return;
+        }
+
+        await setLastSuccess("news_earnings_full_scan", new Date().toISOString(), {
+          candidateCount: candidates.length,
+          workerConcurrency,
+          requestIntervalMs,
+          scope: "all-news",
+        });
+        completeJob(jobId, {
+          requestIntervalMs,
+          scope: "all-news",
           ...result,
         });
         activePullJobs.delete(jobKey);
@@ -4075,13 +4226,15 @@ app.post("/api/news/earnings/update-custom", async (req, res, next) => {
 
 app.post("/api/news/earnings/check-unconfirmed", async (req, res, next) => {
   try {
-    const jobKey = "news_earnings_check_unconfirmed";
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const filters = parseNewsQuery(body);
+    const jobKey = buildNewsEarningsActiveJobKey("check-unconfirmed", filters);
     const existingJobId = activePullJobs.get(jobKey);
     if (existingJobId) {
       const existingJob = getJob(existingJobId);
       if (existingJob && existingJob.status === "running") {
         res.status(409).json({
-          error: `An unconfirmed earnings date check job is already running (jobId=${existingJobId}). Wait for it to finish or cancel it first.`,
+          error: `The same unconfirmed earnings date check request is already running (jobId=${existingJobId}). Wait for it to finish or cancel it first.`,
           existingJobId,
         });
         return;
@@ -4095,7 +4248,8 @@ app.post("/api/news/earnings/check-unconfirmed", async (req, res, next) => {
       return;
     }
 
-    const filters = parseNewsQuery(req.body ?? {});
+    const { workerConcurrency, requestIntervalMs } = parseNewsEarningsUpdateRuntimeOptions(body);
+
     const candidates = await listNewsEarningsCandidates(filters, { onlyUnconfirmed: true });
     const jobId = createJob(candidates.length, {
       category: "news-update",
@@ -4104,14 +4258,16 @@ app.post("/api/news/earnings/check-unconfirmed", async (req, res, next) => {
     });
     activePullJobs.set(jobKey, jobId);
     appendLog(jobId, `Starting unconfirmed earnings date check for ${candidates.length} candidates`);
-    res.json({ jobId, candidateCount: candidates.length });
+    appendLog(jobId, `Worker concurrency=${workerConcurrency}, fallback interval=${requestIntervalMs}ms`);
+    res.json({ jobId, candidateCount: candidates.length, workerConcurrency, requestIntervalMs });
 
     void (async () => {
       try {
         const result = await runNewsEarningsContextUpdate({
           candidates,
           mode: "check-unconfirmed",
-          requestIntervalMs: DEFAULT_FMP_CALENDAR_REQUEST_INTERVAL_MS,
+          workerConcurrency,
+          requestIntervalMs,
           shouldCancel: () => isJobCancelled(jobId),
           onProgress: (completed, total) => updateProgress(jobId, completed, total),
           onLog: (message) => appendLog(jobId, message),
@@ -4125,8 +4281,13 @@ app.post("/api/news/earnings/check-unconfirmed", async (req, res, next) => {
           candidateCount: candidates.length,
           from: filters.from ?? null,
           to: filters.to ?? null,
+          workerConcurrency,
+          requestIntervalMs,
         });
-        completeJob(jobId, { ...result });
+        completeJob(jobId, {
+          requestIntervalMs,
+          ...result,
+        });
         activePullJobs.delete(jobKey);
       } catch (error) {
         failJob(jobId, error instanceof Error ? error.message : String(error));

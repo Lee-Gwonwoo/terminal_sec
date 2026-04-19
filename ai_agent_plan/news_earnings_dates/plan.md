@@ -15,6 +15,12 @@
 - multi-ticker 기사에서는 대표 ticker를 **`ohlc_ticker -> 첫 ticker`** 규칙으로 고정한다.
 - earnings update mode는 `Recent`를 두지 않고, **`Custom Earning Date Update` + `Check Unconfirmed Earning Date`** 두 가지로 구성한다.
 - `Check Unconfirmed Earning Date`는 News Window에 보이는 unconfirmed earnings context를 다시 확인하고 수정하는 전용 버튼으로 둔다.
+- earning date update는 coarse mode lock 대신 **요청 fingerprint 기준 중복 차단**으로 바꿔, 범위/필터가 다른 job은 동시에 실행할 수 있게 한다.
+- earning date update service는 **worker concurrency를 설정값으로 제어**할 수 있게 한다.
+- News Window Control 창에 earning date worker concurrency 설정을 추가하고, FMP fallback interval은 기존 FMP Request Interval 설정을 재사용한다.
+- News Window의 현재 필터와 무관하게 `news_items` 전체를 훑는 **`Full-Scan Earning Date Update`** 진입점을 추가한다.
+- full-scan은 후보 selection만 전체 저장 뉴스 기준으로 넓히고, 기존 skip 규칙(`resolved`/`missing` skip, `partial`/`error` 재시도)은 그대로 유지한다.
+- full-scan route는 전체 candidate query를 기다리지 않고 **즉시 `jobId`를 반환**해야 하며, candidate count 계산은 background worker 안에서 수행한다.
 
 ## 목표
 
@@ -70,6 +76,8 @@ News Window에서 사용자가 컬럼 선택 메뉴로 **어닝 날짜 컨텍스
 - recent/upcoming 각각의 `confirmed / unconfirmed` 상태 계산 및 저장
 - DB 우선 조회 + 부족한 경우 FMP fallback
 - 기존 데이터가 있으면 skip하되, unconfirmed row는 별도 check mode에서 재확인하는 업데이트 버튼 추가
+- 현재 News Window 필터를 무시하고 전체 저장 뉴스를 대상으로 candidate를 만드는 full-scan update 버튼 추가
+- full-scan update는 응답 지연을 막기 위해 `candidateCountPending=true` 상태로 먼저 시작하고, 실제 candidate count는 job log/result에서 확인 가능하게 유지
 - News earnings update 실행 전 `fmp_calendar_earnings` 당일 freshness gate 추가
 - freshness gate 실패 시 사용자에게 선행 액션을 알려주는 오류 메시지 표시
 - News Window Update 메뉴에서 기존 IBKR calendar shortcut 3개 제거
@@ -257,6 +265,8 @@ News Window button click
 - Step 1~8 구현을 완료했고, backend/frontend 정적 검사와 빌드, backend 테스트, 런타임 API 검증까지 마쳤다.
 - backend는 `newsEarningsContextService.ts`를 중심으로 calendar-first lookup, unresolved ticker 대상 FMP fallback, `news_earnings_context` upsert, freshness gate endpoint를 모두 연결했다.
 - frontend는 News Window에 `Earnings Dates` 컬럼과 `Custom Earning Date Update`, `Check Unconfirmed Earning Date` 메뉴를 추가했고, 기존 IBKR calendar shortcut 3개는 제거했다.
+- 추가로 earnings update는 exact duplicate request만 재사용하고, 서로 다른 범위/필터 요청은 병렬 job으로 동시에 시작할 수 있도록 설계를 확장했다.
+- frontend Control 창에는 `Earnings Date Update -> Worker Concurrency` 설정을 추가해 backend worker pool 크기를 조절할 수 있게 했다.
 - 런타임 검증에서는 stale 상태의 `POST /api/news/earnings/update-custom`가 `412 Precondition Failed`를 반환했고, 같은 날 `POST /api/fmp/calendar/earnings/update`를 1일 범위로 먼저 실행한 뒤에는 custom/unconfirmed endpoint 둘 다 `jobId`를 정상 반환했다.
 - `2026-04-17` 기사 범위 custom job 샘플 결과는 `processed=707`, `resolved=373`, `partial=171`, `missing=163`, `fallbackTickers=135`, `fallbackMatchedRows=9`였고, `/api/news` 응답에서 `earnings_context_display`가 `Recent ... | Upcoming ...` 형식으로 채워지는 것을 확인했다.
 

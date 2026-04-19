@@ -6,9 +6,10 @@ import { getEtDateString } from "./timeUtils.js";
 import { normalizeFmpSymbol } from "../utils/fmpSymbol.js";
 
 const DEFAULT_FALLBACK_WINDOW_DAYS = 180;
+const DEFAULT_WORKER_CONCURRENCY = 8;
 const TICKER_BATCH_SIZE = 300;
 
-type NewsEarningsUpdateMode = "custom" | "check-unconfirmed";
+type NewsEarningsUpdateMode = "custom" | "check-unconfirmed" | "full-scan";
 type NewsEarningsLookupStatus = "resolved" | "partial" | "missing" | "error";
 type NewsEarningsSource = "calendar" | "fmp" | "none";
 
@@ -38,6 +39,7 @@ export interface NewsEarningsUpdateResult {
   totalCandidates: number;
   targetedCandidates: number;
   skippedExisting: number;
+  workerConcurrency: number;
   processed: number;
   resolved: number;
   partial: number;
@@ -46,6 +48,32 @@ export interface NewsEarningsUpdateResult {
   fallbackFetchedRows: number;
   fallbackMatchedRows: number;
   fallbackUpsertedRows: number;
+}
+
+export function clampNewsEarningsWorkerConcurrency(value: number | undefined): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_WORKER_CONCURRENCY;
+  }
+  return Math.max(1, Math.min(32, Math.trunc(value as number)));
+}
+
+function createAsyncMutex() {
+  let current = Promise.resolve();
+
+  return async <T>(callback: () => Promise<T>): Promise<T> => {
+    const previous = current;
+    let releaseCurrent!: () => void;
+    current = new Promise<void>((resolve) => {
+      releaseCurrent = resolve;
+    });
+
+    await previous;
+    try {
+      return await callback();
+    } finally {
+      releaseCurrent();
+    }
+  };
 }
 
 function shiftIsoDate(isoDate: string, days: number): string {
@@ -386,6 +414,7 @@ export async function runNewsEarningsContextUpdate(params: {
   candidates: NewsEarningsCandidate[];
   mode: NewsEarningsUpdateMode;
   fallbackWindowDays?: number;
+  workerConcurrency?: number;
   requestIntervalMs?: number;
   shouldCancel?: () => boolean;
   onProgress?: (completed: number, total: number) => void;
@@ -394,6 +423,7 @@ export async function runNewsEarningsContextUpdate(params: {
   const fallbackWindowDays = Number.isFinite(params.fallbackWindowDays)
     ? Math.max(30, Math.min(365, Math.trunc(params.fallbackWindowDays as number)))
     : DEFAULT_FALLBACK_WINDOW_DAYS;
+  const workerConcurrency = clampNewsEarningsWorkerConcurrency(params.workerConcurrency);
   const log = (message: string) => params.onLog?.(message);
   const progress = (completed: number, total: number) => params.onProgress?.(completed, total);
 
@@ -411,6 +441,7 @@ export async function runNewsEarningsContextUpdate(params: {
     totalCandidates: params.candidates.length,
     targetedCandidates: runtimeCandidates.length,
     skippedExisting,
+    workerConcurrency,
     processed: 0,
     resolved: 0,
     partial: 0,
@@ -423,6 +454,7 @@ export async function runNewsEarningsContextUpdate(params: {
 
   progress(0, runtimeCandidates.length);
   log(`mode=${params.mode}, totalCandidates=${params.candidates.length}, targeted=${runtimeCandidates.length}, skippedExisting=${skippedExisting}`);
+  log(`workerConcurrency=${workerConcurrency}`);
 
   if (runtimeCandidates.length === 0 || params.shouldCancel?.()) {
     return result;
@@ -470,37 +502,48 @@ export async function runNewsEarningsContextUpdate(params: {
     });
   }
 
-  for (const candidate of runtimeCandidates) {
-    if (params.shouldCancel?.()) {
-      break;
+  const withWriteLock = createAsyncMutex();
+  const effectiveWorkerCount = Math.min(workerConcurrency, runtimeCandidates.length);
+  let nextCandidateIndex = 0;
+
+  const runWorker = async () => {
+    while (!params.shouldCancel?.()) {
+      const currentIndex = nextCandidateIndex;
+      nextCandidateIndex += 1;
+      if (currentIndex >= runtimeCandidates.length) {
+        return;
+      }
+
+      const candidate = runtimeCandidates[currentIndex];
+      const rows = candidate.contextTicker
+        ? calendarRowsByTicker.get(candidate.contextTicker) ?? []
+        : [];
+      const sides = resolveCalendarSides(rows, candidate.anchorDate);
+      const lookupStatus = computeLookupStatus(sides.recent, sides.upcoming);
+
+      await withWriteLock(() => upsertNewsEarningsContext({
+        newsId: candidate.id,
+        contextTicker: candidate.contextTicker,
+        anchorPublishedAt: candidate.publishedAt,
+        recent: sides.recent,
+        upcoming: sides.upcoming,
+        lookupStatus,
+        fmpFallbackUsed: Boolean(candidate.contextTicker && fallbackTickers.has(candidate.contextTicker)),
+      }));
+
+      result.processed += 1;
+      if (lookupStatus === "resolved") {
+        result.resolved += 1;
+      } else if (lookupStatus === "partial") {
+        result.partial += 1;
+      } else {
+        result.missing += 1;
+      }
+      progress(result.processed, runtimeCandidates.length);
     }
+  };
 
-    const rows = candidate.contextTicker
-      ? calendarRowsByTicker.get(candidate.contextTicker) ?? []
-      : [];
-    const sides = resolveCalendarSides(rows, candidate.anchorDate);
-    const lookupStatus = computeLookupStatus(sides.recent, sides.upcoming);
-
-    await upsertNewsEarningsContext({
-      newsId: candidate.id,
-      contextTicker: candidate.contextTicker,
-      anchorPublishedAt: candidate.publishedAt,
-      recent: sides.recent,
-      upcoming: sides.upcoming,
-      lookupStatus,
-      fmpFallbackUsed: Boolean(candidate.contextTicker && fallbackTickers.has(candidate.contextTicker)),
-    });
-
-    result.processed += 1;
-    if (lookupStatus === "resolved") {
-      result.resolved += 1;
-    } else if (lookupStatus === "partial") {
-      result.partial += 1;
-    } else {
-      result.missing += 1;
-    }
-    progress(result.processed, runtimeCandidates.length);
-  }
+  await Promise.all(Array.from({ length: effectiveWorkerCount }, () => runWorker()));
 
   return result;
 }

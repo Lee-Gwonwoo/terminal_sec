@@ -206,6 +206,7 @@ const DEFAULT_FMP_REQUEST_INTERVAL_MS = 25;
 const DEFAULT_FMP_PR_PAGE_LIMIT = 100;
 const DEFAULT_FMP_PR_MAX_PAGES = 12;
 const DEFAULT_FMP_SEC_MAX_PAGES = 40;
+const DEFAULT_NEWS_EARNINGS_WORKER_CONCURRENCY = 8;
 
 function getFmpTickerConcurrency(): number {
   try {
@@ -222,6 +223,15 @@ function getFmpRequestIntervalMs(): number {
     return Number.isFinite(value) && value >= 0 && value <= 5000 ? value : DEFAULT_FMP_REQUEST_INTERVAL_MS;
   } catch {
     return DEFAULT_FMP_REQUEST_INTERVAL_MS;
+  }
+}
+
+function getNewsEarningsWorkerConcurrency(): number {
+  try {
+    const value = parseInt(localStorage.getItem('news-earnings-worker-concurrency') ?? '', 10);
+    return Number.isFinite(value) && value >= 1 && value <= 32 ? value : DEFAULT_NEWS_EARNINGS_WORKER_CONCURRENCY;
+  } catch {
+    return DEFAULT_NEWS_EARNINGS_WORKER_CONCURRENCY;
   }
 }
 
@@ -755,6 +765,7 @@ export function FinnhubNewsWindow({
   const [fmpTickerConcurrencyInput, setFmpTickerConcurrencyInput] = useState(() => String(getFmpTickerConcurrency()));
   const [fmpStockFulltextConcurrencyInput, setFmpStockFulltextConcurrencyInput] = useState(() => String(getFmpStockFulltextConcurrency()));
   const [fmpRequestIntervalMsInput, setFmpRequestIntervalMsInput] = useState(() => String(getFmpRequestIntervalMs()));
+  const [newsEarningsWorkerConcurrencyInput, setNewsEarningsWorkerConcurrencyInput] = useState(() => String(getNewsEarningsWorkerConcurrency()));
   const [fmpPrPageLimitInput, setFmpPrPageLimitInput] = useState(() => String(getFmpPrPageLimit()));
   const [fmpPrMaxPagesInput, setFmpPrMaxPagesInput] = useState(() => String(getFmpPrMaxPages()));
   const [fmpSecMaxPagesInput, setFmpSecMaxPagesInput] = useState(() => String(getFmpSecMaxPages()));
@@ -1451,6 +1462,7 @@ export function FinnhubNewsWindow({
     const fmpTickerConcurrency = Math.max(1, Math.min(20, parseInt(fmpTickerConcurrencyInput, 10) || DEFAULT_FMP_TICKER_CONCURRENCY));
     const fmpStockFulltextConcurrency = Math.max(1, Math.min(200, parseInt(fmpStockFulltextConcurrencyInput, 10) || DEFAULT_FMP_STOCK_FULLTEXT_CONCURRENCY));
     const fmpRequestIntervalMs = Math.max(0, Math.min(5000, parseInt(fmpRequestIntervalMsInput, 10) || DEFAULT_FMP_REQUEST_INTERVAL_MS));
+    const newsEarningsWorkerConcurrency = Math.max(1, Math.min(32, parseInt(newsEarningsWorkerConcurrencyInput, 10) || DEFAULT_NEWS_EARNINGS_WORKER_CONCURRENCY));
     const fmpPrPageLimit = Math.max(1, Math.min(100, parseInt(fmpPrPageLimitInput, 10) || DEFAULT_FMP_PR_PAGE_LIMIT));
     const fmpPrMaxPages = Math.max(1, Math.min(50, parseInt(fmpPrMaxPagesInput, 10) || DEFAULT_FMP_PR_MAX_PAGES));
     const fmpSecMaxPages = Math.max(1, Math.min(100, parseInt(fmpSecMaxPagesInput, 10) || DEFAULT_FMP_SEC_MAX_PAGES));
@@ -1464,6 +1476,7 @@ export function FinnhubNewsWindow({
       localStorage.setItem('fmp-concurrency', String(fmpTickerConcurrency));
       localStorage.setItem('fmp-stock-fulltext-concurrency', String(fmpStockFulltextConcurrency));
       localStorage.setItem('fmp-request-interval-ms', String(fmpRequestIntervalMs));
+      localStorage.setItem('news-earnings-worker-concurrency', String(newsEarningsWorkerConcurrency));
       localStorage.setItem('fmp-pr-page-limit', String(fmpPrPageLimit));
       localStorage.setItem('fmp-pr-max-pages', String(fmpPrMaxPages));
       localStorage.setItem('fmp-sec-max-pages', String(fmpSecMaxPages));
@@ -1479,6 +1492,7 @@ export function FinnhubNewsWindow({
     setFmpTickerConcurrencyInput(String(fmpTickerConcurrency));
     setFmpStockFulltextConcurrencyInput(String(fmpStockFulltextConcurrency));
     setFmpRequestIntervalMsInput(String(fmpRequestIntervalMs));
+    setNewsEarningsWorkerConcurrencyInput(String(newsEarningsWorkerConcurrency));
     setFmpPrPageLimitInput(String(fmpPrPageLimit));
     setFmpPrMaxPagesInput(String(fmpPrMaxPages));
     setFmpSecMaxPagesInput(String(fmpSecMaxPages));
@@ -1547,10 +1561,15 @@ export function FinnhubNewsWindow({
     setUpdating(true);
     setError(null);
     try {
+      const payload = {
+        ...buildCurrentNewsQueryPayload({ from, to }),
+        workerConcurrency: getNewsEarningsWorkerConcurrency(),
+        requestIntervalMs: getFmpRequestIntervalMs(),
+      };
       const res = await fetch(`${API_BASE}/api/news/earnings/update-custom`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildCurrentNewsQueryPayload({ from, to })),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (res.status === 409 && data.existingJobId) {
@@ -1572,15 +1591,54 @@ export function FinnhubNewsWindow({
     }
   };
 
+  // ─── Earnings Date Update: full-scan across all stored news rows ───
+  const handleFullScanEarningDateUpdate = async () => {
+    setUpdating(true);
+    setError(null);
+    try {
+      const payload = {
+        workerConcurrency: getNewsEarningsWorkerConcurrency(),
+        requestIntervalMs: getFmpRequestIntervalMs(),
+      };
+      const res = await fetch(`${API_BASE}/api/news/earnings/update-full-scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (res.status === 409 && data.existingJobId) {
+        registerJob(data.existingJobId, 'news-update');
+        setShowLogPanel(true);
+        setUpdating(false);
+        return;
+      }
+      if (!res.ok) {
+        setError(data.error || `HTTP ${res.status}`);
+        setUpdating(false);
+        return;
+      }
+      registerJob(data.jobId, 'news-update');
+      setUpdating(false);
+    } catch (err: any) {
+      setError(err.message || 'Failed to start full-scan earning date update');
+      setUpdating(false);
+    }
+  };
+
   // ─── Earnings Date Update: re-check unconfirmed rows ───
   const handleCheckUnconfirmedEarningDate = async () => {
     setUpdating(true);
     setError(null);
     try {
+      const payload = {
+        ...buildCurrentNewsQueryPayload(),
+        workerConcurrency: getNewsEarningsWorkerConcurrency(),
+        requestIntervalMs: getFmpRequestIntervalMs(),
+      };
       const res = await fetch(`${API_BASE}/api/news/earnings/check-unconfirmed`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildCurrentNewsQueryPayload()),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (res.status === 409 && data.existingJobId) {
@@ -2885,6 +2943,10 @@ export function FinnhubNewsWindow({
                         <Calendar className="w-3.5 h-3.5 shrink-0 text-rose-500" />
                         <div><div className="font-medium">Custom Earning Date Update</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick article date range · calendar DB first, FMP fallback only for missing context</div></div>
                       </button>
+                      <button onClick={() => { setShowUpdateMenu(false); handleFullScanEarningDateUpdate(); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <Search className="w-3.5 h-3.5 shrink-0 text-rose-500" />
+                        <div><div className="font-medium">Full-Scan Earning Date Update</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Ignore current filters · scan all stored news rows while keeping existing skip rules</div></div>
+                      </button>
                       <button onClick={() => { setShowUpdateMenu(false); handleCheckUnconfirmedEarningDate(); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <RotateCw className="w-3.5 h-3.5 shrink-0 text-rose-400" />
                         <div><div className="font-medium">Check Unconfirmed Earning Date</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">현재 결과 중 unconfirmed earnings context만 다시 확인합니다</div></div>
@@ -2915,7 +2977,7 @@ export function FinnhubNewsWindow({
                             'Recent Update — 매일 또는 수시로 최신 뉴스만 증분 수집할 때 사용합니다. 운영 중에는 보통 이 버튼이 기본입니다.',
                             'Custom Update — 과거 특정 날짜 범위를 직접 지정할 때 사용합니다. Finnhub company news / press release, FMP PR / FMP stock news는 gap-only로 동작합니다.',
                             'Change Update — 뉴스를 다시 받는 버튼이 아니라, 이미 저장된 뉴스 행의 1D/5D 등 change%를 다시 계산할 때 사용합니다.',
-                            'Earning Date Update — News Window 기사에 recent/upcoming earning date context를 붙이거나, 기존 unconfirmed row를 다시 확인할 때 사용합니다.',
+                            'Earning Date Update — News Window 기사에 recent/upcoming earning date context를 붙입니다. Full-Scan은 현재 필터를 무시하고 전체 저장 뉴스를 훑고, Custom은 지정한 기사 날짜 범위만 보며, Check Unconfirmed는 기존 unconfirmed row만 다시 확인합니다.',
                             'PTPR Press Release — RTPR press release를 ticker 기준으로 수집할 때 사용합니다. provider 제약 때문에 일반 custom gap-only와는 다르게 동작합니다.',
                           ],
                           inputs: [
@@ -2927,7 +2989,7 @@ export function FinnhubNewsWindow({
                             'Custom fully-covered-skip = PTPR. provider가 from/to 원격 조회를 직접 지원하지 않아, 요청 범위가 이미 fully covered면 skip하고 아니면 ticker별 custom 조회를 실행합니다.',
                             'Custom summary-only = FMP SEC Filing / Market News 계열. ticker별 gap 계산 대신 preflight에서 existingItemsInRange 같은 요약 수치를 보여주고, 실행은 요청 범위를 기준으로 진행합니다.',
                             'Change Update: Recent는 최근 7일 재계산, Custom은 지정 날짜 범위 재계산입니다. 뉴스 원문을 다시 받지 않습니다.',
-                            'Earning Date Update: Custom은 지정한 기사 날짜 범위에 대해 calendar DB 기준 earning date context를 계산하고, Check Unconfirmed는 현재 결과 중 unconfirmed row만 다시 검사합니다.',
+                            'Earning Date Update: Full-Scan은 현재 News Window 필터를 무시하고 모든 저장 뉴스 row를 후보로 만들며, Custom은 지정한 기사 날짜 범위에 대해 calendar DB 기준 earning date context를 계산하고, Check Unconfirmed는 현재 결과 중 unconfirmed row만 다시 검사합니다.',
                           ],
                           cautions: [
                             'Custom의 핵심은 gap-only가 가능한 버튼과 아닌 버튼을 구분해서 보는 것입니다. 모든 Custom 버튼이 missing gap만 받는 것은 아닙니다.',
@@ -2935,16 +2997,18 @@ export function FinnhubNewsWindow({
                             '같은 범위를 두 번 연속 실행하면 gap-only 대상 버튼은 두 번째 실행에서 많은 ticker가 fully covered로 판정되어 skip될 수 있습니다.',
                             '넓은 날짜 범위(예: 6개월~1년)를 주면 preflight의 totalMissingDays, totalMissingRanges를 먼저 보고 규모를 확인해야 합니다. 요약 수치가 크면 소스별로 나눠 실행하는 편이 안전합니다.',
                             'Change Update는 뉴스 다운로드가 아니라 재계산입니다. inserted가 늘지 않아도 정상일 수 있습니다.',
+                            'Full-Scan Earning Date Update도 강제 재계산은 아닙니다. 전체 저장 뉴스를 대상으로 후보를 만들지만, 기존 skip 규칙 때문에 이미 resolved 또는 missing으로 판단된 row는 다시 계산하지 않습니다.',
                             'Earning Date Update는 당일 FMP Earnings Calendar Update가 먼저 실행되어 있어야 합니다. backend가 stale 상태를 감지하면 412 오류로 차단합니다.',
                           ],
                           verify: [
                             'Custom 실행 전 preflight 모달에서 executionMode가 무엇인지 먼저 확인합니다. gap-only / fully-covered-skip / summary-only / preflight-only 중 어떤 방식인지 여기서 드러납니다.',
                             'gap-only 대상 버튼이면 preflight JSON에서 fullyCoveredTickers, tickersWithMissingGaps, totalMissingRanges, totalMissingDays를 확인합니다. 이 값이 작을수록 실제 API 호출이 줄어든 것입니다.',
                             'Examples에 AAPL 같은 샘플 ticker가 보이면 coveredRanges와 missingRanges가 앞뒤 gap 형태로만 나오는지 확인합니다. 중간 빈 날짜가 잘게 쪼개져 보이면 비정상입니다.',
+                            'Full-Scan 실행 시에는 View Log의 candidateCount가 현재 화면 필터와 무관하게 크게 잡히는지, 그리고 log에 current filters ignored 메시지가 남는지 확인합니다.',
                             'Continue 후에는 View Log에서 fullyCoveredSkipped, gapRangesFetched, inserted, skippedExisting 같은 summary를 확인합니다. fullyCoveredSkipped가 보이면 gap 절약 로직이 실제 실행에도 반영된 것입니다.',
                             'Change Update 완료 후에는 뉴스 행의 1D/5D 등 변동률 컬럼 값이 채워졌는지 확인하고, Earning Date Update 완료 후에는 Earnings Dates 컬럼 값이 채워졌는지 확인합니다.',
                           ],
-                          route: 'POST /api/news/pull-finhub, /api/news/pull-fmp-press-release, /api/news/pull-fmp-stock-news, /api/news/pull-rtpr, /api/news/pull-investing, /api/news/change/update-custom, /api/news/earnings/update-custom, /api/news/earnings/check-unconfirmed',
+                          route: 'POST /api/news/pull-finhub, /api/news/pull-fmp-press-release, /api/news/pull-fmp-stock-news, /api/news/pull-rtpr, /api/news/pull-investing, /api/news/change/update-custom, /api/news/earnings/update-custom, /api/news/earnings/update-full-scan, /api/news/earnings/check-unconfirmed',
                         };
                         window.dispatchEvent(new CustomEvent('open-data-control-how-to-use', { detail: payload }));
                       }} className="w-full text-left px-3 py-2 text-xs hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded flex items-center gap-2 text-blue-600 dark:text-blue-400">
@@ -3778,6 +3842,21 @@ export function FinnhubNewsWindow({
                   />
                 </div>
                 <p className="text-[10px] text-gray-400">Ticker Concurrency/Interval/Pageing apply to FMP company profile, FMP PR, FMP Stock, and FMP SEC pulls. Stock Full Text Concurrency applies to inline fulltext during FMP Stock pull and to manual `FMP Stock Only` fulltext reruns.</p>
+              </div>
+              <div className="rounded border border-gray-200 dark:border-gray-700 p-3 space-y-3">
+                <div className="text-xs font-medium text-gray-700 dark:text-gray-200">Earnings Date Update</div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Worker Concurrency</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={32}
+                    value={newsEarningsWorkerConcurrencyInput}
+                    onChange={(e) => setNewsEarningsWorkerConcurrencyInput(e.target.value)}
+                    className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+                <p className="text-[10px] text-gray-400">Different earnings-date requests can now run in parallel. Exact duplicate requests still reuse the existing running job. FMP fallback request interval follows the FMP Request Interval (ms) setting above.</p>
               </div>
             </div>
             <div className="flex justify-end gap-2 mt-4">

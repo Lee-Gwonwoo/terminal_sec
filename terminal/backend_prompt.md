@@ -542,6 +542,9 @@ SEC filing companion table.
 - `POST /api/news/change/update-recent`
 - `POST /api/news/change/update-custom/preflight`
 - `POST /api/news/change/update-custom`
+- `POST /api/news/earnings/update-custom`
+- `POST /api/news/earnings/update-full-scan`
+- `POST /api/news/earnings/check-unconfirmed`
 - `POST /api/news/sentiment/update`
 
 ### 저장 뷰 / watchlist / alerts / bookmarks
@@ -1033,6 +1036,33 @@ Control Window / localStorage 공통 설정:
 - Phase 1: OHLC DB → Phase 1.5: FMP fallback → Phase 2: 저장 (위와 동일)
 - 응답 컬럼: `[][][]jobId[][][]`
 
+### `POST /api/news/earnings/update-custom`
+
+- 요청 body: 현재 News Window의 `NewsQuery` filter + `{ "from": "YYYY-MM-DD", "to": "YYYY-MM-DD", "workerConcurrency": 8, "requestIntervalMs": 250 }`
+- 현재 News Window filter와 지정한 기사 날짜 범위를 함께 써서 candidate를 고른다.
+- `news_earnings_context`가 없거나 `lookup_status in ('partial', 'error')`인 row만 처리한다. 이미 `resolved` 또는 `missing`으로 판정된 row는 기본 skip한다.
+- `calendar_events`를 먼저 보고 recent/upcoming earning date context를 계산하고, 부족한 ticker만 FMP earnings fallback으로 보강한다.
+- 실행 전 `fmp_calendar_earnings.last_success_at`가 ET same-day인지 확인하고, stale이면 `412`를 반환한다.
+- duplicate guard는 요청 fingerprint 기준이다. 같은 filter/range 조합만 `409`로 막고 다른 조합은 동시에 실행할 수 있다.
+- 응답 컬럼: `[][][]jobId[][][]`, `[][][]requestedRange[][][]`, `[][][]candidateCount[][][]`, `[][][]workerConcurrency[][][]`, `[][][]requestIntervalMs[][][]`
+
+### `POST /api/news/earnings/update-full-scan`
+
+- 요청 body: `{ "workerConcurrency": 8, "requestIntervalMs": 250 }`
+- 현재 News Window filter를 무시하고 `news_items` 전체 저장 row를 candidate로 만든다.
+- full-scan은 candidate selection만 전체 row 기준으로 넓히고, 기존 skip 규칙(`resolved`/`missing` skip, `partial`/`error` 재시도)은 그대로 유지한다.
+- 계산 순서는 `calendar_events` first → 부족한 ticker만 FMP fallback → `news_earnings_context` upsert 이다.
+- route는 expensive candidate query를 기다리지 않고 먼저 `jobId`를 반환한다. 실제 `candidateCount`는 job 내부에서 계산되어 log/result에 기록된다.
+- freshness gate는 `update-custom`과 같고, 동시에 여러 full-scan job은 만들지 않는다.
+- 응답 컬럼: `[][][]jobId[][][]`, `[][][]candidateCount[][][]`(초기 `null` 가능), `[][][]candidateCountPending[][][]`, `[][][]workerConcurrency[][][]`, `[][][]requestIntervalMs[][][]`, `[][][]scope[][][]`
+
+### `POST /api/news/earnings/check-unconfirmed`
+
+- 요청 body: 현재 News Window의 `NewsQuery` filter + `{ "workerConcurrency": 8, "requestIntervalMs": 250 }`
+- 현재 filter에 걸린 row 중 `recent_earnings_confirmed = 0` 또는 `upcoming_earnings_confirmed = 0`인 row만 다시 검사한다.
+- freshness gate와 duplicate guard 규칙은 `update-custom`과 동일하다.
+- 응답 컬럼: `[][][]jobId[][][]`, `[][][]candidateCount[][][]`, `[][][]workerConcurrency[][][]`, `[][][]requestIntervalMs[][][]`
+
 ### `GET /api/calendar/events`
 
 지원 query:
@@ -1160,7 +1190,7 @@ Control Window / localStorage 공통 설정:
 ## 현재 프런트와의 연결 포인트
 
 - `NewsWindow`는 `GET /api/news`와 `POST /api/news/pull-eodhd`를 사용한다.
-- `FinnhubNewsWindow`는 뉴스 조회, Finnhub 적재, fulltext, change update, bookmarks, job polling을 사용한다.
+- `FinnhubNewsWindow`는 뉴스 조회, Finnhub 적재, fulltext, change update, earnings date update, bookmarks, job polling을 사용한다.
 - `DefaultTickerWindow`는 `GET /api/tickers`, `POST /api/tickers/import-default`, `POST /api/tickers/add`, `DELETE /api/tickers/remove`, `POST /api/company-profiles/pull-market-cap`, `POST /api/company-profiles/pull-float`, `POST /api/company-profiles/pull-holders-yahoo`, `GET /api/jobs/:jobId`를 사용한다.
 - `DailyChangeHistoryWindow`는 `GET /api/default-tickers/daily-change-history`를 사용한다.
 - `DataControlWindow`는 updates status, jobs, OHLC status/update, IBKR calendar update/update-custom, company profile pull, change update, DB inspect를 사용한다.
@@ -2049,6 +2079,73 @@ publisher 동작 주의:
 
 - `update-recent`와 동일하게 background job이지만 duplicate guard는 없다.
 - 직접 API 호출이나 다른 클라이언트에서는 여전히 복수 running job을 만들 수 있으므로, 필요하면 backend 측 logical job key 표준화가 추가로 필요하다.
+
+### `POST /api/news/earnings/update-custom`
+
+요청 body 예시:
+
+```json
+{
+  "source_names": ["FINNHUB", "RTPR", "FMP"],
+  "source_type": "company_news",
+  "from": "2026-03-01",
+  "to": "2026-03-31",
+  "workerConcurrency": 8,
+  "requestIntervalMs": 250
+}
+```
+
+- 현재 News Window filter + 기사 날짜 범위를 함께 써서 candidate를 뽑는다.
+- recent/upcoming earnings context는 `calendar_events`를 먼저 조회하고, 부족한 ticker만 FMP earnings fallback으로 보강한다.
+- `news_earnings_context.lookup_status`가 없는 row, `partial`, `error` row만 다시 처리한다.
+- `fmp_calendar_earnings.last_success_at`가 ET same-day가 아니면 job 생성 전에 `412`로 차단한다.
+- 즉시 `jobId` 반환
+- 완료 시 `update_status.news_earnings_custom` 갱신
+
+현재 job/중복 규칙:
+
+- 요청 fingerprint 기준 duplicate guard를 둔다.
+- 같은 filter/range 요청만 `409 + existingJobId`로 막고, 다른 filter/range면 동시에 돌 수 있다.
+
+### `POST /api/news/earnings/update-full-scan`
+
+요청 body 예시:
+
+```json
+{
+  "workerConcurrency": 8,
+  "requestIntervalMs": 250
+}
+```
+
+- 현재 News Window filter를 무시하고 `news_items` 전체 저장 row를 candidate로 만든다.
+- 다만 full-scan도 강제 재계산은 아니므로, 기존 skip 규칙(`resolved`/`missing` skip, `partial`/`error` 재시도)은 그대로 적용한다.
+- freshness gate, calendar-first lookup, FMP fallback 순서는 `update-custom`과 동일하다.
+- expensive candidate query를 backend worker 안으로 밀어 넣고 먼저 즉시 `jobId` 반환
+- 완료 시 `update_status.news_earnings_full_scan` 갱신
+
+현재 job/중복 규칙:
+
+- full-scan은 별도 scope fingerprint 하나로 묶인다.
+- 동시에 여러 full-scan job을 만들 수 없고, 같은 시점에는 하나만 running 된다.
+
+### `POST /api/news/earnings/check-unconfirmed`
+
+요청 body 예시:
+
+```json
+{
+  "source_names": ["FINNHUB", "RTPR", "FMP"],
+  "source_type": "company_news",
+  "workerConcurrency": 8,
+  "requestIntervalMs": 250
+}
+```
+
+- 현재 filter 범위 안에서 `recent_earnings_confirmed = 0` 또는 `upcoming_earnings_confirmed = 0`인 row만 다시 확인한다.
+- freshness gate는 `update-custom`과 동일하다.
+- 즉시 `jobId` 반환
+- 완료 시 `update_status.news_earnings_check_unconfirmed` 갱신
 
 ## Job API
 
