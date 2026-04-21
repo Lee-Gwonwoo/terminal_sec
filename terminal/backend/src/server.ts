@@ -42,7 +42,7 @@ import {
 } from "./services/finnhubNewsProvider.js";
 import type { FinnhubMappedItem } from "./services/finnhubNewsProvider.js";
 import { mergeChangeForNewItems, bulkUpdateRecentChange, bulkUpdateRecentMissingChange, bulkUpdateCustomChange, type FmpFallbackOptions } from "./services/newsChangeMerger.js";
-import { createJob, getJob, getActiveJobs, updateProgress, appendLog, completeJob, failJob, cancelJob, isJobCancelled } from "./services/jobManager.js";
+import { createJob, getJob, getActiveJobs, updateProgress, appendLog, completeJob, failJob, cancelJob, isJobCancelled, normalizeJobScope, type JobScope } from "./services/jobManager.js";
 import { getFmpSecFulltextBackfillRows, getFulltext, getUnextractedNewsIds, deleteFailedFulltextRows, deleteFmpPressReleaseFallbackRows, deleteFmpStockNewsFallbackRows, deleteCompanyNewsFulltextRows, getFulltextStats, upsertProvidedFulltext } from "./services/fulltextRepository.js";
 import { runFulltextUpdate, runFulltextUpdateForNewsIds, runFulltextPlainTextBackfill, runRtprBodyBackfill, runOriginUrlBackfill, runCompanyNewsOriginUrlBackfill, extractAndPersistFulltext } from "./services/fulltextUpdateService.js";
 import { extractOriginUrl } from "./services/rtprOriginUrlExtractor.js";
@@ -134,6 +134,16 @@ import { clampNewsEarningsWorkerConcurrency, runNewsEarningsContextUpdate } from
 
 const app = express();
 const streamHub = new StreamHub();
+
+const FINNHUB_NEWS_JOB_SCOPE: JobScope = "finnhub-news";
+const INVESTING_NEWS_JOB_SCOPE: JobScope = "investing-news";
+
+function inferNewsWindowJobScope(sourceType: string | undefined, sourceName: string | undefined): JobScope {
+  if ((sourceName ?? "").toUpperCase() === "INVESTING" || sourceType?.startsWith("investing_")) {
+    return INVESTING_NEWS_JOB_SCOPE;
+  }
+  return FINNHUB_NEWS_JOB_SCOPE;
+}
 
 app.use(cors({ origin: config.frontendOrigin }));
 app.use(express.json({ limit: "1mb" }));
@@ -1648,6 +1658,7 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
     const jobId = createJob(Math.max(tickerList.length + (pullMarket ? 1 : 0), 1), {
       category: "news-update",
       label: `Finnhub Pull (${input.sourceType})`,
+      scope: FINNHUB_NEWS_JOB_SCOPE,
     });
     activePullJobs.set(input.sourceType, jobId);
     appendLog(jobId, `Starting ${input.mode}/${input.sourceType} pull for ${tickerList.length} tickers`);
@@ -1943,6 +1954,7 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
           autoFulltextJobId = createJob(companyNewsNewItems.length, {
             category: "news-fulltext",
             label: "Full Text (company_news:auto)",
+            scope: FINNHUB_NEWS_JOB_SCOPE,
           });
           appendLog(jobId, `Auto-starting company_news fulltext for ${companyNewsNewItems.length} newly inserted rows (jobId=${autoFulltextJobId})`);
           runFulltextUpdateForNewsIds(
@@ -2219,6 +2231,7 @@ app.post("/api/news/pull-rtpr", async (req, res, next) => {
     const jobId = createJob(tickerList.length, {
       category: "news-update",
       label: "RTPR Pull",
+      scope: FINNHUB_NEWS_JOB_SCOPE,
     });
     activePullJobs.set(rtprJobKey, jobId);
     appendLog(jobId, `Starting RTPR ${input.mode} pull — ${tickerList.length} tickers`);
@@ -2499,6 +2512,7 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
     const jobId = createJob(tickerList.length, {
       category: "news-update",
       label: "FMP PR Pull",
+      scope: FINNHUB_NEWS_JOB_SCOPE,
     });
     activePullJobs.set(jobKey, jobId);
     appendLog(jobId, `Starting FMP press release ${input.mode} pull — ${tickerList.length} tickers`);
@@ -2906,6 +2920,7 @@ app.post("/api/news/pull-fmp-stock-news", async (req, res, next) => {
     const jobId = createJob(tickerList.length, {
       category: "news-update",
       label: "FMP Stock Pull",
+      scope: FINNHUB_NEWS_JOB_SCOPE,
     });
     activePullJobs.set(jobKey, jobId);
     appendLog(jobId, `Starting FMP stock news ${input.mode} pull — ${tickerList.length} tickers`);
@@ -3210,6 +3225,7 @@ app.post("/api/news/pull-fmp-sec-filing", async (req, res, next) => {
     const jobId = createJob(tickerList.length, {
       category: "news-update",
       label: "FMP SEC Pull",
+      scope: FINNHUB_NEWS_JOB_SCOPE,
     });
     activePullJobs.set(jobKey, jobId);
     appendLog(jobId, `Starting FMP SEC filing ${input.mode} pull — from=${effectiveFrom} to=${effectiveTo}`);
@@ -3484,6 +3500,7 @@ app.post("/api/news/pull-investing", async (req, res, next) => {
     const jobId = createJob(categories.length, {
       category: "news-update",
       label: `Investing Pull (${input.category})`,
+      scope: INVESTING_NEWS_JOB_SCOPE,
     });
     activePullJobs.set(jobKey, jobId);
     appendLog(jobId, `Starting Investing ${input.mode} pull — categories: ${categories.join(", ")}, from=${effectiveFrom}, to=${effectiveTo}, maxPages=${input.maxPages}`);
@@ -3649,6 +3666,7 @@ app.post("/api/news/fulltext/update", async (req, res, next) => {
     const sourceType: string | undefined = req.body?.sourceType; // 'all' | 'company_news' | 'press_release' | 'fmp_press_release' | 'fmp_stock_news'
     const sourceName: string | undefined = req.body?.sourceName;
     const concurrency: number = Math.max(1, Math.min(Number(req.body?.concurrency) || 200, 200));
+    const scope = normalizeJobScope(req.body?.scope, inferNewsWindowJobScope(sourceType, sourceName));
 
     // backfill publisher for any rows missing it
     await backfillPublisher();
@@ -3660,6 +3678,7 @@ app.post("/api/news/fulltext/update", async (req, res, next) => {
     const jobId = createJob(total, {
       category: "news-fulltext",
       label: sourceType ? `Full Text (${sourceType})` : "Full Text (all)",
+      scope,
     });
 
     // Fire-and-forget background job
@@ -3667,7 +3686,7 @@ app.post("/api/news/fulltext/update", async (req, res, next) => {
       console.error("[fulltext-update] unhandled:", err);
     });
 
-    res.json({ jobId, total, concurrency, sourceName: sourceName ?? "all" });
+    res.json({ jobId, total, concurrency, sourceName: sourceName ?? "all", scope });
   } catch (error) {
     next(error);
   }
@@ -3692,14 +3711,16 @@ app.post("/api/news/fulltext/backfill-plaintext", async (_req, res, next) => {
 app.post("/api/news/fulltext/backfill-rtpr", async (req, res, next) => {
   try {
     const concurrency: number = Math.max(1, Math.min(Number(req.body?.concurrency) || 10, 200));
+    const scope = normalizeJobScope(req.body?.scope, FINNHUB_NEWS_JOB_SCOPE);
     const jobId = createJob(0, {
       category: "news-fulltext",
       label: "RTPR Full Text Backfill",
+      scope,
     });
     runRtprBodyBackfill(jobId, concurrency).catch((err) => {
       console.error("[fulltext-backfill-rtpr] unhandled:", err);
     });
-    res.json({ jobId, concurrency });
+    res.json({ jobId, concurrency, scope });
   } catch (error) {
     next(error);
   }

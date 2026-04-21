@@ -791,7 +791,24 @@ export function FinnhubNewsWindow({
   tickerQueryRef.current = tickerQuery;
   const searchQueryRef = useRef(searchQuery);
   searchQueryRef.current = searchQuery;
-  const selectedJobStatus = selectedJobId ? jobStatuses[selectedJobId] ?? null : null;
+  const toTrackedJobStatus = useCallback((job: ActiveTrackedJob): TrackedJobStatus => ({
+    id: job.id,
+    category: job.category,
+    label: job.label,
+    scope: job.scope,
+    status: job.status === 'done' || job.status === 'failed' || job.status === 'cancelled' ? job.status : 'running',
+    progress: job.progress,
+    logs: [],
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+  }), []);
+  const selectedJobStatus = useMemo(() => {
+    if (!selectedJobId) return null;
+    const cached = jobStatuses[selectedJobId];
+    if (cached) return cached;
+    const activeJob = activeJobs.find((job) => job.id === selectedJobId);
+    return activeJob ? toTrackedJobStatus(activeJob) : null;
+  }, [activeJobs, jobStatuses, selectedJobId, toTrackedJobStatus]);
 
   const listContainerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<List>(null);
@@ -1886,6 +1903,24 @@ export function FinnhubNewsWindow({
           (job) => job.scope === NEWS_JOB_SCOPE && (job.category === 'news-update' || job.category === 'news-fulltext')
         );
         setActiveJobs(trackedJobs);
+        setJobStatuses((prev) => {
+          const next = { ...prev };
+          for (const job of trackedJobs) {
+            const fallback = toTrackedJobStatus(job);
+            const existing = next[job.id];
+            next[job.id] = existing
+              ? {
+                  ...fallback,
+                  ...existing,
+                  status: fallback.status,
+                  progress: fallback.progress,
+                  createdAt: existing.createdAt ?? fallback.createdAt,
+                  updatedAt: fallback.updatedAt ?? existing.updatedAt,
+                }
+              : fallback;
+          }
+          return next;
+        });
 
         const sortedJobs = [...trackedJobs].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
         const latestPullJob = sortedJobs.find((job) => job.category === 'news-update') ?? null;
@@ -1909,7 +1944,7 @@ export function FinnhubNewsWindow({
     const timer = setInterval(refreshActiveJobs, 2000);
     return () => { cancelled = true; clearInterval(timer); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedJobId]);
+  }, [selectedJobId, toTrackedJobStatus]);
 
   // Auto-scroll only the log panel itself so the outer page/window position stays stable
   useEffect(() => {

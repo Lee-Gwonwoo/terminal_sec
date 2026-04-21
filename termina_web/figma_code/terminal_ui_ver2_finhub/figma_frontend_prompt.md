@@ -508,7 +508,7 @@ API:
 - Investing News 창의 Update 버튼도 같은 방식으로 `news-update + investing-news` running job에만 반응한다.
 - Finnhub / FMP / RTPR Full Text 메뉴 버튼은 `disabled={ftUpdating}`를 사용하고, 이 `ftUpdating`은 `news-fulltext + finnhub-news`에만 반응한다.
 - Investing Full Text 메뉴도 자기 scope의 `news-fulltext`에만 반응한다.
-- `handleFulltextUpdate()`와 reset 계열 fulltext action은 같은 scope의 `ftUpdating`만 가드한다.
+- `handleFulltextUpdate()`와 reset 계열 fulltext action은 같은 scope의 `ftUpdating`만 가드하고, 요청 payload에도 현재 창 `scope`를 실어 backend job metadata를 같은 scope로 생성한다.
 - 반면 `handleUpdate()` 자체에는 반대 category 가드가 없다. 따라서 같은 창에서도 fulltext job running 중 일반 update 시작 시도는 가능하다.
 - backend 자체는 fulltext endpoint에 Finnhub/RTPR pull과 같은 `409 + existingJobId` duplicate guard가 없다.
 - 즉 현재 UX는 "앱 전역 단일 lock"이 아니라, 창별 scope 안에서 `updating` 묶음과 `ftUpdating` 묶음으로 나뉘어 있다.
@@ -540,6 +540,7 @@ API:
 
 - `GET /api/jobs/active`를 5초마다 polling해서 running job 목록을 읽고, 현재 창 scope와 일치하는 job만 `activeJobs`로 유지한다.
 - `currentJobId`가 비어 있고 현재 창 scope running job이 있으면 가장 최근 same-scope job을 자동 선택하고 로그 패널을 연다.
+- `activeJobs`에만 있고 상세 `/api/jobs/:jobId` 응답이 아직 안 온 상태라도, 패널은 `activeJobs`의 status/progress를 fallback으로 써서 즉시 열린다. 로그 본문은 상세 polling이 도착하는 대로 채운다.
 - 같은 scope running job이 2개 이상이면 패널 헤더에 select dropdown이 나타나고, 사용자가 볼 job을 수동으로 바꿀 수 있다.
 - dropdown 항목 라벨은 현재 `Job 1`, `Job 2` 형태에 가깝고 platform/mode/source를 직접 보여 주지 않는다.
 - `Stop` 버튼은 현재 선택된 `currentJobId`에만 적용된다.

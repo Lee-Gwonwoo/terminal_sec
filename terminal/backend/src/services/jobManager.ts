@@ -44,6 +44,13 @@ export interface JobState {
   scope: JobScope;
 }
 
+export function normalizeJobScope(value: unknown, fallback: JobScope = "other"): JobScope {
+  if (value === "finnhub-news" || value === "investing-news" || value === "other") {
+    return value;
+  }
+  return fallback;
+}
+
 // ─── In-memory store ───
 
 const jobs = new Map<string, JobState>();

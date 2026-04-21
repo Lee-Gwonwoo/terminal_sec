@@ -234,7 +234,7 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 주의:
 
 - `getUnextractedNewsIds()`는 `news_fulltext` row가 없는 뉴스만 대상으로 삼는다. 한 번 `failed` 또는 `skipped` row가 생기면 자동 재시도 대상에서 빠질 수 있다.
-- 프론트는 일반 full text와 FMP PR fulltext에 서로 다른 UI 기본값을 둘 수 있지만, 백엔드 `POST /api/news/fulltext/update`는 최종적으로 요청 body의 `[][][]concurrency[][][]` 숫자 하나만 받아 동일 worker pool 경로로 처리한다.
+- 프론트는 일반 full text와 FMP PR fulltext에 서로 다른 UI 기본값을 둘 수 있지만, 백엔드 `POST /api/news/fulltext/update`는 최종적으로 요청 body의 `[][][]concurrency[][][]`와 선택적으로 전달된 `[][][]scope[][][]`를 받아 동일 worker pool 경로로 처리한다. `scope`는 `View Log`가 창별 running job을 다시 연결할 때 쓰는 job metadata다.
 - 일반 fulltext의 현재 기본 concurrency fallback은 `200`이다. 요청 body에 `concurrency`가 없으면 backend도 `200`으로 처리한다.
 - `FINNHUB + company_news`는 별도 규칙이 있다. 저장된 `url`이 `https://finnhub.io/api/news?id=...` wrapper이면 fulltext 단계에서 먼저 `302 Location`을 읽어 `[][][]origin_url[][][]`을 복구하고, 현재는 그 원문이 `YAHOO`, `BENZINGA`일 때만 원문 추출을 시도한다.
 - 위 `company_news` 경로에서는 summary/body fallback을 더 이상 success로 저장하지 않는다. 지원하지 않는 publisher는 `unavailable`로 남고, 재처리가 필요하면 reset 후 다시 돌려야 한다.
@@ -988,6 +988,9 @@ Control Window / localStorage 공통 설정:
 - `[][][]jobId[][][]`
 
 ### `POST /api/news/fulltext/update`
+
+- 요청 body: `[][][]sourceType[][][]?`, `[][][]sourceName[][][]?`, `[][][]concurrency[][][]?`, `[][][]scope[][][]?`
+- `[][][]scope[][][]`를 보내면 생성된 `news-fulltext` job metadata에 그대로 기록되고, 없으면 backend가 source 기준으로 `finnhub-news` 또는 `investing-news`를 추론한다.
 
 응답 컬럼:
 
