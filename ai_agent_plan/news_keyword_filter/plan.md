@@ -75,13 +75,19 @@
 
 ```json
 {
-  "activeProfileId": "kf_1713760000000",
+  "activeProfileIds": ["kf_1713760000000", "kf_1713760001111"],
   "profiles": [
     {
       "id": "kf_1713760000000",
       "name": "offering 제외",
       "query": "(offering OR dilution) biotech",
       "updatedAt": "2026-04-22T05:28:00"
+    },
+    {
+      "id": "kf_1713760001111",
+      "name": "SEC filing 제외",
+      "query": "\"SEC/EDGAR\" OR \"8-K\"",
+      "updatedAt": "2026-04-22T07:21:00"
     }
   ]
 }
@@ -96,8 +102,9 @@
 
 - toolbar에 기존 `Save` / `Load` 옆 또는 `Filter` 근처에 새 버튼 `Keyword Filter`를 둔다.
 - 버튼을 누르면 dropdown 또는 popover 안에서 아래 작업이 가능해야 한다.
-  - 현재 active profile 확인
-  - `Apply` / `Clear`
+  - 현재 active profile들 확인
+  - profile별 `Add` / `Remove`
+  - `Clear all`
   - `New Filter`
   - saved profile list
   - 각 profile의 `Delete`
@@ -115,8 +122,8 @@
 - `match text`
   - query evaluation에 쓰는 row의 합성 텍스트.
   - 1차 제안: `title`, `summary`, `source_name`, `source_type`, `publisher`, `ticker`, `url`을 lower-case로 합친 문자열.
-- `active profile`
-  - 현재 화면에 실제로 적용되는 프로필. 1차 계획은 한 번에 1개만 active 허용.
+- `active profiles`
+  - 현재 화면에 실제로 적용되는 프로필 목록. 여러 profile이 동시에 active일 수 있고, row는 이 중 하나라도 match하면 제외된다.
 
 #### 검색식 운영 규칙(1차 제안)
 
@@ -158,12 +165,12 @@ offering OR shelf
 |---------|------|-------------|------|
 | D1 | 대상 window | `FinnhubNewsWindow` only | 요청의 직접 앵커가 여기 있고 변경 범위를 최소화할 수 있다. |
 | D2 | 저장 위치 | localStorage 전용 | backend schema/API를 바꾸지 않고 즉시 쓸 수 있다. |
-| D3 | active profile 수 | 한 번에 1개 | UI와 상태 관리가 단순해지고, “현재 적용” 의미가 분명하다. |
+| D3 | active profile 수 | 여러 개 동시 허용 | 사용자가 exclusion 조건을 조합할 수 있고, 저장된 profile을 켜고 끄는 방식이 더 자연스럽다. |
 | D4 | match text 범위 | title + summary + source/publisher + ticker + url | 사용자가 보는 row 정보 범위 안에서 충분하고 full text보다 가볍다. |
 | D5 | 검색식 문법 | 공백 AND, `OR`, quoted phrase, 괄호 | 사용자 요구인 “구글 키워드 웹서치처럼”을 최소 구현으로 충족한다. |
 | D6 | invalid query 처리 | 저장/적용 차단 + 에러 표시 | 조용한 오동작보다 명시적 실패가 낫다. |
 | D7 | 저장 프로필 내용 | 이름 + query만 저장 | source/date/search와 독립된 별도 기능이라는 요구에 맞다. |
-| D8 | row counter 표시 | `visible / fetched` 형태 추가 검토 | 제외 필터가 켜졌을 때 현재 화면에 몇 개 남았는지 보여주는 편이 자연스럽다. |
+| D8 | row counter 표시 | `shown / fetched` + active profiles summary | 현재 화면에 남은 개수와 원본 fetch 개수를 함께 보여주면 client-side exclude 동작이 분명해진다. |
 
 ### 계획 중간 필수 확인
 
@@ -171,7 +178,7 @@ offering OR shelf
 - 기존 `Save` / `Load` saved search와 새 keyword filter profile이 이름상 혼동될 수 있으므로, 라벨을 분명히 나눠야 한다.
 - parser를 컴포넌트 안에 직접 넣으면 `FinnhubNewsWindow.tsx`가 더 커진다. helper 분리를 우선 검토해야 한다.
 - localStorage 불러오기 실패나 legacy payload shape이 있을 때 crash 없이 기본값으로 복구해야 한다.
-- active profile이 삭제될 때는 `activeProfileId`를 즉시 비우고 리스트를 다시 계산해야 한다.
+- active profile이 삭제될 때는 `activeProfileIds`에서 해당 id만 제거하고 리스트를 다시 계산해야 한다.
 - virtual list 이전 단계에서 제외하지 않으면 counter, sticky date, load-more 동작이 어긋날 수 있다.
 - page append(`fetchMore`) 후에도 active profile이 자동 재적용되어야 한다.
 - invalid query를 `Apply`까지 허용하면 “아무것도 안 보임” 또는 “전혀 안 걸러짐” 같은 설명 어려운 상태가 생긴다.
@@ -180,7 +187,7 @@ offering OR shelf
 
 1. query parser/helper를 먼저 만든다.
    - 문법과 evaluation이 흔들리면 UI보다 먼저 테스트 기준이 무너진다.
-2. localStorage shape와 active profile state를 붙인다.
+2. localStorage shape와 active profiles state를 붙인다.
    - 새로고침 후에도 같은 필터가 유지되게 해야 “저장” 요구를 충족한다.
 3. profile 생성/적용/삭제 UI를 추가한다.
    - 사용자가 실제로 조작할 진입점이 먼저 보여야 한다.
@@ -191,13 +198,13 @@ offering OR shelf
 
 ### 단계별 계획(각 단계: 구현 -> 검증)
 
-#### ⏳ Step 0 — 요구사항/문법/저장전략 고정
+#### ✅ Step 0 — 요구사항/문법/저장전략 고정
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 0-1 | 직접 제어 지점을 `FinnhubNewsWindow.tsx`로 고정 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 현재 검색/fetch/groupedNews 경로 확인 | ⏳ |
-| 0-2 | 검색식 규칙을 공백 AND / `OR` / quoted phrase / 괄호로 정의 | `ai_agent_plan/news_keyword_filter/plan.md` | 예시 식 3개가 사람이 읽어도 해석 가능 | ⏳ |
-| 0-3 | 저장 구조를 localStorage profile list + activeProfileId로 고정 | `ai_agent_plan/news_keyword_filter/plan.md` | payload 예시가 요구사항과 일치 | ⏳ |
+| 0-1 | 직접 제어 지점을 `FinnhubNewsWindow.tsx`로 고정 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 현재 검색/fetch/groupedNews 경로 확인 | ✅ |
+| 0-2 | 검색식 규칙을 공백 AND / `OR` / quoted phrase / 괄호로 정의 | `ai_agent_plan/news_keyword_filter/plan.md` | 예시 식 3개가 사람이 읽어도 해석 가능 | ✅ |
+| 0-3 | 저장 구조를 localStorage profile list + activeProfileIds로 고정 | `ai_agent_plan/news_keyword_filter/plan.md` | payload 예시가 요구사항과 일치 | ✅ |
 
 - `0-1` 목적: 구현 범위를 한 창으로 묶어 불필요한 파급을 막는다.
   설명: 서버 검색과 최종 렌더 사이의 client-side filter insertion point를 확인하면 이후 변경이 작아진다.
@@ -223,13 +230,13 @@ offering OR shelf
 3. 사용자 확인 필요: 예
 ```
 
-#### ⬜ Step 1 — 검색식 parser/helper 추가
+#### ⏳ Step 1 — 검색식 parser/helper 추가
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 1-1 | query tokenizer/parser/evaluator helper를 새 파일로 분리 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/newsKeywordFilter.ts` | invalid/valid 예시 식을 함수 수준에서 점검 | ⬜ |
-| 1-2 | row를 평가할 `buildNewsKeywordMatchText()` helper를 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/newsKeywordFilter.ts` | 샘플 row 2개로 예상 match 여부 비교 | ⬜ |
-| 1-3 | parse error message shape를 UI에서 재사용 가능하게 고정 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/newsKeywordFilter.ts` | invalid query 입력 시 message 존재 확인 | ⬜ |
+| 1-1 | query tokenizer/parser/evaluator helper를 새 파일로 분리 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/newsKeywordFilter.ts` | invalid/valid 예시 식을 함수 수준에서 점검 | ⏳ |
+| 1-2 | row를 평가할 `buildNewsKeywordMatchText()` helper를 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/newsKeywordFilter.ts` | 샘플 row 2개로 예상 match 여부 비교 | ⏳ |
+| 1-3 | parse error message shape를 UI에서 재사용 가능하게 고정 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/newsKeywordFilter.ts` | invalid query 입력 시 message 존재 확인 | ⏳ |
 
 - `1-1` 목적: 복잡한 boolean 문법을 컴포넌트 밖으로 분리한다.
   설명: `AND/OR/괄호/phrase` 지원은 별도 helper가 아니면 컴포넌트 가독성이 급격히 나빠진다.
@@ -259,18 +266,25 @@ offering OR shelf
 4. 사용자 확인 필요: 예
 ```
 
-#### ⬜ Step 2 — profile 저장/적용/삭제 UI 및 persistence 추가
+현재 진행 메모 (2026-04-22 06:02 local)
+
+- `src/app/newsKeywordFilter.ts`를 추가해 parser, evaluator, match text builder를 컴포넌트 밖으로 분리했다.
+- `get_errors`에서 `newsKeywordFilter.ts`, `FinnhubNewsWindow.tsx` 모두 0 errors를 확인했다.
+- `npm.cmd run build`가 통과했다.
+- 최종 사용자 확인 전이므로 Step 상태는 `⏳`로 유지한다.
+
+#### ⏳ Step 2 — profile 저장/적용/삭제 UI 및 persistence 추가
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 2-1 | profile type/state/localStorage load/save 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 새로고침 후 active profile 유지 확인 | ⬜ |
-| 2-2 | `Keyword Filter` toolbar 버튼과 dropdown/panel 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 버튼/목록/active 표식 렌더링 확인 | ⬜ |
-| 2-3 | `New Filter` modal에 name/query 입력과 validation 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | invalid query 저장 차단 확인 | ⬜ |
-| 2-4 | saved profile apply/delete/clear 흐름 구현 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | apply 후 active badge, delete 후 목록 갱신 확인 | ⬜ |
+| 2-1 | profile type/state/localStorage load/save 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 새로고침 후 active profile 유지 확인 | ⏳ |
+| 2-2 | `Keyword Filter` toolbar 버튼과 dropdown/panel 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 버튼/목록/active 표식 렌더링 확인 | ⏳ |
+| 2-3 | `New Filter` modal에 name/query 입력과 validation 연결 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | invalid query 저장 차단 확인 | ⏳ |
+| 2-4 | saved profile apply/delete/clear 흐름 구현 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | apply 후 active badge, delete 후 목록 갱신 확인 | ⏳ |
 
 - `2-1` 목적: 저장된 필터가 세션을 넘어 살아남게 한다.
-  설명: localStorage에서 profile list와 activeProfileId를 읽고 쓸 수 있어야 “저장” 요구를 충족한다.
-  완료 조건(눈으로 확인): 페이지 새로고침 후 마지막 active profile이 남아 있다.
+  설명: localStorage에서 profile list와 activeProfileIds를 읽고 쓸 수 있어야 “저장” 요구를 충족한다.
+  완료 조건(눈으로 확인): 페이지 새로고침 후 마지막 active profile 목록이 남아 있다.
   사람 검증(비개발자): 필터를 저장하고 새로고침해도 같은 필터가 선택된 상태다.
   흔한 문제/주의: invalid legacy JSON 때문에 첫 렌더가 깨지지 않게 해야 한다.
 - `2-2` 목적: 검색창과 분리된 전용 진입점을 만든다.
@@ -284,9 +298,9 @@ offering OR shelf
   사람 검증(비개발자): 예시 query를 붙여넣고 이름을 붙여 저장할 수 있다.
   흔한 문제/주의: query가 비어 있거나 이름만 중복될 때 처리 규칙이 필요하다.
 - `2-4` 목적: 저장 후 즉시 적용과 정리를 가능하게 한다.
-  설명: `Apply`, `Clear`, `Delete`가 모두 없으면 사용 흐름이 끊긴다.
-  완료 조건(눈으로 확인): 저장한 항목을 눌러 active로 만들고 삭제할 수 있다.
-  사람 검증(비개발자): 프로필 하나를 적용한 뒤 지우면 active 상태도 같이 해제된다.
+  설명: `Add/Remove`, `Clear all`, `Delete`가 모두 없으면 사용 흐름이 끊긴다.
+  완료 조건(눈으로 확인): 저장한 항목 여러 개를 동시에 active로 만들고, 일부만 끄거나 전체 clear 할 수 있다.
+  사람 검증(비개발자): 프로필 두 개를 같이 켠 뒤 하나를 지워도 나머지 active 상태가 유지된다.
   흔한 문제/주의: active profile 삭제 후 stale filter가 남지 않게 해야 한다.
 
 검증 훅:
@@ -302,13 +316,20 @@ offering OR shelf
 4. 사용자 확인 필요: 예
 ```
 
-#### ⬜ Step 3 — client-side exclude filter 적용
+현재 진행 메모 (2026-04-22 06:02 local)
+
+- toolbar에 `Keyword Filter` 버튼, dropdown, create/edit modal, active badge를 추가했다.
+- localStorage key `[][][]finnhub-news-keyword-filters-v1[][][]`로 profile 목록과 `activeProfileIds`를 저장한다.
+- 브라우저에서 생성, 수정, 적용, clear, 삭제, 새로고침 후 복원까지 1차 확인했다.
+- 최종 사용자 확인 전이므로 Step 상태는 `⏳`로 유지한다.
+
+#### ⏳ Step 3 — client-side exclude filter 적용
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 3-1 | active profile query를 parse/evaluate해 `newsData`에 적용 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 샘플 query 적용 시 row 감소 확인 | ⬜ |
-| 3-2 | `groupedNews` 계산을 exclude 후 데이터 기준으로 재구성 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | sticky header / load-more / sort 정상 확인 | ⬜ |
-| 3-3 | item counter와 active filter summary 문구 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | `visible / fetched` 또는 active query 표시 확인 | ⬜ |
+| 3-1 | active profiles query를 parse/evaluate해 `newsData`에 적용 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | 샘플 query 적용 시 row 감소 확인 | ⏳ |
+| 3-2 | `groupedNews` 계산을 exclude 후 데이터 기준으로 재구성 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | sticky header / load-more / sort 정상 확인 | ⏳ |
+| 3-3 | item counter와 active filter summary 문구 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/FinnhubNewsWindow.tsx` | `visible / fetched` 또는 active query 표시 확인 | ⏳ |
 
 - `3-1` 목적: 실제로 row를 제외하는 본체를 붙인다.
   설명: backend fetch는 유지하고 현재 가져온 data에만 exclude를 적용한다.
@@ -322,7 +343,7 @@ offering OR shelf
   흔한 문제/주의: header만 남거나 load-more sentinel 위치가 어긋날 수 있다.
 - `3-3` 목적: 현재 무엇이 적용됐는지 화면에서 바로 알 수 있게 한다.
   설명: “왜 row가 줄었는지”를 모르면 오동작처럼 보인다.
-  완료 조건(눈으로 확인): active profile 이름과 남은 item 수가 보인다.
+  완료 조건(눈으로 확인): active profile 이름 목록과 남은 item 수가 보인다.
   사람 검증(비개발자): 필터 해제 시 row 수가 원래대로 돌아온다.
   흔한 문제/주의: counter가 fetched total과 visible total 중 무엇인지 불명확하면 혼동된다.
 
@@ -339,13 +360,32 @@ offering OR shelf
 4. 사용자 확인 필요: 예
 ```
 
-#### ⬜ Step 4 — 문서 동기화 및 최종 검증
+현재 진행 메모 (2026-04-22 06:02 local)
+
+- `newsData`와 `groupedNews` 사이에 client-side exclude filter를 추가했다.
+- 하단 summary는 `shown / fetched`, active profiles summary, `Hidden` count를 표시하도록 바뀌었다.
+- 브라우저에서 active summary와 ON/OFF 전환은 확인했지만, 해당 시점 뉴스 목록이 `0 items / Loading...`에 머물러 실제 row 감소량과 `shown / fetched` 변화는 끝까지 검증하지 못했다.
+- 최종 사용자 확인 전이므로 Step 상태는 `⏳`로 유지한다.
+
+현재 진행 메모 (2026-04-22 06:24 local)
+
+- 좁은 날짜 범위 API는 backend 병목이 아니었다.
+  - `GET /api/news?source_names=FINNHUB,RTPR,FMP&limit=5&from=2026-04-21&to=2026-04-22` 응답 시간: 약 `0.026s`
+  - `GET /api/model1/news?source_names=FINNHUB,RTPR,FMP&limit=5&from=2026-04-21&to=2026-04-22` 응답 시간: 약 `0.015s`
+- 동일한 프론트 helper(`newsKeywordFilter.ts`)를 실 API 응답 5건에 직접 적용해 live row 감소량을 검증했다.
+  - query `"SEC/EDGAR" OR "conference call"` => `total 5 / hidden 3 / shown 2`
+  - query `quality investing` => `total 5 / hidden 1 / shown 4`
+- 따라서 실제 populated data 기준으로 exclude 결과가 변하는 것은 확인됐다.
+- 브라우저 자동화에서 `From/To` 변경 직후 `Loading...`이 남은 현상은, 넓은 요청 abort 후 UI fetch state가 남는 기존 경로와 더 관련 있어 보인다. 현재 기능 범위에서는 이를 별도 이슈로 분리하고, keyword filter의 live data matching 자체는 검증 완료로 본다.
+- 최종 사용자 확인 전이므로 Step 상태는 `⏳`로 유지한다.
+
+#### ⏳ Step 4 — 문서 동기화 및 최종 검증
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 4-1 | 기능 설명과 사용 예시를 프론트 문서에 반영 | `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md` | 문서에 `Keyword Filter` 검색 가능 | ⬜ |
-| 4-2 | 필요 시 backend prompt에도 “서버 검색과 별도 client exclude filter”를 반영 | `terminal/backend_prompt.md` | 문서에 역할 분리가 명시됨 | ⬜ |
-| 4-3 | 정적 분석/빌드/런타임 통합 검증을 완료하고 log 기록 | `ai_agent_plan/news_keyword_filter/agent_log.md` | 검증 표 4계층 채움 | ⬜ |
+| 4-1 | 기능 설명과 사용 예시를 프론트 문서에 반영 | `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md` | 문서에 `Keyword Filter` 검색 가능 | ⏳ |
+| 4-2 | 필요 시 backend prompt에도 “서버 검색과 별도 client exclude filter”를 반영 | `terminal/backend_prompt.md` | 문서에 역할 분리가 명시됨 | ⏳ |
+| 4-3 | 정적 분석/빌드/런타임 통합 검증을 완료하고 log 기록 | `ai_agent_plan/news_keyword_filter/agent_log.md` | 검증 표 4계층 채움 | ⏳ |
 
 - `4-1` 목적: 사용자가 query 문법을 UI 밖에서도 참고할 수 있게 한다.
   설명: 특히 공백 AND와 `OR` 규칙은 문서에 남겨야 재현 가능하다.
@@ -375,18 +415,25 @@ offering OR shelf
 4. 사용자 확인 필요: 예
 ```
 
-### 미확정 사항(명시 결정 필요)
+현재 진행 메모 (2026-04-22 06:02 local)
 
-| ID | 내용 | 선택지 | 차단 대상 Step |
-|----|------|--------|----------------|
-| U1 | match text에 `url`까지 포함할지 | A. 포함 / B. 제외 | Step 1, Step 3 |
-| U2 | counter 표시 형식 | A. `visible / fetched` / B. `visible items`만 / C. active profile 이름만 표시 | Step 3 |
-| U3 | profile 수정 기능 포함 여부 | A. 1차는 생성+삭제만 / B. 수정까지 포함 | Step 2 |
+- `figma_frontend_prompt.md`와 `terminal/backend_prompt.md`에 검색과 keyword exclude 역할 분리를 반영했다.
+- `agent_log.md`에 정적 분석, build, 브라우저 검증 결과와 남은 제한 사항을 기록한다.
+- 최종 사용자 확인 전이므로 Step 상태는 `⏳`로 유지한다.
 
-- 권장안:
-  - `U1`: A. 포함. source/publisher 도메인 기반 제외에 도움이 된다.
-  - `U2`: A. `visible / fetched`. 필터 효과가 가장 잘 드러난다.
-  - `U3`: A. 1차는 생성+삭제만. 요청 필수 범위를 먼저 닫고, 수정은 follow-up으로 둔다.
+현재 진행 메모 (2026-04-22 06:24 local)
+
+- 추가 런타임 검증에서 narrow date API는 빠르게 응답했고, shared parser를 실데이터에 적용해 hidden/shown count를 수치로 재확인했다.
+- 따라서 Step 4의 남은 이슈는 keyword filter 동작 자체가 아니라, 브라우저 자동화에서 남은 `Loading...` 관찰값을 어떻게 별도 이슈로 정리할지다.
+- 최종 사용자 확인 전이므로 Step 상태는 `⏳`로 유지한다.
+
+### 구현 후 확정 사항
+
+| ID | 내용 | 현재 구현 |
+|----|------|-----------|
+| R1 | match text 범위 | `title`, `body`, `publisher`, `source`, `sourceType`, `originUrl`, `url`, `ticker`, `keywords` 포함 |
+| R2 | counter 표시 형식 | `shown / fetched` + active profiles summary + `Hidden` count |
+| R3 | profile 조작 범위 | 생성 + 수정 + 삭제 + 다중 active toggle + clear all |
 
 ### 실행 의존성 그래프
 
@@ -400,51 +447,48 @@ Legend
 ```text
 Track A — 프론트 설계/구현
 
-⏳ Step 0 요구사항/문법/저장전략 고정
-  ⏳ 0-1 FinnhubNewsWindow 앵커 고정
-  ⏳ 0-2 query 문법 정의
-  ⏳ 0-3 localStorage 구조 정의
+✅ Step 0 요구사항/문법/저장전략 고정
+  ✅ 0-1 FinnhubNewsWindow 앵커 고정
+  ✅ 0-2 query 문법 정의
+  ✅ 0-3 localStorage 구조 정의
 
-⬜ Step 1 parser/helper 추가
-  ⬜ 1-1 tokenizer/parser/evaluator helper
-  ⬜ 1-2 match text builder
-  ⬜ 1-3 parse error shape
+⏳ Step 1 parser/helper 추가
+  ⏳ 1-1 tokenizer/parser/evaluator helper
+  ⏳ 1-2 match text builder
+  ⏳ 1-3 parse error shape
 
-⬜ Step 2 profile UI/persistence
-  ⬜ 2-1 localStorage load/save
-  ⬜ 2-2 Keyword Filter 버튼/패널
-  ⬜ 2-3 New Filter modal
-  ⬜ 2-4 apply/delete/clear
+⏳ Step 2 profile UI/persistence
+  ⏳ 2-1 localStorage load/save
+  ⏳ 2-2 Keyword Filter 버튼/패널
+  ⏳ 2-3 New Filter modal
+  ⏳ 2-4 apply/delete/clear
 
-⬜ Step 3 exclude 적용
-  ⬜ 3-1 active profile evaluation
-  ⬜ 3-2 groupedNews 재구성
-  ⬜ 3-3 counter/summary 문구
+⏳ Step 3 exclude 적용
+  ⏳ 3-1 active profile evaluation
+  ⏳ 3-2 groupedNews 재구성
+  ⏳ 3-3 counter/summary 문구
 
 Track B — 문서/검증
 
-🚫 Step 4 문서 동기화 및 최종 검증
-  🚫 4-1 figma_frontend_prompt.md 동기화
-  🚫 4-2 backend_prompt.md 역할 분리 반영
-  🚫 4-3 agent_log 검증 표 작성
+⏳ Step 4 문서 동기화 및 최종 검증
+  ⏳ 4-1 figma_frontend_prompt.md 동기화
+  ⏳ 4-2 backend_prompt.md 역할 분리 반영
+  ⏳ 4-3 agent_log 검증 표 작성
 
-[BLOCKED: Track B는 Track A의 실제 UI 문구와 localStorage key가 확정된 뒤 시작]
+[NOTE: Step 4는 문서 동기화와 1차 브라우저 검증까지 진행됐고, 최종 사용자 확인 대기 상태]
 ```
 
 ### 병렬 트랙 요약
 
 - Track A는 실제 기능 구현 경로다. `Step 1 -> Step 2 -> Step 3` 순차 진행이 가장 안전하다.
 - Track B는 문서/검증 경로다. UI 라벨과 동작이 확정된 뒤에만 시작할 수 있다.
-- 현재는 `Step 0` 사용자 확인이 선행돼야 Track A 구현으로 넘어갈 수 있다.
+- 현재는 구현과 1차 검증이 끝났고, Step 1~4의 최종 사용자 확인이 남아 있다.
 
 ### 차단 요약 테이블
 
 | 결정 | 차단 대상 | 선택지 |
 |------|-----------|--------|
-| Step 0 사용자 확인 | Step 1 전체 | 진행 / 수정 후 재계획 |
-| U1 match text 범위 | Step 1, Step 3 | url 포함 / 제외 |
-| U2 counter 표시 | Step 3 | `visible / fetched` / 단순 visible |
-| U3 profile 수정 범위 | Step 2 | 생성+삭제만 / 수정 포함 |
+| 최종 사용자 확인 | Step 1~4를 `✅`로 전환 | 진행 유지 / 수정 요청 |
 
 ### 결정 #1 — 검색식 파서 범위(상세)
 
@@ -482,3 +526,16 @@ Track B — 문서/검증
 - 이유:
   - 현재 row 메타 정보 수준에서 사용자가 기대하는 키워드 제외 대부분을 처리할 수 있다.
   - full text까지 포함하면 fetch하지 않은 row와의 의미 차이가 커진다.
+
+### PLAN CHANGE — 2026-04-22 05:35 (local)
+
+- 사용자 확인으로 `FinnhubNewsWindow` 대상 고정을 승인했다.
+- profile 작업 범위는 `생성 + 수정 + 삭제 + 적용`으로 올렸다.
+- counter 표시는 `shown / fetched` + active profile summary를 기본안으로 고정한다.
+
+### PLAN CHANGE — 2026-04-22 07:21 (local)
+
+- 사용자 요청으로 keyword filter profile을 동시에 여러 개 active할 수 있게 확장한다.
+- 저장 구조는 `activeProfileId` 단일 값에서 `activeProfileIds` 배열로 바꾼다. 다만 기존 localStorage는 migration으로 읽어온다.
+- row 제외 규칙은 `active profiles` 중 하나라도 match하면 제외하는 OR-union 방식으로 고정한다.
+- 메뉴 UX는 단일 `Apply` 대신 profile별 `Add/Remove`와 `Clear all` 기준으로 바꾼다.

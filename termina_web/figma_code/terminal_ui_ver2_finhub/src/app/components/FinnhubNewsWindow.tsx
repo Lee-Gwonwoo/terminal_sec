@@ -4,6 +4,7 @@ import type { DataControlHowToUseWindowData } from '../types';
 import { VariableSizeList as List } from 'react-window';
 import { BookmarkManager } from './BookmarkManager';
 import { getCompanyTickerDataAttrs } from '../companyDescription';
+import { buildNewsKeywordMatchText, matchesKeywordFilterAst, parseKeywordFilterExpression, type KeywordFilterProfile } from '../newsKeywordFilter';
 
 const API_BASE = "";
 const ET_TIME_ZONE = 'America/New_York';
@@ -281,6 +282,49 @@ function readStoredObject(key: string): Record<string, unknown> | null {
     return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
   } catch {
     return null;
+  }
+}
+
+const KEYWORD_FILTER_STORAGE_KEY = 'finnhub-news-keyword-filters-v1';
+
+interface StoredKeywordFilterState {
+  activeProfileIds: string[];
+  profiles: KeywordFilterProfile[];
+}
+
+function isKeywordFilterProfile(value: unknown): value is KeywordFilterProfile {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.id === 'string'
+    && typeof candidate.name === 'string'
+    && typeof candidate.query === 'string'
+    && typeof candidate.updatedAt === 'string';
+}
+
+function readStoredKeywordFilterState(): StoredKeywordFilterState {
+  try {
+    const raw = localStorage.getItem(KEYWORD_FILTER_STORAGE_KEY);
+    if (!raw) {
+      return { activeProfileIds: [], profiles: [] };
+    }
+
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const profiles = Array.isArray(parsed?.profiles) ? parsed.profiles.filter(isKeywordFilterProfile) : [];
+    const activeProfileIds = Array.isArray(parsed?.activeProfileIds)
+      ? parsed.activeProfileIds.filter((value): value is string => typeof value === 'string')
+      : typeof parsed?.activeProfileId === 'string' && parsed.activeProfileId
+        ? [parsed.activeProfileId]
+        : [];
+
+    return {
+      activeProfileIds: activeProfileIds.filter((profileId, index) => activeProfileIds.indexOf(profileId) === index && profiles.some((profile) => profile.id === profileId)),
+      profiles,
+    };
+  } catch {
+    return { activeProfileIds: [], profiles: [] };
   }
 }
 
@@ -594,6 +638,11 @@ export function FinnhubNewsWindow({
     persistedUiStateRef.current = readStoredObject('finhub-news-ui-state') ?? {};
   }
   const persistedUiState = persistedUiStateRef.current;
+  const storedKeywordFiltersRef = useRef<StoredKeywordFilterState | null>(null);
+  if (storedKeywordFiltersRef.current === null) {
+    storedKeywordFiltersRef.current = readStoredKeywordFilterState();
+  }
+  const storedKeywordFilters = storedKeywordFiltersRef.current;
 
   const [searchQuery, setSearchQuery] = useState(initialTicker || '');
   const [tickerQuery, setTickerQuery] = useState(initialTicker || '');
@@ -619,11 +668,19 @@ export function FinnhubNewsWindow({
   const [showWatchlistMenu, setShowWatchlistMenu] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showLoadMenu, setShowLoadMenu] = useState(false);
+  const [showKeywordFilterMenu, setShowKeywordFilterMenu] = useState(false);
+  const [showKeywordFilterModal, setShowKeywordFilterModal] = useState(false);
   const [showDisplayModeMenu, setShowDisplayModeMenu] = useState(false);
   const [selectedWatchlist, setSelectedWatchlist] = useState('All');
   const [listHeight, setListHeight] = useState(500);
   const [stickyDate, setStickyDate] = useState('');
   const [saveName, setSaveName] = useState('');
+  const [keywordFilterProfiles, setKeywordFilterProfiles] = useState<KeywordFilterProfile[]>(() => storedKeywordFilters.profiles);
+  const [activeKeywordFilterIds, setActiveKeywordFilterIds] = useState<string[]>(() => storedKeywordFilters.activeProfileIds);
+  const [editingKeywordFilterId, setEditingKeywordFilterId] = useState<string | null>(null);
+  const [keywordFilterName, setKeywordFilterName] = useState('');
+  const [keywordFilterQuery, setKeywordFilterQuery] = useState('');
+  const [keywordFilterFormError, setKeywordFilterFormError] = useState<string | null>(null);
 
   // Source cell context menu (Copy URL)
   const [sourceCtxMenu, setSourceCtxMenu] = useState<null | { x: number; y: number; url: string }>(null);
@@ -815,6 +872,7 @@ export function FinnhubNewsWindow({
   const filterMenuRef = useRef<HTMLDivElement>(null);
   const watchlistMenuRef = useRef<HTMLDivElement>(null);
   const loadMenuRef = useRef<HTMLDivElement>(null);
+  const keywordFilterMenuRef = useRef<HTMLDivElement>(null);
   const displayModeMenuRef = useRef<HTMLDivElement>(null);
   // columnMenuRef declared above with column state
 
@@ -975,6 +1033,114 @@ export function FinnhubNewsWindow({
     sourceTypeFilter: SourceTypeFilter;
   }
   const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
+  const activeKeywordFilters = useMemo(
+    () => keywordFilterProfiles.filter((profile) => activeKeywordFilterIds.includes(profile.id)),
+    [activeKeywordFilterIds, keywordFilterProfiles],
+  );
+  const activeKeywordFilterParses = useMemo(
+    () => activeKeywordFilters.map((profile) => ({ profile, parsed: parseKeywordFilterExpression(profile.query) })),
+    [activeKeywordFilters],
+  );
+  const activeKeywordFilterParseError = useMemo(
+    () => activeKeywordFilterParses.find((entry) => !entry.parsed.ok) ?? null,
+    [activeKeywordFilterParses],
+  );
+  const activeKeywordFilterAsts = useMemo(
+    () => activeKeywordFilterParses.flatMap((entry) => entry.parsed.ok ? [entry.parsed.ast] : []),
+    [activeKeywordFilterParses],
+  );
+  const keywordFilterDraftParse = useMemo(() => {
+    const trimmedQuery = keywordFilterQuery.trim();
+    if (!trimmedQuery) {
+      return null;
+    }
+    return parseKeywordFilterExpression(trimmedQuery);
+  }, [keywordFilterQuery]);
+  const keywordFilterValidationMessage = keywordFilterFormError
+    ?? (keywordFilterDraftParse && !keywordFilterDraftParse.ok ? keywordFilterDraftParse.error : null);
+
+  const resetKeywordFilterModal = useCallback(() => {
+    setShowKeywordFilterModal(false);
+    setEditingKeywordFilterId(null);
+    setKeywordFilterName('');
+    setKeywordFilterQuery('');
+    setKeywordFilterFormError(null);
+  }, []);
+
+  const openNewKeywordFilterModal = useCallback(() => {
+    setEditingKeywordFilterId(null);
+    setKeywordFilterName('');
+    setKeywordFilterQuery('');
+    setKeywordFilterFormError(null);
+    setShowKeywordFilterMenu(false);
+    setShowKeywordFilterModal(true);
+  }, []);
+
+  const openEditKeywordFilterModal = useCallback((profile: KeywordFilterProfile) => {
+    setEditingKeywordFilterId(profile.id);
+    setKeywordFilterName(profile.name);
+    setKeywordFilterQuery(profile.query);
+    setKeywordFilterFormError(null);
+    setShowKeywordFilterMenu(false);
+    setShowKeywordFilterModal(true);
+  }, []);
+
+  const handleSaveKeywordFilter = useCallback(() => {
+    const trimmedName = keywordFilterName.trim();
+    const trimmedQuery = keywordFilterQuery.trim();
+
+    if (!trimmedName) {
+      setKeywordFilterFormError('Filter name is required.');
+      return;
+    }
+
+    if (!trimmedQuery) {
+      setKeywordFilterFormError('Exclude query is required.');
+      return;
+    }
+
+    const parsed = parseKeywordFilterExpression(trimmedQuery);
+    if (!parsed.ok) {
+      setKeywordFilterFormError(parsed.error);
+      return;
+    }
+
+    const profileId = editingKeywordFilterId ?? `kf_${Date.now()}`;
+    const nextProfile: KeywordFilterProfile = {
+      id: profileId,
+      name: trimmedName,
+      query: trimmedQuery,
+      updatedAt: new Date().toISOString(),
+    };
+
+    setKeywordFilterProfiles((prev) => {
+      if (prev.some((profile) => profile.id === profileId)) {
+        return prev.map((profile) => profile.id === profileId ? nextProfile : profile);
+      }
+      return [nextProfile, ...prev];
+    });
+    setActiveKeywordFilterIds((prev) => prev.includes(profileId) ? prev : [profileId, ...prev]);
+    resetKeywordFilterModal();
+  }, [editingKeywordFilterId, keywordFilterName, keywordFilterQuery, resetKeywordFilterModal]);
+
+  const handleDeleteKeywordFilter = useCallback((profileId: string) => {
+    setKeywordFilterProfiles((prev) => prev.filter((profile) => profile.id !== profileId));
+    setActiveKeywordFilterIds((prev) => prev.filter((id) => id !== profileId));
+    if (editingKeywordFilterId === profileId) {
+      resetKeywordFilterModal();
+    }
+  }, [editingKeywordFilterId, resetKeywordFilterModal]);
+
+  const handleToggleKeywordFilter = useCallback((profileId: string) => {
+    setActiveKeywordFilterIds((prev) => prev.includes(profileId)
+      ? prev.filter((id) => id !== profileId)
+      : [profileId, ...prev]);
+  }, []);
+
+  const handleClearActiveKeywordFilters = useCallback(() => {
+    setActiveKeywordFilterIds([]);
+    setShowKeywordFilterMenu(false);
+  }, []);
 
   const handleAddBookmark = useCallback(async (folderId: string, newsId: string) => {
     try {
@@ -1073,6 +1239,21 @@ export function FinnhubNewsWindow({
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [bookmarkFolderCtxMenu]);
+
+  useEffect(() => {
+    setActiveKeywordFilterIds((prev) => prev.filter((profileId) => keywordFilterProfiles.some((profile) => profile.id === profileId)));
+  }, [keywordFilterProfiles]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(KEYWORD_FILTER_STORAGE_KEY, JSON.stringify({
+        activeProfileIds: activeKeywordFilterIds,
+        profiles: keywordFilterProfiles,
+      }));
+    } catch {
+      // ignore storage failures
+    }
+  }, [activeKeywordFilterIds, keywordFilterProfiles]);
 
   // ─── Fetch news from backend (server-side search via keyword param) ───
   const fetchNews = useCallback(async (keyword?: string) => {
@@ -1988,14 +2169,15 @@ export function FinnhubNewsWindow({
       if (filterMenuRef.current && !filterMenuRef.current.contains(event.target as Node)) setShowFilterMenu(false);
       if (watchlistMenuRef.current && !watchlistMenuRef.current.contains(event.target as Node)) setShowWatchlistMenu(false);
       if (loadMenuRef.current && !loadMenuRef.current.contains(event.target as Node)) setShowLoadMenu(false);
+      if (keywordFilterMenuRef.current && !keywordFilterMenuRef.current.contains(event.target as Node)) setShowKeywordFilterMenu(false);
       if (displayModeMenuRef.current && !displayModeMenuRef.current.contains(event.target as Node)) setShowDisplayModeMenu(false);
       if (columnMenuRef.current && !columnMenuRef.current.contains(event.target as Node)) setShowColumnMenu(false);
     };
-    if (showFilterMenu || showWatchlistMenu || showLoadMenu || showDisplayModeMenu || showColumnMenu) {
+    if (showFilterMenu || showWatchlistMenu || showLoadMenu || showKeywordFilterMenu || showDisplayModeMenu || showColumnMenu) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
-  }, [showFilterMenu, showWatchlistMenu, showLoadMenu, showDisplayModeMenu, showColumnMenu]);
+  }, [showFilterMenu, showWatchlistMenu, showLoadMenu, showKeywordFilterMenu, showDisplayModeMenu, showColumnMenu]);
 
   // ─── Sort helper ───
   const getSortValue = useCallback((item: DisplayItem, col: ColumnId): string | number => {
@@ -2034,9 +2216,33 @@ export function FinnhubNewsWindow({
     });
   };
 
-  // ─── Sort + Group (search is now server-side) ───
+  const keywordFilteredNews = useMemo(() => {
+    if (activeKeywordFilterAsts.length === 0) {
+      return newsData;
+    }
+
+    return newsData.filter((item) => {
+      const matchText = buildNewsKeywordMatchText({
+        title: item.title,
+        body: item.body,
+        publisher: item.publisher,
+        source: item.source,
+        sourceType: item.sourceType,
+        originUrl: item.originUrl,
+        url: item.url,
+        tickers: item.ticker,
+        keywords: item.keywords,
+      });
+
+      return !activeKeywordFilterAsts.some((ast) => matchesKeywordFilterAst(ast, matchText));
+    });
+  }, [activeKeywordFilterAsts, newsData]);
+
+  const hiddenByKeywordFilterCount = Math.max(newsData.length - keywordFilteredNews.length, 0);
+
+  // ─── Sort + Group (search is server-side, exclude keyword filter is client-side) ───
   const groupedNews = useMemo(() => {
-    let filtered = [...newsData];
+    let filtered = [...keywordFilteredNews];
 
     if (sort.column && sort.dir) {
       const col = sort.column;
@@ -2066,7 +2272,7 @@ export function FinnhubNewsWindow({
       result.push({ type: 'load-more' });
     }
     return result;
-  }, [newsData, sort, getSortValue, nextCursor]);
+  }, [keywordFilteredNews, sort, getSortValue, nextCursor]);
 
   const findStickyDateForIndex = useCallback((index: number) => {
     for (let i = Math.min(index, groupedNews.length - 1); i >= 0; i--) {
@@ -3207,12 +3413,107 @@ export function FinnhubNewsWindow({
                 <Settings2 className="w-3.5 h-3.5" /><span className="text-xs">Control</span>
               </button>
 
-              <button onClick={() => setShowSaveModal(true)} className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-white dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 bg-white dark:bg-gray-900" title="Save search settings">
+              <div className="relative" ref={keywordFilterMenuRef}>
+                <button
+                  onClick={() => {
+                    setShowKeywordFilterMenu(!showKeywordFilterMenu);
+                    setShowFilterMenu(false);
+                    setShowColumnMenu(false);
+                    setShowLoadMenu(false);
+                    setShowDisplayModeMenu(false);
+                    setShowWatchlistMenu(false);
+                  }}
+                  className={`px-3 py-1.5 border rounded-lg transition-colors flex items-center gap-1.5 ${activeKeywordFilters.length > 0 ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-300 dark:border-gray-600 hover:bg-white dark:hover:bg-gray-800 bg-white dark:bg-gray-900'}`}
+                  title="Exclude rows using a saved keyword filter profile"
+                >
+                  <Filter className="w-3.5 h-3.5" />
+                  <span className="text-xs">Keyword Filter</span>
+                  {activeKeywordFilters.length > 0 && (
+                    <span className="rounded-full bg-blue-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">{activeKeywordFilters.length}</span>
+                  )}
+                  <ChevronDown className="w-3 h-3" />
+                </button>
+                {showKeywordFilterMenu && (
+                  <div className="absolute top-full mt-1 right-0 w-[340px] bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-lg z-30">
+                    <div className="p-3 space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-400 dark:text-gray-500">Keyword Exclude Filter</div>
+                          <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">공백은 AND, `OR`, 따옴표, 괄호를 지원합니다. 일치한 row는 목록에서 제외합니다.</div>
+                        </div>
+                        <button
+                          onClick={openNewKeywordFilterModal}
+                          className="inline-flex items-center gap-1 rounded border border-gray-300 dark:border-gray-600 px-2.5 py-1.5 text-[11px] hover:bg-gray-50 dark:hover:bg-gray-700"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>New</span>
+                        </button>
+                      </div>
+
+                      <div className={`rounded-lg border px-3 py-2 ${activeKeywordFilters.length > 0 ? 'border-blue-200 bg-blue-50/70 dark:border-blue-800 dark:bg-blue-900/20' : 'border-dashed border-gray-300 dark:border-gray-600 bg-gray-50/60 dark:bg-gray-900/30'}`}>
+                        {activeKeywordFilters.length > 0 ? (
+                          <>
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="text-[11px] font-semibold text-gray-700 dark:text-gray-200">Active: {activeKeywordFilters.length} filters</div>
+                              <button onClick={handleClearActiveKeywordFilters} className="text-[11px] text-blue-600 dark:text-blue-300 hover:underline">Clear all</button>
+                            </div>
+                            <div className="mt-2 space-y-2">
+                              {activeKeywordFilters.map((profile) => (
+                                <div key={profile.id} className="rounded border border-blue-200/70 dark:border-blue-800/70 px-2.5 py-2">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="text-[11px] font-medium text-gray-700 dark:text-gray-200">{profile.name}</div>
+                                    <button onClick={() => handleToggleKeywordFilter(profile.id)} className="text-[11px] text-blue-600 dark:text-blue-300 hover:underline">Remove</button>
+                                  </div>
+                                  <div className="mt-1 text-[10px] text-gray-500 dark:text-gray-400 break-words">{profile.query}</div>
+                                  <div className="mt-2 flex items-center justify-end gap-3 text-[11px]">
+                                    <button onClick={() => openEditKeywordFilterModal(profile)} className="text-gray-600 dark:text-gray-300 hover:underline">Edit</button>
+                                    <button onClick={() => handleDeleteKeywordFilter(profile.id)} className="text-red-500 hover:underline">Delete</button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="text-[11px] text-gray-500 dark:text-gray-400">현재 적용 중인 키워드 제외 필터가 없습니다.</div>
+                        )}
+                      </div>
+
+                      <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                        {keywordFilterProfiles.length === 0 ? (
+                          <div className="rounded border border-dashed border-gray-300 dark:border-gray-600 px-3 py-4 text-center text-[11px] text-gray-500 dark:text-gray-400">저장된 키워드 필터가 없습니다.</div>
+                        ) : keywordFilterProfiles.map((profile) => {
+                          const isActive = activeKeywordFilterIds.includes(profile.id);
+                          return (
+                            <div key={profile.id} className={`rounded-lg border ${isActive ? 'border-blue-300 bg-blue-50/60 dark:border-blue-700 dark:bg-blue-900/20' : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/20'}`}>
+                              <button
+                                onClick={() => handleToggleKeywordFilter(profile.id)}
+                                className="w-full text-left px-3 py-2 rounded-t-lg hover:bg-gray-50 dark:hover:bg-gray-800"
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-[11px] font-medium text-gray-700 dark:text-gray-200">{profile.name}</span>
+                                  {isActive ? <span className="rounded-full bg-blue-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">On</span> : <span className="text-[10px] text-gray-400">Add</span>}
+                                </div>
+                                <div className="mt-1 text-[10px] text-gray-500 dark:text-gray-400 break-words">{profile.query}</div>
+                              </button>
+                              <div className="flex items-center justify-end gap-3 px-3 pb-2 text-[11px]">
+                                <button onClick={() => openEditKeywordFilterModal(profile)} className="text-gray-600 dark:text-gray-300 hover:underline">Edit</button>
+                                <button onClick={() => handleDeleteKeywordFilter(profile.id)} className="text-red-500 hover:underline">Delete</button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <button onClick={() => { setShowSaveModal(true); setShowKeywordFilterMenu(false); }} className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-white dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 bg-white dark:bg-gray-900" title="Save search settings">
                 <Save className="w-3.5 h-3.5" /><span className="text-xs">Save</span>
               </button>
 
               <div className="relative" ref={loadMenuRef}>
-                <button onClick={() => { setShowLoadMenu(!showLoadMenu); setShowFilterMenu(false); setShowWatchlistMenu(false); setShowDisplayModeMenu(false); }} className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-white dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 bg-white dark:bg-gray-900" title="Load search settings">
+                <button onClick={() => { setShowLoadMenu(!showLoadMenu); setShowFilterMenu(false); setShowWatchlistMenu(false); setShowDisplayModeMenu(false); setShowKeywordFilterMenu(false); }} className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-white dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 bg-white dark:bg-gray-900" title="Load search settings">
                   <FolderOpen className="w-3.5 h-3.5" /><span className="text-xs">Load</span>
                 </button>
                 {showLoadMenu && (
@@ -3237,16 +3538,30 @@ export function FinnhubNewsWindow({
 
         <div className="flex flex-col lg:flex-row lg:items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-800/30 px-3 py-2">
           <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
-            <span>{newsData.length} items{nextCursor ? '+' : ''}</span>
+            <span>{keywordFilteredNews.length === newsData.length ? `${newsData.length} items${nextCursor ? '+' : ''}` : `${keywordFilteredNews.length} shown / ${newsData.length}${nextCursor ? '+' : ''} fetched`}</span>
             {loading && <span className="text-blue-500">Loading...</span>}
             {loadingMore && <span className="text-blue-500">Loading more...</span>}
             {selectedWatchlist !== 'All' && (
               <span className="text-gray-500 dark:text-gray-400">Watch list: {selectedWatchlist}</span>
             )}
+            {activeKeywordFilters.length > 0 && (
+              <span className="text-blue-600 dark:text-blue-300" title={activeKeywordFilters.map((profile) => profile.query).join(' | ')}>
+                Keyword Filter: {activeKeywordFilters.map((profile) => profile.name).join(', ')}
+              </span>
+            )}
+            {hiddenByKeywordFilterCount > 0 && (
+              <span className="text-blue-600 dark:text-blue-300">Hidden: {hiddenByKeywordFilterCount}</span>
+            )}
           </div>
 
           {error && (
             <span className="text-[11px] text-red-500 truncate max-w-[320px]" title={error}>{error}</span>
+          )}
+
+          {!error && activeKeywordFilterParseError && !activeKeywordFilterParseError.parsed.ok && (
+            <span className="text-[11px] text-amber-600 dark:text-amber-300 truncate max-w-[320px]" title={`${activeKeywordFilterParseError.profile.name}: ${activeKeywordFilterParseError.parsed.error}`}>
+              Keyword Filter error: {activeKeywordFilterParseError.profile.name} - {activeKeywordFilterParseError.parsed.error}
+            </span>
           )}
 
           {isModel1SafeMode && (
@@ -3284,7 +3599,7 @@ export function FinnhubNewsWindow({
 
             <div className="relative" ref={filterMenuRef}>
               <button
-                onClick={() => { setShowFilterMenu(!showFilterMenu); setShowColumnMenu(false); setShowLoadMenu(false); setShowDisplayModeMenu(false); setShowWatchlistMenu(false); }}
+                onClick={() => { setShowFilterMenu(!showFilterMenu); setShowColumnMenu(false); setShowLoadMenu(false); setShowDisplayModeMenu(false); setShowWatchlistMenu(false); setShowKeywordFilterMenu(false); }}
                 className={`px-2.5 py-1.5 text-xs border rounded-lg transition-colors flex items-center gap-1.5 ${
                   hasNumericFilters
                     ? 'border-blue-300 bg-blue-50 text-blue-600 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
@@ -3378,7 +3693,7 @@ export function FinnhubNewsWindow({
 
             <div className="relative" ref={columnMenuRef}>
             <button
-              onClick={() => { setShowColumnMenu(!showColumnMenu); setShowFilterMenu(false); setShowLoadMenu(false); setShowDisplayModeMenu(false); setShowWatchlistMenu(false); }}
+              onClick={() => { setShowColumnMenu(!showColumnMenu); setShowFilterMenu(false); setShowLoadMenu(false); setShowDisplayModeMenu(false); setShowWatchlistMenu(false); setShowKeywordFilterMenu(false); }}
               className="px-2.5 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-white dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 bg-white dark:bg-gray-900"
               title="Show/hide columns"
             >
@@ -3419,7 +3734,7 @@ export function FinnhubNewsWindow({
           </div>
 
           <div className="relative" ref={watchlistMenuRef}>
-            <button onClick={() => { setShowWatchlistMenu(!showWatchlistMenu); setShowFilterMenu(false); setShowLoadMenu(false); setShowDisplayModeMenu(false); }}
+            <button onClick={() => { setShowWatchlistMenu(!showWatchlistMenu); setShowFilterMenu(false); setShowLoadMenu(false); setShowDisplayModeMenu(false); setShowKeywordFilterMenu(false); }}
               className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-white dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 bg-white dark:bg-gray-900">
               <span>Watch Lists</span><ChevronDown className="w-3 h-3" />
             </button>
@@ -3614,6 +3929,75 @@ export function FinnhubNewsWindow({
             <div className="flex justify-end gap-2">
               <button onClick={() => setShowSaveModal(false)} className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
               <button onClick={handleSaveSearch} className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showKeywordFilterModal && (
+        <div className="absolute inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-4 w-[420px] border border-gray-200 dark:border-gray-700">
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <div>
+                <h3 className="text-sm font-semibold">{editingKeywordFilterId ? 'Edit Keyword Filter' : 'New Keyword Filter'}</h3>
+                <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">공백은 AND, `OR`, 따옴표, 괄호를 지원합니다. 일치한 row는 제외됩니다.</div>
+              </div>
+              <button onClick={resetKeywordFilterModal} className="rounded p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-600 dark:hover:text-gray-200">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-300 mb-1">Filter Name</label>
+                <input
+                  type="text"
+                  value={keywordFilterName}
+                  onChange={(e) => { setKeywordFilterName(e.target.value); setKeywordFilterFormError(null); }}
+                  placeholder="예: offering 제외"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSaveKeywordFilter();
+                    }
+                    if (e.key === 'Escape') {
+                      resetKeywordFilterModal();
+                    }
+                  }}
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-300 mb-1">Exclude Query</label>
+                <textarea
+                  value={keywordFilterQuery}
+                  onChange={(e) => { setKeywordFilterQuery(e.target.value); setKeywordFilterFormError(null); }}
+                  placeholder={'예: offering biotech\n예: offering OR shelf\n예: ("public offering" OR dilution) biotech'}
+                  rows={4}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-y"
+                  onKeyDown={(e) => {
+                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveKeywordFilter();
+                    }
+                    if (e.key === 'Escape') {
+                      resetKeywordFilterModal();
+                    }
+                  }}
+                />
+                <div className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">예: `offering biotech` = AND, `offering OR shelf` = OR, `("public offering" OR dilution) biotech` = grouped AND.</div>
+              </div>
+
+              {keywordFilterValidationMessage && (
+                <div className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-700 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300">{keywordFilterValidationMessage}</div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-1">
+                <button onClick={resetKeywordFilterModal} className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
+                <button onClick={handleSaveKeywordFilter} className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">{editingKeywordFilterId ? 'Save & Apply' : 'Create & Apply'}</button>
+              </div>
             </div>
           </div>
         </div>

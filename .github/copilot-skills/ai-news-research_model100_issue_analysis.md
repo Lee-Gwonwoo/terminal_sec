@@ -128,6 +128,12 @@
 - `validator / counterparty`는 중요해도 **관련주 고등급의 근거가 아니다.** 예를 들어 `Oracle`, `AEP`처럼 이번 계약/검증에는 핵심이어도, 핵심 이슈 티커와 같은 사업을 하지 않으면 관련주 표에서 `A`나 `B`를 주지 않는다.
 - `관련주`와 `검증자`를 섞지 않는다. 사용자가 `관련주`를 물으면 먼저 **동종/인접 사업 peer**를 정리하고, customer/utility/hyperscaler는 별도 `검증자 / counterparty` 표로 뺀다.
 - `3개 이상 종목 동시 +5%` 같은 basket 확인 규칙도 **관련주 표에 들어간 same-business / adjacent-business basket** 기준으로만 계산한다. validator / counterparty는 이 분모에 넣지 않는다.
+- 기본 `관련주 정리` 단계에서는 각 핵심 ticker에 대해 `현재 투자 스토리를 지탱하는 사업이 실제로 언제부터 운영됐는지`, `과거 사업/상호/핵심 테마를 빈번하게 바꿨는지`, `현재 사업이 과거 사업의 연장인지 사실상 새 사업인지`를 함께 확인한다.
+- 이 business history 확인은 governance audit가 아니라 **관련주 적합성 검증**이다. 사업 유사도가 높아 보여도 현재 사업이 최근에 붙은 서사인지, 과거 사업과의 연속성이 약한지, 실제 운영 증거가 약한지는 `설명` 또는 짧은 메모에 남긴다.
+- 상장 연혁이 길더라도 `법인 연혁`과 `현재 사업의 경제적 연혁`을 분리한다. 제품, 고객, 매출, 핵심 자산, 경영진의 연속성을 기준으로 `현재 사업 실질 시작 시점`을 판단한다.
+- 이 business history 조사는 app DB에 없거나 매우 sparse할 가능성이 높으므로, `company_profiles.description`만으로 부족하면 **웹서치를 허용하고 권장**한다.
+- business history 웹 확인 우선순위는 `SEC EDGAR / 20-F / 10-K / S-1 등 연차·등록 공시 -> 본국 공시 시스템(예: SEDAR+) -> issuer IR / about / history / timeline page -> archived press release / newsroom -> 신뢰 가능한 보조 프로필 사이트` 순서로 둔다.
+- 검색 엔진(Bing, DuckDuckGo 등)은 **발견(discovery) 수단으로는 사용 가능**하지만, 최종 문서에는 검색 결과 페이지가 아니라 실제 근거 페이지를 source로 남긴다.
 - 기본 예시:
    - `핵심 동종 peer + A + read-through`: BE 이슈에서 FCEL처럼 같은 데이터센터 onsite power / distributed generation 문제를 푸는 종목
    - `인접 사업 peer + B + read-through`: 같은 고객 예산을 놓고 다른 전력 아키텍처로 경쟁하는 엔진/터빈 계열
@@ -143,6 +149,9 @@
    2. `company description 축`: `company_profiles.description`, `securities.industry/sector` 확인
    3. `peer / graph 축`: `peers_json`, 기존 core ticker peer, 동일 파동일 동반 반응 종목 확인
    4. `price validation 축`: anchor day / front-wide breakout / 후속 파동일의 동기화 반응 확인
+- `관련주 확장`에서 새 후보를 넣거나 제외할 때도 keyword match만으로 끝내지 말고, `현재 사업 실질 시작 시점`, `과거 사업/상호/핵심 테마 변경 여부`, `현재 사업의 실제 운영 증거`를 함께 확인한다.
+- 과거 사업 전환이 잦거나 현재 테마가 최근에 붙은 서사에 가깝다면, 그 사실을 `포함/제외 판단`과 `설명` 칸에 남긴다. business history가 약하면 관련주 등급을 자동으로 높게 주지 않는다.
+- DB에 business history가 없다고 해서 `관련주 확장` 검토를 멈추지 않는다. 이 경우 web search로 filing, IR history page, archived PR, home-market filing까지 추적해 포함/제외 판단을 이어간다.
 - `관련주 확장`에서는 **적어도 1개의 keyword 묶음만 쓰고 끝내면 안 된다.** 가능하면 아래처럼 3개 이상 묶는다.
    - 제품 키워드: `transceiver`, `optical engine`, `laser`, `modulator`, `DSP`, `coherent`
    - 아키텍처 키워드: `silicon photonics`, `CPO`, `1.6T`, `800G`, `InP`, `PIC`
@@ -185,6 +194,34 @@
 - 바스켓이 넓어 서술형 deep-dive를 줄여야 하더라도, 최소한 비교표 행은 전 ticker에 대해 유지한다. narrative 범위를 줄였으면 `핵심 ticker 상세 / 나머지 ticker 요약`처럼 축약 범위를 명시한다.
 - 1차 소스와 2차 소스가 충돌하면 1차 소스를 우선하고, 2차 소스는 검산·시계열 보강·screening 보조 용도로만 쓴다.
 - 숫자나 filing 근거를 확보하지 못한 항목은 추정으로 메우지 말고 `미확인`, `공시 미발견`, `source 확인 필요`처럼 명시한다.
+
+##### Governance task 섹션 작성 규칙
+
+- governance 관련 작성 분량이 많거나, 한 번에 모든 항목을 확정하기 어려우면 research page 안에 **별도 `### Governance task` 섹션을 추가**해 단계적으로 작성할 수 있다.
+- 이 `Governance task` 섹션은 기존 `### Governance / Dilution 리스크 감사` 본문을 **대체하지 않는다.** 이미 governance 표/요약이 작성되어 있어도, 추가 조사·미확정 항목·후속 deep-dive는 항상 그 **아래 별도 섹션**에 누적한다.
+- 사용자가 `하나씩`, `단계적으로`, `먼저 governance부터`, `거버넌스 task 따로`처럼 요청하면, governance audit를 한 번에 모두 끝내지 못해도 된다. 대신 각 회차에서 무엇을 완료했고 무엇이 남았는지를 `### Governance task` 섹션에 남겨 page 자체가 진행 상태를 보존해야 한다.
+- `### Governance task` 섹션에는 가능하면 표를 우선 사용하고, 최소한 `task | 상태 | 이번 회차 산출물 | 남은 확인 source | 다음 단계`가 보이게 정리한다.
+- task 분할 기본 예시는 `share structure`, `founder / control`, `insider ownership / voting power`, `5년 dilution`, `capital raise / shelf / ATM`, `Form 4 / insider selling`, `red flag checklist` 순서를 우선한다.
+
+##### 거버넌스 표 이후 오퍼링 히스토리 연동 규칙
+
+- 사용자가 `거버넌스`와 `오퍼링 이력`을 함께 보려는 맥락이면, **거버넌스 비교표/요약을 먼저 작성한 뒤 회사별 오퍼링 히스토리 섹션으로 이어서 정리**한다.
+- 즉 출력 흐름은 기본적으로 `거버넌스 표/요약 -> 회사별 오퍼링 이력 -> 여러 회사 비교 요약` 순서를 우선한다.
+- 이때 오퍼링 이력은 반드시 **한 회사씩 완결형으로** 적는다. 예: `# POET ... 오퍼링 이력`을 끝내고 `## 주요 인사이트`까지 마친 뒤 다음 `# MXL ... 오퍼링 이력`으로 넘어간다.
+- 여러 회사를 묶어 비교하더라도, 각 회사 섹션 안에서는 `범위 설명 -> 전체 목록 표 -> 주요 인사이트`를 유지하고, 마지막에만 `## 비교 요약` 또는 `## 비교 업데이트`를 둔다.
+- 거버넌스 섹션에서 이미 `capital raise history`, `ATM`, `희석률`을 다뤘더라도, 회사별 오퍼링 history 표는 **생략하지 않는다.** 거버넌스 표는 비교용 요약이고, 오퍼링 history 표는 거래 연표/금액/구성 정리용으로 역할이 다르다.
+
+##### 사용자 제공 초안 정리 규칙
+
+- 사용자가 조사 내용을 거친 초안 형태로 제공하면, 그 내용을 바탕으로 **섹션 제목, markdown 표, 짧은 해설, 비교표**를 갖춘 완결형 문서로 재정렬한다.
+- 사용자가 준 숫자/서술을 그대로 붙여넣지 말고, 최소한 아래를 정리한다.
+   1. 제목과 범위 문단 분리
+   2. 표 컬럼 정렬 및 헤더 복원
+   3. `주요 인사이트` bullet 정리
+   4. 여러 회사 비교표 또는 `비교 업데이트` 섹션 분리
+- 사용자가 이미 `POET`, `MXL`, `LWLG`, `AXTI`처럼 회사별 블록을 준 경우, 각 회사를 독립 섹션으로 쪼개고 마지막에 비교표를 둔다.
+- 사용자가 `5개 종목 Class B / Dual-class 구조 조사 결과`, `5개 종목 지분구조 및 희석 이력 종합 정리`, `각 종목별 세부 분석`처럼 결과 섹션 예시를 주면, 특별한 충돌이 없는 한 그 섹션명을 우선 존중한다.
+- 단, 예시 문구를 그대로 복제하는 것이 목적은 아니고, **같은 정보 구조와 읽기 순서**를 재현하는 것이 목적이다.
 
 필수 조사 항목:
 
@@ -308,6 +345,103 @@
 - 시총 비중이 정확 계산이 아닌 경우에는 반드시 `(추정)`을 붙이고, 가능하면 `gross proceeds / 당시 market cap`인지 `shares * price / market cap`인지 짧게 설명한다.
 - 표만 던지고 끝내지 않는다. 사용자 예시처럼 **표 + 짧은 해설 + 핵심 경고/특이사항**을 같이 둔다.
 - 사용자가 범위 제외를 원하지 않았더라도, 역사적으로 딜 수가 매우 많다면 표 위에서 `이번 답변은 NASDAQ 업리스팅 이후 중심`, `초기 OTC/TSXV 소규모 PP 제외`처럼 **이번 정리의 범위선**을 먼저 그어 독자가 무엇이 빠졌는지 알 수 있게 한다.
+
+### 멀티-회사 오퍼링 / 지배구조 정리 템플릿
+
+- 사용자가 여러 회사를 순차적으로 비교하려는 경우, 아래 순서를 기본으로 한다.
+   1. `## {N}개 종목 Class B / Dual-class 구조 조사 결과` 또는 동등한 거버넌스 요약 표
+   2. `## 주목할 포인트` 또는 `## 핵심 포인트`
+   3. `## {N}개 종목 지분구조 및 희석 이력 종합 정리` 표
+   4. `## 각 종목별 세부 분석`
+   5. 회사별 오퍼링 이력 섹션들: `# POET ...`, `# MXL ...`, `# LWLG ...`처럼 **한 회사씩 완결형**
+   6. 마지막 `## 비교 요약` 또는 `## 비교 업데이트`
+- 위 구조는 사용자가 `이것도 참고해라`, `이런 식으로 정리해라`처럼 예시형 결과를 줄 때 특히 우선 적용한다.
+- 멀티-회사 거버넌스 요약 표의 권장 컬럼은 `Ticker | 회사명 | Share 구조 | 세부사항` 또는 `Ticker | 주요 인물 | 창업자 여부 | 현재 지분율 | 보유 주식 수 | 최근 매매 패턴`이다.
+- `각 종목별 세부 분석`에서는 회사당 1개 소제목을 두고, `창업자/전문경영인 여부`, `지분율`, `최근 매매 패턴`, `희석/ATM/오퍼링 체질`, `구조 리스크 vs 실제 행보`를 1~3문단으로 정리한다.
+- 멀티-회사 오퍼링 이력 비교의 마지막 요약 표 권장 컬럼은 `상장 연도 | 상장 이후 총 equity 조달 | Follow-on/ATM 빈도 | 자본조달 방식 | 희석 체질 | 비즈니스 단계`다.
+- 사용자가 예시에서 특정 표현을 반복하면, 예를 들어 `극명한 대조`, `모든 red flag`, `serial diluter 패턴` 같은 요약어는 그대로 복사하지 말고, **근거가 바로 뒤에 붙는 한줄 평가**로 재작성한다.
+- 사용자가 일부 회사만 묶어서 비교하라고 하면 `## FORM & ACMR 지분구조 및 희석 이력 분석`처럼 **쌍/소수 종목 묶음 제목**을 그대로 사용할 수 있다. 이 경우에도 `요약 표 -> 핵심 포인트 -> 각 종목별 세부 분석 -> 필요 시 회사별 오퍼링 이력` 순서를 유지한다.
+
+#### 사용자 예시형 결과 뼈대
+
+- 아래 뼈대는 사용자가 `이런 식으로 정리해라`라고 준 예시를 markdown 결과물로 재구성할 때 우선 사용하는 기본 shape다.
+- 숫자와 회사명은 실제 조사 결과로 교체하되, **제목 계층과 표 배치 순서**는 특별한 이유가 없으면 유지한다.
+
+```md
+## 5개 종목 Class B / Dual-class 구조 조사 결과
+
+| Ticker | 회사명 | Share 구조 | 세부사항 |
+| --- | --- | --- | --- |
+| POET | POET Technologies | single-class | ... |
+| MXL | MaxLinear | single-class | ... |
+| LWLG | Lightwave Logic | single-class | ... |
+| AXTI | AXT Inc. | single-class | ... |
+| FORM | FormFactor | single-class | ... |
+
+## 핵심 포인트
+
+- ...
+- ...
+
+## 5개 종목 지분구조 및 희석 이력 종합 정리
+
+| Ticker | 주요 인물 | 창업자 여부 | 현재 지분율 | 보유 주식 수 | 최근 매매 패턴 |
+| --- | --- | --- | --- | --- | --- |
+| ... | ... | ... | ... | ... | ... |
+
+## 각 종목별 세부 분석
+
+### POET
+
+- 구조:
+- 실제 행보:
+
+### MXL
+
+- 구조:
+- 실제 행보:
+
+### LWLG
+
+- 구조:
+- 실제 행보:
+```
+
+```md
+# POET Technologies (NASDAQ: POET) 오퍼링 이력
+
+이번 정리는 ... 범위를 기준으로 한다. ... 는 제외/포함한다.
+
+## 오퍼링 전체 목록
+
+| # | 날짜 (발표/마감) | 오퍼링 종류 | 총 금액 (USD) | 오퍼링 가격 | 주식수/구성 | 당시 시총 비중 (추정) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | ... | ATM | ... | 시장가 매매 | ... | ... |
+| 2 | ... | registered direct | ... | ... | ... | ... |
+
+## 주요 인사이트
+
+- 누적 equity 조달 규모:
+- 가장 큰 딜 / 가장 희석적이었던 딜:
+- ATM / shelf / warrant / 잔여 capacity:
+- 구조적 리스크 vs 실제 운용 행보:
+
+# MaxLinear (NASDAQ: MXL) 오퍼링 이력
+
+...
+
+# Lightwave Logic (NASDAQ: LWLG) 오퍼링 이력
+
+...
+
+## 비교 요약
+
+| Ticker | 상장 연도 | 상장 이후 총 equity 조달 | Follow-on/ATM 빈도 | 자본조달 방식 | 희석 체질 | 비즈니스 단계 |
+| --- | --- | --- | --- | --- | --- | --- |
+| ... | ... | ... | ... | ... | ... | ... |
+```
+
+- 사용자가 `비교 업데이트`, `세 회사 비교 요약`, `거버넌스 관점 순위` 같은 마지막 섹션명을 명시했다면, 위 `## 비교 요약` 위치에 그 제목을 그대로 대체해 사용한다.
 
 오너십 데이터 섹션 바로 아래에 반드시 이어져야 하는 것:
 - **핵심 분석이슈 고정 블록**을 먼저 쓴다. 여기서 `이슈 티어가 만들어진 날`, `event_date`, `published_at`, `change_anchor`, 대표 headline/structured catalyst, 핵심 가격 반응 테이블을 먼저 제시한다.
@@ -603,8 +737,10 @@ company_news 분석 시, **이벤트가 실제로 발생한 날짜(event_date)**
 ## 한줄 결론
 ## 관련주 정리
    [표: 티커 / 분류 / 관련성 정도 등급 / 설명]
+   - 각 핵심 ticker는 `현재 사업 실질 시작 시점 / 과거 사업 전환 여부 / 현재 사업과 과거 사업의 연속성`을 `설명` 또는 짧은 메모에 남긴다
 ## 관련주 확장 (사용자가 명시적으로 요청한 경우에만)
    [표: 티커 / 후보 발견 경로 / 분류 / 관련성 정도 등급 / 포함 여부 / 설명]
+   - 새 후보는 `현재 사업 실질 시작 시점 / 사업 전환 이력 / 실제 운영 증거`까지 확인해 포함/제외 판단을 적는다
    - 사용한 keyword 묶음
    - 검토했지만 제외한 대표 후보와 제외 이유
 ## 오너십 데이터
@@ -616,6 +752,11 @@ company_news 분석 시, **이벤트가 실제로 발생한 날짜(event_date)**
    [표: offering date / closing date / offering type / offer price / shares sold / gross proceeds / market cap at pricing / offering % of market cap / discount to prior close / use of proceeds]
    [표: Form 4 buy/sell / 10b5-1 여부 / large sales / red flag checklist]
    [요약: governance 상대 순위 / academic frame / comparable cases / 구조적 리스크 vs 실제 운영상 리스크]
+   ### Governance task
+   [표: task / 상태 / 이번 회차 산출물 / 남은 확인 source / 다음 단계]
+   - 기존 governance 표/요약을 지우지 말고 그 아래에 추가 작성
+   - 이미 governance 내용이 page에 있어도 별도 섹션으로 누적
+   - 분량이 많으면 task 단위로 하나씩 완료해도 허용
 ## 🔴 핵심 분석이슈: {메인 촉매 날짜} {티커}
   - event_date: {실제 이벤트 날짜}
   - published_at: {기사/공시 시각}
@@ -812,7 +953,7 @@ company_news 분석 시, **이벤트가 실제로 발생한 날짜(event_date)**
 ## 데이터 소스 귀속 (attribution) 규칙 (필수)
 
 - 모든 팩트(날짜, headline, 등락률, 어닝 수치)에는 **데이터 소스를 명시**한다.
-- 허용되는 소스 태그: `company_news`, `fmp_pr`, `fmp_sec`, `calendar_events`, `ohlc_1d`, `news_change_metrics`, `investing`, `company_profiles`, `sec_10k`, `sec_s1`, `sec_def14a`, `sec_8k`, `sec_form4`, `sec_10q`, `sec_424b5`, `sec_edgar_web`, `issuer_ir`, `issuer_ir_web`, `macrotrends`, `companiesmarketcap`, `gurufocus`, `insidertrades`, `fintel`, `simplywallst`, `corpgov_harvard`, `stocktitan`.
+- 허용되는 소스 태그: `company_news`, `fmp_pr`, `fmp_sec`, `calendar_events`, `ohlc_1d`, `news_change_metrics`, `investing`, `company_profiles`, `sec_10k`, `sec_s1`, `sec_def14a`, `sec_8k`, `sec_form4`, `sec_10q`, `sec_424b5`, `sec_edgar_web`, `sedar_plus_web`, `issuer_ir`, `issuer_ir_web`, `issuer_history_web`, `archived_pr_web`, `macrotrends`, `companiesmarketcap`, `gurufocus`, `insidertrades`, `fintel`, `simplywallst`, `corpgov_harvard`, `stocktitan`.
 - 소스가 불명확한 정보는 `(출처 미확인)` 태그를 붙이고, 가능하면 DB 쿼리로 검증한다.
 - headline은 DB에서 읽은 원문 그대로 적는다. 요약/의역하지 않는다.
 

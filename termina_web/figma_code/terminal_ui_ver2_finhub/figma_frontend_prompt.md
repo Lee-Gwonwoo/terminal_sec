@@ -15,7 +15,8 @@
 - ticker가 있는 주요 창에서는 클릭으로 `Company Description` 창을 열 수 있고, ticker hover 3초 뒤 `CompanyDescriptionHoverPreview` overlay가 뜬다.
 - `BraveNewsWindow.tsx` 파일은 남아 있지만 현재 `WindowType`에 연결되어 있지 않아 UI에서 열 수 없다.
 - 탭/창 레이아웃, 다크 모드, 전역 글자 크기, 뉴스 제목/요약 글자 크기, linked ticker는 `terminal-workspace-v1`로 localStorage에 저장된다.
-- 추가 UI 상태로 `finhub-news-ui-state`, `investing-news-ui-state`, `finnhub-last-update-config`, `data-control-active-tab`, `ft-concurrency`, `fmp-pr-fulltext-concurrency`, `fmp-stock-fulltext-concurrency`, `change-fmp-concurrency`, `finnhub-ticker-concurrency`, `finnhub-request-interval-sec`, `finnhub-company-news-ticker-concurrency`, `finnhub-company-news-request-interval-sec`, `rtpr-ticker-concurrency`, `fmp-concurrency`, `fmp-request-interval-ms`, `fmp-pr-page-limit`, `fmp-pr-max-pages`, `fmp-sec-max-pages`, `fmp-skip-existing`, `peers-skip-existing`, `ipo-skip-existing`, `yahoo-concurrency`, `yahoo-request-interval-ms`, `yahoo-skip-existing`를 사용한다.
+- 추가 UI 상태로 `finhub-news-ui-state`, `investing-news-ui-state`, `finnhub-last-update-config`, `data-control-active-tab`, `ft-concurrency`, `fmp-pr-fulltext-concurrency`, `fmp-stock-fulltext-concurrency`, `change-fmp-concurrency`, `finnhub-ticker-concurrency`, `finnhub-request-interval-sec`, `finnhub-company-news-ticker-concurrency`, `finnhub-company-news-request-interval-sec`, `rtpr-ticker-concurrency`, `fmp-concurrency`, `fmp-request-interval-ms`, `fmp-pr-page-limit`, `fmp-pr-max-pages`, `fmp-sec-max-pages`, `fmp-skip-existing`, `peers-skip-existing`, `ipo-skip-existing`, `yahoo-concurrency`, `yahoo-request-interval-ms`, `yahoo-skip-existing`, `finnhub-news-keyword-filters-v1`를 사용한다.
+- `FinnhubNewsWindow`는 `finnhub-news-keyword-filters-v1`에 keyword exclude profile 목록과 `activeProfileIds`를 저장한다. 이 저장소는 검색 저장(`Save` / `Load`)과 별개다.
 - `FinnhubNewsWindow`의 `Control` modal과 `DataControlWindow` Settings 탭은 `fmp-concurrency`, `fmp-request-interval-ms`를 공유한다. 즉 FMP press release / FMP stock news / FMP SEC filing pull 속도 설정은 두 화면에서 같은 값을 편집한다.
 - 같은 두 화면은 `fmp-pr-page-limit`, `fmp-pr-max-pages`, `fmp-sec-max-pages`도 공유한다. 즉 FMP press release / FMP stock news / FMP SEC filing의 페이지 단위 수집 제한도 같은 저장 키를 본다.
 - `FinnhubNewsWindow`의 `Control` modal과 `DataControlWindow` Settings 탭은 `finnhub-company-news-ticker-concurrency`, `finnhub-company-news-request-interval-sec`도 공유한다. 즉 `Company News` pull 전용 속도 설정은 두 화면에서 같은 값을 편집한다.
@@ -190,6 +191,26 @@ GET /api/news?source_names=FINNHUB,RTPR,FMP&limit=500
 - 리스트 하단에 `Load more` 버튼 제공
 - `react-window`의 `onItemsRendered`로 sentinel row 감지 시 자동 추가 로드
 
+### Keyword Exclude Filter
+
+- `Keyword Filter`는 검색창과 별도인 client-side exclude filter다.
+- 구현 파일은 `src/app/newsKeywordFilter.ts`, 연결 지점은 `src/app/components/FinnhubNewsWindow.tsx`다.
+- backend `GET /api/news`는 exclude query를 모른다. 즉 서버 검색은 `keyword`, 제외 필터는 프론트에서 이미 받아온 `newsData`에 다시 적용하는 2단 구조다.
+- 저장 단위는 `name + query + updatedAt`를 가진 profile이며, localStorage key `finnhub-news-keyword-filters-v1`에 `activeProfileIds` 배열과 함께 저장한다. 기존 단일 `activeProfileId` 저장값도 migration으로 읽어온다.
+- query grammar는 아래 4가지만 1차 범위로 지원한다.
+  - 공백 = implicit `AND`
+  - `OR`
+  - quoted phrase
+  - 괄호 그룹
+- 예시:
+  - `offering biotech`
+  - `offering OR shelf`
+  - `("public offering" OR dilution) biotech`
+- match text는 `title`, `body`, `publisher`, `source`, `sourceType`, `originUrl`, `url`, `ticker`, `keywords`를 lower-case로 합쳐 평가한다.
+- invalid query는 저장/적용을 막고 modal 안에 validation message를 표시한다.
+- 여러 active filter가 동시에 가능하며, row는 active profile 중 하나라도 match하면 제외된다.
+- active filter가 있으면 summary 줄에 profile 이름 목록을 보여주고, count는 `shown / fetched` 형식으로 바뀐다. 제외된 row가 있으면 `Hidden` count도 함께 표시한다.
+
 ### 검색 UI
 
 상단 툴바는 `좌측 검색 블록 + 우측 제어 블록 + 하단 유틸리티 줄` 3영역으로 재배치돼 있다.
@@ -201,9 +222,10 @@ GET /api/news?source_names=FINNHUB,RTPR,FMP&limit=500
 - 우측 제어 블록
   - source type filter 버튼 묶음
   - `Full View` / `Model_1 Safe`, `Bookmark view`, `Display mode`
-  - `Update`, `View Log`, `Full Text`, `Refresh`, `Control`, `Save`, `Load`
+  - `Update`, `View Log`, `Full Text`, `Refresh`, `Control`, `Keyword Filter`, `Save`, `Load`
 - 하단 유틸리티 줄
   - item count / loading 상태
+  - active keyword filter summary / hidden count
   - 에러 메시지 / `Model_1 safe payload active`
   - `HV`, `Z Score` quick toggle 버튼
   - `Filters`, `Columns`, `Watch Lists`

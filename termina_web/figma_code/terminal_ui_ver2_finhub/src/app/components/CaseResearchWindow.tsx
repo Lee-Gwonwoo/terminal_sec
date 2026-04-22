@@ -102,12 +102,6 @@ interface ParsedMarkdownTableRow {
   cells: ParsedMarkdownTableCell[];
 }
 
-interface MarkdownTableBlock {
-  start: number;
-  end: number;
-  lines: PreviewTextLine[];
-}
-
 function normalizeHighlightColor(value: string): string {
   const trimmed = value.trim().toUpperCase();
   return /^#[0-9A-F]{6}$/.test(trimmed) ? trimmed : HIGHLIGHT_PRESETS[0].value;
@@ -315,193 +309,15 @@ function splitPreviewTextLines(text: string): PreviewTextLine[] {
   return lines;
 }
 
-function findPreviewLineIndexAtOffset(lines: PreviewTextLine[], offset: number): number {
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (offset <= line.end || index === lines.length - 1) {
-      return index;
-    }
-  }
-  return Math.max(0, lines.length - 1);
-}
-
-function isPotentialMarkdownTableLine(lineText: string): boolean {
-  const trimmed = lineText.trim();
-  return trimmed.length > 0 && trimmed.includes('|');
-}
-
-function countMonospaceColumns(value: string): number {
-  return Array.from(value).length;
-}
-
-function buildMarkdownSeparatorCell(width: number, alignment: TableAlignment): string {
-  if (alignment === 'right') {
-    const totalWidth = Math.max(width, 4);
-    return `${'-'.repeat(Math.max(3, totalWidth - 1))}:`;
-  }
-  if (alignment === 'center') {
-    const totalWidth = Math.max(width, 5);
-    return `:${'-'.repeat(Math.max(3, totalWidth - 2))}:`;
-  }
-  return '-'.repeat(Math.max(width, 3));
-}
-
-function padMarkdownTableCell(value: string, width: number, alignment: TableAlignment): string {
-  const normalizedValue = value.trim();
-  const diff = Math.max(0, width - countMonospaceColumns(normalizedValue));
-  if (diff === 0) {
-    return normalizedValue;
-  }
-  if (alignment === 'right') {
-    return `${' '.repeat(diff)}${normalizedValue}`;
-  }
-  if (alignment === 'center') {
-    const left = Math.floor(diff / 2);
-    const right = diff - left;
-    return `${' '.repeat(left)}${normalizedValue}${' '.repeat(right)}`;
-  }
-  return `${normalizedValue}${' '.repeat(diff)}`;
-}
-
-function formatMarkdownTableBlock(block: MarkdownTableBlock): string | null {
-  if (block.lines.length < 2) {
-    return null;
-  }
-
-  const parsedRows = block.lines.map(line => parseMarkdownTableRow(line.text, line.start));
-  const headerRow = parsedRows[0];
-  const separatorRow = parsedRows[1];
-  const alignments = separatorRow ? parseMarkdownTableAlignments(separatorRow) : null;
-
-  if (!headerRow || !separatorRow || !alignments) {
-    return null;
-  }
-
-  const bodyRows = parsedRows.slice(2);
-  if (bodyRows.some(row => row == null)) {
-    return null;
-  }
-
-  const rows = [headerRow, ...bodyRows as ParsedMarkdownTableRow[]];
-  const columnCount = Math.max(
-    alignments.length,
-    ...rows.map(row => row.cells.length),
-  );
-  const normalizedAlignments = Array.from({ length: columnCount }, (_, index) => alignments[index] ?? 'left');
-  const matrix = rows.map(row => Array.from({ length: columnCount }, (_, index) => row.cells[index]?.text ?? ''));
-  const widths = Array.from({ length: columnCount }, (_, columnIndex) => {
-    const contentWidth = Math.max(...matrix.map(row => countMonospaceColumns(row[columnIndex])));
-    return countMonospaceColumns(buildMarkdownSeparatorCell(contentWidth, normalizedAlignments[columnIndex]));
-  });
-  const baseIndent = block.lines[0].text.match(/^\s*/)?.[0] ?? '';
-  const formatRow = (cells: string[]) => `${baseIndent}| ${cells.map((cell, index) => padMarkdownTableCell(cell, widths[index], normalizedAlignments[index])).join(' | ')} |`;
-  const separatorLine = `${baseIndent}| ${widths.map((width, index) => buildMarkdownSeparatorCell(width, normalizedAlignments[index])).join(' | ')} |`;
-
-  return [
-    formatRow(matrix[0]),
-    separatorLine,
-    ...matrix.slice(1).map(formatRow),
-  ].join('\n');
-}
-
-function collectMarkdownTableBlocks(text: string, start: number, end: number): MarkdownTableBlock[] {
-  const lines = splitPreviewTextLines(text);
-  if (lines.length === 0) {
-    return [];
-  }
-
-  const collapsed = start === end;
-  if (collapsed) {
-    const lineIndex = findPreviewLineIndexAtOffset(lines, start);
-    if (!isPotentialMarkdownTableLine(lines[lineIndex]?.text ?? '')) {
-      return [];
-    }
-    let blockStart = lineIndex;
-    let blockEnd = lineIndex;
-    while (blockStart > 0 && isPotentialMarkdownTableLine(lines[blockStart - 1].text)) {
-      blockStart -= 1;
-    }
-    while (blockEnd + 1 < lines.length && isPotentialMarkdownTableLine(lines[blockEnd + 1].text)) {
-      blockEnd += 1;
-    }
-    return [{
-      start: lines[blockStart].start,
-      end: lines[blockEnd].end,
-      lines: lines.slice(blockStart, blockEnd + 1),
-    }];
-  }
-
-  const startLineIndex = findPreviewLineIndexAtOffset(lines, start);
-  const endLineIndex = findPreviewLineIndexAtOffset(lines, Math.max(start, end - 1));
-  const blocks: MarkdownTableBlock[] = [];
-  let index = startLineIndex;
-
-  while (index <= endLineIndex) {
-    if (!isPotentialMarkdownTableLine(lines[index].text)) {
-      index += 1;
-      continue;
-    }
-
-    const blockStart = index;
-    while (index + 1 <= endLineIndex && isPotentialMarkdownTableLine(lines[index + 1].text)) {
-      index += 1;
-    }
-    const blockEnd = index;
-    blocks.push({
-      start: lines[blockStart].start,
-      end: lines[blockEnd].end,
-      lines: lines.slice(blockStart, blockEnd + 1),
-    });
-    index += 1;
-  }
-
-  return blocks;
-}
-
-function formatMarkdownTablesInSelection(
-  text: string,
-  start: number,
-  end: number,
-): { text: string; selection: EditorSelectionRange } | null {
-  const blocks = collectMarkdownTableBlocks(text, start, end);
-  if (blocks.length === 0) {
-    return null;
-  }
-
-  let nextText = text;
-  const replacements = blocks
-    .map(block => ({ block, formatted: formatMarkdownTableBlock(block) }))
-    .filter((entry): entry is { block: MarkdownTableBlock; formatted: string } => entry.formatted != null)
-    .sort((left, right) => right.block.start - left.block.start);
-
-  if (replacements.length === 0) {
-    return null;
-  }
-
-  const updatedRanges: Array<{ start: number; end: number }> = [];
-  for (const { block, formatted } of replacements) {
-    nextText = `${nextText.slice(0, block.start)}${formatted}${nextText.slice(block.end)}`;
-    updatedRanges.push({ start: block.start, end: block.start + formatted.length });
-  }
-
-  const normalizedRanges = updatedRanges.sort((left, right) => left.start - right.start);
-  return {
-    text: nextText,
-    selection: {
-      start: normalizedRanges[0].start,
-      end: normalizedRanges[normalizedRanges.length - 1].end,
-    },
-  };
-}
-
 function parseMarkdownTableRow(lineText: string, lineStart: number): ParsedMarkdownTableRow | null {
-  const leadingWhitespaceLength = lineText.match(/^\s*/)?.[0].length ?? 0;
-  const trimmedLine = lineText.trim();
+  const normalizedLine = lineText.endsWith('\r') ? lineText.slice(0, -1) : lineText;
+  const leadingWhitespaceLength = normalizedLine.match(/^\s*/)?.[0].length ?? 0;
+  const trimmedLine = normalizedLine.trim();
   if (!trimmedLine.includes('|')) {
     return null;
   }
 
-  let working = lineText.slice(leadingWhitespaceLength);
+  let working = normalizedLine.slice(leadingWhitespaceLength);
   let baseOffset = lineStart + leadingWhitespaceLength;
   if (working.startsWith('|')) {
     working = working.slice(1);
@@ -1166,30 +982,6 @@ export function CaseResearchWindow() {
       pushHistory: false,
       restoreSelection: true,
     });
-  }, [activePage, commitEditorDocument]);
-
-  const handleFormatTable = useCallback(() => {
-    const textarea = bodyRef.current;
-    if (!textarea || !activePage) {
-      return;
-    }
-
-    const start = textarea.selectionStart ?? selectionRangeRef.current.start;
-    const end = textarea.selectionEnd ?? selectionRangeRef.current.end;
-    const formatted = formatMarkdownTablesInSelection(editorDocumentRef.current.text, start, end);
-    if (!formatted || formatted.text === editorDocumentRef.current.text) {
-      return;
-    }
-
-    const nextDocument: EditorDocument = {
-      text: formatted.text,
-      highlights: updateHighlightRangesForTextChange(
-        editorDocumentRef.current.text,
-        formatted.text,
-        editorDocumentRef.current.highlights,
-      ),
-    };
-    commitEditorDocument(nextDocument, formatted.selection, { restoreSelection: true });
   }, [activePage, commitEditorDocument]);
 
   const handleEditorKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1897,13 +1689,6 @@ export function CaseResearchWindow() {
                     title="Redo the last undone change (Ctrl+Y)"
                   >
                     Redo
-                  </button>
-                  <button
-                    onClick={handleFormatTable}
-                    className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:border-slate-500 dark:hover:bg-slate-900"
-                    title="Align the selected markdown table, or the table under the cursor"
-                  >
-                    Format table
                   </button>
                   {(['edit', 'split', 'preview'] as EditorViewMode[]).map(mode => {
                     const isActive = editorViewMode === mode;

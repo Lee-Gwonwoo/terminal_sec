@@ -19,6 +19,7 @@
 - RTPR API 키는 선택 사항이다. 없으면 RTPR pull만 제한된다.
 - EODHD 토큰은 `POST /api/news/pull-eodhd` 호출 시 파일에서 읽는다.
 - `GET /api/news`는 `news_items` 단독 조회가 아니라 `news_change_metrics`, `news_fulltext`, `news_ai_analysis`, sentiment snapshot, peers, company description, IPO date, market cap, industry를 join/병합해서 내려준다.
+- `GET /api/news`의 `keyword`는 서버 검색 조건이다. Finnhub News 창의 `Keyword Filter` exclude profile은 backend request param이나 DB 컬럼으로 내려오지 않고, 프론트 localStorage (`finnhub-news-keyword-filters-v1`, `activeProfileIds` 포함) + client-side filter로만 동작한다. 여러 profile이 동시에 active일 수 있어도 backend 조회 조건은 바뀌지 않는다.
 - `POST /api/news/pull-investing`가 존재하며 Investing.com의 stock market / cryptocurrency category를 `news_items`에 적재한다.
 - `news_change_metrics`는 `CREATE TABLE IF NOT EXISTS`로 유지되는 영구 테이블이며, change update 작업이 metric 단위로 UPSERT 한다.
 - `news_items`의 dedupe/unique 기준은 `UNIQUE (source, source_type, url)`이다. 같은 URL이라도 `source_type`이 다르면 별도 row로 공존할 수 있다.
