@@ -21,7 +21,7 @@
 
 `Model_4_watchlists`는 `Model_1`과 같은 분석 프레임을 사용하되, **현재 뉴스 직접 분석 대상을 사용자가 지정한 watchlist ticker 집합으로 제한**하는 모델이다. 상세 정의는 [ai-news-research_model4_watchlists.md](ai-news-research_model4_watchlists.md)에 둔다.
 
-`Model_100_issue tier analysis`는 개별 뉴스가 아니라 **이슈 1개가 만들어낸 종목 바스켓 전체의 형성·확산·분화 라이프사이클**을 분석하는 모델이다. 관련주 정리 후 **오너십 데이터 바로 아래에서 핵심 분석이슈 anchor를 먼저 고정**하고, 그 다음 선행/관련 이슈와 확산 타임라인을 비교한다. 가격 반응은 `change / HV / z-score`를 same-day, from-open, 1d, 7d, 14d, 30d window로 함께 본다. 상세 정의는 [ai-news-research_model100_issue_analysis.md](ai-news-research_model100_issue_analysis.md)에 둔다.
+`Model_100_issue tier analysis`는 개별 뉴스가 아니라 **이슈 1개가 만들어낸 종목 바스켓 전체의 형성·확산·분화 라이프사이클**을 분석하는 모델이다. 관련주 정리 후 `## 오너십 데이터` 안에서 **ownership + governance / dilution risk audit**를 기본적으로 정리하고, 그 바로 아래에서 핵심 분석이슈 anchor를 먼저 고정한 뒤 선행/관련 이슈와 확산 타임라인을 비교한다. governance audit에는 share structure, founder-control, insider ownership, 5년 dilution, Form 4, ATM/shelf, red flag checklist, academic frame이 포함되며, DB에 값이 없으면 `SEC EDGAR`와 issuer IR 웹 원문을 직접 확인해 계속 진행한다. 가격 반응은 `change / HV / z-score`를 same-day, from-open, 1d, 7d, 14d, 30d window로 함께 본다. 상세 정의는 [ai-news-research_model100_issue_analysis.md](ai-news-research_model100_issue_analysis.md)에 둔다.
 
 추가로 `Model_100`에는 사용자가 명시적으로 `관련주 확장`, `related-stock expansion`, `관련주 더 넓혀`, `후보 확장`을 요청했을 때만 붙는 **선택적 추가 작업**이 있다. 이는 기본 Model_100 절차를 대체하지 않고, 기본 관련주 표를 만든 뒤 `keyword / company_profiles.description / peers / same-wave price validation` 축으로 후보를 더 넓게 발굴해 `포함 / 제외 / 관련성 정도`를 별도 섹션으로 남기는 규칙이다. 기본 Model_100 요청에서는 이 확장 절차를 자동 강제하지 않는다. 상세 정의는 [ai-news-research_model100_issue_analysis.md](ai-news-research_model100_issue_analysis.md)에 둔다.
 

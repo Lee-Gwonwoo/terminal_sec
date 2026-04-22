@@ -15,6 +15,8 @@ const HIGHLIGHT_PRESETS = [
   { label: 'Lavender', value: '#DDD6FE' },
 ];
 
+const EDITOR_MONO_FONT_FAMILY = '"D2Coding", "NanumGothicCoding", "Noto Sans Mono CJK KR", "GulimChe", Consolas, "Liberation Mono", "Courier New", monospace';
+
 // ── Types ──
 
 interface ResearchTab {
@@ -82,6 +84,23 @@ interface EditorSnapshot {
 }
 
 type EditorViewMode = 'edit' | 'split' | 'preview';
+type TableAlignment = 'left' | 'center' | 'right';
+
+interface PreviewTextLine {
+  text: string;
+  start: number;
+  end: number;
+}
+
+interface ParsedMarkdownTableCell {
+  text: string;
+  start: number;
+  end: number;
+}
+
+interface ParsedMarkdownTableRow {
+  cells: ParsedMarkdownTableCell[];
+}
 
 function normalizeHighlightColor(value: string): string {
   const trimmed = value.trim().toUpperCase();
@@ -253,6 +272,209 @@ function renderHighlightedText(text: string, ranges: HighlightRange[]): React.Re
   }
 
   return nodes;
+}
+
+function sliceHighlightRanges(ranges: HighlightRange[], start: number, end: number): HighlightRange[] {
+  return normalizeHighlightRanges(
+    ranges
+      .filter(range => range.end > start && range.start < end)
+      .map(range => ({
+        start: Math.max(0, range.start - start),
+        end: Math.min(end, range.end) - start,
+        color: range.color,
+      })),
+    Math.max(0, end - start),
+  );
+}
+
+function splitPreviewTextLines(text: string): PreviewTextLine[] {
+  if (text.length === 0) {
+    return [{ text: '', start: 0, end: 0 }];
+  }
+
+  const lines: PreviewTextLine[] = [];
+  let lineStart = 0;
+
+  for (let index = 0; index <= text.length; index += 1) {
+    if (index === text.length || text[index] === '\n') {
+      lines.push({
+        text: text.slice(lineStart, index),
+        start: lineStart,
+        end: index,
+      });
+      lineStart = index + 1;
+    }
+  }
+
+  return lines;
+}
+
+function parseMarkdownTableRow(lineText: string, lineStart: number): ParsedMarkdownTableRow | null {
+  const leadingWhitespaceLength = lineText.match(/^\s*/)?.[0].length ?? 0;
+  const trimmedLine = lineText.trim();
+  if (!trimmedLine.includes('|')) {
+    return null;
+  }
+
+  let working = lineText.slice(leadingWhitespaceLength);
+  let baseOffset = lineStart + leadingWhitespaceLength;
+  if (working.startsWith('|')) {
+    working = working.slice(1);
+    baseOffset += 1;
+  }
+  if (working.endsWith('|')) {
+    working = working.slice(0, -1);
+  }
+
+  const rawCells = working.split('|');
+  if (rawCells.length < 2) {
+    return null;
+  }
+
+  const cells: ParsedMarkdownTableCell[] = [];
+  let cellOffset = 0;
+
+  for (const rawCell of rawCells) {
+    const leading = rawCell.match(/^\s*/)?.[0].length ?? 0;
+    const trailing = rawCell.match(/\s*$/)?.[0].length ?? 0;
+    const trimmedCell = rawCell.trim();
+    const start = baseOffset + cellOffset + leading;
+    const end = Math.max(start, baseOffset + cellOffset + rawCell.length - trailing);
+    cells.push({ text: trimmedCell, start, end });
+    cellOffset += rawCell.length + 1;
+  }
+
+  return { cells };
+}
+
+function parseMarkdownTableAlignments(row: ParsedMarkdownTableRow): TableAlignment[] | null {
+  if (row.cells.length === 0) {
+    return null;
+  }
+
+  const alignments: TableAlignment[] = [];
+  for (const cell of row.cells) {
+    const token = cell.text.replace(/\s+/g, '');
+    if (!/^:?-{3,}:?$/.test(token)) {
+      return null;
+    }
+    const hasLeadingColon = token.startsWith(':');
+    const hasTrailingColon = token.endsWith(':');
+    if (hasLeadingColon && hasTrailingColon) {
+      alignments.push('center');
+    } else if (hasTrailingColon) {
+      alignments.push('right');
+    } else {
+      alignments.push('left');
+    }
+  }
+
+  return alignments;
+}
+
+function renderPreviewContent(text: string, ranges: HighlightRange[]): React.ReactNode[] {
+  const lines = splitPreviewTextLines(text);
+  const blocks: React.ReactNode[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const headerRow = parseMarkdownTableRow(lines[index].text, lines[index].start);
+    const separatorRow = index + 1 < lines.length
+      ? parseMarkdownTableRow(lines[index + 1].text, lines[index + 1].start)
+      : null;
+    const alignments = separatorRow ? parseMarkdownTableAlignments(separatorRow) : null;
+
+    if (
+      headerRow &&
+      separatorRow &&
+      alignments &&
+      headerRow.cells.length === separatorRow.cells.length
+    ) {
+      const bodyRows: ParsedMarkdownTableRow[] = [];
+      let bodyIndex = index + 2;
+      while (bodyIndex < lines.length) {
+        const nextLine = lines[bodyIndex];
+        const nextRow = parseMarkdownTableRow(nextLine.text, nextLine.start);
+        if (!nextRow || nextLine.text.trim().length === 0 || nextRow.cells.length !== headerRow.cells.length) {
+          break;
+        }
+        bodyRows.push(nextRow);
+        bodyIndex += 1;
+      }
+
+      blocks.push(
+        <div
+          key={`table-${lines[index].start}`}
+          className="my-4 overflow-x-auto rounded-2xl border border-slate-200 bg-white/90 shadow-sm dark:border-slate-700 dark:bg-slate-950/70"
+        >
+          <table className="min-w-max border-collapse text-left text-sm">
+            <thead className="bg-slate-100/90 dark:bg-slate-900/90">
+              <tr>
+                {headerRow.cells.map((cell, cellIndex) => (
+                  <th
+                    key={`head-${cellIndex}`}
+                    className="border border-slate-200 px-3 py-2 font-semibold text-slate-900 dark:border-slate-700 dark:text-slate-100"
+                    style={{ textAlign: alignments[cellIndex] }}
+                  >
+                    {cell.text.length > 0
+                      ? renderHighlightedText(cell.text, sliceHighlightRanges(ranges, cell.start, cell.end))
+                      : '\u00A0'}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {bodyRows.map((row, rowIndex) => (
+                <tr key={`row-${rowIndex}`} className="odd:bg-white even:bg-slate-50/70 dark:odd:bg-slate-950/60 dark:even:bg-slate-900/40">
+                  {row.cells.map((cell, cellIndex) => (
+                    <td
+                      key={`cell-${rowIndex}-${cellIndex}`}
+                      className="border border-slate-200 px-3 py-2 align-top text-slate-800 dark:border-slate-700 dark:text-slate-200"
+                      style={{ textAlign: alignments[cellIndex] }}
+                    >
+                      {cell.text.length > 0
+                        ? renderHighlightedText(cell.text, sliceHighlightRanges(ranges, cell.start, cell.end))
+                        : '\u00A0'}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      );
+
+      index = bodyIndex;
+      continue;
+    }
+
+    const blockStart = index;
+    index += 1;
+    while (index < lines.length) {
+      const candidateHeader = parseMarkdownTableRow(lines[index].text, lines[index].start);
+      const candidateSeparator = index + 1 < lines.length
+        ? parseMarkdownTableRow(lines[index + 1].text, lines[index + 1].start)
+        : null;
+      if (candidateHeader && candidateSeparator && parseMarkdownTableAlignments(candidateSeparator)) {
+        break;
+      }
+      index += 1;
+    }
+
+    const blockTextStart = lines[blockStart].start;
+    const blockTextEnd = index < lines.length ? lines[index].start : text.length;
+    const blockText = text.slice(blockTextStart, blockTextEnd);
+    blocks.push(
+      <div
+        key={`text-${blockTextStart}`}
+        className="whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-800 dark:text-slate-100"
+      >
+        {renderHighlightedText(blockText, sliceHighlightRanges(ranges, blockTextStart, blockTextEnd))}
+      </div>,
+    );
+  }
+
+  return blocks;
 }
 
 function findHighlightRangeAtSelection(
@@ -460,7 +682,7 @@ export function CaseResearchWindow() {
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [restoringKey, setRestoringKey] = useState<string | null>(null);
   const [editorDocument, setEditorDocument] = useState<EditorDocument>({ text: '', highlights: [] });
-  const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>('split');
+  const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>('edit');
   const [selectedHighlightColor, setSelectedHighlightColor] = useState<string>(HIGHLIGHT_PRESETS[0].value);
   const [selectionRange, setSelectionRange] = useState<EditorSelectionRange>({ start: 0, end: 0 });
   const [, setHistoryVersion] = useState(0);
@@ -1492,7 +1714,8 @@ export function CaseResearchWindow() {
                       <div
                         ref={editorOverlayRef}
                         aria-hidden="true"
-                        className="pointer-events-none absolute inset-0 overflow-auto px-6 py-5 text-sm leading-relaxed whitespace-pre-wrap break-words text-slate-800 dark:text-slate-100"
+                        className="pointer-events-none absolute inset-0 overflow-auto px-6 py-5 font-mono text-sm leading-relaxed whitespace-pre-wrap break-words text-slate-800 [tab-size:2] dark:text-slate-100"
+                        style={{ fontFamily: EDITOR_MONO_FONT_FAMILY }}
                       >
                         {editorDocument.text.length > 0 ? renderHighlightedText(editorDocument.text, editorDocument.highlights) : (
                           <span className="text-slate-400 dark:text-slate-600">Write your notes here...</span>
@@ -1501,6 +1724,7 @@ export function CaseResearchWindow() {
                       </div>
                       <textarea
                         ref={bodyRef}
+                        wrap="off"
                         value={editorDocument.text}
                         onChange={e => handleBodyChange(e.target.value, e.target.selectionStart ?? 0, e.target.selectionEnd ?? 0)}
                         onSelect={syncSelectionRange}
@@ -1509,11 +1733,12 @@ export function CaseResearchWindow() {
                         onKeyDown={handleEditorKeyDown}
                         onScroll={syncEditorScroll}
                         placeholder="Write your notes here..."
-                        className="absolute inset-0 h-full w-full resize-none overflow-auto bg-transparent px-6 py-5 text-sm leading-relaxed outline-none placeholder:text-transparent selection:bg-blue-200/70 caret-slate-900 dark:selection:bg-blue-500/30 dark:caret-slate-100"
+                        className="absolute inset-0 h-full w-full resize-none overflow-auto bg-transparent px-6 py-5 font-mono text-sm leading-relaxed outline-none placeholder:text-transparent selection:bg-blue-200/70 [tab-size:2] caret-slate-900 dark:selection:bg-blue-500/30 dark:caret-slate-100"
                         style={{
                           minHeight: '100%',
                           color: 'transparent',
                           WebkitTextFillColor: 'transparent',
+                          fontFamily: EDITOR_MONO_FONT_FAMILY,
                         }}
                       />
                     </div>
@@ -1527,8 +1752,8 @@ export function CaseResearchWindow() {
                     </div>
                     <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5">
                       {editorDocument.text.trim() ? (
-                        <div className="whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-800 dark:text-slate-100">
-                          {renderHighlightedText(editorDocument.text, editorDocument.highlights)}
+                        <div className="space-y-3 text-sm leading-relaxed text-slate-800 dark:text-slate-100">
+                          {renderPreviewContent(editorDocument.text, editorDocument.highlights)}
                         </div>
                       ) : (
                         <div className="rounded-2xl border border-dashed border-slate-300 bg-white/80 px-4 py-5 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-400">

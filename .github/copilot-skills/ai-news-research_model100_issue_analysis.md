@@ -7,6 +7,32 @@
 - 특정 이슈(테마/촉매)를 중심으로 **동일 밸류체인 또는 동일 테마에 묶인 종목 바스켓**이 어떻게 형성·확산·분화되었는지를 시간순으로 분석한다.
 - 개별 뉴스 1건이 아니라 **이슈 1개가 만들어낸 종목 바스켓 전체의 라이프사이클**을 대상으로 한다.
 
+### AI Research Preview 표 작성 규칙 (필수)
+
+- `AI Research Window`의 `Preview`에서 **행/열이 있는 블록은 markdown table로 보이게 작성**하는 것을 기본 규칙으로 둔다.
+- 즉 아래처럼 `| ... |` header row와 `| --- | --- |` separator row를 갖춘 표를 사용한다.
+
+```md
+| 항목 | 값 |
+| --- | --- |
+| 최종 판정 | `1 tier (지속형)` |
+| 메인 direct anchor | `2026-01-27 GLW / Meta 최대 60억달러 fiber-optic 계약` |
+```
+
+- 단순 공백 정렬이나 `항목: 값` 반복은 Preview에서 행/열 구조가 깨지므로, **표처럼 보여야 하는 정보는 prose 대신 table로 유지**한다.
+- 표 작성 최소 규칙:
+   - 헤더 줄과 separator 줄을 반드시 함께 넣는다.
+   - 각 row는 한 줄에서 닫는다.
+   - 모든 row의 열 수를 맞춘다.
+   - 행/열 의미가 있는 블록을 공백 정렬 pseudo-table로 쓰지 않는다.
+- 열이 많아 폭이 넓어져도 prose로 축소하지 않는다. 현재 AI Research `Preview`는 넓은 표를 가로 스크롤로 보여줄 수 있으므로, **정보 구조 보존이 우선**이다.
+- 특히 아래 섹션은 가능하면 표를 우선 사용한다.
+   - `## 관련주 정리`
+   - `## 오너십 데이터`
+   - `### Governance / Dilution 리스크 감사`
+   - `## 핵심 분석이슈`의 상단 요약 블록
+   - 확산 타임라인 비교표, 오퍼링 history 표, red flag checklist 표
+
 ### 언제 쓰나
 
 - 사용자가 `issue analysis`, `이슈 분석`, `tier 분석`, `바스켓 분석`, `순환매 분석`, `이슈 타임라인` 같은 표현을 쓸 때.
@@ -25,10 +51,17 @@
 ### Model_100 추가 작업: `관련주 확장`
 
 - `관련주 확장`은 **기본 Model_100의 필수 절차가 아니라**, 사용자가 명시적으로 요청했을 때만 수행하는 선택적 추가 작업이다.
-- 기본 Model_100 요청에서는 기존 방식대로 `관련주 정리 -> 오너십 데이터 -> 핵심 분석이슈 -> 선행 이슈 -> 확산 타임라인 -> 최종 판정` 순서를 유지한다.
+- 기본 Model_100 요청에서는 기존 방식대로 `관련주 정리 -> 오너십 데이터(ownership + governance/dilution audit) -> 핵심 분석이슈 -> 선행 이슈 -> 확산 타임라인 -> 최종 판정` 순서를 유지한다.
 - 사용자가 `관련주 확장`을 붙여 요청하면, 기본 관련주 표를 만든 뒤 **후보군 discovery를 한 번 더 수행**해 빠진 종목이 없는지 점검하고, 새 후보의 `사업 유사도 등급`, `이슈 연결 방식`, `포함/제외 판단`을 별도 표로 남긴다.
 - 즉 `관련주 정리`는 **현재 바스켓의 구조화**, `관련주 확장`은 **바스켓 바깥 후보의 추가 발굴과 누락 점검**이다.
 - `관련주 확장`은 broad theme 아무 종목이나 늘어놓는 작업이 아니다. 반드시 `핵심 이슈 티커와의 사업 유사성`과 `실제 파동 동기화`를 함께 검증해야 한다.
+
+### Model_100 기본 조사축: `governance / dilution risk audit`
+
+- `governance / dilution risk audit`은 **기본 Model_100 절차**다. 사용자가 별도로 명시하지 않아도 수행한다.
+- 따라서 `## 오너십 데이터`는 단순 ownership snapshot으로 끝내면 안 되고, **share structure / founder-control / insider ownership / dilution history / insider selling / capital raise / red flag audit**까지 포함해야 한다.
+- `관련주 확장`은 여전히 선택적 추가 작업이지만, `governance / dilution risk audit`은 아니다. 확장 요청이 없어도 기본 basket에 대해서는 감사를 수행한다.
+- 기본 Model_100 page에서는 `관련주 정리`에 남긴 ticker 전부에 대해 최소 1행 이상의 governance 비교표를 남기고, 핵심 ticker들에 대해서는 서술형 deep-dive를 추가한다.
 
 ---
 
@@ -137,6 +170,7 @@
 - 이 표의 종목은 page 설명에는 중요할 수 있지만, related-stock ranking이나 basket propagation count에는 넣지 않는다.
 
 4. **오너십 데이터 테이블**: 각 종목의 시총, Float %, Institutional %, Insider % 를 포함한다.
+5. **Governance / dilution 리스크 감사 패키지**: `## 오너십 데이터` 섹션 안에서 각 종목의 지배구조와 희석 리스크를 비교표 중심으로 체계화한다.
 
 오너십 데이터 조회 규칙:
 - 출처: `GET /api/tickers` 또는 app DB의 `company_profiles` 테이블.
@@ -144,7 +178,138 @@
 - `institutional_pct`가 100% 초과할 수 있음 (중복 집계 특성). 이를 그대로 기록하고 `원래의 집계 특성 그대로`라고 주석 표기.
 - 오너십 해석을 별도 문단으로 추가: 대형캡 vs 소형캡의 반응 차이, float 크기와 변동성 관계, insider 보유율이 시사하는 것 등.
 
-오너십 데이터 바로 아래에 반드시 이어져야 하는 것:
+#### Governance / dilution 리스크 감사 (기본 절차, 필수)
+
+- 이 감사는 **Model_100 기본 조사축**이며, 사용자가 따로 요청하지 않아도 수행한다.
+- `## 관련주 정리` 최종 표에 남긴 ticker는 **모두** governance 비교표 행을 가져야 한다. 사용자가 명시적으로 ticker list를 줬다면 그 목록은 전부 포함한다.
+- 바스켓이 넓어 서술형 deep-dive를 줄여야 하더라도, 최소한 비교표 행은 전 ticker에 대해 유지한다. narrative 범위를 줄였으면 `핵심 ticker 상세 / 나머지 ticker 요약`처럼 축약 범위를 명시한다.
+- 1차 소스와 2차 소스가 충돌하면 1차 소스를 우선하고, 2차 소스는 검산·시계열 보강·screening 보조 용도로만 쓴다.
+- 숫자나 filing 근거를 확보하지 못한 항목은 추정으로 메우지 말고 `미확인`, `공시 미발견`, `source 확인 필요`처럼 명시한다.
+
+필수 조사 항목:
+
+1. **주식 구조 (Share Structure)**
+   - `single-class` vs `dual-class` 여부.
+   - dual-class이면 `Class A / Class B`의 주당 의결권 비율 (`1표 vs 10표`, `1표 vs 20표` 등).
+   - `sunset provision` 존재 여부와 trigger (`time-based`, `ownership-based`, `death/disability`, `transfer-based`)를 적는다.
+   - preferred stock의 `blank check` 권한(이사회 단독 발행 권한) 존재 여부.
+   - 법인 소재지 (`Delaware`, `Nevada`, `Cayman`, `Canada` 등)와 `home country exemption` 적용 여부.
+   - `authorized shares` vs `issued/outstanding shares` gap을 숫자와 비율로 적어 향후 dilution capacity를 계산한다.
+
+2. **경영진 프로파일**
+   - CEO 이름, 취임 시점, 재직 기간.
+   - **창업자(Founder) 여부**를 `True founder`, `Co-founder`, `Professional manager` 중 하나로 분류한다.
+   - `Chairman / CEO` 겸직 여부.
+   - 창업자가 CEO가 아니고 이사회 또는 executive chair에만 남아 있으면 별도 표기한다.
+
+3. **Insider Ownership / Voting Power**
+   - CEO 개인 보유 주식 수와 보유율.
+   - 창업자 보유율이 CEO와 다르면 별도 분리한다.
+   - 직접 보유 vs `family trust`, LLC, partnership, vehicle을 통한 간접 보유를 구분한다.
+   - dual-class이면 `Class B` 또는 고의결권 class 보유 수량과 voting power를 따로 적는다.
+   - 전체 insider ownership 합계 %와 `CEO + 핵심 이사진` voting power 합계를 적는다.
+
+4. **Shares Outstanding 추이 (최근 5년)**
+   - 연도별 `shares outstanding`와 전년 대비 변동률을 표로 정리한다.
+   - 5년 누적 희석률은 `(latest shares / oldest shares - 1) * 100`으로 계산한다.
+   - 주요 offering 이벤트를 `ATM`, `follow-on`, `secondary`, `PIPE`, `convertible-linked` 중 어디에 해당하는지 분리해 타임라인화한다.
+   - 각 주요 offering 이벤트마다 최소한 `pricing/launch date`, `closing date`(확인 가능할 때), `offering type`, `offering price/share`, `gross proceeds`, `shares sold`, `primary/secondary mix`, `당시 시가총액`, `offering size / 당시 시총 비율(%)`을 적는다.
+   - `offering size / 당시 시총 비율(%)`은 가능하면 `gross proceeds / 당시 market cap * 100`으로 계산하고, gross proceeds 확인이 어려우면 `offering shares * offering price / 당시 market cap * 100`으로 근사한 뒤 근사값임을 표시한다.
+   - `buyback` 유무와 규모를 함께 적는다.
+   - `stock-based compensation (SBC)`가 희석에 얼마나 기여했는지 10-K/10-Q footnote와 diluted share count 변화를 근거로 추정한다.
+
+5. **Insider Trading 패턴**
+   - 최근 1~3년 `Form 4` 기준 매수 vs 매도 건수를 집계한다.
+   - 주가 급등 시점의 대량 매도 여부와 timing을 분석한다.
+   - `10b5-1 plan`에 의한 programmatic selling인지, discretionary sale인지 구분 가능한 범위에서 적는다.
+   - 저점에서의 자기 매수 이력(창업자 conviction signal)이 있는지 본다.
+   - 최근 대규모 매도 이벤트(`$5M` 이상)는 별도 표로 분리한다.
+
+6. **자본 조달 History**
+   - `ATM offering` 프로그램 존재 여부, 한도, 잔여 capacity.
+   - `S-3 shelf registration` 등록 금액.
+   - 주가 급등 시점에 equity offering을 반복하는 패턴인지 본다.
+   - 개별 조달 이벤트는 `발표일`, `pricing date`, `settlement/closing date`, `offer price`, `직전 종가 대비 할인율`, `gross proceeds`, `당시 market cap 대비 비중`, `사용처`를 가능한 범위에서 같은 행에 모아 적는다.
+   - 조달 자금 사용처를 `R&D`, `M&A`, `working capital`, `cash burn cover` 등으로 정리한다.
+   - 수익성 상태(`흑자 / 적자`)와 cash burn rate를 같이 적어 financing dependence를 해석한다.
+
+7. **종합 Red Flag 체크리스트**
+   - 아래 항목을 ticker별 `Y/N`로 같은 표에 정리한다.
+   - `Dual-class with 10+ votes/share held by founder`
+   - `Founder/CEO 지분 5% 미만`
+   - `3년 누적 희석률 30% 이상`
+   - `ATM 프로그램 상시 운영`
+   - `수익성 부재 + 반복적 equity offering`
+   - `주가 급등 시 CEO 대량 매도`
+   - `Home country exemption으로 주주 승인 우회 가능`
+   - `Sunset provision 없는 perpetual dual-class`
+   - `Blank check preferred stock 발행 권한`
+   - `Related-party transaction 이력`
+
+8. **최종 평가**
+   - 종목 간 `governance` 관점 상대 순위를 매긴다.
+   - 학술 프레임은 최소 `Bebchuk-Kastiel agency cost`, `Cremers dual-class life cycle`, `Jensen free cash flow problem`, `Myers-Majluf pecking order / adverse selection`을 사용해 해석한다.
+   - `WeWork`, `Snap`, `Meta`, `Alphabet` 등 유사 사례와 비교할 수 있으면 붙인다.
+   - 결론은 반드시 `구조적 리스크`와 `실제 운영상 리스크`를 분리해서 적는다. 예: `구조는 founder-control + blank check로 공격적이지만, 실제 최근 3년 행보는 buyback 우세`.
+
+조사 방법 / 소스 우선순위:
+
+- **1차 소스 (우선):** `SEC 10-K`, `S-1`, `DEF 14A`, `8-K`, `Form 4`, `10-Q`, `424B5 prospectus supplement`, charter/bylaws, 회사 IR의 board/management 페이지.
+- **2차 소스 (보조):** `macrotrends.net`, `companiesmarketcap.com`, `gurufocus.com`, `insidertrades.com`, `fintel.io`, `simplywall.st`, `corpgov.law.harvard.edu`, `stocktitan.net`.
+- app DB와 `GET /api/tickers`의 ownership/company-profile 값은 **편의용 cache**일 뿐, governance / dilution audit의 필수 선행조건이 아니다.
+- 따라서 DB에 필요한 값이 없거나 sparse해도, governance 작업은 **중단하지 않고** `SEC EDGAR`와 회사 IR/filing 웹페이지를 직접 확인하는 방식으로 계속 진행한다.
+- 특히 share structure, charter/bylaw, blank check preferred, sunset, beneficial ownership, Form 4, shelf/ATM, 424B5 offering 조건은 **웹에서 SEC filing 원문을 직접 찾아 확인하는 것을 허용하고 권장**한다.
+- 웹 확인이 필요한 경우 우선순위는 `SEC EDGAR filing 원문 -> issuer IR filing mirror / proxy page -> 신뢰 가능한 보조 집계 사이트` 순서로 둔다.
+- DB 부재로 웹 확인을 사용했다면, 결과 표나 본문에 최소한 `form type`, `filing date`, `source tag`, 가능하면 `document title`까지 남겨 어떤 공시를 근거로 썼는지 추적 가능하게 한다.
+- share structure / blank check / domicile / sunset은 가능하면 charter, S-1, DEF 14A, 10-K의 risk factors와 governance section으로 확인한다.
+- founder / CEO / chair 구조는 DEF 14A와 IR management page를 우선하고, founder 여부는 회사 역사/창업 서술과 연차보고서를 교차 확인한다.
+- insider ownership / voting power는 DEF 14A beneficial ownership table을 우선 사용하고, Form 4와 13D/13G는 보조로 활용한다.
+- shares outstanding 시계열은 10-K, 10-Q, S-3/424B5, 8-K를 우선 사용하고, `macrotrends`와 `companiesmarketcap`은 시계열 검산용으로 사용한다.
+- insider trading pattern은 `Form 4`를 우선 사용하고, `gurufocus`, `insidertrades`, `fintel`은 event screening 보조로 쓴다.
+- capital raise history는 `8-K`, `S-3`, `424B5`, underwriting agreement, ATM sales agreement를 우선 사용한다.
+- offering price, shares sold, gross proceeds, pricing date는 `424B5`, underwriting agreement, ATM prospectus supplement를 우선하고, 당시 시총은 해당 날짜 전후의 `shares outstanding * close price` 또는 신뢰 가능한 market-cap source로 계산한다.
+- 실무용 웹 fallback query 예시는 `company name + DEF 14A beneficial ownership`, `ticker + 424B5 offering price`, `company name + amended and restated certificate of incorporation blank check preferred`, `ticker + Form 4 10b5-1`처럼 form/type을 함께 붙이는 방식으로 좁힌다.
+
+출력 형식 규칙:
+
+- 종목별 narrative가 길어지더라도, 최소한 아래 비교표들은 기본으로 남긴다.
+  - `share structure / founder-control / domicile / voting power` 비교표
+   - `5년 shares outstanding / dilution / buyback / SBC / financing` 비교표
+   - `offering date / offering type / offer price / shares sold / gross proceeds / market cap at pricing / offering % of market cap / use of proceeds` 비교표
+  - `Form 4 / ATM / shelf / red flag` 비교표
+- 핵심 숫자는 반드시 구체적으로 적는다. `%`, `주식 수`, `조달 금액`, `매도 금액`을 추상어로 대체하지 않는다.
+- 평가 문장은 `괜찮다`처럼 뭉뚱그리지 말고, `구조는 X / 실제 행보는 Y`를 분리한다.
+- 답변 언어는 한국어를 기본으로 하되, `dual-class`, `ATM offering`, `SBC`, `blank check preferred`, `sunset provision` 같은 금융 용어는 영어 병기를 유지한다.
+
+### 단일 종목 오퍼링 / 유상증자 조사 출력 템플릿
+
+- 사용자가 `한 회사씩`, `오퍼링 이력`, `유상증자`, `ATM`, `registered direct`, `PP`, `follow-on`, `희석 이력`처럼 **단일 종목의 자본조달 history 자체**를 묻는 경우, 기본 출력 순서는 아래와 같이 고정한다.
+   1. 제목: `# {회사명} ({거래소: 티커}) 오퍼링 이력`
+   2. 범위 선언: 조사 기간, 포함 범위, 제외 범위(`예: 업리스팅 이후만`, `TSXV 시절 소규모 PP 제외`)를 2~4문장으로 먼저 밝힌다.
+   3. `## {범위명} 오퍼링 전체 목록` 표를 둔다.
+   4. `## 주요 인사이트`에서 누적 조달 규모, 연도별 조달 패턴, 가장 큰 딜, ATM/워런트/잔여 capacity, 희석성 해석을 정리한다.
+   5. 여러 종목을 함께 다루는 요청일 때만 마지막에 `## 비교 요약` 또는 `## Governance / 희석 해석`을 추가한다.
+- **한 회사씩 완료 규칙:** 현재 회사의 표와 인사이트를 끝내기 전에는 다음 회사 섹션으로 넘어가지 않는다. 사용자가 `POET부터`, `먼저 LWLG`, `한 회사씩`이라고 말했으면 그 회사 1개를 완결형으로 마무리한 뒤 다음 회사를 진행한다.
+- 전체 목록 표의 기본 컬럼은 아래를 우선한다.
+   - `#`
+   - `날짜 (발표/마감)`
+   - `오퍼링 종류`
+   - `총 금액 (USD)`
+   - `오퍼링 가격`
+   - `주식수/구성`
+   - `당시 시총 비중 (추정)`
+- `ATM offering`처럼 프로그램 한도만 있고 체결 시점의 고정 price/share가 없는 경우:
+   - `총 금액 (USD)`에는 `프로그램 한도` 또는 `누적 실제 판매액`을 구분해서 적는다.
+   - `오퍼링 가격`에는 `시장가 매매`, `avg $X.XX/share`, `미고정` 중 실제 공시 수준에 맞는 표현을 쓴다.
+   - `주식수/구성`에는 `실제 판매분 별도 공시`, `누적 판매주식`, `warrant 없음/있음` 등을 구조적으로 적는다.
+- `registered direct`, `bought deal`, `follow-on`, `PIPE`, `Canadian PP`, `LPC facility`, `ATM amendment`, `base shelf`는 서로 섞지 말고 **거래 성격별로 정확히 분류**한다.
+- `preliminary prospectus`와 `final prospectus`가 같은 딜이면, **final 조건을 주 행으로 사용**하고 preliminary는 note 또는 날짜 칸 보조 설명으로 흡수한다. 같은 딜을 중복 집계하지 않는다.
+- 워런트, commitment shares, underwriter option, over-allotment, ATM amendment 증액분, 기존 프로그램 carryover는 `주식수/구성` 칸에서 풀어 적고, `총 금액`과 혼동하지 않는다.
+- 시총 비중이 정확 계산이 아닌 경우에는 반드시 `(추정)`을 붙이고, 가능하면 `gross proceeds / 당시 market cap`인지 `shares * price / market cap`인지 짧게 설명한다.
+- 표만 던지고 끝내지 않는다. 사용자 예시처럼 **표 + 짧은 해설 + 핵심 경고/특이사항**을 같이 둔다.
+- 사용자가 범위 제외를 원하지 않았더라도, 역사적으로 딜 수가 매우 많다면 표 위에서 `이번 답변은 NASDAQ 업리스팅 이후 중심`, `초기 OTC/TSXV 소규모 PP 제외`처럼 **이번 정리의 범위선**을 먼저 그어 독자가 무엇이 빠졌는지 알 수 있게 한다.
+
+오너십 데이터 섹션 바로 아래에 반드시 이어져야 하는 것:
 - **핵심 분석이슈 고정 블록**을 먼저 쓴다. 여기서 `이슈 티어가 만들어진 날`, `event_date`, `published_at`, `change_anchor`, 대표 headline/structured catalyst, 핵심 가격 반응 테이블을 먼저 제시한다.
 - 그 다음에야 `이전에 같은 이슈가 있었나`, 같은 티커/다른 티커 관련이슈, 배경 이벤트를 쓴다.
 - 즉 독자가 page를 위에서 아래로 읽을 때, "지금 무엇이 핵심 anchor인가"를 먼저 이해한 뒤 관련이슈 비교로 내려가야 한다.
@@ -430,6 +595,8 @@ company_news 분석 시, **이벤트가 실제로 발생한 날짜(event_date)**
 
 아래 섹션 순서와 제목을 기본 템플릿으로 사용한다. 사용자가 별도 구조를 요청하지 않으면 이 순서를 따른다.
 
+단, 사용자가 `단일 회사 오퍼링 이력`, `유상증자 history`, `ATM / RD / PP 타임라인`처럼 **자본조달 history 자체만** 요구한 경우에는 아래 full research page 템플릿을 그대로 강제하지 않고, 위 `단일 종목 오퍼링 / 유상증자 조사 출력 템플릿`을 우선 적용한다. 즉 standalone offering audit 답변은 `제목 -> 범위 설명 -> 전체 목록 표 -> 주요 인사이트 -> 필요 시 비교/해석` 순서를 기본으로 하고, 관련주/확산 타임라인 섹션은 요구될 때만 붙인다.
+
 `관련주 확장`을 명시적으로 요청받은 경우에는 `## 관련주 정리` 바로 아래에 `## 관련주 확장` 또는 동등한 보조 섹션을 추가해, **새 후보의 발견 경로 / 관련성 정도 / 포함 여부 / 제외 사유**를 남긴다. 기본 Model_100 요청에서는 이 섹션을 자동으로 추가하지 않는다.
 
 ```
@@ -441,6 +608,14 @@ company_news 분석 시, **이벤트가 실제로 발생한 날짜(event_date)**
    - 사용한 keyword 묶음
    - 검토했지만 제외한 대표 후보와 제외 이유
 ## 오너십 데이터
+   [표: market cap / float % / institutional % / insider %]
+   ### Governance / Dilution 리스크 감사
+   [표: share structure / class votes / sunset / blank check / domicile / home country exemption / authorized vs outstanding]
+   [표: CEO / founder type / chair split / CEO ownership / founder ownership / insider ownership / voting power]
+   [표: 5년 shares outstanding / YoY dilution / cumulative dilution / buyback / SBC / ATM / shelf / major offering timeline]
+   [표: offering date / closing date / offering type / offer price / shares sold / gross proceeds / market cap at pricing / offering % of market cap / discount to prior close / use of proceeds]
+   [표: Form 4 buy/sell / 10b5-1 여부 / large sales / red flag checklist]
+   [요약: governance 상대 순위 / academic frame / comparable cases / 구조적 리스크 vs 실제 운영상 리스크]
 ## 🔴 핵심 분석이슈: {메인 촉매 날짜} {티커}
   - event_date: {실제 이벤트 날짜}
   - published_at: {기사/공시 시각}
@@ -637,7 +812,7 @@ company_news 분석 시, **이벤트가 실제로 발생한 날짜(event_date)**
 ## 데이터 소스 귀속 (attribution) 규칙 (필수)
 
 - 모든 팩트(날짜, headline, 등락률, 어닝 수치)에는 **데이터 소스를 명시**한다.
-- 허용되는 소스 태그: `company_news`, `fmp_pr`, `fmp_sec`, `calendar_events`, `ohlc_1d`, `news_change_metrics`, `investing`, `company_profiles`.
+- 허용되는 소스 태그: `company_news`, `fmp_pr`, `fmp_sec`, `calendar_events`, `ohlc_1d`, `news_change_metrics`, `investing`, `company_profiles`, `sec_10k`, `sec_s1`, `sec_def14a`, `sec_8k`, `sec_form4`, `sec_10q`, `sec_424b5`, `sec_edgar_web`, `issuer_ir`, `issuer_ir_web`, `macrotrends`, `companiesmarketcap`, `gurufocus`, `insidertrades`, `fintel`, `simplywallst`, `corpgov_harvard`, `stocktitan`.
 - 소스가 불명확한 정보는 `(출처 미확인)` 태그를 붙이고, 가능하면 DB 쿼리로 검증한다.
 - headline은 DB에서 읽은 원문 그대로 적는다. 요약/의역하지 않는다.
 
@@ -657,3 +832,10 @@ company_news 분석 시, **이벤트가 실제로 발생한 날짜(event_date)**
 10. **관련성 정도 등급 누락 금지**: `## 관련주 정리`에서 각 티커의 `관련성 정도 등급`을 적지 않으면 미완료로 간주한다. 단순히 `직접 수혜/간접 수혜/peer`만 적고 끝내면 최신 Model_100 기준과 맞지 않는다.
 11. **스코프 혼동 금지**: anchor 날짜 page인데 실제로는 issue-cycle 누적 강도를 쓰고 있다면, 이를 숨긴 채 `단일 이벤트 자체가 1 tier`처럼 서술하지 않는다. 스코프를 명시하지 못하면 기본적으로 anchor event의 direct surprise quality 기준으로 보수 판정한다.
 12. **기존 이슈 반복 과대평가 금지**: 이미 알려진 고객 관계, 기존 계약의 증액/확대, 반복 headline만으로 breadth가 생겼다고 해서 자동으로 `1 tier`를 주지 않는다. 핵심 티커 direct z-score와 신규성 확인이 약하면 `2 tier` 우선 검토가 기본이다.
+13. **Governance / dilution audit 생략 금지**: `Model_100` 기본 요청에서 `## 오너십 데이터`를 ownership 숫자만 적고 끝내면 미완료로 간주한다. 최소한 share structure, founder/CEO, insider ownership, 5년 dilution, capital raise, Form 4, red flag checklist가 보여야 한다.
+14. **희석 capacity 숫자 없는 서술 금지**: `authorized shares 많다`, `희석 우려 있다`처럼 숫자 없는 인상비평으로 끝내지 않는다. 가능하면 `authorized vs outstanding` gap과 3년/5년 dilution 수치를 같이 적는다.
+15. **Founder/manager 분류 뭉개기 금지**: founder가 아닌 professional manager를 `창업자형 리더십`처럼 모호하게 쓰지 않는다. `True founder / Co-founder / Professional manager` 중 하나로 명시한다.
+16. **구조 리스크와 실제 행보 혼동 금지**: perpetual dual-class, blank check preferred, shelf/ATM capacity 같은 구조적 장치와, 실제로 그것을 얼마나 공격적으로 사용했는지는 분리해서 서술한다.
+17. **Programmatic selling 단정 금지**: `10b5-1` 여부를 filing이나 Form 4 footnote로 확인하지 못했으면 programmatic selling으로 단정하지 않는다. 확인 불가 상태를 명시한다.
+18. **오퍼링 핵심 수치 누락 금지**: 조달 이벤트를 언급하면서 `종류만` 적고 `날짜 / offer price / 당시 시총 대비 비중`을 빼면 미완료로 간주한다. 최소한 `offering date`, `offering type`, `offer price/share`, `market cap at pricing`, `offering % of market cap`는 확보를 시도하고, 불가하면 어떤 값이 왜 비어 있는지 적는다.
+19. **DB 부재를 이유로 governance 조사 중단 금지**: ownership/governance 관련 값이 `company_profiles`나 app DB에 없더라도, SEC EDGAR / issuer IR 웹 원문 확인으로 계속 조사해야 한다. `DB에 없음`만 적고 멈추면 미완료로 간주한다.

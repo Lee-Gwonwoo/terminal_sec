@@ -13,6 +13,31 @@
 - 이 줄은 상단 요약 표, 현재 뉴스 요약, `source check`, `primary/secondary/watch` 표보다 먼저 와야 한다.
 - 사용자가 문서를 펼쳤을 때 **이번에 실제로 분석한 데이터의 날짜/시각 범위**를 즉시 알 수 있어야 하며, 날짜만 적거나 시각이 빠진 출력은 완료본으로 보지 않는다.
 
+**AI Research Preview 표 작성 규칙 (필수)**
+
+- `AI Research Window`의 `Preview`에서 **행/열 구조가 보이는 정보는 markdown table로 작성하는 것**을 기본값으로 둔다.
+- 즉 `항목: 값`을 여러 줄 반복하거나, 공백으로 눈대중 정렬한 pseudo-table을 쓰지 말고 아래 형식처럼 **반드시 header row + separator row**를 포함한 표로 적는다.
+
+```md
+| 항목 | 값 |
+| --- | --- |
+| 최종 판정 | 1 tier |
+| source check | FMP PR 있음 / 8-K 없음 |
+```
+
+- `Preview`에서 표로 보이게 하려면 최소한 아래 조건을 지켜야 한다.
+  - 헤더 줄과 구분선 줄을 모두 넣는다.
+  - 각 행은 한 줄에 정확히 닫는다.
+  - 열 수를 행마다 맞춘다.
+  - 단순 공백 맞춤으로 표처럼 보이게 쓰지 않는다.
+- 표 폭이 넓어지는 경우에도 prose로 풀어 쓰지 말고 **표를 유지**한다. 현재 AI Research `Preview`는 넓은 표를 가로 스크롤로 보여줄 수 있으므로, 열 정보가 유지되는 편이 우선이다.
+- 특히 아래 블록은 가능하면 표를 우선 사용한다.
+  - 상단 요약 후보 표
+  - source check 요약
+  - same-ticker / other-ticker 유사사례 비교
+  - ownership / float / institutional / insider 수치 비교
+  - 최종 판정 요약
+
 작업 절차 (3단계 구조):
 
 `Model_1`은 아래 3단계를 순서대로 수행한다. 각 단계의 역할이 다르므로 단계를 건너뛰거나 합치지 않는다.
@@ -139,14 +164,16 @@
 
 **Model_1 소스 커버리지 규칙 (필수)**
 
-- DB 구조 변경 이후 `Model_1`에서 현재 뉴스와 관련 공시/보도자료를 볼 때는 **아래 3개 소스를 함께 확인하는 것**을 기본값으로 둔다.
+- DB 구조 변경 이후 `Model_1`에서 현재 뉴스와 관련 공시/보도자료를 볼 때는 **아래 4개 소스를 함께 확인하는 것**을 기본값으로 둔다.
   - `FMP PR`: `source='FMP'`, `source_type='fmp_press_release'`
   - `press release 데이터`: 현재 앱의 press release provider dataset (`RTPR`/`PTPR` 등 별도 press release source)
-  - `FMP SEC`: `source='FMP'`, `source_type='fmp_sec_filing'`
-- 즉 `Model_1`에서 보도자료 계열을 볼 때는 **FMP PR만 보고 끝내면 안 되고**, `press release` provider 데이터도 같이 확인해야 한다. 두 feed는 제목, ticker 매핑, 본문 길이, coverage가 완전히 같지 않을 수 있다.
-- `FMP SEC`는 `Model_1`에서 **모든 form을 다 보는 것이 아니라 `8-K`만 확인**한다. 기본 해석 대상은 material event disclosure이며, `10-K`, `10-Q`, `S-3`, `424B5`, `FWP` 등 다른 form은 사용자가 명시적으로 요청하지 않는 한 `Model_1` 기본 조사 범위에 포함하지 않는다.
-- 따라서 `Model_1`의 source check가 완료되었다고 쓰려면, 최소한 `FMP PR 확인`, `press release provider 확인`, `FMP SEC 8-K 확인`의 3개 체크가 모두 끝나 있어야 한다.
-- 세 소스 중 일부가 비어 있거나 DB에 아직 적재되지 않았으면 이를 숨기지 말고 `소스 없음`, `결과 0건`, `적재 확인 필요`처럼 명시한다. 데이터 부재를 다른 소스가 자동 대체한다고 가정하지 않는다.
+  - `FMP SEC 8-K`: `source='FMP'`, `source_type='fmp_sec_filing'`, 단 `tags` 또는 form 기준 `8-K`만 채택
+  - `company news 데이터`: 현재 앱의 company-news dataset (`source_type='company_news'`, 주로 `source='FINNHUB'`)
+- 즉 `Model_1`에서 보도자료 계열을 볼 때는 **FMP PR만 보고 끝내면 안 되고**, `press release` provider 데이터와 `company_news`도 같이 확인해야 한다. 세 feed는 제목, ticker 매핑, 본문 길이, coverage가 완전히 같지 않을 수 있다.
+- `company_news`는 단순 보조 노이즈가 아니라, PR/SEC에 바로 드러나지 않는 시장 해석 기사, 후속 보도, publisher commentary를 통해 **과거 유사사례의 실제 반응 맥락**을 보강하는 기본 source로 취급한다.
+- `FMP SEC`는 `Model_1`에서 **모든 form을 다 보는 것이 아니라 `8-K`만 확인**한다. 기본 해석 대상은 material event disclosure이며, `10-K`, `10-Q`, `S-3`, `424B5`, `FWP`, `6-K` 등 다른 form은 사용자가 명시적으로 요청하지 않는 한 `Model_1` 기본 조사 범위에 포함하지 않는다.
+- 따라서 `Model_1`의 source check가 완료되었다고 쓰려면, 최소한 `FMP PR 확인`, `press release provider 확인`, `FMP SEC 8-K 확인`, `company_news 확인`의 4개 체크가 모두 끝나 있어야 한다.
+- 네 소스 중 일부가 비어 있거나 DB에 아직 적재되지 않았으면 이를 숨기지 말고 `소스 없음`, `결과 0건`, `적재 확인 필요`처럼 명시한다. 데이터 부재를 다른 소스가 자동 대체한다고 가정하지 않는다.
 
 **Model_1 데이터 사용 가드레일 (필수)**
 
@@ -159,6 +186,23 @@
 - 구현 레벨에서는 **current-news용 API와 일반 뉴스 API를 분리**하는 것을 기본값으로 둔다. 현재 레포 기준으로는 backend `[][][]/api/model1/news[][][]`, `[][][]/api/model1/news/:id[][][]`가 `[][][]model1_current_news_view[][][]`만 조회하는 Model_1 safe endpoint다.
 - 위 Model_1 safe endpoint는 `news_items` / `news_fulltext` / `news_ai_analysis` 기반 projection만 반환하고, current-news용 응답 JSON에는 `[][][]change_*[][][]`, `[][][]ohlc_*[][][]` 필드를 포함하지 않는다.
 - 따라서 **현재 뉴스 목록/상세를 Model_1로 읽는 UI나 agent는 공용 `[][][]/api/news[][][]`가 아니라 `[][][]/api/model1/news[][][]` 계열을 사용**해야 한다. 공용 `[][][]/api/news[][][]`는 일반 운영/모니터링용이며 change 필드를 계속 포함할 수 있다.
+
+**Model_1 company news / event-date 보정 규칙 (필수, Model_100 참조)**
+
+- `company_news`는 `Model_1`에서 **기본 사용 가능 source**다. 단, `company_news` row는 이벤트 발생일과 기사 게시일이 다를 수 있으므로, `Model_100`의 시간 정리 규칙을 그대로 참조한다.
+- `company_news`를 현재 사건 확인이나 과거 유사사례 정리에 사용할 때는 가능하면 아래 3개를 함께 적는다.
+  - `event_date`: 실제 이벤트가 발생한 날짜
+  - `published_at`: 해당 company news 기사가 게시된 시각
+  - `change_anchor`: 가격 반응 계산의 기준 거래일 (`first_public_at`이 16:00 ET 이후면 다음 거래일)
+- 후속 해설 기사나 `why the stock moved`형 company news는 **기사 row의 published_at을 이벤트 첫 반응으로 간주하면 안 된다.** 이 경우 `event_date` 또는 `first_public_at`을 찾아 가격 기준일을 다시 잡는다.
+- `event_date` 판별과 `change_anchor` 보정은 `Model_100`의 `이벤트 날짜 vs 기사 날짜 구분 규칙`을 그대로 따른다. 즉 company news는 가능한 한 `event_date / published_at / change_anchor` 3줄을 함께 남기고, 판별 불가 시 `event_date 미확인, published_at 기준 provisional`이라고 적는다.
+- `company_news` 유사사례 표는 `Model_100`의 반응 요약 방식을 참조한다. 최소한 아래 window에 대해 **change + HV + z-score 삼중항**을 우선 확보하려고 시도한다.
+  - same-day close: `change_pct`, `hv_change_pct`, `zscore_change_pct`
+  - same-day from open: `change_from_open_pct`, `hv_change_from_open_pct`, `zscore_change_from_open_pct`
+  - next trading day close: `change_1d_pct`, `hv_change_1d_pct`, `zscore_change_1d_pct`
+  - 1 week / 2 weeks / 1 month: `change_7d_pct`, `change_14d_pct`, `change_30d_pct`와 대응 `hv_*`, `zscore_*`
+- company news 유사사례를 정리할 때는 가능하면 `직전 어닝 날짜`와 `다음 어닝 날짜`도 함께 적는다. 어닝 직전/직후 기사인지, 어닝 해설 기사인지에 따라 reaction 해석이 크게 달라질 수 있기 때문이다.
+- 요약 원칙: PR/SEC는 사건 원문 anchor를 주고, `company_news`는 **시장이 그 사건을 언제/어떻게 해석했는지**를 보강한다. 두 층을 섞되, 이벤트 기준일은 항상 먼저 정리한다.
 
 **Model_1 분석 데이터 기간 표기 규칙 (필수)**
 
@@ -354,7 +398,7 @@
 - 목적: 잠재적으로 중요한 뉴스를 **놓치지 않고** 넓게 픽한다.
 - 허들: **낮음**. 약간이라도 주가에 의미 있을 가능성이 있으면 일단 통과시킨다.
 - 이 단계에서는 과거 유사사례를 깊이 조사하지 않는다. headline/lead/본문의 언어적 성격만 보고 빠르게 판단한다.
-- 이 단계의 현재 기사 확인에서는, 가능하면 `FMP PR`, `press release provider`, `FMP SEC 8-K`를 먼저 훑어 **같은 경제 사건이 보도자료/8-K에도 걸려 있는지**를 같이 본다. 단, `FMP SEC`는 여기서도 `8-K` 이외 form으로 범위를 넓히지 않는다.
+- 이 단계의 현재 기사 확인에서는, 가능하면 `FMP PR`, `press release provider`, `FMP SEC 8-K`, `company_news`를 먼저 훑어 **같은 경제 사건이 보도자료/8-K/company-news 해설 기사에 어떻게 걸려 있는지**를 같이 본다. 단, `FMP SEC`는 여기서도 `8-K` 이외 form으로 범위를 넓히지 않는다.
 - 이 단계에서도 **사고과정을 숨기지 않는다.** 왜 통과시켰는지, 왜 제외했는지, 어떤 경제 사건으로 읽었는지를 짧게라도 드러낸다.
 - 판단 기준:
   - 사건의 경제적 성격이 명확한가 (계약, 승인, 실적, 오퍼링, 소송 등)
@@ -398,7 +442,7 @@
 - 이 단계의 핵심은 **대표 사례 몇 개를 예쁘게 고르는 것**이 아니라, 3단계에서 실제로 재판단할 수 있을 만큼 **분포를 볼 수 있는 증거 집합**을 확보하는 것이다.
 - 수행 내용:
   1. 현재 뉴스에서 핵심 키워드를 선별한다.
-  2. 현재 사건과 직접 연결되는 source coverage를 먼저 점검한다. 기본 체크는 `FMP PR`, `press release provider`, `FMP SEC 8-K`의 3개다.
+  2. 현재 사건과 직접 연결되는 source coverage를 먼저 점검한다. 기본 체크는 `FMP PR`, `press release provider`, `FMP SEC 8-K`, `company_news`의 4개다.
   3. 그 키워드로 과거 뉴스 검색 범위를 좁힌다.
   4. 해당 ticker의 유사 뉴스가 있었는지 확인한다 (same-ticker).
   5. 다른 ticker에서도 비슷한 뉴스/이슈가 있었는지 확인한다 (other-ticker).
@@ -406,13 +450,15 @@
   7. 각 유사사례에 대해 **change 데이터 전체**(8개 metric)를 수집한다.
   8. final 경쟁 후보들에 대해서는 유사사례 조사와 병행해 DB에서 `market_cap`, `float %`, `institutional %`를 확인해 둔다.
 - 추가 수행 규칙:
-  1. 현재 기사 해석 메모에는 `FMP PR 확인 여부`, `press release provider 확인 여부`, `FMP SEC 8-K 확인 여부`를 가능하면 짧게 같이 남긴다. 예: `source check: FMP PR 있음 / RTPR 없음 / FMP SEC 8-K 없음`.
+  1. 현재 기사 해석 메모에는 `FMP PR 확인 여부`, `press release provider 확인 여부`, `FMP SEC 8-K 확인 여부`, `company_news 확인 여부`를 가능하면 짧게 같이 남긴다. 예: `source check: FMP PR 있음 / RTPR 없음 / FMP SEC 8-K 없음 / company_news 있음`.
   7. **확증 사례와 반례를 함께 수집한다.** 현재 뉴스를 bullish/bearish로 보고 싶더라도, 그 방향과 반대였던 유사사례를 의도적으로 같이 모은다.
   8. **시가총액 구간을 같이 기록한다.** other-ticker 사례를 쓸 때는 small-cap 사례만 잔뜩 모아 놓고 large-cap 현재 뉴스에 그대로 대입하지 않는다.
   9. **선반영 가능성을 같이 점검한다.** 가능하면 현재 ticker의 뉴스 직전 `1d / 3d / 5d / 20d` 가격 흐름을 확인해, 이미 유사 재료로 먼저 오른 상태인지 본다.
   10. **사례 수가 부족하면 더 조사한다.** same-ticker 또는 other-ticker가 1~2건만 잡혔다고 바로 3단계로 넘기지 말고, 키워드/peer/industry 축을 바꿔 추가 탐색한다.
   11. 현재 분석 대상 기간의 기사에는 `change` 계열 데이터를 붙여서 판단하지 않는다. 현재 기사에 대한 price move를 보고 importance를 정하는 대신, 반드시 `현재 기사 이전`에 나온 유사사례의 반응만 수집한다.
   12. `FMP SEC`를 확인할 때는 `8-K`만 대상으로 삼는다. symbol search 결과에 다른 form이 함께 섞여 있어도 `Model_1` 기본 조사 로그에는 `8-K`만 채택하고, 나머지는 `비대상 form`으로 분리한다.
+  13. `company_news`를 유사사례 표에 포함할 때는 `Model_100` 방식으로 `event_date`, `published_at`, `change_anchor`를 가능하면 함께 적고, 후속 해설 기사라면 기사 게시일 reaction이 아니라 **실제 이벤트 기준일 reaction**을 우선 사용한다.
+  14. `company_news` 기반 유사사례는 가능하면 `change/HV/z-score` 삼중항과 `직전/다음 어닝 날짜`를 함께 적는다. 특히 earnings follow-up, financing follow-up, post-filing 해설 기사에서는 이 보정이 없으면 반응 해석이 왜곡되기 쉽다.
 - 사례 수 목표는 **same-ticker 3건 이상, other-ticker 3건 이상을 각각 따로 확보하려고 시도하는 것**을 최소 기준으로 둔다.
 - 실무 기본 권장치는 **same-ticker 약 5건, other-ticker 약 5건**이다. 즉 일반적으로는 각 축에서 5건 안팎이면 분포를 보기 더 좋다고 본다.
 - 다만 항상 5건을 강제하지는 않는다. 핵심은 `각 축에서 최소 3건 이상을 확보하려고 충분히 시도했는가`이며, 3건 미만이면 더 찾으려고 한 검색 시도와 한계를 같이 남긴다.
@@ -535,7 +581,7 @@
 - `Model_1`로 최종 주요 이슈와 ticker를 분석할 때는, **현재 뉴스 1건만 요약하고 끝내면 안 된다.** 반드시 과거 유사사례 비교 결과를 같이 적는다.
 - `primary`뿐 아니라 `secondary`로 최종 note에 남긴 ticker도 동일하다. 즉 `secondary`도 현재 뉴스 요약만 적고 끝내지 말고, same-ticker / other-ticker 비교 결과를 함께 적는다.
 - 최종 답변, research note, 날짜별 스크리닝 note의 시작 부분에는 **`분석 데이터 기간: YYYY-MM-DD HH:mm ~ YYYY-MM-DD HH:mm (timezone)`** 줄을 반드시 넣는다. 이 줄은 가능하면 제목 바로 아래 첫 본문 줄에 둔다. 날짜 제목만 있고 시각이 없는 출력은 완료본으로 보지 않는다.
-- 최종 현재 뉴스 요약에는 가능하면 `source check`를 함께 적는다. 기본 형식은 `FMP PR / press release / FMP SEC 8-K` 3축이며, 예: `source check: FMP PR 있음, RTPR press release 있음, FMP SEC 8-K 없음`.
+- 최종 현재 뉴스 요약에는 가능하면 `source check`를 함께 적는다. 기본 형식은 `FMP PR / press release / FMP SEC 8-K / company_news` 4축이며, 예: `source check: FMP PR 있음, RTPR press release 있음, FMP SEC 8-K 없음, company_news 있음`.
 - 또한 `Model_1` 최종 주요 이슈 리스트는 **시가총액으로 직접 제외하지 않는다.** 대신 각 ticker의 `market_cap`을 함께 적고, 특히 large-cap / mega-cap일수록 개별 기사 반응 상한, 선반영 가능성, 비교 사례 보정 근거를 더 엄격히 설명한다. 단, `institutional ownership % >= 90` 제외 규칙은 별도로 계속 적용한다.
 - 최종 답변이나 research note에서 same-ticker 또는 other-ticker 중 한 축이라도 빠져 있으면, 원칙적으로 `Model_1 분석 완료`로 보지 않는다. 각 축에서 우선 `3건 이상` 찾으려고 시도해야 하며, 일반적으로는 `5건 안팎`이면 더 좋다. 한쪽 사례가 0건이거나 3건 미만이면 그 실제 확보 건수와 검색 시도 내역을 적는 방식으로라도 **반드시 섹션을 남긴다.**
 - `watch`는 상세 Model_1 완료 대상으로 보지 않더라도, 최소한 `ticker`, `headline 요약`, `watch로 둔 이유`는 상단 스크리닝 표 또는 바로 아래 watch 보조 표에서 반드시 보이게 남긴다.
@@ -549,6 +595,7 @@
 - `same-ticker 유사사례`를 적을 때는 가능하면 아래 항목을 함께 남긴다.
   - 유사 뉴스의 `[][][]date[][][]`
   - 유사 뉴스의 `[][][]title[][][]`
+  - 유사 뉴스가 `company_news`이면 가능하면 `[][][]event_date[][][]`, `[][][]published_at[][][]`, `[][][]change_anchor[][][]`, `[][][]recent_earnings_date[][][]`, `[][][]upcoming_earnings_date[][][]`
   - 유사 뉴스의 change 데이터 **전체** (8개 metric 모두 기록, 값이 없으면 `None`으로 표기):
     - `[][][]change_pct[][][]`: 전일 종가 → 뉴스 기준일 종가
     - `[][][]change_from_open_pct[][][]`: 뉴스 기준일 시가 → 뉴스 기준일 종가
@@ -558,6 +605,7 @@
     - `[][][]change_7d_pct[][][]`: 전일 종가 → 7거래일 후 종가
     - `[][][]change_14d_pct[][][]`: 전일 종가 → 14거래일 후 종가
     - `[][][]change_30d_pct[][][]`: 전일 종가 → 30거래일 후 종가
+  - 가능하면 위 change 데이터와 **대응 HV / z-score**도 같이 적는다. 특히 `company_news`나 후속 해설 기사에서는 `change` 절대값보다 `z-score`가 더 중요한 구분자가 될 수 있다.
   - 그 사례를 현재 뉴스와 비슷하다고 본 이유에 대한 짧은 설명
   - 그 사례가 실제로 `상승`, `하락`, `초기 약세 후 지연 상승`, `반응 미약` 중 어디에 가까웠는지에 대한 해석
   - 반응 구조 태그 (해당되면): `intraday_only`, `delayed_followthrough`, `sustained_repricing`, `one_day_spike_then_fade`, `multi_window_impact`
