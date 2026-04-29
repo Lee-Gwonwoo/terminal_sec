@@ -281,6 +281,14 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
 
   const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
   const sql = `
+    WITH candidate_news AS (
+      SELECT ni.id, ni.published_at
+      FROM news_items ni
+      ${extraJoins}
+      ${whereSql}
+      ORDER BY ni.published_at DESC, ni.id DESC
+      LIMIT ?
+    )
         SELECT ni.id, ni.published_at, ni.source, ni.publisher, COALESCE(ni.origin_url, sf.filing_url, sf.report_url) AS origin_url, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
           nec.context_ticker AS earnings_context_ticker,
           nec.recent_earnings_date,
@@ -311,7 +319,8 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
               ${floatPctSql} AS float_pct,
               ${institutionalPctSql} AS institutional_pct,
               ${insiderPctSql} AS insider_pct
-    FROM news_items ni
+          FROM candidate_news cn
+          JOIN news_items ni ON ni.id = cn.id
     LEFT JOIN sec_filings sf ON sf.news_id = ni.id
     LEFT JOIN news_fulltext nf ON nf.news_id = ni.id
     LEFT JOIN news_earnings_context nec ON nec.news_id = ni.id
@@ -325,10 +334,7 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
     LEFT JOIN news_change_metrics cm_30d ON cm_30d.news_id = ni.id AND cm_30d.metric_key = 'change_30d_pct'
     ${volatilityMetricSql.joinSql}
     LEFT JOIN news_ai_analysis naa ON naa.news_id = ni.id
-    ${extraJoins}
-    ${whereSql}
-    ORDER BY ni.published_at DESC, ni.id DESC
-    LIMIT ?
+    ORDER BY cn.published_at DESC, cn.id DESC
   `;
 
   const rows = await getDb().all<any[]>(sql, values);

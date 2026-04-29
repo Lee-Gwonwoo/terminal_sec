@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronUp,
   Eye,
+  GripVertical,
   RefreshCw,
   Search,
   Settings2,
@@ -87,6 +88,12 @@ interface CalendarResponse {
   nextCursor?: string;
 }
 
+interface CalendarWatchlist {
+  id: string;
+  name: string;
+  itemCount: number;
+}
+
 interface JobStatus {
   status: 'running' | 'done' | 'failed' | 'cancelled';
   progress: { completed: number; total: number; pct: number };
@@ -109,6 +116,8 @@ interface NumericFilterConfig {
   unitLabel: string;
   multiplier?: number;
 }
+
+type DatePresetKey = 'this_week' | 'next_5_days' | 'next_2_weeks' | 'this_month' | 'next_month';
 
 const FALLBACK_TYPES: CalendarTypeConfig[] = [
   { key: 'earnings', label: 'Earnings', supports: [], columns: ['report_date', 'ticker', 'name', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual', 'industry', 'float_pct', 'institutional_pct', 'insider_pct', 'session', 'source'] },
@@ -200,6 +209,13 @@ const NUMERIC_FILTERS_BY_TYPE: Record<string, NumericFilterConfig[]> = {
 const IPO_SECURITY_TYPE_ORDER = ['Common Stock', 'Unit', 'Warrant', 'Rights', 'ADS', 'ETF', 'Fund/Trust', 'Preferred', 'Other'];
 const DEFAULT_EARNINGS_UPDATE_CONCURRENCY = 1;
 const DEFAULT_FINANCIAL_SYNC_CONCURRENCY = 1;
+const DATE_PRESET_OPTIONS: Array<{ key: DatePresetKey; label: string }> = [
+  { key: 'this_week', label: 'This Week' },
+  { key: 'next_5_days', label: 'Next 5 Days' },
+  { key: 'next_2_weeks', label: 'Next 2 Weeks' },
+  { key: 'this_month', label: 'This Month' },
+  { key: 'next_month', label: 'Next Month' },
+];
 
 function readStoredNumberInRange(key: string, fallback: number, min: number, max: number): number {
   try {
@@ -291,6 +307,77 @@ function formatDateValue(value: unknown): string {
   return value.slice(0, 10);
 }
 
+function formatDateInputValue(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function getStartOfWeek(date: Date): Date {
+  const next = new Date(date);
+  const day = next.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  next.setDate(next.getDate() + diff);
+  return next;
+}
+
+function getEndOfWeek(date: Date): Date {
+  return addDays(getStartOfWeek(date), 6);
+}
+
+function getStartOfMonth(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function getEndOfMonth(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0);
+}
+
+function buildDatePresetRange(preset: DatePresetKey, now = new Date()): { from: string; to: string } {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  if (preset === 'this_week') {
+    return {
+      from: formatDateInputValue(getStartOfWeek(today)),
+      to: formatDateInputValue(getEndOfWeek(today)),
+    };
+  }
+
+  if (preset === 'next_5_days') {
+    return {
+      from: formatDateInputValue(today),
+      to: formatDateInputValue(addDays(today, 4)),
+    };
+  }
+
+  if (preset === 'next_2_weeks') {
+    return {
+      from: formatDateInputValue(today),
+      to: formatDateInputValue(addDays(today, 13)),
+    };
+  }
+
+  if (preset === 'this_month') {
+    return {
+      from: formatDateInputValue(getStartOfMonth(today)),
+      to: formatDateInputValue(getEndOfMonth(today)),
+    };
+  }
+
+  const nextMonthStart = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+  return {
+    from: formatDateInputValue(nextMonthStart),
+    to: formatDateInputValue(getEndOfMonth(nextMonthStart)),
+  };
+}
+
 function getRatioValue(row: CalendarRow): string {
   if (typeof row.ratio === 'string' && row.ratio.trim()) {
     return row.ratio;
@@ -338,7 +425,7 @@ function matchesNumericRange(
   return true;
 }
 
-async function fetchCalendarEvents(type: string, from: string, to: string): Promise<CalendarRow[]> {
+async function fetchCalendarEvents(type: string, from: string, to: string, watchlistId?: string): Promise<CalendarRow[]> {
   const allItems: CalendarRow[] = [];
   let cursor: string | undefined;
 
@@ -353,6 +440,9 @@ async function fetchCalendarEvents(type: string, from: string, to: string): Prom
     }
     if (to) {
       params.set('to', to);
+    }
+    if (watchlistId) {
+      params.set('watchlist_id', watchlistId);
     }
     if (cursor) {
       params.set('cursor', cursor);
@@ -377,19 +467,23 @@ async function fetchCalendarEvents(type: string, from: string, to: string): Prom
 export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const [typeConfigs, setTypeConfigs] = useState<CalendarTypeConfig[]>(FALLBACK_TYPES);
   const [events, setEvents] = useState<CalendarRow[]>([]);
+  const [watchlists, setWatchlists] = useState<CalendarWatchlist[]>([]);
   const [activeType, setActiveType] = useState('earnings');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [selectedDatePreset, setSelectedDatePreset] = useState<DatePresetKey | null>(null);
   const [sortField, setSortField] = useState<string | null>(() => getDefaultSortFieldForType('earnings'));
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [columnStates, setColumnStates] = useState<Record<string, ColumnConfig[]>>(() =>
     Object.fromEntries(FALLBACK_TYPES.map((typeConfig) => [typeConfig.key, buildColumns(typeConfig.key, typeConfig.columns)]))
   );
   const [showColumnMenu, setShowColumnMenu] = useState(false);
+  const [showWatchlistMenu, setShowWatchlistMenu] = useState(false);
   const [showFmpSettingsMenu, setShowFmpSettingsMenu] = useState(false);
+  const [draggedColumnKey, setDraggedColumnKey] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
   const [jobLabel, setJobLabel] = useState('Calendar update');
@@ -403,6 +497,8 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const [floatPctMax, setFloatPctMax] = useState('');
   const [institutionalPctMin, setInstitutionalPctMin] = useState('');
   const [institutionalPctMax, setInstitutionalPctMax] = useState('');
+  const [confirmedFilter, setConfirmedFilter] = useState<boolean | null>(null);
+  const [selectedWatchlistId, setSelectedWatchlistId] = useState<string>('all');
   const [ipoSecurityTypeFilter, setIpoSecurityTypeFilter] = useState('all');
   const [tickerContextMenu, setTickerContextMenu] = useState<{
     x: number;
@@ -426,6 +522,10 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const visibleColumns = currentColumns.filter((column) => column.visible);
   const numericFilters = NUMERIC_FILTERS_BY_TYPE[activeType] ?? [];
   const hasRequiredDateRange = Boolean(dateFrom && dateTo);
+  const supportsWatchlistFilter = activeType !== 'economics';
+  const selectedWatchlistLabel = selectedWatchlistId === 'all'
+    ? 'All Watchlists'
+    : watchlists.find((watchlist) => watchlist.id === selectedWatchlistId)?.name ?? 'Watch Lists';
 
   useEffect(() => {
     let cancelled = false;
@@ -466,6 +566,47 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   useEffect(() => {
     let cancelled = false;
 
+    const loadWatchlists = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/watchlists`);
+        if (!response.ok) {
+          throw new Error(`Watchlist fetch failed: HTTP ${response.status}`);
+        }
+        const data = await response.json() as Array<Record<string, unknown>>;
+        if (cancelled || !Array.isArray(data)) {
+          return;
+        }
+        const nextWatchlists = data.map((row) => {
+          const itemCount = Array.isArray(row.items)
+            ? row.items.length
+            : Array.isArray(row.tickers)
+              ? row.tickers.length
+              : 0;
+          return {
+            id: String(row.id ?? ''),
+            name: String(row.name ?? 'Untitled'),
+            itemCount,
+          } satisfies CalendarWatchlist;
+        }).filter((row) => row.id);
+        setWatchlists(nextWatchlists);
+        setSelectedWatchlistId((current) => current !== 'all' && !nextWatchlists.some((watchlist) => watchlist.id === current) ? 'all' : current);
+      } catch {
+        if (!cancelled) {
+          setWatchlists([]);
+          setSelectedWatchlistId('all');
+        }
+      }
+    };
+
+    void loadWatchlists();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
     if (!hasRequiredDateRange) {
       setEvents([]);
       setError(null);
@@ -479,7 +620,12 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
       setLoading(true);
       setError(null);
       try {
-        const items = await fetchCalendarEvents(activeType, dateFrom, dateTo);
+        const items = await fetchCalendarEvents(
+          activeType,
+          dateFrom,
+          dateTo,
+          supportsWatchlistFilter && selectedWatchlistId !== 'all' ? selectedWatchlistId : undefined,
+        );
         if (cancelled) {
           return;
         }
@@ -501,7 +647,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     return () => {
       cancelled = true;
     };
-  }, [activeType, dateFrom, dateTo, hasRequiredDateRange, reloadToken]);
+  }, [activeType, dateFrom, dateTo, hasRequiredDateRange, reloadToken, selectedWatchlistId, supportsWatchlistFilter]);
 
   useEffect(() => {
     if (!jobId || (jobStatus && jobStatus.status !== 'running')) {
@@ -607,6 +753,54 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     }));
   };
 
+  const handleColumnDragStart = (event: React.DragEvent<HTMLTableCellElement>, columnKey: string) => {
+    setDraggedColumnKey(columnKey);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', columnKey);
+  };
+
+  const handleColumnDragOver = (event: React.DragEvent<HTMLTableCellElement>) => {
+    if (!draggedColumnKey) {
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleColumnDrop = (event: React.DragEvent<HTMLTableCellElement>, targetColumnKey: string) => {
+    event.preventDefault();
+
+    if (!draggedColumnKey || draggedColumnKey === targetColumnKey) {
+      setDraggedColumnKey(null);
+      return;
+    }
+
+    setColumnStates((previous) => {
+      const sourceColumns = previous[activeType] ?? [];
+      const draggedIndex = sourceColumns.findIndex((column) => column.key === draggedColumnKey);
+      const targetIndex = sourceColumns.findIndex((column) => column.key === targetColumnKey);
+
+      if (draggedIndex === -1 || targetIndex === -1) {
+        return previous;
+      }
+
+      const reordered = [...sourceColumns];
+      const [movedColumn] = reordered.splice(draggedIndex, 1);
+      reordered.splice(targetIndex, 0, movedColumn);
+
+      return {
+        ...previous,
+        [activeType]: reordered,
+      };
+    });
+
+    setDraggedColumnKey(null);
+  };
+
+  const handleColumnDragEnd = () => {
+    setDraggedColumnKey(null);
+  };
+
   const tabFilteredEvents = useMemo(() => {
     return events.filter((event) => event.type === activeType);
   }, [events, activeType]);
@@ -634,7 +828,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     });
   }, [tabFilteredEvents]);
 
-  const filteredAndSortedEvents = useMemo(() => {
+  const baseFilteredEvents = useMemo(() => {
     let filtered = [...tabFilteredEvents];
 
     if (searchQuery.trim()) {
@@ -661,6 +855,27 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
       matchesNumericRange(event.institutional_pct, institutionalPctMin, institutionalPctMax),
     );
 
+    return filtered;
+  }, [
+    tabFilteredEvents,
+    searchQuery,
+    activeType,
+    ipoSecurityTypeFilter,
+    marketCapMin,
+    marketCapMax,
+    floatPctMin,
+    floatPctMax,
+    institutionalPctMin,
+    institutionalPctMax,
+  ]);
+
+  const filteredAndSortedEvents = useMemo(() => {
+    let filtered = [...baseFilteredEvents];
+
+    if (activeType === 'earnings' && confirmedFilter !== null) {
+      filtered = filtered.filter((event) => Boolean(event.confirmed) === confirmedFilter);
+    }
+
     if (sortField && sortDirection) {
       filtered.sort((a, b) => {
         const aVal = a[sortField];
@@ -686,37 +901,32 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
 
     return filtered;
   }, [
-    tabFilteredEvents,
-    searchQuery,
+    baseFilteredEvents,
+    confirmedFilter,
     activeType,
-    ipoSecurityTypeFilter,
     sortField,
     sortDirection,
-    marketCapMin,
-    marketCapMax,
-    floatPctMin,
-    floatPctMax,
-    institutionalPctMin,
-    institutionalPctMax,
   ]);
 
   const earningsStatusSummary = useMemo(() => {
     if (activeType !== 'earnings') {
       return null;
     }
-    const confirmedCount = filteredAndSortedEvents.filter((event) => Boolean(event.confirmed)).length;
-    const pendingCount = filteredAndSortedEvents.length - confirmedCount;
+    const confirmedCount = baseFilteredEvents.filter((event) => Boolean(event.confirmed)).length;
+    const pendingCount = baseFilteredEvents.length - confirmedCount;
     return {
       confirmedCount,
       pendingCount,
-      totalCount: filteredAndSortedEvents.length,
+      totalCount: baseFilteredEvents.length,
     };
-  }, [activeType, filteredAndSortedEvents]);
+  }, [activeType, baseFilteredEvents]);
 
   const hasActiveFilters = Boolean(
     searchQuery ||
     dateFrom ||
     dateTo ||
+    confirmedFilter !== null ||
+    (supportsWatchlistFilter && selectedWatchlistId !== 'all') ||
     ipoSecurityTypeFilter !== 'all' ||
     marketCapMin ||
     marketCapMax ||
@@ -729,7 +939,10 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const clearAllFilters = () => {
     setDateFrom('');
     setDateTo('');
+    setSelectedDatePreset(null);
     setSearchQuery('');
+    setConfirmedFilter(null);
+    setSelectedWatchlistId('all');
     setIpoSecurityTypeFilter('all');
     setMarketCapMin('');
     setMarketCapMax('');
@@ -739,6 +952,13 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     setInstitutionalPctMax('');
     setSortField(getDefaultSortFieldForType(activeType));
     setSortDirection('desc');
+  };
+
+  const applyDatePreset = (preset: DatePresetKey) => {
+    const range = buildDatePresetRange(preset);
+    setDateFrom(range.from);
+    setDateTo(range.to);
+    setSelectedDatePreset(preset);
   };
 
   const startCalendarJob = async (params: {
@@ -1025,22 +1245,81 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
             <input
               type="date"
               value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
+              onChange={(e) => {
+                setDateFrom(e.target.value);
+                setSelectedDatePreset(null);
+              }}
               className="px-3 py-2 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 w-36"
             />
             <span className="text-sm text-gray-500">to</span>
             <input
               type="date"
               value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
+              onChange={(e) => {
+                setDateTo(e.target.value);
+                setSelectedDatePreset(null);
+              }}
               className="px-3 py-2 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 w-36"
             />
           </div>
+
+          {supportsWatchlistFilter && (
+            <div className="relative">
+              <button
+                onClick={() => {
+                  setShowWatchlistMenu((value) => !value);
+                  setShowColumnMenu(false);
+                  setShowFmpSettingsMenu(false);
+                }}
+                className="flex max-w-[180px] items-center gap-1 px-3 py-2 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-600"
+              >
+                <span className="truncate">{selectedWatchlistLabel}</span>
+                <ChevronDown className="h-4 w-4 shrink-0" />
+              </button>
+
+              {showWatchlistMenu && (
+                <>
+                  <div
+                    className="fixed inset-0 z-10"
+                    onClick={() => setShowWatchlistMenu(false)}
+                  />
+                  <div className="absolute right-0 top-full mt-1 max-h-80 w-64 overflow-auto rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg z-20 p-2">
+                    <button
+                      onClick={() => {
+                        setSelectedWatchlistId('all');
+                        setShowWatchlistMenu(false);
+                      }}
+                      className={`w-full rounded px-3 py-2 text-left text-xs hover:bg-gray-100 dark:hover:bg-gray-700 ${selectedWatchlistId === 'all' ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : ''}`}
+                    >
+                      All Watchlists
+                    </button>
+                    {watchlists.map((watchlist) => (
+                      <button
+                        key={watchlist.id}
+                        onClick={() => {
+                          setSelectedWatchlistId(watchlist.id);
+                          setShowWatchlistMenu(false);
+                        }}
+                        className={`w-full rounded px-3 py-2 text-left text-xs hover:bg-gray-100 dark:hover:bg-gray-700 ${selectedWatchlistId === watchlist.id ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : ''}`}
+                      >
+                        <div className="truncate font-medium">{watchlist.name}</div>
+                        <div className="mt-0.5 text-[10px] text-gray-500 dark:text-gray-400">{watchlist.itemCount} tickers</div>
+                      </button>
+                    ))}
+                    {watchlists.length === 0 && (
+                      <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">No watchlists found</div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
 
           <div className="relative">
             <button
               onClick={() => {
                 setShowColumnMenu(!showColumnMenu);
+                setShowWatchlistMenu(false);
               }}
               className="flex items-center gap-1 px-3 py-2 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-600"
             >
@@ -1096,7 +1375,10 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
               </button>
               <div className="relative">
                 <button
-                  onClick={() => setShowFmpSettingsMenu((value) => !value)}
+                  onClick={() => {
+                    setShowFmpSettingsMenu((value) => !value);
+                    setShowWatchlistMenu(false);
+                  }}
                   className="flex items-center gap-2 px-3 py-2 text-sm rounded bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
                 >
                   <Settings2 className="w-4 h-4" />
@@ -1185,6 +1467,19 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
           )}
         </div>
 
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <span className="text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Quick Range</span>
+          {DATE_PRESET_OPTIONS.map((preset) => (
+            <button
+              key={preset.key}
+              onClick={() => applyDatePreset(preset.key)}
+              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${selectedDatePreset === preset.key ? 'border-blue-600 bg-blue-600 text-white dark:border-blue-400 dark:bg-blue-500' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'}`}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+
         {numericFilters.length > 0 && (
           <div className="flex flex-wrap items-end gap-3 mb-3 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2">
             {numericFilters.map((filterConfig) => {
@@ -1264,9 +1559,29 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
               FMP stable earnings source does not provide reliable time or session. Date, estimate/actual, and DB-based ownership columns are supported.
             </div>
             {hasRequiredDateRange && earningsStatusSummary && earningsStatusSummary.totalCount > 0 && (
-              <div className="text-xs text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded px-3 py-2">
-                Confirmed {earningsStatusSummary.confirmedCount} / Pending {earningsStatusSummary.pendingCount}
-                {earningsStatusSummary.pendingCount === 0 ? ' · 현재 선택 범위에는 이미 발표된 실적만 있습니다. pending estimate를 보려면 종료일을 더 미래로 늘리세요.' : ''}
+              <div className="flex flex-wrap items-center gap-2 text-xs text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded px-3 py-2">
+                <span className="font-medium">Status</span>
+                <button
+                  onClick={() => setConfirmedFilter(null)}
+                  className={`inline-flex items-center rounded border px-2 py-0.5 font-medium ${confirmedFilter === null ? 'border-blue-600 bg-blue-600 text-white dark:border-blue-400 dark:bg-blue-500' : 'border-blue-200 bg-white text-blue-700 dark:border-blue-700 dark:bg-gray-900 dark:text-blue-300'}`}
+                >
+                  All {earningsStatusSummary.totalCount}
+                </button>
+                <button
+                  onClick={() => setConfirmedFilter(true)}
+                  className={`inline-flex items-center rounded border px-2 py-0.5 font-medium ${confirmedFilter === true ? 'border-emerald-600 bg-emerald-600 text-white dark:border-emerald-400 dark:bg-emerald-500' : 'border-emerald-200 bg-white text-emerald-700 dark:border-emerald-700 dark:bg-gray-900 dark:text-emerald-300'}`}
+                >
+                  Confirmed {earningsStatusSummary.confirmedCount}
+                </button>
+                <button
+                  onClick={() => setConfirmedFilter(false)}
+                  className={`inline-flex items-center rounded border px-2 py-0.5 font-medium ${confirmedFilter === false ? 'border-slate-600 bg-slate-600 text-white dark:border-slate-400 dark:bg-slate-500' : 'border-slate-200 bg-white text-slate-700 dark:border-slate-600 dark:bg-gray-900 dark:text-slate-300'}`}
+                >
+                  Pending {earningsStatusSummary.pendingCount}
+                </button>
+                {earningsStatusSummary.pendingCount === 0 ? (
+                  <span>현재 선택 범위에는 이미 발표된 실적만 있습니다. pending estimate를 보려면 종료일을 더 미래로 늘리세요.</span>
+                ) : null}
               </div>
             )}
           </div>
@@ -1341,16 +1656,24 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                   <th
                     key={column.key}
                     style={{ width: column.width }}
-                    className={`px-3 py-2 text-xs font-medium border-b border-gray-300 dark:border-gray-700 ${column.align === 'right' ? 'text-right' : column.align === 'center' ? 'text-center' : 'text-left'}`}
+                    draggable
+                    onDragStart={(event) => handleColumnDragStart(event, column.key)}
+                    onDragOver={handleColumnDragOver}
+                    onDrop={(event) => handleColumnDrop(event, column.key)}
+                    onDragEnd={handleColumnDragEnd}
+                    className={`px-3 py-2 text-xs font-medium border-b border-gray-300 dark:border-gray-700 ${column.align === 'right' ? 'text-right' : column.align === 'center' ? 'text-center' : 'text-left'} ${draggedColumnKey === column.key ? 'opacity-50' : ''}`}
                   >
-                    <button
-                      onClick={() => handleSort(column.key)}
-                      className="inline-flex items-center gap-1 hover:text-blue-600 dark:hover:text-blue-400"
-                    >
-                      {column.label}
-                      {sortField === column.key && sortDirection === 'asc' && <ChevronUp className="w-3 h-3" />}
-                      {sortField === column.key && sortDirection === 'desc' && <ChevronDown className="w-3 h-3" />}
-                    </button>
+                    <div className={`inline-flex w-full items-center gap-1 ${column.align === 'right' ? 'justify-end' : column.align === 'center' ? 'justify-center' : 'justify-start'}`}>
+                      <GripVertical className="h-3 w-3 shrink-0 text-gray-400" />
+                      <button
+                        onClick={() => handleSort(column.key)}
+                        className="inline-flex items-center gap-1 hover:text-blue-600 dark:hover:text-blue-400"
+                      >
+                        {column.label}
+                        {sortField === column.key && sortDirection === 'asc' && <ChevronUp className="w-3 h-3" />}
+                        {sortField === column.key && sortDirection === 'desc' && <ChevronDown className="w-3 h-3" />}
+                      </button>
+                    </div>
                   </th>
                 ))}
               </tr>
@@ -1384,7 +1707,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
 
       <div className="px-4 py-2 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-600 dark:text-gray-400">
         {hasRequiredDateRange
-          ? `Showing ${filteredAndSortedEvents.length} of ${tabFilteredEvents.length} events`
+          ? `Showing ${filteredAndSortedEvents.length} of ${tabFilteredEvents.length} events${supportsWatchlistFilter && selectedWatchlistId !== 'all' ? ` · Watchlist: ${selectedWatchlistLabel}` : ''}`
           : 'Select a start and end date to load events'}
       </div>
 

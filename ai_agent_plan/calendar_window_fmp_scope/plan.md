@@ -138,6 +138,23 @@
   - 값은 localStorage에 유지해 창을 다시 열어도 마지막 설정이 남게 한다.
   - 사용자가 수정한 값은 다음 button click부터 즉시 반영된다.
 
+### PLAN CHANGE #12 — 2026-04-29 CalendarWindow watchlist/date preset/column drag 추가
+
+- 사용자 추가 요구를 반영해 `CalendarWindow` 상단 필터/표 조작 범위를 다음으로 확장한다.
+  - backend가 이미 지원하는 `watchlist_id` query를 프론트에서 선택 가능하게 노출한다.
+  - 현재 컬럼 visible/width state는 유지한 채, 사용자가 헤더를 drag해서 순서를 바꿀 수 있게 한다.
+  - date range input 외에 빠른 preset 버튼을 추가한다.
+    - `This Week`
+    - `Next 5 Days`
+    - `Next 2 Weeks`
+    - `This Month`
+    - `Next Month`
+- 구현 방향
+  - watchlist filter는 client-side ticker subset 재필터가 아니라 `/api/calendar/events?watchlist_id=...` backend query를 사용한다.
+  - 컬럼 drag reorder는 type별 `columnStates`를 source of truth로 유지하고, drop 시 배열 순서만 바꾼다.
+  - date preset은 local browser date 기준으로 `dateFrom/dateTo` string state를 직접 갱신하고, 사용자가 수동 입력하면 preset 선택 상태는 해제한다.
+  - `Next 5 Days`, `Next 2 Weeks`는 “오늘 포함” 기준으로 계산한다.
+
 ### 현재 레포 상태(중요, 확인됨)
 
 - backend에는 이미 일반형 calendar read API가 있다.
@@ -627,6 +644,9 @@
 | 4-6 | 날짜 범위 미지정 시 events fetch를 막고 안내 상태를 표시 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx` | 브라우저 초기 진입/Reset 후 빈 상태 확인 | ⏳ |
 | 4-7 | ticker 우클릭 context menu와 Financial dialog 차트 UI 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx`, `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarFinancialDialog.tsx` | 브라우저에서 우클릭 menu + dialog 확인 | ⏳ |
 | 4-8 | earnings 탭에 default ticker financial history sync 버튼과 estimate overlay UI 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx`, `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarFinancialDialog.tsx` | 브라우저에서 sync 버튼 + estimate line/card 확인 | ⏳ |
+| 4-9 | watchlist dropdown을 추가하고 `/api/watchlists` + `/api/calendar/events?watchlist_id=` 연동 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx` | watchlist 선택 후 row 집합 변화 확인 | ✅ |
+| 4-10 | date range preset 버튼(`This Week`, `Next 5 Days`, `Next 2 Weeks`, `This Month`, `Next Month`) 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx` | 버튼 클릭 후 date input / row 변화 확인 | ✅ |
+| 4-11 | 컬럼 header drag reorder 추가 | `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx` | 헤더 드래그 후 컬럼 순서 유지 확인 | ✅ |
 
 4-1 목적: 현재 calendar 화면을 실데이터 기반으로 바꾸기 위함.
 설명: mock array 대신 backend response를 state source of truth로 삼는다.
@@ -676,6 +696,24 @@
 사람 검증(비개발자): earnings 화면에서 한 번 버튼을 누른 뒤 ticker dialog를 열면 estimate가 같이 보인다.
 흔한 문제/주의: actual 전용 차트 config를 그대로 두면 estimate series가 API에 있어도 화면에는 안 나타난다.
 
+4-9 목적: 사용자가 CalendarWindow 결과를 저장된 관심 watchlist 기준으로 바로 좁힐 수 있게 하기 위함.
+설명: `/api/watchlists` 목록을 읽어 dropdown을 만들고, 선택된 watchlist id를 calendar fetch query에 전달한다.
+완료 조건(눈으로 확인): watchlist를 바꾸면 같은 날짜 범위에서도 row 집합이 달라진다.
+사람 검증(비개발자): watchlist 이름을 고르면 해당 종목들만 남는다.
+흔한 문제/주의: watchlist를 client-side로만 거르면 pagination 총량/summary가 실제 backend 결과와 달라질 수 있다.
+
+4-10 목적: 날짜 범위를 직접 타이핑하지 않고도 자주 쓰는 window를 빠르게 적용하기 위함.
+설명: preset 버튼이 `dateFrom/dateTo`를 즉시 채우고 현재 로드 결과를 바꾼다.
+완료 조건(눈으로 확인): 버튼을 누르면 두 date input 값이 자동으로 바뀌고 결과가 다시 로드된다.
+사람 검증(비개발자): `Next 2 Weeks`를 누르면 오늘부터 2주 범위가 바로 잡힌다.
+흔한 문제/주의: local date 계산에서 timezone 때문에 하루 밀리지 않게 `YYYY-MM-DD` string 기준으로 처리해야 한다.
+
+4-11 목적: 사용자가 자주 보는 컬럼 순서를 창 안에서 직접 맞출 수 있게 하기 위함.
+설명: header를 drag/drop하면 현재 type의 `columnStates` 배열 순서를 바꾼다.
+완료 조건(눈으로 확인): 예를 들어 `Confirmed`를 `Symbol` 앞/뒤로 옮기면 표와 header 순서가 함께 바뀐다.
+사람 검증(비개발자): 헤더를 잡아 끌어 놓으면 컬럼 위치가 그대로 이동한다.
+흔한 문제/주의: hidden column까지 drag 대상으로 처리할 때 visible 순서와 source 배열 순서가 어긋나지 않게 해야 한다.
+
 검증 훅:
 ```text
 - backend dev + webui dev 실행
@@ -686,6 +724,9 @@
 - 기본 진입/Reset 후 날짜 안내 상태이고 row가 비어 있는지 확인
 - ticker 우클릭 -> Financial menu -> dialog open -> annual/quarterly toggle 확인
 - earnings 탭 `Sync Financial History` 버튼 -> job progress -> 완료 후 dialog estimate 확인
+- watchlist dropdown 선택 후 `/api/calendar/events?watchlist_id=` 결과와 화면 row 변화 확인
+- date preset 버튼 클릭 후 input 값과 row 집합이 같이 바뀌는지 확인
+- header drag/drop 후 컬럼 순서가 실제로 바뀌는지 확인
 ```
 사용자 확인 필요: **예**
 

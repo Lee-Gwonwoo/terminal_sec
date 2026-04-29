@@ -342,6 +342,69 @@
   - 구현 + build/test + live API + browser 검증 완료
   - 사용자 확인 대기 (`awaiting user confirmation`)
 
+## 2026-04-29
+**작성 시각:** 2026-04-29 07:06 (local)
+
+### Calendar earnings confirmed 가시성 회귀 수정
+
+- 변경 파일
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx`
+  - `ai_agent_plan/calendar_window_fmp_scope/agent_log.md`
+- 확인한 원인
+  - 현재 Calendar earnings 화면에는 예전 구현에 있던 `Confirmed / Unconfirmed` quick filter가 빠져 있었다.
+  - `2026-04-01 ~ 2026-05-31` 범위 기준으로 earnings row는 `1170`건이고, 이 중 `confirmed=135`, `pending=1035`였다.
+  - 기본 정렬이 최신 날짜 우선이라 pending future row가 상단을 대부분 차지해, confirmed row가 실제로는 존재해도 화면상에서 바로 보이지 않는 상태였다.
+- 구현 내용
+  - `CalendarWindow`에 `confirmedFilter` state 추가
+  - search / 숫자 필터 이후의 base filtered row 집합과 confirmed filter 적용 단계를 분리
+  - earnings summary를 `Status` 필터 바로가기 형태로 바꿔 `All / Confirmed / Pending` 버튼을 추가
+  - summary count는 confirmed filter 적용 전 기준으로 유지해 현재 범위 분포를 바로 볼 수 있게 수정
+  - Reset 버튼이 confirmed filter도 함께 초기화하도록 수정
+- 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `CalendarWindow.tsx` `get_errors` 0 errors |
+| 빌드 | ✅ | backend `npm run build`, frontend `npm run build` 성공 |
+| 자동 테스트 | ✅ | backend vitest `16 files / 96 tests` 통과 |
+| 런타임 통합 | ✅ | 브라우저에서 `2026-04-01 ~ 2026-05-31` 범위 로드 후 `Status / All 1170 / Confirmed 135 / Pending 1035` 노출 확인, `Confirmed 135` 클릭 시 첫 row가 `2026-04-24 HCA Confirmed`로 필터링됨 |
+
+- 상태
+  - 구현 + build/test + browser 검증 완료
+  - 사용자 확인 대기 (`awaiting user confirmation`)
+
+## 2026-04-29
+**작성 시각:** 2026-04-29 07:52 (local)
+
+### Calendar watchlist/date preset/column drag 추가
+
+- 변경 파일
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/src/app/components/CalendarWindow.tsx`
+  - `termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md`
+  - `ai_agent_plan/calendar_window_fmp_scope/plan.md`
+  - `ai_agent_plan/calendar_window_fmp_scope/agent_log.md`
+- 구현 내용
+  - `CalendarWindow`에 watchlist dropdown 추가
+  - `GET /api/watchlists`로 목록을 읽고, economics를 제외한 탭에서만 표시하도록 구성
+  - watchlist 선택 시 `GET /api/calendar/events`에 `watchlist_id`를 붙여 server-side filter로 다시 fetch하도록 수정
+  - `Quick Range` 버튼(`This Week`, `Next 5 Days`, `Next 2 Weeks`, `This Month`, `Next Month`) 추가
+  - preset 클릭 시 `dateFrom/dateTo`를 즉시 채우고, date input을 수동 수정하면 preset active 상태가 해제되도록 수정
+  - table header에 drag handle을 추가하고 visible column 순서를 drag-and-drop으로 재배치할 수 있게 수정
+  - footer summary에 watchlist 적용 중일 때 현재 watchlist 이름이 보이도록 보강
+- 검증
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `CalendarWindow.tsx` `get_errors` 0 errors |
+| 빌드 | ✅ | frontend `npm run build` 성공 |
+| 브라우저 런타임 | ✅ | `Next 5 Days` 클릭 시 `2026-04-29 ~ 2026-05-03` 자동 입력 및 row 로드 확인 |
+| 브라우저 런타임 | ✅ | `market leader 1` watchlist 선택 시 footer가 `Showing 0 of 0 events · Watchlist: market leader 1`로 바뀌고 결과 집합이 재조회됨을 확인 |
+| 브라우저 런타임 | ✅ | `Symbol` header를 `Date` 앞으로 드래그했을 때 header 순서가 `Symbol / Date / ...`로 바뀌는 것 확인 |
+
+- 상태
+  - 구현 + build + browser 검증 완료
+  - 사용자 확인 대기 (`awaiting user confirmation`)
+
 ## 2026-04-16
 **작성 시각:** 2026-04-16 08:31 (local)
 

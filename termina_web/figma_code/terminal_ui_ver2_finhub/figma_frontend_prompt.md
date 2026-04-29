@@ -1089,6 +1089,7 @@ API:
 - backend API 연동 있음
 - `GET /api/calendar/types`로 탭 목록을 읽는다.
 - `GET /api/calendar/events`로 현재 탭 + 날짜 범위 데이터를 읽는다.
+  - economics를 제외한 탭에서는 선택된 watchlist가 있으면 `watchlist_id` query를 함께 보낸다.
 - ticker 우클릭 `Financial` dialog를 열 때 `GET /api/calendar/financials/:ticker`로 annual / quarterly 재무 series를 읽는다.
 - earnings 탭에서 `POST /api/fmp/calendar/earnings/update`를 실행하고 `GET /api/jobs/:jobId`로 polling 한다.
 - earnings 탭에서 `POST /api/fmp/calendar/financials/update`도 실행할 수 있고, 같은 `GET /api/jobs/:jobId` polling 패턴으로 default ticker financial history sync 상태를 보여준다.
@@ -1101,9 +1102,15 @@ API:
 현재 구현 요약:
 
 - date range는 HTML date input이며, 값이 있으면 API query `from/to`로 바로 전달된다.
+  - 상단 `Quick Range` 버튼(`This Week`, `Next 5 Days`, `Next 2 Weeks`, `This Month`, `Next Month`)을 누르면 해당 날짜 범위가 즉시 input에 채워진다.
+  - date input을 직접 수정하면 active preset highlight는 해제된다.
 - `from`과 `to`가 둘 다 지정되기 전에는 `GET /api/calendar/events`를 호출하지 않는다.
   - 이 상태에서는 row table 대신 날짜 범위를 먼저 선택하라는 안내 메시지를 보여준다.
   - Reset 후에도 같은 대기 상태로 돌아간다.
+- economics를 제외한 탭에서는 watchlist dropdown을 표시한다.
+  - 목록은 `GET /api/watchlists`에서 읽는다.
+  - 선택값은 client memory state만 사용하며 영속 저장되지 않는다.
+  - 선택 시 server-side `watchlist_id` filter가 걸린 결과 집합으로 다시 fetch한다.
 - 기본 날짜 정렬은 늦은 날짜 우선(`desc`)이다.
   - 초기 진입, 탭 전환, Reset 모두 이 기준을 사용한다.
 - search는 client-side로 `ticker`, `company`, `title`, `industry`, `source`, `status`, `company_description`을 대상으로 동작한다.
@@ -1115,6 +1122,9 @@ API:
   - `Inst %`, `Float %`는 퍼센트 값 그대로 비교한다.
   - `Market Cap` 입력 단위는 `B$`이며, 프론트에서 내부 비교 시 실제 달러 값으로 환산한다.
   - 숫자 필터가 켜져 있을 때 해당 값이 `null`인 row는 결과에서 제외된다.
+- table header는 drag reorder를 지원한다.
+  - visible column만 현재 순서 기준으로 drag-and-drop 할 수 있다.
+  - column visibility와 width 설정은 유지한 채 배열 순서만 재배치한다.
 - earnings stable source에는 reliable time/session이 없으므로, 관련 column 값은 비어 있을 수 있다.
 - earnings 탭에는 `FMP Sync Settings` 버튼이 있고, 여기서 다음 실행에 쓸 concurrency 값을 수정할 수 있다.
   - `Earnings Update` concurrency
