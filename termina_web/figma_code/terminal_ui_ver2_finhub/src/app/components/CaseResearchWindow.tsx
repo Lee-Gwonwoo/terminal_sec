@@ -1589,14 +1589,16 @@ export function CaseResearchWindow() {
             <>
               {/* Page ID + metadata */}
               <div className="px-6 pt-5 pb-3 border-b border-slate-200 shrink-0 bg-white/90 dark:border-slate-800 dark:bg-slate-900/60">
-                {/* Page ID row */}
+                {/* Research page ID row */}
                 <div className="flex items-center gap-2 mb-2">
+                  <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Research Page ID</span>
                   <FileText size={12} className="text-slate-500 shrink-0 dark:text-slate-400" />
                   <code className="text-[10px] text-slate-500 font-mono select-all dark:text-slate-400">{activePage.id}</code>
                   <button
                     onClick={handleCopyId}
                     className="text-slate-500 hover:text-blue-600 shrink-0 dark:hover:text-blue-400"
-                    title="Copy page ID"
+                    title="Copy research page ID"
+                    aria-label="Copy research page ID"
                   >
                     {copiedId ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
                   </button>

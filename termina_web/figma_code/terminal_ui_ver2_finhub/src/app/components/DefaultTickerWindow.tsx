@@ -1,5 +1,5 @@
 import React, { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronUp, Plus, RefreshCw, Search, X } from "lucide-react";
+import { AlertCircle, ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronUp, Plus, RefreshCw, Search, Settings2, X } from "lucide-react";
 import { FixedSizeList as List, type ListChildComponentProps } from "react-window";
 import { getCompanyTickerDataAttrs } from "../companyDescription";
 
@@ -39,10 +39,35 @@ interface JobStatus {
 const ROW_HEIGHT = 37;
 const HEADER_HEIGHT = 37;
 const MIN_LIST_HEIGHT = 200;
-const GRID_TEMPLATE_COLUMNS = "minmax(96px,0.9fr) minmax(180px,1.7fr) minmax(96px,0.8fr) minmax(128px,1.1fr) minmax(96px,0.9fr) minmax(96px,0.8fr) minmax(128px,1fr) minmax(96px,0.8fr) minmax(96px,0.8fr) minmax(96px,0.8fr) 48px";
+const TICKER_COLUMN_TEMPLATE = "minmax(96px,0.9fr)";
+const DELETE_COLUMN_TEMPLATE = "48px";
+const COLUMN_VISIBILITY_STORAGE_KEY = "default-ticker-visible-columns-v1";
 
 type SortKey = "ticker" | "name" | "exchange" | "industry" | "addedAt" | "ipoDate" | "marketCap" | "floatPct" | "institutionalPct" | "insiderPct";
 type SortDirection = "asc" | "desc" | null;
+type ConfigurableColumnKey = Exclude<SortKey, "ticker">;
+
+interface ColumnDefinition {
+  key: SortKey;
+  label: string;
+  template: string;
+  align?: "left" | "right";
+}
+
+const CONFIGURABLE_COLUMN_DEFINITIONS: ColumnDefinition[] = [
+  { key: "name", label: "Name", template: "minmax(180px,1.7fr)" },
+  { key: "exchange", label: "Exchange", template: "minmax(96px,0.8fr)" },
+  { key: "industry", label: "Industry", template: "minmax(128px,1.1fr)" },
+  { key: "addedAt", label: "Added Date", template: "minmax(96px,0.9fr)" },
+  { key: "ipoDate", label: "IPO Date", template: "minmax(96px,0.8fr)" },
+  { key: "marketCap", label: "Market Cap", template: "minmax(128px,1fr)", align: "right" },
+  { key: "floatPct", label: "Float %", template: "minmax(96px,0.8fr)", align: "right" },
+  { key: "institutionalPct", label: "Inst %", template: "minmax(96px,0.8fr)", align: "right" },
+  { key: "insiderPct", label: "Insider %", template: "minmax(96px,0.8fr)", align: "right" },
+];
+
+const CONFIGURABLE_COLUMN_KEYS = CONFIGURABLE_COLUMN_DEFINITIONS.map((column) => column.key as ConfigurableColumnKey);
+const DEFAULT_VISIBLE_COLUMN_KEYS: ConfigurableColumnKey[] = [...CONFIGURABLE_COLUMN_KEYS];
 
 interface SortState {
   key: SortKey | null;
@@ -51,9 +76,27 @@ interface SortState {
 
 interface TickerListRowData {
   rows: TickerRow[];
+  visibleColumns: ColumnDefinition[];
+  gridTemplateColumns: string;
   removing: string | null;
   onTickerClick?: (ticker: string) => void;
   onRemove: (ticker: string) => void;
+}
+
+function isConfigurableColumnKey(value: string): value is ConfigurableColumnKey {
+  return CONFIGURABLE_COLUMN_KEYS.includes(value as ConfigurableColumnKey);
+}
+
+function readInitialVisibleColumnKeys(): ConfigurableColumnKey[] {
+  try {
+    const stored = window.localStorage.getItem(COLUMN_VISIBILITY_STORAGE_KEY);
+    if (!stored) return DEFAULT_VISIBLE_COLUMN_KEYS;
+    const parsed = JSON.parse(stored);
+    if (!Array.isArray(parsed)) return DEFAULT_VISIBLE_COLUMN_KEYS;
+    return parsed.filter((value): value is ConfigurableColumnKey => typeof value === "string" && isConfigurableColumnKey(value));
+  } catch {
+    return DEFAULT_VISIBLE_COLUMN_KEYS;
+  }
 }
 
 function fallbackRowsFromTickers(tickers: string[] | undefined): TickerRow[] {
@@ -163,16 +206,8 @@ function getSortLabel(sortState: SortState): string {
 
   const labels: Record<SortKey, string> = {
     ticker: "Ticker",
-    name: "Name",
-    exchange: "Exchange",
-    industry: "Industry",
-    addedAt: "Added Date",
-    ipoDate: "IPO Date",
-    marketCap: "Market Cap",
-    floatPct: "Float %",
-    institutionalPct: "Inst %",
-    insiderPct: "Insider %",
-  };
+    ...Object.fromEntries(CONFIGURABLE_COLUMN_DEFINITIONS.map((column) => [column.key, column.label])),
+  } as Record<SortKey, string>;
 
   return `${labels[sortState.key]} ${sortState.direction === "asc" ? "asc" : "desc"}`;
 }
@@ -210,6 +245,48 @@ function getJobSummary(kind: string, job: JobStatus): string {
   return `${kind} update cancelled`;
 }
 
+function renderColumnCell(row: TickerRow, column: ColumnDefinition): React.ReactNode {
+  switch (column.key) {
+    case "name":
+      return row.name ?? "-";
+    case "exchange":
+      return row.exchange ?? "-";
+    case "industry":
+      return row.industry ?? "-";
+    case "addedAt":
+      return formatAddedDate(row.addedAt);
+    case "ipoDate":
+      return row.ipoDate ?? "-";
+    case "marketCap":
+      return <>{formatMarketCap(row.marketCap)}<SourceBadge source={row.marketCapSource} /></>;
+    case "floatPct":
+      return <>{formatPct(row.floatPct)}<SourceBadge source={row.floatSource} /></>;
+    case "institutionalPct":
+      return <>{formatPct(row.institutionalPct)}<SourceBadge source={row.institutionalSource} /></>;
+    case "insiderPct":
+      return <>{formatPct(row.insiderPct)}<SourceBadge source={row.insiderSource} /></>;
+    case "ticker":
+      return row.ticker;
+  }
+}
+
+function getColumnTitle(row: TickerRow, column: ColumnDefinition): string | undefined {
+  switch (column.key) {
+    case "name":
+      return row.name ?? undefined;
+    case "exchange":
+      return row.exchange ?? undefined;
+    case "industry":
+      return row.industry ?? undefined;
+    case "addedAt":
+      return row.addedAt ?? undefined;
+    case "ipoDate":
+      return row.ipoDate ?? undefined;
+    default:
+      return undefined;
+  }
+}
+
 const TickerListRow = memo(function TickerListRow({ data, index, style }: ListChildComponentProps<TickerListRowData>) {
   const row = data.rows[index];
   return (
@@ -217,7 +294,7 @@ const TickerListRow = memo(function TickerListRow({ data, index, style }: ListCh
       style={style}
       className="border-b border-gray-100 dark:border-gray-800 hover:bg-blue-50/60 dark:hover:bg-blue-900/20 transition-colors"
     >
-      <div className="grid h-full items-center" style={{ gridTemplateColumns: GRID_TEMPLATE_COLUMNS }}>
+      <div className="grid h-full items-center" style={{ gridTemplateColumns: data.gridTemplateColumns }}>
         <div className="px-3 py-2 min-w-0">
           <button
             onClick={() => data.onTickerClick?.(row.ticker)}
@@ -229,23 +306,17 @@ const TickerListRow = memo(function TickerListRow({ data, index, style }: ListCh
             {row.ticker}
           </button>
         </div>
-        <div className="px-3 py-2 truncate text-gray-700 dark:text-gray-200" title={row.name ?? undefined}>{row.name ?? "-"}</div>
-        <div className="px-3 py-2 truncate text-gray-500 dark:text-gray-400" title={row.exchange ?? undefined}>{row.exchange ?? "-"}</div>
-        <div className="px-3 py-2 truncate text-gray-500 dark:text-gray-400" title={row.industry ?? undefined}>{row.industry ?? "-"}</div>
-        <div className="px-3 py-2 truncate text-gray-500 dark:text-gray-400" title={row.addedAt ?? undefined}>{formatAddedDate(row.addedAt)}</div>
-        <div className="px-3 py-2 truncate text-gray-500 dark:text-gray-400" title={row.ipoDate ?? undefined}>{row.ipoDate ?? "-"}</div>
-        <div className="px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-200 whitespace-nowrap overflow-hidden">
-          {formatMarketCap(row.marketCap)}<SourceBadge source={row.marketCapSource} />
-        </div>
-        <div className="px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-200 whitespace-nowrap overflow-hidden">
-          {formatPct(row.floatPct)}<SourceBadge source={row.floatSource} />
-        </div>
-        <div className="px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-200 whitespace-nowrap overflow-hidden">
-          {formatPct(row.institutionalPct)}<SourceBadge source={row.institutionalSource} />
-        </div>
-        <div className="px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-200 whitespace-nowrap overflow-hidden">
-          {formatPct(row.insiderPct)}<SourceBadge source={row.insiderSource} />
-        </div>
+        {data.visibleColumns.map((column) => (
+          <div
+            key={column.key}
+            className={column.align === "right"
+              ? "px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-200 whitespace-nowrap overflow-hidden"
+              : `${column.key === "name" ? "text-gray-700 dark:text-gray-200" : "text-gray-500 dark:text-gray-400"} px-3 py-2 truncate`}
+            title={getColumnTitle(row, column)}
+          >
+            {renderColumnCell(row, column)}
+          </div>
+        ))}
         <div className="px-3 py-2 text-center">
           <button
             onClick={(e) => {
@@ -289,13 +360,24 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
   const [filterText, setFilterText] = useState("");
   const [tickerFilterText, setTickerFilterText] = useState("");
   const [sortState, setSortState] = useState<SortState>({ key: null, direction: null });
+  const [visibleColumnKeys, setVisibleColumnKeys] = useState<ConfigurableColumnKey[]>(readInitialVisibleColumnKeys);
+  const [showColumnPicker, setShowColumnPicker] = useState(false);
   const [dataSource, setDataSource] = useState<"db" | "csv" | null>(null);
   const [listHeight, setListHeight] = useState(MIN_LIST_HEIGHT);
   const listContainerRef = useRef<HTMLDivElement>(null);
+  const columnPickerRef = useRef<HTMLDivElement>(null);
   const trimmedCsvPath = csvPath.trim();
   const isDefaultPath = trimmedCsvPath === DEFAULT_CSV_PATH;
   const deferredFilterText = useDeferredValue(filterText);
   const deferredTickerFilterText = useDeferredValue(tickerFilterText);
+  const visibleColumns = useMemo(() => {
+    const visibleKeys = new Set(visibleColumnKeys);
+    return CONFIGURABLE_COLUMN_DEFINITIONS.filter((column) => visibleKeys.has(column.key as ConfigurableColumnKey));
+  }, [visibleColumnKeys]);
+  const gridTemplateColumns = useMemo(
+    () => [TICKER_COLUMN_TEMPLATE, ...visibleColumns.map((column) => column.template), DELETE_COLUMN_TEMPLATE].join(" "),
+    [visibleColumns],
+  );
 
   const loadTickers = useCallback(async () => {
     setLoading(true);
@@ -322,6 +404,42 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
   useEffect(() => {
     void loadTickers();
   }, [loadTickers]);
+
+  useEffect(() => {
+    window.localStorage.setItem(COLUMN_VISIBILITY_STORAGE_KEY, JSON.stringify(visibleColumnKeys));
+  }, [visibleColumnKeys]);
+
+  useEffect(() => {
+    setSortState((current) => {
+      if (!current.key || current.key === "ticker" || visibleColumnKeys.includes(current.key as ConfigurableColumnKey)) {
+        return current;
+      }
+      return { key: null, direction: null };
+    });
+  }, [visibleColumnKeys]);
+
+  useEffect(() => {
+    if (!showColumnPicker) return;
+    const handleWindowMouseDown = (event: MouseEvent) => {
+      if (!columnPickerRef.current?.contains(event.target as Node)) {
+        setShowColumnPicker(false);
+      }
+    };
+    window.addEventListener("mousedown", handleWindowMouseDown);
+    return () => window.removeEventListener("mousedown", handleWindowMouseDown);
+  }, [showColumnPicker]);
+
+  const handleColumnVisibilityToggle = useCallback((key: ConfigurableColumnKey) => {
+    setVisibleColumnKeys((current) => {
+      const nextSet = new Set(current);
+      if (nextSet.has(key)) {
+        nextSet.delete(key);
+      } else {
+        nextSet.add(key);
+      }
+      return CONFIGURABLE_COLUMN_KEYS.filter((columnKey) => nextSet.has(columnKey));
+    });
+  }, []);
 
   const handleAdd = async () => {
     const trimmed = newTicker.trim().toUpperCase();
@@ -696,12 +814,14 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
 
   const listData = useMemo<TickerListRowData>(() => ({
     rows: displayedRows,
+    visibleColumns,
+    gridTemplateColumns,
     removing,
     onTickerClick,
     onRemove: (ticker: string) => {
       void handleRemove(ticker);
     },
-  }), [displayedRows, removing, onTickerClick, handleRemove]);
+  }), [displayedRows, visibleColumns, gridTemplateColumns, removing, onTickerClick, handleRemove]);
 
   const showMarketCapCard = marketCapJob !== null;
   const showFloatCard = floatJob !== null;
@@ -911,6 +1031,54 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
         >
           {activeRecentAdded ? "Default Order" : "Recent Added"}
         </button>
+        <div className="relative" ref={columnPickerRef}>
+          <button
+            type="button"
+            onClick={() => setShowColumnPicker((value) => !value)}
+            className={`px-2 py-1 text-[11px] rounded border flex items-center gap-1 ${
+              showColumnPicker
+                ? "border-blue-500 bg-blue-50 text-blue-600 dark:border-blue-400 dark:bg-blue-900/30 dark:text-blue-300"
+                : "border-gray-300 text-gray-500 dark:border-gray-600 dark:text-gray-400"
+            }`}
+            title="Choose visible table columns"
+          >
+            <Settings2 className="w-3 h-3" />
+            Columns
+          </button>
+          {showColumnPicker && (
+            <div className="absolute right-0 top-full z-30 mt-1 w-44 rounded border border-gray-200 bg-white p-2 shadow-lg dark:border-gray-700 dark:bg-gray-800">
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => setVisibleColumnKeys(DEFAULT_VISIBLE_COLUMN_KEYS)}
+                  className="px-1.5 py-0.5 text-[10px] rounded border border-gray-200 text-gray-500 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-700/60"
+                >
+                  All
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setVisibleColumnKeys(["addedAt"])}
+                  className="px-1.5 py-0.5 text-[10px] rounded border border-gray-200 text-gray-500 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-700/60"
+                >
+                  Added Only
+                </button>
+              </div>
+              <div className="space-y-1">
+                {CONFIGURABLE_COLUMN_DEFINITIONS.map((column) => (
+                  <label key={column.key} className="flex items-center gap-2 rounded px-1.5 py-1 text-[11px] text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700/60">
+                    <input
+                      type="checkbox"
+                      checked={visibleColumnKeys.includes(column.key as ConfigurableColumnKey)}
+                      onChange={() => handleColumnVisibilityToggle(column.key as ConfigurableColumnKey)}
+                      className="h-3 w-3 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>{column.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
         <span className="text-xs text-gray-400">
           {displayedRows.length}/{rows.length}
         </span>
@@ -919,7 +1087,8 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
       <div className="mb-2 text-[11px] text-gray-500 dark:text-gray-400">
         정렬 기준: {getSortLabel(sortState)}
         {deferredTickerFilterText ? ` · ticker filter: ${deferredTickerFilterText}` : ""}
-        {dataSource === "csv" ? " · CSV-only 경로는 Added Date가 없어 '-'로 표시됩니다." : ""}
+        {visibleColumnKeys.length !== DEFAULT_VISIBLE_COLUMN_KEYS.length ? ` · visible columns: ${visibleColumnKeys.length + 2}` : ""}
+        {dataSource === "csv" && visibleColumnKeys.includes("addedAt") ? " · CSV-only 경로는 Added Date가 없어 '-'로 표시됩니다." : ""}
       </div>
 
       <div ref={listContainerRef} className="flex-1 overflow-hidden border border-gray-200 dark:border-gray-700 rounded">
@@ -935,18 +1104,19 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
           <div className="h-full flex flex-col text-xs">
             <div
               className="grid sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700"
-              style={{ gridTemplateColumns: GRID_TEMPLATE_COLUMNS, height: HEADER_HEIGHT }}
+              style={{ gridTemplateColumns, height: HEADER_HEIGHT }}
             >
               <button type="button" onClick={() => handleHeaderSort("ticker")} className="flex items-center gap-1 px-3 py-2 font-semibold text-left hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors">Ticker {renderSortIcon("ticker")}</button>
-              <button type="button" onClick={() => handleHeaderSort("name")} className="flex items-center gap-1 px-3 py-2 font-semibold text-left hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors">Name {renderSortIcon("name")}</button>
-              <button type="button" onClick={() => handleHeaderSort("exchange")} className="flex items-center gap-1 px-3 py-2 font-semibold text-left hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors">Exchange {renderSortIcon("exchange")}</button>
-              <button type="button" onClick={() => handleHeaderSort("industry")} className="flex items-center gap-1 px-3 py-2 font-semibold text-left hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors">Industry {renderSortIcon("industry")}</button>
-              <button type="button" onClick={() => handleHeaderSort("addedAt")} className="flex items-center gap-1 px-3 py-2 font-semibold text-left hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors">Added Date {renderSortIcon("addedAt")}</button>
-              <button type="button" onClick={() => handleHeaderSort("ipoDate")} className="flex items-center gap-1 px-3 py-2 font-semibold text-left hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors">IPO Date {renderSortIcon("ipoDate")}</button>
-              <button type="button" onClick={() => handleHeaderSort("marketCap")} className="flex items-center justify-end gap-1 px-3 py-2 font-semibold text-right hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors">Market Cap {renderSortIcon("marketCap")}</button>
-              <button type="button" onClick={() => handleHeaderSort("floatPct")} className="flex items-center justify-end gap-1 px-3 py-2 font-semibold text-right hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors">Float % {renderSortIcon("floatPct")}</button>
-              <button type="button" onClick={() => handleHeaderSort("institutionalPct")} className="flex items-center justify-end gap-1 px-3 py-2 font-semibold text-right hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors">Inst % {renderSortIcon("institutionalPct")}</button>
-              <button type="button" onClick={() => handleHeaderSort("insiderPct")} className="flex items-center justify-end gap-1 px-3 py-2 font-semibold text-right hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors">Insider % {renderSortIcon("insiderPct")}</button>
+              {visibleColumns.map((column) => (
+                <button
+                  key={column.key}
+                  type="button"
+                  onClick={() => handleHeaderSort(column.key)}
+                  className={`${column.align === "right" ? "justify-end text-right" : "text-left"} flex items-center gap-1 px-3 py-2 font-semibold hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors`}
+                >
+                  {column.label} {renderSortIcon(column.key)}
+                </button>
+              ))}
               <div className="text-center font-semibold px-3 py-2">Del</div>
             </div>
             <List

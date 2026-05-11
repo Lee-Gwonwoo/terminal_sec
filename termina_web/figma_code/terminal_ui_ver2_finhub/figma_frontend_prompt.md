@@ -902,10 +902,13 @@ company data job contract:
 - filter 입력
 - 일반 filter 입력은 ticker/name/exchange/industry/added date/ipo date를 함께 찾는다.
 - `Recent Added` / `Default Order` 버튼은 빠른 preset이다. `Recent Added`를 누르면 `Added Date desc`, 다시 누르면 기본 universe 순서로 돌아간다.
+- `Columns` 드롭다운에서 table 표시 컬럼을 선택할 수 있다. `Ticker`와 `Del`은 고정이고, `Name`, `Exchange`, `Industry`, `Added Date`, `IPO Date`, `Market Cap`, `Float %`, `Inst %`, `Insider %`는 checkbox로 표시/숨김을 바꾼다.
+- 컬럼 선택 상태는 `localStorage`의 `default-ticker-visible-columns-v1`에 저장된다. 기본값은 모든 선택 가능 컬럼 표시이며, `Added Date`가 기본으로 보인다.
 - table header 클릭으로 컬럼 정렬이 가능하다. 대상 컬럼: `Ticker`, `Name`, `Exchange`, `Industry`, `Added Date`, `IPO Date`, `Market Cap`, `Float %`, `Inst %`, `Insider %`.
 - 각 header는 `asc → desc → 기본 순서 해제` 순서로 순환한다.
 - 정렬 기준 문구는 header sort state를 그대로 반영한다. 정렬이 해제되면 `기본 universe 순서`로 표시한다.
-- table 표시: `Ticker | Name | Exchange | Industry | Added Date | IPO Date | Market Cap | Float % | Inst % | Insider % | Del`
+- 기본 table 표시: `Ticker | Name | Exchange | Industry | Added Date | IPO Date | Market Cap | Float % | Inst % | Insider % | Del`
+- 사용자가 컬럼을 숨기면 table header/body/grid 폭이 선택된 컬럼 목록 기준으로 다시 계산된다. 숨긴 컬럼으로 정렬 중이었다면 정렬은 기본 universe 순서로 해제된다.
 - `Market Cap`, `Float %`, `Inst %`, `Insider %` 셀에는 값 옆에 source badge가 붙는다.
   - 현재 구현 기준 `Market Cap = FMP`, `Float % = Fmp`, `Inst % = Yahoo`, `Insider % = Yahoo`
   - `Inst %`는 현재 Finnhub 값을 읽지 않고 Yahoo holders 값만 사용한다.
