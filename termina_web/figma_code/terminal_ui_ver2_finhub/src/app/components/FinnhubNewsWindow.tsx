@@ -103,6 +103,13 @@ function getSourceTypeShortLabel(sourceType: SourceTypeFilter | string): string 
   return 'All';
 }
 
+function getCustomPreflightTickerCount(data: any): number | null {
+  if (!data || typeof data !== 'object') return null;
+  if (typeof data.selectedTickerCount === 'number') return data.selectedTickerCount;
+  if (typeof data.totalTickers === 'number') return data.totalTickers;
+  return null;
+}
+
 function getSourceTypeBadgeLabel(sourceType: string): string {
   return getSourceTypeLabel(sourceType);
 }
@@ -795,6 +802,7 @@ export function FinnhubNewsWindow({
   // ─── Update config (last used mode/sourceType) ───
   type UpdateMode = '7d' | 'recent' | 'custom';
   type UpdateSourceType = 'all' | 'company_news' | 'press_release' | 'market_news' | 'fmp_press_release' | 'fmp_press_release_entire' | 'fmp_stock_news' | 'fmp_sec_filing';
+  type NewTickerUpdateSourceType = 'company_news' | 'press_release' | 'fmp_press_release';
   const [lastUpdateConfig, setLastUpdateConfig] = useState<{ mode: UpdateMode; sourceType: UpdateSourceType }>(() => {
     try {
       const saved = localStorage.getItem('finnhub-last-update-config');
@@ -805,6 +813,11 @@ export function FinnhubNewsWindow({
   const [showCustomDateModal, setShowCustomDateModal] = useState(false);
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [showNewTickerCustomDateModal, setShowNewTickerCustomDateModal] = useState(false);
+  const [newTickerPendingSourceType, setNewTickerPendingSourceType] = useState<NewTickerUpdateSourceType>('company_news');
+  const [newTickerAddedFrom, setNewTickerAddedFrom] = useState('');
+  const [newTickerNewsFrom, setNewTickerNewsFrom] = useState('');
+  const [newTickerNewsTo, setNewTickerNewsTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [showChangeCustomDateModal, setShowChangeCustomDateModal] = useState(false);
   const [changeCustomFrom, setChangeCustomFrom] = useState('');
   const [changeCustomTo, setChangeCustomTo] = useState(() => new Date().toISOString().slice(0, 10));
@@ -1395,6 +1408,7 @@ export function FinnhubNewsWindow({
     sourceType: UpdateSourceType = 'all',
     from?: string,
     to?: string,
+    options?: { tickerAddedFrom?: string },
   ) => {
     const config = { mode, sourceType };
     setLastUpdateConfig(config);
@@ -1413,6 +1427,7 @@ export function FinnhubNewsWindow({
         };
         if (from) body.from = from;
         if (to) body.to = to;
+        if (options?.tickerAddedFrom) body.tickerAddedFrom = options.tickerAddedFrom;
         const res = await fetch(`${API_BASE}/api/news/pull-fmp-press-release`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1505,6 +1520,7 @@ export function FinnhubNewsWindow({
       };
       if (from) body.from = from;
       if (to) body.to = to;
+      if (options?.tickerAddedFrom) body.tickerAddedFrom = options.tickerAddedFrom;
       const res = await fetch(`${API_BASE}/api/news/pull-finhub`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1558,6 +1574,14 @@ export function FinnhubNewsWindow({
     setShowCustomDateModal(true);
   };
 
+  const handleNewTickerCustomStart = (sourceType: NewTickerUpdateSourceType) => {
+    setNewTickerPendingSourceType(sourceType);
+    setNewTickerAddedFrom('');
+    setNewTickerNewsFrom('');
+    setNewTickerNewsTo(new Date().toISOString().slice(0, 10));
+    setShowNewTickerCustomDateModal(true);
+  };
+
   const openCustomPreflight = async (endpoint: string, body: Record<string, unknown>, title: string, onContinue: () => void) => {
     try {
       const res = await fetch(`${API_BASE}${endpoint}`, {
@@ -1603,6 +1627,22 @@ export function FinnhubNewsWindow({
       return;
     }
     await openCustomPreflight('/api/news/pull-finhub/preflight-custom', { mode: 'custom', sourceType, from, to }, `${getSourceTypeLabel(sourceType)} Preflight`, continueRun);
+  };
+
+  const handleNewTickerCustomPreflightStart = async (
+    sourceType: NewTickerUpdateSourceType,
+    tickerAddedFrom: string,
+    from: string,
+    to: string,
+  ) => {
+    const options = { tickerAddedFrom };
+    const title = `Custom New Tickers ${getSourceTypeLabel(sourceType)} Preflight`;
+    const continueRun = () => { void handleUpdate('custom', sourceType, from, to, options); };
+    if (sourceType === 'fmp_press_release') {
+      await openCustomPreflight('/api/news/pull-fmp-press-release/preflight-custom', { mode: 'custom', from, to, tickerAddedFrom }, title, continueRun);
+      return;
+    }
+    await openCustomPreflight('/api/news/pull-finhub/preflight-custom', { mode: 'custom', sourceType, from, to, tickerAddedFrom }, title, continueRun);
   };
 
   // ─── PTPR (RTPR) press release pull ───
@@ -3160,6 +3200,22 @@ export function FinnhubNewsWindow({
                         <Calendar className="w-3.5 h-3.5 shrink-0 text-violet-500" />
                         <div><div className="font-medium">Custom FMP SEC Filing</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick date range · filing summary included</div></div>
                       </button>
+
+                      {/* ── Custom New Tickers ── */}
+                      <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
+                      <div className="px-2 py-1 text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Custom New Tickers</div>
+                      <button onClick={() => { setShowUpdateMenu(false); handleNewTickerCustomStart('company_news'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <Plus className="w-3.5 h-3.5 shrink-0 text-blue-500" />
+                        <div><div className="font-medium">Custom New Tickers Company News</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Default tickers added since date · gap-only custom range</div></div>
+                      </button>
+                      <button onClick={() => { setShowUpdateMenu(false); handleNewTickerCustomStart('press_release'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <Plus className="w-3.5 h-3.5 shrink-0 text-green-500" />
+                        <div><div className="font-medium">Custom New Tickers Press Release</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Default tickers added since date · Finnhub PR only</div></div>
+                      </button>
+                      <button onClick={() => { setShowUpdateMenu(false); handleNewTickerCustomStart('fmp_press_release'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
+                        <Plus className="w-3.5 h-3.5 shrink-0 text-emerald-500" />
+                        <div><div className="font-medium">Custom New Tickers FMP PR</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Default tickers added since date · FMP PR gap-only</div></div>
+                      </button>
                       <button onClick={() => { setShowUpdateMenu(false); handleCustomStart('market_news'); }} disabled={updating} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2 disabled:opacity-50">
                         <Calendar className="w-3.5 h-3.5 shrink-0 text-amber-500" />
                         <div><div className="font-medium">Custom Market News</div><div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Pick date range · limited by Finnhub /news history depth</div></div>
@@ -4065,6 +4121,46 @@ export function FinnhubNewsWindow({
           </div>
         </div>
       )}
+      {/* ─── Custom New Tickers Date Modal ─── */}
+      {showNewTickerCustomDateModal && (
+        <div className="absolute inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-4 w-96 border border-gray-200 dark:border-gray-700">
+            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><Plus className="w-4 h-4 text-blue-500" />Custom New Tickers {getSourceTypeLabel(newTickerPendingSourceType)}</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Ticker Added From</label>
+                <input type="date" value={newTickerAddedFrom} onChange={(event) => setNewTickerAddedFrom(event.target.value)}
+                  className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">News From</label>
+                  <input type="date" value={newTickerNewsFrom} onChange={(event) => setNewTickerNewsFrom(event.target.value)}
+                    className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">News To</label>
+                  <input type="date" value={newTickerNewsTo} onChange={(event) => setNewTickerNewsTo(event.target.value)}
+                    className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                </div>
+              </div>
+              <p className="text-[10px] text-gray-400">Default Ticker에 추가된 날짜 기준으로 ticker를 먼저 좁힌 뒤, 선택한 뉴스 날짜 범위의 missing gap만 확인합니다.</p>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setShowNewTickerCustomDateModal(false)} className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
+              <button
+                onClick={() => {
+                  if (!newTickerAddedFrom || !newTickerNewsFrom || !newTickerNewsTo) return;
+                  setShowNewTickerCustomDateModal(false);
+                  void handleNewTickerCustomPreflightStart(newTickerPendingSourceType, newTickerAddedFrom, newTickerNewsFrom, newTickerNewsTo);
+                }}
+                disabled={!newTickerAddedFrom || !newTickerNewsFrom || !newTickerNewsTo}
+                className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+              >Preflight</button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* ─── PTPR Custom Date Modal ─── */}
       {showPtprCustomDateModal && (
         <div className="absolute inset-0 bg-black/30 flex items-center justify-center z-50">
@@ -4316,6 +4412,11 @@ export function FinnhubNewsWindow({
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-4 w-[42rem] max-w-[92vw] border border-gray-200 dark:border-gray-700">
             <h3 className="text-sm font-semibold mb-2 flex items-center gap-2"><RotateCw className="w-4 h-4 text-blue-500" />{customPreflightTitle}</h3>
             <p className="text-xs text-gray-600 dark:text-gray-300 mb-3">실행 전에 현재 coverage와 예상 처리 범위를 보여줍니다.</p>
+            {(() => {
+              const preflightTickerCount = getCustomPreflightTickerCount(customPreflightData);
+              if (preflightTickerCount !== 0) return null;
+              return <p className="text-xs text-amber-600 dark:text-amber-300 mb-3">대상 ticker가 없습니다. 조건을 조정한 뒤 다시 preflight 하세요.</p>;
+            })()}
             <pre className="max-h-[24rem] overflow-auto rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-3 text-[11px] leading-5 text-gray-700 dark:text-gray-200 whitespace-pre-wrap break-all">{JSON.stringify(customPreflightData, null, 2)}</pre>
             <div className="flex justify-end gap-2 mt-4">
               <button
@@ -4328,13 +4429,15 @@ export function FinnhubNewsWindow({
               >Cancel</button>
               <button
                 onClick={() => {
+                  if (getCustomPreflightTickerCount(customPreflightData) === 0) return;
                   const execute = pendingCustomExecute;
                   setShowCustomPreflightModal(false);
                   setCustomPreflightData(null);
                   setPendingCustomExecute(null);
                   execute?.();
                 }}
-                className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+                disabled={getCustomPreflightTickerCount(customPreflightData) === 0}
+                className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
               >Continue</button>
             </div>
           </div>

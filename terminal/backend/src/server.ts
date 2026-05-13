@@ -1105,6 +1105,91 @@ async function getDefaultUniverseTickers(): Promise<string[]> {
   }
 }
 
+type AddedTickerSelectionSummary = {
+  tickerAddedFrom: string;
+  selectedTickerCount: number;
+  excludedOlderTickerCount: number;
+  selectedTickersSample: Array<{ ticker: string; addedAt: string | null }>;
+};
+
+async function getDefaultUniverseTickersAddedFrom(tickerAddedFrom: string, maxTickers: number): Promise<{
+  tickers: string[];
+  summary: AddedTickerSelectionSummary;
+}> {
+  const universes = await listUniverses();
+  const def = universes.find((u) => u.name === "default");
+  if (!def) {
+    return {
+      tickers: [],
+      summary: {
+        tickerAddedFrom,
+        selectedTickerCount: 0,
+        excludedOlderTickerCount: 0,
+        selectedTickersSample: [],
+      },
+    };
+  }
+
+  const db = getDb();
+  const totalRow = await db.get<{ cnt: number }>(
+    "SELECT COUNT(*) AS cnt FROM ticker_universe_items WHERE universe_id = ?",
+    [def.id],
+  );
+  const selectedRows = await db.all<Array<{ ticker: string; addedAt: string | null }>>(
+    `SELECT s.ticker, ui.created_at AS addedAt
+     FROM ticker_universe_items ui
+     JOIN securities s ON s.id = ui.security_id
+     WHERE ui.universe_id = ?
+       AND date(ui.created_at) >= date(?)
+     ORDER BY ui.created_at DESC, ui.sort_order, s.ticker`,
+    [def.id, tickerAddedFrom],
+  );
+  const limitedRows = maxTickers > 0 ? selectedRows.slice(0, maxTickers) : selectedRows;
+  return {
+    tickers: limitedRows.map((row) => row.ticker),
+    summary: {
+      tickerAddedFrom,
+      selectedTickerCount: limitedRows.length,
+      excludedOlderTickerCount: Math.max(0, (totalRow?.cnt ?? 0) - selectedRows.length),
+      selectedTickersSample: limitedRows.slice(0, 50).map((row) => ({ ticker: row.ticker, addedAt: row.addedAt ?? null })),
+    },
+  };
+}
+
+async function getNewsPullTickerSelection(input: { csvPath: string; maxTickers: number; tickerAddedFrom?: string }): Promise<{
+  tickers: string[];
+  addedTickerSelection: AddedTickerSelectionSummary | null;
+}> {
+  if (input.tickerAddedFrom) {
+    if (input.csvPath !== DEFAULT_TICKERS_CSV) {
+      throw new CsvServiceError("tickerAddedFrom is supported only for the default DB universe, not custom CSV paths");
+    }
+    const result = await getDefaultUniverseTickersAddedFrom(input.tickerAddedFrom, input.maxTickers);
+    return { tickers: result.tickers, addedTickerSelection: result.summary };
+  }
+
+  let tickers: string[];
+  if (input.csvPath === DEFAULT_TICKERS_CSV) {
+    tickers = await getDefaultUniverseTickers();
+  } else {
+    try {
+      const csvResult = readTickersFromCsv(input.csvPath);
+      tickers = csvResult.tickers;
+    } catch {
+      tickers = await getDefaultUniverseTickers();
+    }
+  }
+  if (input.maxTickers > 0) tickers = tickers.slice(0, input.maxTickers);
+  return { tickers, addedTickerSelection: null };
+}
+
+function withAddedTickerSelection<T extends Record<string, unknown>>(
+  payload: T,
+  selection: AddedTickerSelectionSummary | null,
+): T & Partial<AddedTickerSelectionSummary> {
+  return selection ? { ...payload, ...selection } : payload;
+}
+
 async function getDefaultUniverseRows(): Promise<TickerListRow[]> {
   try {
     const universes = await listUniverses();
@@ -1311,6 +1396,7 @@ const pullFinnhubSchema = z.object({
   sourceType: z.enum(["all", "company_news", "press_release", "market_news"]).optional().default("all"),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  tickerAddedFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
 
 /** Helper: insert fetched items into DB, track counts, push SSE */
@@ -1484,18 +1570,7 @@ app.post("/api/news/pull-finhub/preflight-custom", async (req, res, next) => {
       to: input.to ?? new Date().toISOString().slice(0, 10),
     };
 
-    let tickerList: string[];
-    if (input.csvPath === DEFAULT_TICKERS_CSV) {
-      tickerList = await getDefaultUniverseTickers();
-    } else {
-      try {
-        const csvResult = readTickersFromCsv(input.csvPath);
-        tickerList = csvResult.tickers;
-      } catch {
-        tickerList = await getDefaultUniverseTickers();
-      }
-    }
-    if (input.maxTickers > 0) tickerList = tickerList.slice(0, input.maxTickers);
+    const { tickers: tickerList, addedTickerSelection } = await getNewsPullTickerSelection(input);
 
     if (input.sourceType === "market_news") {
       res.json({
@@ -1505,6 +1580,7 @@ app.post("/api/news/pull-finhub/preflight-custom", async (req, res, next) => {
         executionMode: "summary-only",
         supported: false,
         reason: "market_news custom mode does not support ticker gap planning",
+        ...withAddedTickerSelection({}, addedTickerSelection),
       });
       return;
     }
@@ -1546,17 +1622,17 @@ app.post("/api/news/pull-finhub/preflight-custom", async (req, res, next) => {
     }
 
     if (input.sourceType === "all") {
-      res.json({
+      res.json(withAddedTickerSelection({
         source: "FINNHUB",
         sourceType: input.sourceType,
         requestedRange,
         totalTickers: tickerList.length,
         bySourceType: summaries,
-      });
+      }, addedTickerSelection));
       return;
     }
 
-    res.json(summaries[input.sourceType]);
+    res.json(withAddedTickerSelection(summaries[input.sourceType] as Record<string, unknown>, addedTickerSelection));
   } catch (error) {
     next(error);
   }
@@ -1589,21 +1665,16 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
       return;
     }
 
-    // Load tickers — DB universe first when using default path; CSV for explicit overrides
-    let tickerList: string[];
-    if (input.csvPath === DEFAULT_TICKERS_CSV) {
-      tickerList = await getDefaultUniverseTickers();
-    } else {
-      try {
-        const csvResult = readTickersFromCsv(input.csvPath);
-        tickerList = csvResult.tickers;
-      } catch {
-        tickerList = await getDefaultUniverseTickers();
-      }
-    }
-    if (input.maxTickers > 0) tickerList = tickerList.slice(0, input.maxTickers);
+    // Load tickers — DB universe first when using default path; CSV for explicit overrides.
+    // tickerAddedFrom narrows this to newly-added default-universe tickers only.
+    const { tickers: initialTickerList, addedTickerSelection } = await getNewsPullTickerSelection(input);
+    let tickerList = initialTickerList;
     if (!pullCompany && !pullPress) {
       tickerList = [];
+    }
+    if (input.tickerAddedFrom && tickerList.length === 0) {
+      res.status(400).json({ error: `No default tickers were added on or after ${input.tickerAddedFrom}` });
+      return;
     }
     console.log(`[pull-finhub] mode=${input.mode} sourceType=${input.sourceType} maxTickers=${input.maxTickers} tickerConcurrency=${input.tickerConcurrency} requestIntervalMs=${input.requestIntervalMs} fulltextConcurrency=${input.fulltextConcurrency} batchLevels=${batchLevels.join(",")} → tickerList.length=${tickerList.length}`);
 
@@ -1663,6 +1734,10 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
     activePullJobs.set(input.sourceType, jobId);
     appendLog(jobId, `Starting ${input.mode}/${input.sourceType} pull for ${tickerList.length} tickers`);
     appendLog(jobId, `[batch] requested tickerConcurrency=${input.tickerConcurrency}, requestIntervalMs=${input.requestIntervalMs}, fulltextConcurrency=${input.fulltextConcurrency}, levels=${batchLevels.join(" → ")}`);
+    if (addedTickerSelection) {
+      appendLog(jobId, `[ticker filter] addedFrom=${addedTickerSelection.tickerAddedFrom}, selected=${addedTickerSelection.selectedTickerCount}, excludedOlder=${addedTickerSelection.excludedOlderTickerCount}`);
+      appendLog(jobId, `[ticker filter sample] ${addedTickerSelection.selectedTickersSample.slice(0, 12).map((item) => `${item.ticker}:${item.addedAt ?? "-"}`).join(", ") || "none"}`);
+    }
 
     if (isRecent) {
       const fallbackCount = tickerList.filter((t) => {
@@ -1973,6 +2048,9 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
           mode: input.mode,
           sourceType: input.sourceType,
           tickerCount: tickerList.length,
+          tickerAddedFrom: addedTickerSelection?.tickerAddedFrom ?? null,
+          selectedTickerCount: addedTickerSelection?.selectedTickerCount ?? tickerList.length,
+          excludedOlderTickerCount: addedTickerSelection?.excludedOlderTickerCount ?? null,
           inserted: counters.totalInserted,
           skipped: counters.totalSkipped,
           fullyCoveredSkipped: counters.fullyCoveredSkipped,
@@ -1988,6 +2066,10 @@ app.post("/api/news/pull-finhub", async (req, res, next) => {
           mode: input.mode,
           sourceType: input.sourceType,
           tickerCount: tickerList.length,
+          tickerAddedFrom: addedTickerSelection?.tickerAddedFrom ?? null,
+          selectedTickerCount: addedTickerSelection?.selectedTickerCount ?? tickerList.length,
+          excludedOlderTickerCount: addedTickerSelection?.excludedOlderTickerCount ?? null,
+          selectedTickersSample: addedTickerSelection?.selectedTickersSample ?? null,
           inserted: counters.totalInserted,
           skipped: counters.totalSkipped,
           fullyCoveredSkipped: counters.fullyCoveredSkipped,
@@ -2023,6 +2105,7 @@ const pullFmpPressReleaseSchema = z.object({
   mode: z.enum(["recent", "custom", "custom-entire"]).optional().default("recent"),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  tickerAddedFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   tickerConcurrency: z.number().int().min(1).max(20).optional().default(10),
   requestIntervalMs: z.number().int().min(0).max(5_000).optional().default(25),
   pageLimit: z.number().int().min(1).max(100).optional().default(100),
@@ -2095,7 +2178,11 @@ app.post("/api/news/pull-fmp-press-release/preflight-custom", async (req, res, n
       from: input.from,
       to: input.to ?? getEtDateString(new Date()),
     };
-    const tickerList = await getDefaultUniverseTickers();
+    const { tickers: tickerList, addedTickerSelection } = await getNewsPullTickerSelection({
+      csvPath: DEFAULT_TICKERS_CSV,
+      maxTickers: 0,
+      tickerAddedFrom: input.tickerAddedFrom,
+    });
     const plans = await buildTickerGapPlans({
       tickers: tickerList,
       source: "FMP",
@@ -2104,13 +2191,13 @@ app.post("/api/news/pull-fmp-press-release/preflight-custom", async (req, res, n
       to: requestedRange.to,
       executionMode: "gap-only",
     });
-    res.json(summarizeTickerGapPlans({
+    res.json(withAddedTickerSelection(summarizeTickerGapPlans({
       source: "FMP",
       sourceType: "fmp_press_release",
       requestedRange,
       plans,
       executionMode: "gap-only",
-    }));
+    }), addedTickerSelection));
   } catch (error) {
     next(error);
   }
@@ -2494,7 +2581,15 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
       activePullJobs.delete(jobKey);
     }
 
-    const tickerList = await getDefaultUniverseTickers();
+    const { tickers: tickerList, addedTickerSelection } = await getNewsPullTickerSelection({
+      csvPath: DEFAULT_TICKERS_CSV,
+      maxTickers: 0,
+      tickerAddedFrom: input.tickerAddedFrom,
+    });
+    if (input.tickerAddedFrom && tickerList.length === 0) {
+      res.status(400).json({ error: `No default tickers were added on or after ${input.tickerAddedFrom}` });
+      return;
+    }
     const todayEt = getEtDateString(new Date());
     const fallback7d = getEtDateString(new Date(Date.now() - 7 * 86_400_000));
     const effectiveTo = input.to ?? todayEt;
@@ -2517,6 +2612,10 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
     activePullJobs.set(jobKey, jobId);
     appendLog(jobId, `Starting FMP press release ${input.mode} pull — ${tickerList.length} tickers`);
     appendLog(jobId, `[batch] tickerConcurrency=${input.tickerConcurrency}, requestIntervalMs=${input.requestIntervalMs}, pageLimit=${input.pageLimit}, maxPages=${input.maxPages}`);
+    if (addedTickerSelection) {
+      appendLog(jobId, `[ticker filter] addedFrom=${addedTickerSelection.tickerAddedFrom}, selected=${addedTickerSelection.selectedTickerCount}, excludedOlder=${addedTickerSelection.excludedOlderTickerCount}`);
+      appendLog(jobId, `[ticker filter sample] ${addedTickerSelection.selectedTickersSample.slice(0, 12).map((item) => `${item.ticker}:${item.addedAt ?? "-"}`).join(", ") || "none"}`);
+    }
 
     let anchorMap: Map<string, string> | undefined;
     if (!isCustom) {
@@ -2833,6 +2932,9 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
         await setLastSuccess("fmp_press_release", new Date().toISOString(), {
           mode: input.mode,
           tickerCount: tickerList.length,
+          tickerAddedFrom: addedTickerSelection?.tickerAddedFrom ?? null,
+          selectedTickerCount: addedTickerSelection?.selectedTickerCount ?? tickerList.length,
+          excludedOlderTickerCount: addedTickerSelection?.excludedOlderTickerCount ?? null,
           tickerConcurrency: input.tickerConcurrency,
           requestIntervalMs: input.requestIntervalMs,
           pageLimit: input.pageLimit,
@@ -2852,6 +2954,10 @@ app.post("/api/news/pull-fmp-press-release", async (req, res, next) => {
           mode: input.mode,
           sourceType: "fmp_press_release",
           tickerCount: tickerList.length,
+          tickerAddedFrom: addedTickerSelection?.tickerAddedFrom ?? null,
+          selectedTickerCount: addedTickerSelection?.selectedTickerCount ?? tickerList.length,
+          excludedOlderTickerCount: addedTickerSelection?.excludedOlderTickerCount ?? null,
+          selectedTickersSample: addedTickerSelection?.selectedTickersSample ?? null,
           inserted: counters.totalInserted,
           skipped: counters.totalSkipped,
           fullyCoveredSkipped: counters.fullyCoveredSkipped,

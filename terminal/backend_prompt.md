@@ -672,7 +672,8 @@ SEC filing companion table.
   "mode": "7d",
   "sourceType": "all",
   "from": "2026-03-01",
-  "to": "2026-03-06"
+  "to": "2026-03-06",
+  "tickerAddedFrom": "2026-05-01"
 }
 ```
 
@@ -681,6 +682,7 @@ SEC filing companion table.
 - `mode`: `7d | recent | custom`
 - `sourceType`: `all | company_news | press_release | market_news`
 - `custom`일 때만 `from/to` 사용
+- `tickerAddedFrom`: optional. `YYYY-MM-DD` 형식이며 default DB universe에서 `ticker_universe_items.created_at` 날짜가 이 값 이상인 ticker만 대상으로 좁힌다. custom CSV path에는 적용하지 않는다.
 - `custom` + `sourceType=company_news` 또는 `press_release`일 때: **gap-only** 실행 — ticker별 envelope 기반 missing gap만 fetch. job log에 `[custom preflight]` 요약이 출력된다.
 - `custom` + `sourceType=all`일 때: `company_news`와 `press_release` 각각 gap-only로 실행하고, `market_news`는 gap 계산 없이 전체 범위로 실행한다.
 - `custom` + `sourceType=market_news`일 때: gap 계산 없이 전체 범위로 fetch한다 (ticker별 뉴스가 아니므로 envelope 개념이 없다).
@@ -689,6 +691,7 @@ SEC filing companion table.
 응답 컬럼:
 
 - `[][][]jobId[][][]`
+- job result/details 추가 필드: `[][][]tickerAddedFrom[][][]`, `[][][]selectedTickerCount[][][]`, `[][][]excludedOlderTickerCount[][][]`, `[][][]selectedTickersSample[][][]` (ticker subset 실행 시 sample만 포함)
 
 ### `GET /api/news/pull-finhub/preflight`
 
@@ -760,13 +763,20 @@ coverage가 전혀 없으면 `[from, to]` 전체가 missing이다.
 - `[][][]totalMissingDays[][][]`
 - `[][][]examples[][][]` (최대 10개 ticker의 `coveredRanges`, `missingRanges`, `missingDayCount`, `fullyCovered`)
 
+새로 추가된 default ticker만 대상으로 preflight할 때 추가되는 필드:
+
+- `[][][]tickerAddedFrom[][][]`: default ticker 추가 기준 시작일. 포함 기준은 `date(ticker_universe_items.created_at) >= tickerAddedFrom`이다.
+- `[][][]selectedTickerCount[][][]`: 실제 preflight/job 대상 ticker 수다.
+- `[][][]excludedOlderTickerCount[][][]`: 기준일보다 오래전에 추가되어 제외된 default ticker 수다.
+- `[][][]selectedTickersSample[][][]`: 최대 50개 `{ ticker, addedAt }` sample이다.
+
 #### Preflight-Custom 라우트 매트릭스
 
 | 라우트 | executionMode | 요청 body | 응답 형태 |
 |--------|---------------|-----------|-----------|
-| `POST /api/news/pull-finhub/preflight-custom` | gap-only (co/pr) / summary-only (market) | pullFinnhub body + `mode` 강제 custom | sourceType=all이면 `bySourceType` 분리, market_news는 `supported: false` |
+| `POST /api/news/pull-finhub/preflight-custom` | gap-only (co/pr) / summary-only (market) | pullFinnhub body + `mode` 강제 custom, `tickerAddedFrom?` | sourceType=all이면 `bySourceType` 분리, market_news는 `supported: false` |
 | `POST /api/news/pull-rtpr/preflight-custom` | fully-covered-skip | `{ from, to, tickerConcurrency? }` | 공통 gap summary |
-| `POST /api/news/pull-fmp-press-release/preflight-custom` | gap-only | `{ from, to, tickerConcurrency?, requestIntervalMs?, pageLimit?, maxPages? }` | 공통 gap summary |
+| `POST /api/news/pull-fmp-press-release/preflight-custom` | gap-only | `{ from, to, tickerAddedFrom?, tickerConcurrency?, requestIntervalMs?, pageLimit?, maxPages? }` | 공통 gap summary |
 | `POST /api/news/pull-fmp-stock-news/preflight-custom` | gap-only | `{ from, to, tickerConcurrency?, fulltextConcurrency?, requestIntervalMs?, pageLimit?, maxPages? }` | 공통 gap summary |
 | `POST /api/news/pull-fmp-sec-filing/preflight-custom` | summary-only | `{ from, to, tickerConcurrency?, requestIntervalMs?, maxPages? }` | `{ ..., existingItemsInRange }` |
 | `POST /api/news/pull-investing/preflight-custom` | summary-only | `{ from, to, category?, maxPages?, requestIntervalMs?, fulltextConcurrency? }` | `{ ..., categories: [{ category, existingItemsInRange }] }` |
@@ -830,6 +840,7 @@ FMP press release를 수집한다.
   "mode": "recent",
   "from": "2026-03-01",
   "to": "2026-03-20",
+  "tickerAddedFrom": "2026-05-01",
   "tickerConcurrency": 10,
   "fulltextConcurrency": 25,
   "requestIntervalMs": 25,
@@ -842,6 +853,7 @@ FMP press release를 수집한다.
 - `recent`: DB의 마지막 `fmp_press_release` anchor 이후부터 수집
 - `custom`: `from/to` 범위로 수집. **gap-only** 실행 — `buildTickerGapPlans()`로 ticker별 envelope을 계산해 missing gap 구간만 실제 fetch한다. fully covered ticker는 skip된다. job log에 `[custom preflight] fullyCovered=X, missingTickers=Y, missingRanges=Z`가 출력된다.
 - `custom-entire`: `from/to` 범위로 수집. gap planning 없이 **전체 날짜 범위**를 모든 ticker에 대해 fetch한다. envelope/gap skip 없이 과거 코드와 동일하게 동작한다. preflight 호출도 불필요하다.
+- `tickerAddedFrom`: optional. default DB universe에서 `ticker_universe_items.created_at` 날짜가 이 값 이상인 ticker만 대상으로 좁힌다. News Window의 `Custom New Tickers FMP PR` 버튼이 이 필드를 사용한다.
 - `tickerConcurrency`: ticker worker 수 (기본 10)
 - `requestIntervalMs`: FMP API 호출 간격 (기본 25ms)
 - `pageLimit`: page당 최대 row 수 (기본 100)
@@ -853,6 +865,7 @@ FMP press release를 수집한다.
 응답 컬럼:
 
 - `[][][]jobId[][][]`
+- job result/details 추가 필드: `[][][]tickerAddedFrom[][][]`, `[][][]selectedTickerCount[][][]`, `[][][]excludedOlderTickerCount[][][]`, `[][][]selectedTickersSample[][][]` (ticker subset 실행 시 sample만 포함)
 
 ### `POST /api/news/pull-fmp-stock-news`
 

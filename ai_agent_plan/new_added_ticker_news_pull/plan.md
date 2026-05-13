@@ -147,14 +147,14 @@ API contract 초안:
 
 ### 단계별 계획(각 단계: 구현 → 검증)
 
-#### ⬜ Step 0 — 기존 흐름 감사
+#### ⏳ Step 0 — 기존 흐름 감사
 
 | 세부 단계 | 작업 | 상태 |
 |-----------|------|------|
-| 0-1 | Default Ticker의 `addedAt` source와 현재 API 응답 확인 | ⬜ |
-| 0-2 | News Window custom 버튼/모달/preflight 흐름 확인 | ⬜ |
-| 0-3 | Finnhub/FMP PR backend custom route의 ticker list 생성 지점 확인 | ⬜ |
-| 0-4 | 기존 custom preflight 응답 shape와 frontend 표시 방식을 확인 | ⬜ |
+| 0-1 | Default Ticker의 `addedAt` source와 현재 API 응답 확인 | ⏳ |
+| 0-2 | News Window custom 버튼/모달/preflight 흐름 확인 | ⏳ |
+| 0-3 | Finnhub/FMP PR backend custom route의 ticker list 생성 지점 확인 | ⏳ |
+| 0-4 | 기존 custom preflight 응답 shape와 frontend 표시 방식을 확인 | ⏳ |
 
 0-1 목적: 새 ticker 판단 기준을 DB source 기준으로 고정하기 위함.
 설명: `ticker_universe_items.created_at` → `/api/tickers.rows[].addedAt` 흐름을 확인한다.
@@ -187,14 +187,14 @@ Invoke-RestMethod -Uri 'http://localhost:8080/api/tickers' | Select-Object -Expa
 
 사용자 확인 필요: **예**
 
-#### ⬜ Step 1 — backend ticker subset helper
+#### ⏳ Step 1 — backend ticker subset helper
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 1-1 | `tickerAddedFrom` 날짜 validation 규칙 추가 | `terminal/backend/src/server.ts` | invalid date 400 확인 | ⬜ |
-| 1-2 | default universe에서 `created_at >= tickerAddedFrom` ticker만 반환하는 helper 추가 | `terminal/backend/src/server.ts` 또는 `tickerUniverseRepository.ts` | DB count와 API count 비교 | ⬜ |
-| 1-3 | helper가 sample ticker + addedAt를 함께 반환할 수 있게 summary 함수 추가 | `terminal/backend/src/server.ts` | preflight sample 확인 | ⬜ |
-| 1-4 | `tickerAddedFrom`이 없으면 기존 전체 ticker list를 그대로 반환하도록 호환성 유지 | `terminal/backend/src/server.ts` | 기존 preflight 결과 변화 없음 | ⬜ |
+| 1-1 | `tickerAddedFrom` 날짜 validation 규칙 추가 | `terminal/backend/src/server.ts` | invalid date 400 확인 | ⏳ |
+| 1-2 | default universe에서 `created_at >= tickerAddedFrom` ticker만 반환하는 helper 추가 | `terminal/backend/src/server.ts` 또는 `tickerUniverseRepository.ts` | DB count와 API count 비교 | ⏳ |
+| 1-3 | helper가 sample ticker + addedAt를 함께 반환할 수 있게 summary 함수 추가 | `terminal/backend/src/server.ts` | preflight sample 확인 | ⏳ |
+| 1-4 | `tickerAddedFrom`이 없으면 기존 전체 ticker list를 그대로 반환하도록 호환성 유지 | `terminal/backend/src/server.ts` | 기존 preflight 결과 변화 없음 | ⏳ |
 
 1-1 목적: `from`/`to` 뉴스 날짜와 ticker 추가 기준 날짜를 구분하기 위함.
 설명: `[][][]tickerAddedFrom[][][]`는 `YYYY-MM-DD`만 허용한다.
@@ -228,15 +228,15 @@ Invoke-RestMethod -Method Post -Uri 'http://localhost:8080/api/news/pull-finhub/
 
 사용자 확인 필요: **예**
 
-#### ⬜ Step 2 — backend route 연결
+#### ⏳ Step 2 — backend route 연결
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 2-1 | `pull-finhub/preflight-custom`에 `tickerAddedFrom` subset 적용 | `terminal/backend/src/server.ts` | Company/Press preflight count 확인 | ⬜ |
-| 2-2 | `pull-finhub` 실제 custom 실행에 같은 subset 적용 | `terminal/backend/src/server.ts` | job log의 selected ticker count 확인 | ⬜ |
-| 2-3 | `pull-fmp-press-release/preflight-custom`에 `tickerAddedFrom` subset 적용 | `terminal/backend/src/server.ts` | FMP PR preflight count 확인 | ⬜ |
-| 2-4 | `pull-fmp-press-release` 실제 custom 실행에 같은 subset 적용 | `terminal/backend/src/server.ts` | job log/result 확인 | ⬜ |
-| 2-5 | job result/log에 `tickerAddedFrom`, selected/excluded count를 남김 | `terminal/backend/src/server.ts` | `GET /api/jobs/:jobId` 확인 | ⬜ |
+| 2-1 | `pull-finhub/preflight-custom`에 `tickerAddedFrom` subset 적용 | `terminal/backend/src/server.ts` | Company/Press preflight count 확인 | ⏳ |
+| 2-2 | `pull-finhub` 실제 custom 실행에 같은 subset 적용 | `terminal/backend/src/server.ts` | job log의 selected ticker count 확인 | ⏳ |
+| 2-3 | `pull-fmp-press-release/preflight-custom`에 `tickerAddedFrom` subset 적용 | `terminal/backend/src/server.ts` | FMP PR preflight count 확인 | ⏳ |
+| 2-4 | `pull-fmp-press-release` 실제 custom 실행에 같은 subset 적용 | `terminal/backend/src/server.ts` | job log/result 확인 | ⏳ |
+| 2-5 | job result/log에 `tickerAddedFrom`, selected/excluded count를 남김 | `terminal/backend/src/server.ts` | `GET /api/jobs/:jobId` 확인 | ⏳ |
 
 2-1 목적: 실행 전 summary가 새 ticker subset 기준으로 계산되게 하기 위함.
 설명: 기존 `buildTickerGapPlans()` 호출의 tickers 입력을 subset으로 좁힌다.
@@ -280,18 +280,18 @@ Invoke-RestMethod -Method Post -Uri 'http://localhost:8080/api/news/pull-fmp-pre
 
 사용자 확인 필요: **예**
 
-#### ⬜ Step 3 — News Window UI 추가
+#### ⏳ Step 3 — News Window UI 추가
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 3-1 | Update 메뉴 `Custom Update` 섹션 아래에 새 버튼 3개 추가 | `FinnhubNewsWindow.tsx` | 버튼 렌더링 확인 | ⬜ |
-| 3-2 | 새 ticker 전용 custom 설정 모달 추가 | `FinnhubNewsWindow.tsx` | 날짜 3개 입력/validation 확인 | ⬜ |
-| 3-3 | modal submit 시 기존 preflight modal을 `tickerAddedFrom` 포함 payload로 호출 | `FinnhubNewsWindow.tsx` | preflight 응답 표시 확인 | ⬜ |
-| 3-4 | Continue 시 기존 `handleUpdate('custom', ...)` 계열에 `tickerAddedFrom` 전달 | `FinnhubNewsWindow.tsx` | job 생성 payload 확인 | ⬜ |
-| 3-5 | `lastUpdateConfig`와 main button 반복 동작이 기존 버튼을 깨지 않도록 정리 | `FinnhubNewsWindow.tsx` | 기존 main button 동작 확인 | ⬜ |
+| 3-1 | Update 메뉴 `Custom Update` 섹션 아래에 새 버튼 3개 추가 | `FinnhubNewsWindow.tsx` | 버튼 렌더링 확인 | ⏳ |
+| 3-2 | 새 ticker 전용 custom 설정 모달 추가 | `FinnhubNewsWindow.tsx` | 날짜 3개 입력/validation 확인 | ⏳ |
+| 3-3 | modal submit 시 기존 preflight modal을 `tickerAddedFrom` 포함 payload로 호출 | `FinnhubNewsWindow.tsx` | preflight 응답 표시 확인 | ⏳ |
+| 3-4 | Continue 시 기존 `handleUpdate('custom', ...)` 계열에 `tickerAddedFrom` 전달 | `FinnhubNewsWindow.tsx` | job 생성 payload 확인 | ⏳ |
+| 3-5 | `lastUpdateConfig`와 main button 반복 동작이 기존 버튼을 깨지 않도록 정리 | `FinnhubNewsWindow.tsx` | 기존 main button 동작 확인 | ⏳ |
 
 3-1 목적: 사용자가 기존 custom 버튼 옆에서 새 기능을 찾게 하기 위함.
-설명: 버튼 이름은 `New Tickers Company News`, `New Tickers Press Release`, `New Tickers FMP PR`로 제안한다.
+설명: 버튼 이름은 `Custom New Tickers Company News`, `Custom New Tickers Press Release`, `Custom New Tickers FMP PR`로 제안한다.
 완료 조건(눈으로 확인): News Window update menu에 새 버튼 3개가 보인다.
 사람 검증(비개발자): “새로 추가된 ticker만”이라는 설명 문구가 버튼 아래에 보인다.
 흔한 문제/주의: 메뉴가 너무 길어지므로 기존 scroll menu 높이 안에서 동작해야 한다.
@@ -303,7 +303,7 @@ Invoke-RestMethod -Method Post -Uri 'http://localhost:8080/api/news/pull-fmp-pre
 흔한 문제/주의: `Ticker Added From`과 `News From`을 같은 값으로 자동 고정하지 않는다. 둘은 독립 필드다.
 
 3-3 목적: 큰 다운로드 전 사용자가 대상 수를 확인하게 하기 위함.
-설명: 기존 `openCustomPreflight()`를 확장해 `tickerAddedFrom`을 넘기고, modal title에 `New Tickers`를 표시한다.
+설명: 기존 `openCustomPreflight()`를 확장해 `tickerAddedFrom`을 넘기고, modal title에 `Custom New Tickers`를 표시한다.
 완료 조건(눈으로 확인): preflight modal에 selected ticker count와 sample이 보인다.
 사람 검증(비개발자): 대상 ticker가 0개면 Continue하지 않는다.
 흔한 문제/주의: 기존 preflight modal이 새 필드를 모르면 `[object Object]`처럼 깨질 수 있다.
@@ -324,24 +324,24 @@ Invoke-RestMethod -Method Post -Uri 'http://localhost:8080/api/news/pull-fmp-pre
 ```text
 - Vite dev 화면에서 News Window > Update menu 열기
 - 새 버튼 3개 표시 확인
-- New Tickers Company News 클릭
+- Custom New Tickers Company News 클릭
 - Ticker Added From / News From / News To 입력
 - Preflight modal에 selected ticker count + sample 표시 확인
 ```
 
 사용자 확인 필요: **예**
 
-#### ⬜ Step 4 — 문서/스펙 동기화
+#### ⏳ Step 4 — 문서/스펙 동기화
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 4-1 | frontend prompt에 새 버튼/모달/local behavior 설명 추가 | `figma_frontend_prompt.md` | 관련 섹션 검색 | ⬜ |
-| 4-2 | backend prompt에 request/response field와 route 동작 추가 | `terminal/backend_prompt.md` | API section 검색 | ⬜ |
-| 4-3 | 필요 시 repo memory에 구현 후 운영 메모 저장 | `/memories/repo/` | memory 내용 확인 | ⬜ |
+| 4-1 | frontend prompt에 새 버튼/모달/local behavior 설명 추가 | `figma_frontend_prompt.md` | 관련 섹션 검색 | ⏳ |
+| 4-2 | backend prompt에 request/response field와 route 동작 추가 | `terminal/backend_prompt.md` | API section 검색 | ⏳ |
+| 4-3 | 필요 시 repo memory에 구현 후 운영 메모 저장 | `/memories/repo/` | memory 내용 확인 | ⏳ |
 
 4-1 목적: UI 동작 설명과 실제 구현을 맞추기 위함.
 설명: News Window update menu 문서에 새 버튼과 입력 필드를 추가한다.
-완료 조건(눈으로 확인): `New Tickers` 키워드로 문서 검색이 된다.
+완료 조건(눈으로 확인): `Custom New Tickers` 키워드로 문서 검색이 된다.
 사람 검증(비개발자): 어떤 날짜를 어디에 넣는지 문서로 확인 가능하다.
 흔한 문제/주의: 화면에 없는 사용법 안내를 과하게 넣지 않는다.
 
@@ -359,22 +359,22 @@ Invoke-RestMethod -Method Post -Uri 'http://localhost:8080/api/news/pull-fmp-pre
 
 검증 훅:
 ```powershell
-Select-String -Path 'termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md' -Pattern 'New Tickers|tickerAddedFrom'
+Select-String -Path 'termina_web/figma_code/terminal_ui_ver2_finhub/figma_frontend_prompt.md' -Pattern 'Custom New Tickers|tickerAddedFrom'
 Select-String -Path 'terminal/backend_prompt.md' -Pattern 'tickerAddedFrom|selectedTickerCount'
 ```
 
 사용자 확인 필요: **예**
 
-#### ⬜ Step 5 — 검증과 회귀 확인
+#### ⏳ Step 5 — 검증과 회귀 확인
 
 | 세부 단계 | 작업 | 파일 | 검증 | 상태 |
 |-----------|------|------|------|------|
-| 5-1 | 정적 오류 확인 | 변경 파일 전체 | `get_errors` 0개 | ⬜ |
-| 5-2 | backend build/test 실행 | `terminal/backend` | `npm run build`, `npm run test` | ⬜ |
-| 5-3 | frontend build 실행 | webui package | `npm run build` | ⬜ |
-| 5-4 | preflight API runtime 검증 | backend dev | 실제 `Invoke-RestMethod` | ⬜ |
-| 5-5 | browser UI runtime 검증 | frontend dev | Playwright/브라우저 확인 | ⬜ |
-| 5-6 | 실제 pull job 최소 범위 검증 또는 실행 제한 사유 기록 | backend dev | job 생성/로그 또는 API key/rate limit 사유 | ⬜ |
+| 5-1 | 정적 오류 확인 | 변경 파일 전체 | `get_errors` 0개 | ⏳ |
+| 5-2 | backend build/test 실행 | `terminal/backend` | `npm run build`, `npm run test` | ⏳ |
+| 5-3 | frontend build 실행 | webui package | `npm run build` | ⏳ |
+| 5-4 | preflight API runtime 검증 | backend dev | 실제 `Invoke-RestMethod` | ⏳ |
+| 5-5 | browser UI runtime 검증 | frontend dev | Playwright/브라우저 확인 | ⏳ |
+| 5-6 | 실제 pull job 최소 범위 검증 또는 실행 제한 사유 기록 | backend dev | job 생성/로그 또는 API key/rate limit 사유 | ⏳ |
 
 5-1 목적: 타입/문법 회귀를 먼저 잡기 위함.
 설명: 변경한 TS/MD 파일의 VS Code diagnostics를 확인한다.
@@ -431,9 +431,11 @@ Invoke-RestMethod -Method Post -Uri 'http://localhost:8080/api/news/pull-finhub/
 
 ### 미확정 사항(명시 결정 필요)
 
+PLAN CHANGE — 2026-05-11: 사용자가 기존 Custom 버튼과 같은 동작임을 바로 알 수 있도록 새 버튼/섹션/모달/preflight title의 표시명을 `New Tickers ...`에서 `Custom New Tickers ...`로 변경한다. Update menu에서는 `Custom Market News`보다 앞에 배치해 더 쉽게 찾을 수 있게 한다. API contract와 backend 동작은 그대로 유지한다.
+
 | 결정 ID | 미확정 내용 | 선택지 | 차단 대상 Step |
 |---------|-------------|--------|----------------|
-| U1 | 새 버튼 이름 | A. `New Tickers Company News` 계열, B. `Added Tickers Company News` 계열 | Step 3 |
+| U1 | 새 버튼 이름 | A. `Custom New Tickers Company News` 계열, B. `Added Tickers Company News` 계열 | Step 3 |
 | U2 | main update button 반복 대상 포함 여부 | A. 제외(제안), B. 포함 + 마지막 `tickerAddedFrom/newsFrom/newsTo` 저장 | Step 3-5 |
 | U3 | `tickerAddedFrom` 기본값 | A. 빈 값(사용자 필수 입력), B. 최근 7일, C. 가장 최근 addedAt 날짜 | Step 3-2 |
 | U4 | 대상 0개 preflight에서 Continue 표시 | A. 숨김/disabled(제안), B. 표시하되 실행 시 400 | Step 3-3 |
@@ -451,52 +453,52 @@ Invoke-RestMethod -Method Post -Uri 'http://localhost:8080/api/news/pull-finhub/
 
 ```text
 트랙 A — Backend 대상 산정 / API
-⬜ Step 0 기존 흐름 감사
-  ⬜ 0-1 addedAt source/API 확인
-  ⬜ 0-2 custom UI 흐름 확인
-  ⬜ 0-3 backend ticker list 생성 지점 확인
-  ⬜ 0-4 preflight 표시 방식 확인
+⏳ Step 0 기존 흐름 감사
+  ⏳ 0-1 addedAt source/API 확인
+  ⏳ 0-2 custom UI 흐름 확인
+  ⏳ 0-3 backend ticker list 생성 지점 확인
+  ⏳ 0-4 preflight 표시 방식 확인
       |
       v
-⬜ Step 1 backend ticker subset helper
-  ⬜ 1-1 tickerAddedFrom validation
-  ⬜ 1-2 added date filter helper
-  ⬜ 1-3 summary/sample 함수
-  ⬜ 1-4 기존 요청 호환성 유지
+⏳ Step 1 backend ticker subset helper
+  ⏳ 1-1 tickerAddedFrom validation
+  ⏳ 1-2 added date filter helper
+  ⏳ 1-3 summary/sample 함수
+  ⏳ 1-4 기존 요청 호환성 유지
       |
       v
-⬜ Step 2 backend route 연결
-  ⬜ 2-1 Finnhub preflight subset
-  ⬜ 2-2 Finnhub 실제 실행 subset
-  ⬜ 2-3 FMP PR preflight subset
-  ⬜ 2-4 FMP PR 실제 실행 subset
-  ⬜ 2-5 job result/log 필드
+⏳ Step 2 backend route 연결
+  ⏳ 2-1 Finnhub preflight subset
+  ⏳ 2-2 Finnhub 실제 실행 subset
+  ⏳ 2-3 FMP PR preflight subset
+  ⏳ 2-4 FMP PR 실제 실행 subset
+  ⏳ 2-5 job result/log 필드
 
 트랙 B — Frontend UX
-⬜ Step 0 기존 흐름 감사
+⏳ Step 0 기존 흐름 감사
       |
       v
-⬜ Step 3 News Window UI 추가
-  ⬜ 3-1 새 버튼 3개
-  ⬜ 3-2 새 설정 모달
-  ⬜ 3-3 preflight payload 연결
-  ⬜ 3-4 Continue 실행 payload 연결
-  ⬜ 3-5 main button 반복 동작 정리
+⏳ Step 3 News Window UI 추가
+  ⏳ 3-1 새 버튼 3개
+  ⏳ 3-2 새 설정 모달
+  ⏳ 3-3 preflight payload 연결
+  ⏳ 3-4 Continue 실행 payload 연결
+  ⏳ 3-5 main button 반복 동작 정리
 
 트랙 C — 문서 / 검증
-⬜ Step 4 문서/스펙 동기화
-  ⬜ 4-1 frontend prompt
-  ⬜ 4-2 backend prompt
-  ⬜ 4-3 repo memory
+⏳ Step 4 문서/스펙 동기화
+  ⏳ 4-1 frontend prompt
+  ⏳ 4-2 backend prompt
+  ⏳ 4-3 repo memory
       |
       v
-⬜ Step 5 검증과 회귀 확인
-  ⬜ 5-1 정적 오류
-  ⬜ 5-2 backend build/test
-  ⬜ 5-3 frontend build
-  ⬜ 5-4 preflight API runtime
-  ⬜ 5-5 browser UI runtime
-  ⬜ 5-6 최소 실제 pull 또는 제한 사유
+⏳ Step 5 검증과 회귀 확인
+  ⏳ 5-1 정적 오류
+  ⏳ 5-2 backend build/test
+  ⏳ 5-3 frontend build
+  ⏳ 5-4 preflight API runtime
+  ⏳ 5-5 browser UI runtime
+  ⏳ 5-6 최소 실제 pull 또는 제한 사유
 ```
 
 병렬 트랙 요약:
@@ -509,7 +511,7 @@ Invoke-RestMethod -Method Post -Uri 'http://localhost:8080/api/news/pull-finhub/
 
 | 결정 | 차단 대상 | 선택지 |
 |------|-----------|--------|
-| U1 버튼 이름 | Step 3-1 | 기본안: `New Tickers ...` |
+| U1 버튼 이름 | Step 3-1 | 기본안: `Custom New Tickers ...` |
 | U2 main button 반복 포함 여부 | Step 3-5 | 기본안: 반복 대상 제외 |
 | U3 tickerAddedFrom 기본값 | Step 3-2 | 기본안: 사용자 필수 입력 |
 | U4 대상 0개 처리 | Step 3-3 | 기본안: Continue disabled |
@@ -551,9 +553,9 @@ Invoke-RestMethod -Method Post -Uri 'http://localhost:8080/api/news/pull-finhub/
 
 제안 버튼:
 
-- `New Tickers Company News`
-- `New Tickers Press Release`
-- `New Tickers FMP PR`
+- `Custom New Tickers Company News`
+- `Custom New Tickers Press Release`
+- `Custom New Tickers FMP PR`
 
 모달 입력:
 

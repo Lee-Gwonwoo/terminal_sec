@@ -385,6 +385,10 @@ Finnhub 뉴스 적재는 직접 API response를 표에 그리지 않고, backend
   - FMP Stock
   - FMP SEC Filing
   - Market News
+- Custom New Tickers
+  - Company News
+  - Press Release
+  - FMP PR
 - PTPR Press Release
   - Recent PTPR Press Release
   - Custom PTPR Press Release
@@ -425,6 +429,14 @@ Recent Update 섹션 바로 아래에 automatic recent retry 정책 설명이 �
 
 custom update는 별도 날짜 선택 modal에서 `from/to`를 입력한 뒤 시작한다.
 
+`Custom New Tickers` 섹션은 기존 custom update와 같은 gap-only 경로를 사용하되, backend payload에 `[][][]tickerAddedFrom[][][]`을 추가한다. 이 섹션은 Update menu의 custom 계열 안에서 `Custom Market News`보다 앞에 둔다. modal 입력 필드는 다음 3개다.
+
+- `[][][]tickerAddedFrom[][][]`: Default Ticker에 추가된 날짜 기준 시작일. backend는 `date(ticker_universe_items.created_at) >= tickerAddedFrom`인 ticker만 대상으로 삼는다.
+- `[][][]from[][][]`: 실제 뉴스 수집 날짜 범위 시작일(`News From`).
+- `[][][]to[][][]`: 실제 뉴스 수집 날짜 범위 종료일(`News To`).
+
+대상 source는 `company_news`, `press_release`, `fmp_press_release` 3개다. preflight 응답의 `[][][]selectedTickerCount[][][]`가 0이면 Continue 버튼은 disabled 상태로 유지한다. 새 버튼은 main update button의 반복 실행 대상으로 저장하지 않고, 드롭다운에서 명시적으로 다시 실행한다.
+
 #### Custom Preflight 흐름
 
 Custom Update를 시작하면 소스 타입에 따라 **preflight → modal → Continue → 실제 job** 순서로 진행한다.
@@ -441,6 +453,14 @@ dispatch 라우팅 (`handleCustomPreflightStart`):
 | `market_news` | (preflight 없음) | 직접 실행 |
 
 PTPR Press Release의 Custom은 `POST /api/news/pull-rtpr/preflight-custom`을 사용한다 (fully-covered-skip 모드).
+
+Custom New Tickers 버튼의 dispatch:
+
+| 버튼 | preflight endpoint | 실제 실행 |
+|------|-------------------|-----------|
+| `Custom New Tickers Company News` | `POST /api/news/pull-finhub/preflight-custom` + `sourceType: 'company_news'` + `tickerAddedFrom` | `POST /api/news/pull-finhub` + `mode: 'custom'` + 같은 날짜 3개 |
+| `Custom New Tickers Press Release` | `POST /api/news/pull-finhub/preflight-custom` + `sourceType: 'press_release'` + `tickerAddedFrom` | `POST /api/news/pull-finhub` + `mode: 'custom'` + 같은 날짜 3개 |
+| `Custom New Tickers FMP PR` | `POST /api/news/pull-fmp-press-release/preflight-custom` + `tickerAddedFrom` | `POST /api/news/pull-fmp-press-release` + `mode: 'custom'` + 같은 날짜 3개 |
 
 `openCustomPreflight()` 흐름:
 
