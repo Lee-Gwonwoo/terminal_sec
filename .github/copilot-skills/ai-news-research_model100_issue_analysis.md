@@ -48,6 +48,18 @@
 - `Model_100`은 이슈 1개 → 관련 종목 바스켓 전체의 형성·확산·소멸을 시간축으로 분석한다.
 - 단, `Model_1`의 same-ticker / other-ticker 조사, `Model_2`의 case_type 분류, DB 조회 방법은 `Model_100` 내에서도 도구로 활용할 수 있다.
 
+### 기존 issue analysis page 선례 참고 규칙
+
+- `Model_100`으로 새 이슈의 tier를 평가할 때는, 현재 DB의 `research_pages`에 저장된 기존 `issue analysis` / `Model_100` page를 **tier calibration 선례**로 먼저 참고한다.
+- 목적은 새 이슈를 고립적으로 평가하지 않고, 과거에 `1 tier`, `1.5 tier`, `2 tier`, `3 tier`, `fail tier`로 정리된 page들이 어떤 change / HV / z-score / breadth / follow-through 조건에서 그렇게 판정됐는지 비교하기 위함이다.
+- 최소 확인 대상은 아래와 같다.
+   1. 같은 테마 또는 인접 테마의 기존 Model_100 page
+   2. 같은 핵심 ticker 또는 direct peer가 포함된 기존 issue analysis page
+   3. `Retrospective tier calibration 선례`에 명시된 fail-tier / boundary-tier page
+- 기존 page를 참고할 때는 title의 tier 라벨만 보지 말고, page 본문 상단에 `Tier 재분류 메모`가 있는지 먼저 확인한다. 재분류 메모가 있으면 그것이 과거 본문보다 우선한다.
+- 최종 판정에서는 가능하면 `참고한 기존 page / 유사점 / 차이점 / 이번 판정에 준 영향`을 짧은 표로 남긴다. 특히 새 이슈를 높은 tier로 올리거나 fail tier로 낮출 때는 최소 1개 이상의 기존 page와 비교한다.
+- 기존 page 선례는 판단을 고정하는 족쇄가 아니라 calibration 기준이다. 새 이슈가 과거 선례보다 더 강하거나 약하면, 어떤 지표가 달랐는지(change, z-score, related-stock breadth, next-day follow-through, 7d/14d 유지력)를 숫자로 설명한다.
+
 ### Model_100 추가 작업: `관련주 확장`
 
 - `관련주 확장`은 **기본 Model_100의 필수 절차가 아니라**, 사용자가 명시적으로 요청했을 때만 수행하는 선택적 추가 작업이다.
@@ -701,27 +713,41 @@ company_news 분석 시, **이벤트가 실제로 발생한 날짜(event_date)**
 | 티어 | 정의 | 판정 조건 |
 | --- | --- | --- |
 | **1 tier (지속형)** | 이슈가 2회 이상의 파동을 만들고, 바스켓 내 3개 이상 종목이 각 파동에서 5% 이상 동반 반응하며, **메인 anchor의 핵심 직접 수혜 티커**가 자신의 평소 변동성 대비도 강하게 반응한다. 또한 메인 anchor가 기존 thesis의 단순 반복/증액이 아니라 새로운 direct confirmation을 제공해야 한다. 메인 촉매 이후 30일 이상 테마가 유지됨. | 확산 타임라인에서 2차 파동 이상 존재 + 개별 확인 이벤트 1건 이상 + 핵심 티커 direct z-score 품질 충족 |
-| **2 tier (보통형)** | 이슈가 1~2회 파동을 만들었거나, breadth는 있었지만 **핵심 티커 direct z-score가 약하거나 기존 이슈의 반복/확대 성격이 강한 경우**. | 전면 부각은 있었으나 2차 파동이 약하거나, 핵심 direct surprise quality가 1 tier에 못 미침 |
+| **1.5 tier (단독 z-score 초강형 / 경계형)** | `1 tier`로 보기에는 바스켓 breadth, 2차 파동, 30일 지속력, 신규 direct confirmation 중 일부가 부족하지만, **메인 anchor의 핵심 직접 수혜 티커 단독 z-score가 예외적으로 강해** `2 tier`로 낮추면 신호를 과소평가하는 경우. 단, 관련주/peer basket의 실제 change 데이터가 횡보 또는 무반응이면 `1.5 tier`가 아니라 `fail tier` 또는 `3 tier`를 먼저 검토한다. | 핵심 티커 direct z-score가 매우 강함 + 최소한의 follow-through 또는 부분적 관련주 반응은 있으나, 1 tier의 breadth/지속성/신규성 조건은 완전히 충족하지 못함 |
+| **2 tier (보통형)** | 이슈가 1~2회 파동을 만들었거나, breadth는 있었지만 **핵심 티커 direct z-score가 약하거나 기존 이슈의 반복/확대 성격이 강한 경우**. 단, 핵심 direct z-score가 예외적으로 강해 `2 tier`로 낮추면 신호를 과소평가하는 경계 사례는 `1.5 tier`를 먼저 검토한다. | 전면 부각은 있었으나 2차 파동이 약하거나, 핵심 direct surprise quality가 1.5 tier 이상에 못 미침 |
 | **3 tier (약형)** | 이슈가 뉴스에 등장했으나 바스켓 전체 동시 급등이 미약하거나 1일 내 되돌림. | 전면 부각 부재 또는 즉시 반납 |
-| **fail tier (1일 스파이크)** | 촉매 당일만 반응하고 다음 거래일 즉시 반납 또는 역전. | 메인 촉매 당일 반응 후 다음 거래일 반대 방향 또는 0% 근처 |
+| **fail tier (스파이크 / 바스켓 미형성)** | 촉매 당일만 반응하고 다음 거래일 즉시 반납 또는 역전. 또는 headline과 단독 티커 반응은 좋아 보여도, 확인 가능한 change 데이터에서 관련주/peer basket이 사실상 횡보하거나 반응하지 않아 Model_100 이슈로 형성되지 못한 경우. | 메인 촉매 당일 반응 후 다음 거래일 반대 방향 또는 0% 근처, 또는 관련주 바스켓의 clean 동반 반응이 없고 후속 window에서도 상승 확산이 확인되지 않음 |
 
 티어 판정 보조 기준:
 - **핵심 티커 direct z-score 품질**: 메인 anchor의 직접 수혜 티커(또는 page의 핵심 티커)의 `same-day`, `from-open`, `1d`, `7d` z-score를 **최우선**으로 본다. 기본 가이드는 `same-day` 또는 `1d` 중 하나가 `|z| >= 2`에 근접하거나 이를 넘고, follow-through window(`1d`, `7d`, `14d`)에서도 추가 확인이 있어야 한다. sympathy peer의 z-score가 높아도 핵심 티커 direct z-score가 약하면 기본적으로 `2 tier` ceiling을 우선 검토한다.
+- **1.5 tier 경계 규칙**: `1 tier`의 breadth/지속성/신규성 조건은 부족하지만 핵심 티커 direct z-score가 너무 강한 경우에는 `2 tier`로 강등하지 말고 `1.5 tier`를 검토한다. 운영 가이드는 `same-day`, `from-open`, `1d`, `7d` 중 하나가 대략 `|z| >= 3` 수준이거나, 둘 이상 window에서 `|z| >= 2` 수준이고, 다음 거래일/7d/14d follow-through 또는 관련주 일부 반응이 함께 확인되는 경우다. 단, 관련주 전파가 전혀 없거나, 관련주/peer basket의 change 데이터가 거의 횡보/무반응이고, 다음 거래일 또는 후속 window에서 확산이 확인되지 않으면 `1.5 tier`가 아니라 `fail tier` 또는 `3 tier`를 우선 검토한다.
 - **파동 횟수**: 확산 타임라인에서 바스켓 3개 이상 종목이 동시 `Change_1d_Pct` 5% 이상 반응한 날의 횟수.
 - **파동 지속력**: 각 파동일의 `Change_7d_Pct`/`Change_14d_Pct`가 양수를 유지하는지로 "되돌림 없는 진짜 파동"인지 판단.
 - **HV 대비 초과반응**: 같은 파동이라도 `zscore_*`가 높은 종목이 자신의 평소 변동성 대비 더 강하게 반응한 것이다. 고변동성 소형주는 절대 change만 크고 z-score는 낮을 수 있으므로 반드시 함께 본다.
-- **신규성 vs 반복성**: 메인 anchor가 이미 알려진 고객/계약/정책/테마의 단순 확대, 금액 상향, 반복 headline인지 확인한다. **기존 이슈의 반복/증액 성격이 강하면 breadth만으로 `1 tier`를 주지 않는다.** 이 경우 핵심 티커의 direct z-score가 아주 강하거나, 이전 precedent보다 명확히 강한 신규 counterparty / revenue attribution이 추가된 경우에만 `1 tier` 승격을 검토한다.
+- **신규성 vs 반복성**: 메인 anchor가 이미 알려진 고객/계약/정책/테마의 단순 확대, 금액 상향, 반복 headline인지 확인한다. **기존 이슈의 반복/증액 성격이 강하면 breadth만으로 `1 tier`를 주지 않는다.** 이 경우 핵심 티커의 direct z-score가 아주 강하지만 신규성/지속성/breadth가 1 tier에 못 미치면 `1.5 tier`, 이전 precedent보다 명확히 강한 신규 counterparty / revenue attribution까지 추가된 경우에만 `1 tier` 승격을 검토한다.
 - **지속 기간**: 메인 촉매부터 마지막 의미 있는 파동까지의 캘린더 일수.
 - **개별 확인 이벤트**: 소형캡 자체 수주/어닝/딜로 테마를 독립적으로 확인한 횟수.
 - **테마 확장 여부**: 이슈 주제가 원래 범위에서 인접 테마로 옮겨간 사례 유무.
 - **Turnover 추이**: 파동별 Turnover가 이전 파동 대비 증가/감소하는지로 자금 유입 지속성을 판단.
 
+#### Retrospective tier calibration 선례
+
+다음 page들은 향후 Model_100에서 비슷한 이슈를 평가할 때 참고할 **재분류 선례**다. 핵심 목적은 headline 또는 단독 종목 반응이 좋아 보여도, 실제 related-stock basket의 change 데이터가 뒤따르지 않으면 높은 tier를 주지 않도록 기준을 고정하는 것이다.
+
+| page id | 최신 판정 | 재분류 이유 |
+| --- | --- | --- |
+| `f422cd61-4f4e-4872-a891-c1e642b000a7` | `fail tier` | 최초에는 단독 z-score/anchor quality 때문에 `1.5 tier` 후보처럼 보였지만, 재점검 결과 관련주/peer basket이 clean하게 오르지 못했고 후속 change 데이터가 거의 횡보에 가까웠다. 단독 가격 반응만으로 Model_100 이슈 형성을 인정하지 않는다. |
+| `2ef919a1-d5d2-4197-9b6d-2000a673f7b7` | `fail tier` | headline은 중상급 호재로 볼 여지가 있었지만, change 데이터 기준 실제 가격 반응과 관련주 확산이 거의 없었다. `좋은 뉴스`와 `Model_100 basket-forming issue`를 분리하는 선례다. |
+| `a5afb1f8-5456-4109-a7be-8826c11871ed` | `fail tier` | NNE x SMCI AI data center nuclear MOU는 pre-open narrative는 강했지만, regular/next window에서 원전 관련주 basket이 동반 상승하지 못했다. pre-open spike candidate는 후속 change 확인 전까지 높은 tier로 확정하지 않는다. |
+
 최종 정리 필수 산출물:
 
 1. **한줄 결론**: 이슈 티어 판정 + 핵심 날짜 2개 (이슈 형성일 + 전면 부각일).
 2. **최종 판정 문단**: `이슈 티어가 만들어진 날`, `전면 부각의 날`에 대한 근거 요약.
+   - `1.5 tier`를 부여할 때는 **왜 `1 tier`는 아닌지**(부족한 breadth/지속성/신규성)와 **왜 `2 tier`로 낮추지 않는지**(핵심 티커 direct z-score와 follow-through 품질)를 각각 1문장 이상으로 분리해 적는다.
 3. **선행 이슈 성격 정리**: 메인 촉매 이전 선행 이슈들의 공통 성격 (개별적, 단일 종목, 간접, 일회성 등).
 4. **스코프 선언**: 이번 page가 `event-level` 판정인지 `issue-cycle-level` 판정인지 명시한다. anchor 날짜 page인데 cycle 누적 판정을 쓸 경우 제목/한줄 결론/최종 판정에서 그 스코프를 분명히 드러낸다.
+5. **기존 issue analysis 선례 비교**: tier를 확정하기 전에 참고한 기존 Model_100 / issue analysis page를 `page id`, `기존 판정`, `유사점`, `차이점`, `이번 판정에 준 영향` 표로 남긴다. 참고할 만한 기존 page가 없으면 `기존 page 선례 미발견`이라고 명시한다.
 
 ---
 
