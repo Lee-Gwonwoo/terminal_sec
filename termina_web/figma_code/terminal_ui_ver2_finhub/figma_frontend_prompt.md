@@ -11,7 +11,7 @@
 - `News` 창도 `GET /api/news`, `POST /api/news/pull-eodhd`를 실제로 호출하지만, 현재 운영 기준의 주력 뉴스 창은 아니다.
 - `Watchlist` 창은 backend `watchlists` API와 연결되어 있고, 종목 이름/가격 일부는 프론트의 fallback lookup을 함께 사용한다.
 - `Calendar` 창은 backend `calendar_events` 기반의 실데이터 창이며, 현재 earnings + IPO 탭과 background job polling을 지원한다. IPO 탭에는 `Security Type` 컬럼과 dropdown 필터가 있고, 이 값은 FMP의 `ticker/company_name` 문자열에서 파생된다.
-- `Finnhub News` 창과 `Calendar` 창은 `GET /api/industries` 목록을 읽어 `All Industries` dropdown을 표시한다. 메뉴 항목은 checkbox multi-select이며, 선택된 industry 목록을 `industries` 반복 query로 backend에 넘겨 server-side 필터링한다. 개별 industry row를 우클릭하면 `Instruction` 버튼이 뜨고, 버튼을 누르면 `GET /api/industries/detail` 결과로 industry 설명과 시총순 관련 ticker 목록을 dialog에 표시한다.
+- `Finnhub News` 창과 `Calendar` 창은 `GET /api/industries` 목록을 읽어 `All Industries` dropdown을 표시한다. 메뉴 항목은 checkbox multi-select이며, 선택된 industry 목록을 `industries` 반복 query로 backend에 넘겨 server-side 필터링한다. `All Industries` 상태에서는 모든 industry checkbox가 체크된 것처럼 보이고, 개별 항목을 해제하면 전체 중 일부만 선택한 상태로 전환된다. 메뉴 상단에는 industry 명칭 검색 input이 있다. 개별 industry row를 우클릭하면 `Instruction` 버튼이 뜨고, 버튼을 누르면 `GET /api/industries/detail` 결과로 industry 설명과 시총순 관련 ticker 목록을 dialog에 표시한다.
 - `App.tsx`는 `open-case-description`, `open-company-description`, `open-data-control-how-to-use` custom event를 받아 `case-description`, `company-description`, `data-control-how-to-use` 보조 창을 현재 탭에 동적으로 추가한다.
 - ticker가 있는 주요 창에서는 클릭으로 `Company Description` 창을 열 수 있고, ticker hover 3초 뒤 `CompanyDescriptionHoverPreview` overlay가 뜬다.
 - `BraveNewsWindow.tsx` 파일은 남아 있지만 현재 `WindowType`에 연결되어 있지 않아 UI에서 열 수 없다.
@@ -238,7 +238,7 @@ GET /api/news?source_names=FINNHUB,RTPR,FMP&limit=500
 - `Inst %`
 - `Insider %`
 
-각 항목은 `Min/Max` 범위 입력 2개를 가지며, 값이 바뀌면 backend `/api/news`, `/api/model1/news`를 같은 범위 조건으로 다시 조회한다. Industry dropdown도 같은 서버 조회 경로를 사용하며, 저장 검색 payload와 뉴스 earnings 확인 job payload에도 선택 배열이 포함된다. industry menu row 우클릭은 선택 상태를 바꾸지 않고, `Instruction` 버튼을 통해 별도 상세 dialog를 연다.
+각 항목은 `Min/Max` 범위 입력 2개를 가지며, 값이 바뀌면 backend `/api/news`, `/api/model1/news`를 같은 범위 조건으로 다시 조회한다. Industry dropdown도 같은 서버 조회 경로를 사용하며, 저장 검색 payload와 뉴스 earnings 확인 job payload에도 선택 배열이 포함된다. `All Industries`는 backend query에는 industry filter를 보내지 않는 전체 선택 상태이고, UI에서는 모든 checkbox가 체크된다. 이 상태에서 특정 industry checkbox를 해제하면 전체 목록에서 그 industry만 빠진 명시 선택 배열로 바뀐다. industry menu row 우클릭은 선택 상태를 바꾸지 않고, `Instruction` 버튼을 통해 별도 상세 dialog를 연다.
 
 ### Industry Instruction Dialog
 
@@ -1142,10 +1142,16 @@ API:
   - economics를 제외한 탭에서는 선택된 watchlist가 있으면 `watchlist_id` query를 함께 보낸다.
   - economics를 제외한 탭에서는 선택된 industry가 있으면 `industries` 반복 query도 함께 보낸다.
 - `GET /api/industries`로 industry dropdown option을 읽는다.
+  - 메뉴 상단 검색 input으로 industry 명칭을 부분 검색한다.
+  - `All Industries`는 filter 없음 상태이지만 UI에서는 모든 industry checkbox가 체크된다.
+  - 전체 선택 상태에서 특정 checkbox를 해제하면 전체 목록에서 해당 industry만 빠진 명시 선택 배열로 바뀌고, 그 배열을 `industries` 반복 query로 보낸다.
 - ticker 우클릭 `Financial` dialog를 열 때 `GET /api/calendar/financials/:ticker`로 annual / quarterly 재무 series를 읽는다.
 - earnings 탭에서 `POST /api/fmp/calendar/earnings/update`를 실행하고 `GET /api/jobs/:jobId`로 polling 한다.
 - earnings 탭에서 `POST /api/fmp/calendar/financials/update`도 실행할 수 있고, 같은 `GET /api/jobs/:jobId` polling 패턴으로 default ticker financial history sync 상태를 보여준다.
 - IPO 탭에서 `POST /api/fmp/calendar/ipos/update`, `POST /api/fmp/calendar/ipos/sec-download`를 실행하고 같은 `GET /api/jobs/:jobId` polling 패턴을 사용한다.
+- economics를 제외한 탭에서는 `POST /api/company-profiles/pull-yahoo`를 실행하는 `Update Yahoo Desc` 버튼을 표시한다.
+  - 현재 active tab에서 로드된 row의 `ticker`를 중복 제거해 `tickers` body로 보낸다.
+  - Yahoo 실행 설정은 Data Control 창과 같은 localStorage key(`yahoo-concurrency`, `yahoo-request-interval-ms`, `yahoo-skip-existing`)를 읽어 사용한다.
 - industry / ownership(`float_pct`, `institutional_pct`, `insider_pct`)는 column selector에서 켜고 끌 수 있다.
 - IPO direct/SEC 컬럼(`ipo_date`, `company_name`, `exchange`, `status`, `price_range`, `shares`, `offer_amount`, `company_description`, `sec_max_owner_pct`, `sec_total_owner_pct`, `prospectus_url`, `disclosure_url`)도 column selector에서 켜고 끌 수 있다.
 - earnings에서는 `Inst %`, `Float %`, `Market Cap(B$)` min/max 숫자 필터를 사용할 수 있다.
@@ -1161,14 +1167,17 @@ API:
   - Reset 후에도 같은 대기 상태로 돌아간다.
 - economics를 제외한 탭에서는 watchlist dropdown을 표시한다.
   - 목록은 `GET /api/watchlists`에서 읽는다.
-  - 선택값은 client memory state만 사용하며 영속 저장되지 않는다.
+  - 선택값은 `calendar-window-ui-state` localStorage에 저장되어 Calendar 창을 떠났다가 돌아와도 유지된다.
   - 선택 시 server-side `watchlist_id` filter가 걸린 결과 집합으로 다시 fetch한다.
 - economics를 제외한 탭에서는 industry dropdown도 표시한다.
   - 목록은 `GET /api/industries`에서 읽는다.
   - 메뉴 항목은 checkbox이며 여러 industry를 동시에 선택할 수 있다.
-  - 선택값은 client memory state만 사용하며 영속 저장되지 않는다.
+  - 선택값은 `calendar-window-ui-state` localStorage에 저장되어 Calendar 창을 떠났다가 돌아와도 유지된다.
   - 선택 시 server-side `industries` filter가 걸린 결과 집합으로 다시 fetch한다.
   - 개별 industry row를 우클릭하면 `Instruction` 버튼이 뜬다. 버튼을 누르면 `GET /api/industries/detail?industry=...`를 호출해 industry 설명, ticker 수, market cap 보유 수, sector 요약, 시총순 ticker table을 dialog로 표시한다.
+- Calendar UI 상태는 `calendar-window-ui-state` localStorage에 저장된다.
+  - 저장 대상: active tab, date range, quick range 선택값, search, sort, column visibility/order/width, watchlist, industry, IPO security type, 숫자 필터, earnings confirmed filter.
+  - 저장하지 않는 대상: 실행 중인 job 상태, menu open/close 상태, ticker context menu, financial dialog target.
 - 기본 날짜 정렬은 늦은 날짜 우선(`desc`)이다.
   - 초기 진입, 탭 전환, Reset 모두 이 기준을 사용한다.
 - search는 client-side로 `ticker`, `company`, `title`, `industry`, `source`, `status`, `company_description`을 대상으로 동작한다.
@@ -1182,7 +1191,8 @@ API:
   - 숫자 필터가 켜져 있을 때 해당 값이 `null`인 row는 결과에서 제외된다.
 - table header는 drag reorder를 지원한다.
   - visible column만 현재 순서 기준으로 drag-and-drop 할 수 있다.
-  - column visibility와 width 설정은 유지한 채 배열 순서만 재배치한다.
+  - 각 header 오른쪽 resize handle을 드래그해 column width를 px 단위로 조정할 수 있다.
+  - column visibility, order, width는 `calendar-window-ui-state` localStorage에 저장된다.
 - earnings stable source에는 reliable time/session이 없으므로, 관련 column 값은 비어 있을 수 있다.
 - earnings 탭에는 `FMP Sync Settings` 버튼이 있고, 여기서 다음 실행에 쓸 concurrency 값을 수정할 수 있다.
   - `Earnings Update` concurrency

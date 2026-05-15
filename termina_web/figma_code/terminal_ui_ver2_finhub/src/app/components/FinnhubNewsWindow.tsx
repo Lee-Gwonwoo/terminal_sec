@@ -40,14 +40,17 @@ function normalizeSelectedIndustries(value: unknown, fallbackValue?: unknown): s
   )).sort((left, right) => left.localeCompare(right));
 }
 
-function formatIndustryButtonLabel(industries: string[]): string {
-  if (industries.length === 0) return 'All Industries';
+function formatIndustryButtonLabel(industries: string[], totalIndustries = 0): string {
+  if (industries.length === 0 || (totalIndustries > 0 && industries.length >= totalIndustries)) return 'All Industries';
   if (industries.length === 1) return industries[0];
+  if (totalIndustries > 0 && industries.length > 2) return `${industries.length}/${totalIndustries} Industries`;
   return `${industries[0]} +${industries.length - 1}`;
 }
 
-function formatIndustryStatusLabel(industries: string[]): string {
+function formatIndustryStatusLabel(industries: string[], totalIndustries = 0): string {
+  if (industries.length === 0 || (totalIndustries > 0 && industries.length >= totalIndustries)) return 'All industries';
   if (industries.length <= 2) return industries.join(', ');
+  if (totalIndustries > 0) return `${industries.length}/${totalIndustries} industries selected`;
   return `${industries.slice(0, 2).join(', ')} +${industries.length - 2}`;
 }
 
@@ -875,6 +878,7 @@ export function FinnhubNewsWindow({
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [industrySearchQuery, setIndustrySearchQuery] = useState('');
 
   // ─── Update config (last used mode/sourceType) ───
   type UpdateMode = '7d' | 'recent' | 'custom';
@@ -976,21 +980,47 @@ export function FinnhubNewsWindow({
     insiderPctMax,
   ].filter((value) => value.trim()).length;
   const hasNumericFilters = activeNumericFilterCount > 0;
-  const selectedIndustrySet = useMemo(() => new Set(selectedIndustries), [selectedIndustries]);
-  const selectedIndustryLabel = formatIndustryButtonLabel(selectedIndustries);
-  const selectedIndustryStatusLabel = formatIndustryStatusLabel(selectedIndustries);
-  const hasIndustryFilter = selectedIndustries.length > 0;
+  const isAllIndustrySelection = selectedIndustries.length === 0 || (industryOptions.length > 0 && selectedIndustries.length >= industryOptions.length);
+  const activeIndustryFilters = useMemo(
+    () => isAllIndustrySelection ? [] : selectedIndustries,
+    [isAllIndustrySelection, selectedIndustries],
+  );
+  const selectedIndustrySet = useMemo(() => new Set(activeIndustryFilters), [activeIndustryFilters]);
+  const selectedIndustryLabel = formatIndustryButtonLabel(selectedIndustries, industryOptions.length);
+  const selectedIndustryStatusLabel = formatIndustryStatusLabel(selectedIndustries, industryOptions.length);
+  const hasIndustryFilter = activeIndustryFilters.length > 0;
+  const filteredIndustryOptions = useMemo(() => {
+    const query = industrySearchQuery.trim().toLowerCase();
+    if (!query) return industryOptions;
+    return industryOptions.filter((industry) => industry.toLowerCase().includes(query));
+  }, [industryOptions, industrySearchQuery]);
 
   const toggleSelectedIndustry = useCallback((industry: string) => {
     const trimmed = industry.trim();
     if (!trimmed) return;
     setSelectedIndustries((previous) => {
-      if (previous.includes(trimmed)) {
-        return previous.filter((item) => item !== trimmed);
+      if (industryOptions.length === 0) {
+        if (previous.includes(trimmed)) {
+          return previous.filter((item) => item !== trimmed);
+        }
+        return [...previous, trimmed].sort((left, right) => left.localeCompare(right));
       }
-      return [...previous, trimmed].sort((left, right) => left.localeCompare(right));
+
+      const wasAllSelected = previous.length === 0 || previous.length >= industryOptions.length;
+      if (wasAllSelected) {
+        return industryOptions.filter((item) => item !== trimmed);
+      }
+
+      const nextSet = new Set(previous);
+      if (nextSet.has(trimmed)) {
+        nextSet.delete(trimmed);
+      } else {
+        nextSet.add(trimmed);
+      }
+      const next = industryOptions.filter((item) => nextSet.has(item));
+      return next.length >= industryOptions.length ? [] : next;
     });
-  }, []);
+  }, [industryOptions]);
 
   const openIndustryInstructionMenu = useCallback((event: React.MouseEvent, industry: string) => {
     event.preventDefault();
@@ -1071,8 +1101,8 @@ export function FinnhubNewsWindow({
       payload.tickers = [currentTicker.toUpperCase()];
     }
 
-    if (selectedIndustries.length > 0) {
-      payload.industries = selectedIndustries;
+    if (activeIndustryFilters.length > 0) {
+      payload.industries = activeIndustryFilters;
     }
 
     const effectiveFrom = overrides?.from ?? fromDate;
@@ -1101,7 +1131,7 @@ export function FinnhubNewsWindow({
     institutionalPctMax,
     institutionalPctMin,
     selectedBookmarkFolderId,
-    selectedIndustries,
+    activeIndustryFilters,
     sourceTypeFilter,
     toDate,
   ]);
@@ -1489,7 +1519,7 @@ export function FinnhubNewsWindow({
       if (currentTicker) {
         params.set('tickers', currentTicker.toUpperCase());
       }
-      for (const industry of selectedIndustries) {
+      for (const industry of activeIndustryFilters) {
         params.append('industries', industry);
       }
       if (fromDate) {
@@ -1516,7 +1546,7 @@ export function FinnhubNewsWindow({
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, [selectedBookmarkFolderId, selectedIndustries, sourceTypeFilter, fromDate, toDate, newsApiBase, applyOwnershipFilterParams]);
+  }, [selectedBookmarkFolderId, activeIndustryFilters, sourceTypeFilter, fromDate, toDate, newsApiBase, applyOwnershipFilterParams]);
 
   // ─── Fetch more (cursor-based append) ───
   const fetchMore = useCallback(async () => {
@@ -1544,7 +1574,7 @@ export function FinnhubNewsWindow({
       if (currentTicker) {
         params.set('tickers', currentTicker.toUpperCase());
       }
-      for (const industry of selectedIndustries) {
+      for (const industry of activeIndustryFilters) {
         params.append('industries', industry);
       }
       if (fromDate) {
@@ -1571,7 +1601,7 @@ export function FinnhubNewsWindow({
       setLoadingMore(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nextCursor, loadingMore, selectedBookmarkFolderId, selectedIndustries, sourceTypeFilter, fromDate, toDate, newsApiBase, applyOwnershipFilterParams]);
+  }, [nextCursor, loadingMore, selectedBookmarkFolderId, activeIndustryFilters, sourceTypeFilter, fromDate, toDate, newsApiBase, applyOwnershipFilterParams]);
 
   useEffect(() => {
     if (isModel1SafeMode && sort.column && MODEL1_HIDDEN_CHANGE_COLUMNS.includes(sort.column)) {
@@ -3234,7 +3264,7 @@ export function FinnhubNewsWindow({
                 <button
                   onClick={() => { setShowIndustryMenu(!showIndustryMenu); setIndustryInstructionMenu(null); setShowFilterMenu(false); setShowLoadMenu(false); setShowDisplayModeMenu(false); setShowWatchlistMenu(false); setShowKeywordFilterMenu(false); }}
                   className={`px-3 py-1.5 border rounded-lg transition-colors flex max-w-[190px] items-center gap-1.5 ${hasIndustryFilter ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-300 dark:border-gray-600 hover:bg-white dark:hover:bg-gray-800 bg-white dark:bg-gray-900'}`}
-                  title={hasIndustryFilter ? selectedIndustries.join(', ') : 'Industry filter'}
+                  title={hasIndustryFilter ? selectedIndustries.join(', ') : 'All industries selected'}
                 >
                   <Filter className="w-3.5 h-3.5" />
                   <span className="truncate text-xs">{selectedIndustryLabel}</span>
@@ -3242,17 +3272,39 @@ export function FinnhubNewsWindow({
                 </button>
                 {showIndustryMenu && (
                   <div className="absolute top-full left-0 mt-1 max-h-80 w-72 overflow-auto rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg z-30 p-1.5">
-                    <label className={`flex w-full cursor-pointer items-center gap-2 rounded px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800 ${!hasIndustryFilter ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : ''}`}>
+                    <div className="sticky top-0 z-10 bg-white pb-1 dark:bg-gray-900">
+                      <div className="relative">
+                        <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+                        <input
+                          type="text"
+                          value={industrySearchQuery}
+                          onChange={(event) => setIndustrySearchQuery(event.target.value)}
+                          placeholder="Search industries..."
+                          className="w-full rounded border border-gray-200 bg-white py-1.5 pl-7 pr-7 text-xs text-gray-800 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                        />
+                        {industrySearchQuery && (
+                          <button
+                            type="button"
+                            onClick={() => setIndustrySearchQuery('')}
+                            className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+                            title="Clear industry search"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <label className={`flex w-full cursor-pointer items-center gap-2 rounded px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800 ${isAllIndustrySelection ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : ''}`}>
                       <input
                         type="checkbox"
-                        checked={!hasIndustryFilter}
+                        checked={isAllIndustrySelection}
                         onChange={() => setSelectedIndustries([])}
                         className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                       />
                       <span className="truncate">All Industries</span>
                     </label>
-                    {industryOptions.map((industry) => {
-                      const checked = selectedIndustrySet.has(industry);
+                    {filteredIndustryOptions.map((industry) => {
+                      const checked = isAllIndustrySelection || selectedIndustrySet.has(industry);
                       return (
                         <label
                           key={industry}
@@ -3272,6 +3324,9 @@ export function FinnhubNewsWindow({
                     })}
                     {industryOptions.length === 0 && (
                       <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">No industries found</div>
+                    )}
+                    {industryOptions.length > 0 && filteredIndustryOptions.length === 0 && (
+                      <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">No matching industries</div>
                     )}
                     {industryInstructionMenu && (
                       <div

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Calendar as CalendarIcon,
   ChevronDown,
@@ -21,14 +21,17 @@ interface CalendarWindowProps {
 
 const API_BASE = '';
 
-function formatIndustryButtonLabel(industries: string[]): string {
-  if (industries.length === 0) return 'All Industries';
+function formatIndustryButtonLabel(industries: string[], totalIndustries = 0): string {
+  if (industries.length === 0 || (totalIndustries > 0 && industries.length >= totalIndustries)) return 'All Industries';
   if (industries.length === 1) return industries[0];
+  if (totalIndustries > 0 && industries.length > 2) return `${industries.length}/${totalIndustries} Industries`;
   return `${industries[0]} +${industries.length - 1}`;
 }
 
-function formatIndustryStatusLabel(industries: string[]): string {
+function formatIndustryStatusLabel(industries: string[], totalIndustries = 0): string {
+  if (industries.length === 0 || (totalIndustries > 0 && industries.length >= totalIndustries)) return 'All industries';
   if (industries.length <= 2) return industries.join(', ');
+  if (totalIndustries > 0) return `${industries.length}/${totalIndustries} industries selected`;
   return `${industries.slice(0, 2).join(', ')} +${industries.length - 2}`;
 }
 
@@ -261,6 +264,11 @@ const NUMERIC_FILTERS_BY_TYPE: Record<string, NumericFilterConfig[]> = {
 const IPO_SECURITY_TYPE_ORDER = ['Common Stock', 'Unit', 'Warrant', 'Rights', 'ADS', 'ETF', 'Fund/Trust', 'Preferred', 'Other'];
 const DEFAULT_EARNINGS_UPDATE_CONCURRENCY = 1;
 const DEFAULT_FINANCIAL_SYNC_CONCURRENCY = 1;
+const DEFAULT_YAHOO_DESCRIPTION_CONCURRENCY = 5;
+const DEFAULT_YAHOO_DESCRIPTION_INTERVAL_MS = 200;
+const CALENDAR_UI_STATE_STORAGE_KEY = 'calendar-window-ui-state';
+const MIN_COLUMN_WIDTH_PX = 64;
+const MAX_COLUMN_WIDTH_PX = 720;
 const DATE_PRESET_OPTIONS: Array<{ key: DatePresetKey; label: string }> = [
   { key: 'this_week', label: 'This Week' },
   { key: 'next_5_days', label: 'Next 5 Days' },
@@ -283,6 +291,36 @@ function readStoredNumberInRange(key: string, fallback: number, min: number, max
   } catch {
     return fallback;
   }
+}
+
+function readStoredBoolean(key: string, fallback: boolean): boolean {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === 'true') return true;
+    if (raw === 'false') return false;
+    return fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function readStoredObject(key: string): Record<string, unknown> | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function isDatePresetKey(value: unknown): value is DatePresetKey {
+  return typeof value === 'string' && DATE_PRESET_OPTIONS.some((option) => option.key === value);
+}
+
+function isSortDirection(value: unknown): value is SortDirection {
+  return value === 'asc' || value === 'desc' || value === null;
 }
 
 function humanizeKey(key: string): string {
@@ -333,6 +371,53 @@ function mergeColumns(existing: ColumnConfig[] | undefined, next: ColumnConfig[]
   const preservedKeys = new Set(preserved.map((column) => column.key));
   const appended = next.filter((column) => !preservedKeys.has(column.key));
   return [...preserved, ...appended];
+}
+
+function buildColumnStates(typeConfigs: CalendarTypeConfig[]): Record<string, ColumnConfig[]> {
+  return Object.fromEntries(typeConfigs.map((typeConfig) => [typeConfig.key, buildColumns(typeConfig.key, typeConfig.columns)]));
+}
+
+function parseColumnWidthPx(width: string | undefined): number {
+  const value = Number.parseInt(String(width ?? ''), 10);
+  return Number.isFinite(value) && value > 0 ? value : 140;
+}
+
+function clampColumnWidth(width: number): number {
+  if (!Number.isFinite(width)) return 140;
+  return Math.max(MIN_COLUMN_WIDTH_PX, Math.min(MAX_COLUMN_WIDTH_PX, Math.round(width)));
+}
+
+function normalizeStoredColumns(value: unknown): ColumnConfig[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const columns = value.flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const row = item as Record<string, unknown>;
+    if (typeof row.key !== 'string' || !row.key) return [];
+    return [{
+      key: row.key,
+      label: typeof row.label === 'string' ? row.label : humanizeKey(row.key),
+      visible: typeof row.visible === 'boolean' ? row.visible : false,
+      width: `${clampColumnWidth(parseColumnWidthPx(typeof row.width === 'string' ? row.width : undefined))}px`,
+      align: row.align === 'center' || row.align === 'right' || row.align === 'left' ? row.align : undefined,
+    } satisfies ColumnConfig];
+  });
+  return columns.length > 0 ? columns : undefined;
+}
+
+function restoreColumnStates(value: unknown, typeConfigs: CalendarTypeConfig[]): Record<string, ColumnConfig[]> {
+  const defaults = buildColumnStates(typeConfigs);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return defaults;
+  }
+  const stored = value as Record<string, unknown>;
+  const next = { ...defaults };
+  for (const typeConfig of typeConfigs) {
+    const storedColumns = normalizeStoredColumns(stored[typeConfig.key]);
+    if (storedColumns) {
+      next[typeConfig.key] = mergeColumns(storedColumns, defaults[typeConfig.key]);
+    }
+  }
+  return next;
 }
 
 function formatCompactCurrency(value: number): string {
@@ -520,22 +605,38 @@ async function fetchCalendarEvents(type: string, from: string, to: string, watch
 }
 
 export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
+  const storedUiStateRef = useRef<Record<string, unknown> | null>(null);
+  if (storedUiStateRef.current === null) {
+    storedUiStateRef.current = readStoredObject(CALENDAR_UI_STATE_STORAGE_KEY) ?? {};
+  }
+  const storedUiState = storedUiStateRef.current ?? {};
+  const storedActiveType = typeof storedUiState.activeType === 'string' && FALLBACK_TYPES.some((item) => item.key === storedUiState.activeType)
+    ? storedUiState.activeType
+    : 'earnings';
+  const storedSelectedDatePreset = isDatePresetKey(storedUiState.selectedDatePreset) ? storedUiState.selectedDatePreset : null;
+  const storedSortField = typeof storedUiState.sortField === 'string' || storedUiState.sortField === null
+    ? storedUiState.sortField as string | null
+    : getDefaultSortFieldForType(storedActiveType);
+  const storedSortDirection = isSortDirection(storedUiState.sortDirection) ? storedUiState.sortDirection : 'desc';
+  const storedSelectedIndustries = Array.isArray(storedUiState.selectedIndustries)
+    ? storedUiState.selectedIndustries.filter((industry): industry is string => typeof industry === 'string' && industry.trim().length > 0)
+    : [];
+
   const [typeConfigs, setTypeConfigs] = useState<CalendarTypeConfig[]>(FALLBACK_TYPES);
   const [events, setEvents] = useState<CalendarRow[]>([]);
   const [watchlists, setWatchlists] = useState<CalendarWatchlist[]>([]);
   const [industryOptions, setIndustryOptions] = useState<string[]>([]);
-  const [activeType, setActiveType] = useState('earnings');
+  const [activeType, setActiveType] = useState(storedActiveType);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-  const [selectedDatePreset, setSelectedDatePreset] = useState<DatePresetKey | null>(null);
-  const [sortField, setSortField] = useState<string | null>(() => getDefaultSortFieldForType('earnings'));
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
-  const [columnStates, setColumnStates] = useState<Record<string, ColumnConfig[]>>(() =>
-    Object.fromEntries(FALLBACK_TYPES.map((typeConfig) => [typeConfig.key, buildColumns(typeConfig.key, typeConfig.columns)]))
-  );
+  const [searchQuery, setSearchQuery] = useState(typeof storedUiState.searchQuery === 'string' ? storedUiState.searchQuery : '');
+  const [industrySearchQuery, setIndustrySearchQuery] = useState('');
+  const [dateFrom, setDateFrom] = useState(typeof storedUiState.dateFrom === 'string' ? storedUiState.dateFrom : '');
+  const [dateTo, setDateTo] = useState(typeof storedUiState.dateTo === 'string' ? storedUiState.dateTo : '');
+  const [selectedDatePreset, setSelectedDatePreset] = useState<DatePresetKey | null>(storedSelectedDatePreset);
+  const [sortField, setSortField] = useState<string | null>(storedSortField);
+  const [sortDirection, setSortDirection] = useState<SortDirection>(storedSortDirection);
+  const [columnStates, setColumnStates] = useState<Record<string, ColumnConfig[]>>(() => restoreColumnStates(storedUiState.columnStates, FALLBACK_TYPES));
   const [showColumnMenu, setShowColumnMenu] = useState(false);
   const [showWatchlistMenu, setShowWatchlistMenu] = useState(false);
   const [showIndustryMenu, setShowIndustryMenu] = useState(false);
@@ -546,6 +647,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const [industryInstructionError, setIndustryInstructionError] = useState<string | null>(null);
   const [showFmpSettingsMenu, setShowFmpSettingsMenu] = useState(false);
   const [draggedColumnKey, setDraggedColumnKey] = useState<string | null>(null);
+  const resizingColumnRef = useRef<null | { key: string; startX: number; startWidth: number }>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
   const [jobLabel, setJobLabel] = useState('Calendar update');
@@ -553,16 +655,16 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const [updatePending, setUpdatePending] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
-  const [marketCapMin, setMarketCapMin] = useState('');
-  const [marketCapMax, setMarketCapMax] = useState('');
-  const [floatPctMin, setFloatPctMin] = useState('');
-  const [floatPctMax, setFloatPctMax] = useState('');
-  const [institutionalPctMin, setInstitutionalPctMin] = useState('');
-  const [institutionalPctMax, setInstitutionalPctMax] = useState('');
-  const [confirmedFilter, setConfirmedFilter] = useState<boolean | null>(null);
-  const [selectedWatchlistId, setSelectedWatchlistId] = useState<string>('all');
-  const [selectedIndustries, setSelectedIndustries] = useState<string[]>([]);
-  const [ipoSecurityTypeFilter, setIpoSecurityTypeFilter] = useState('all');
+  const [marketCapMin, setMarketCapMin] = useState(typeof storedUiState.marketCapMin === 'string' ? storedUiState.marketCapMin : '');
+  const [marketCapMax, setMarketCapMax] = useState(typeof storedUiState.marketCapMax === 'string' ? storedUiState.marketCapMax : '');
+  const [floatPctMin, setFloatPctMin] = useState(typeof storedUiState.floatPctMin === 'string' ? storedUiState.floatPctMin : '');
+  const [floatPctMax, setFloatPctMax] = useState(typeof storedUiState.floatPctMax === 'string' ? storedUiState.floatPctMax : '');
+  const [institutionalPctMin, setInstitutionalPctMin] = useState(typeof storedUiState.institutionalPctMin === 'string' ? storedUiState.institutionalPctMin : '');
+  const [institutionalPctMax, setInstitutionalPctMax] = useState(typeof storedUiState.institutionalPctMax === 'string' ? storedUiState.institutionalPctMax : '');
+  const [confirmedFilter, setConfirmedFilter] = useState<boolean | null>(typeof storedUiState.confirmedFilter === 'boolean' || storedUiState.confirmedFilter === null ? storedUiState.confirmedFilter : null);
+  const [selectedWatchlistId, setSelectedWatchlistId] = useState<string>(typeof storedUiState.selectedWatchlistId === 'string' && storedUiState.selectedWatchlistId ? storedUiState.selectedWatchlistId : 'all');
+  const [selectedIndustries, setSelectedIndustries] = useState<string[]>(storedSelectedIndustries);
+  const [ipoSecurityTypeFilter, setIpoSecurityTypeFilter] = useState(typeof storedUiState.ipoSecurityTypeFilter === 'string' && storedUiState.ipoSecurityTypeFilter ? storedUiState.ipoSecurityTypeFilter : 'all');
   const [tickerContextMenu, setTickerContextMenu] = useState<{
     x: number;
     y: number;
@@ -590,19 +692,95 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const selectedWatchlistLabel = selectedWatchlistId === 'all'
     ? 'All Watchlists'
     : watchlists.find((watchlist) => watchlist.id === selectedWatchlistId)?.name ?? 'Watch Lists';
-  const selectedIndustrySet = useMemo(() => new Set(selectedIndustries), [selectedIndustries]);
-  const selectedIndustryLabel = formatIndustryButtonLabel(selectedIndustries);
-  const selectedIndustryStatusLabel = formatIndustryStatusLabel(selectedIndustries);
-  const hasIndustryFilter = selectedIndustries.length > 0;
+  const isAllIndustrySelection = selectedIndustries.length === 0 || (industryOptions.length > 0 && selectedIndustries.length >= industryOptions.length);
+  const activeIndustryFilters = useMemo(
+    () => isAllIndustrySelection ? [] : selectedIndustries,
+    [isAllIndustrySelection, selectedIndustries],
+  );
+  const selectedIndustrySet = useMemo(() => new Set(activeIndustryFilters), [activeIndustryFilters]);
+  const selectedIndustryLabel = formatIndustryButtonLabel(selectedIndustries, industryOptions.length);
+  const selectedIndustryStatusLabel = formatIndustryStatusLabel(selectedIndustries, industryOptions.length);
+  const hasIndustryFilter = activeIndustryFilters.length > 0;
+  const filteredIndustryOptions = useMemo(() => {
+    const query = industrySearchQuery.trim().toLowerCase();
+    if (!query) return industryOptions;
+    return industryOptions.filter((industry) => industry.toLowerCase().includes(query));
+  }, [industryOptions, industrySearchQuery]);
+  const visibleTableMinWidth = Math.max(
+    720,
+    visibleColumns.reduce((totalWidth, column) => totalWidth + clampColumnWidth(parseColumnWidthPx(column.width)), 0),
+  );
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CALENDAR_UI_STATE_STORAGE_KEY, JSON.stringify({
+        activeType,
+        searchQuery,
+        dateFrom,
+        dateTo,
+        selectedDatePreset,
+        sortField,
+        sortDirection,
+        columnStates,
+        marketCapMin,
+        marketCapMax,
+        floatPctMin,
+        floatPctMax,
+        institutionalPctMin,
+        institutionalPctMax,
+        confirmedFilter,
+        selectedWatchlistId,
+        selectedIndustries,
+        ipoSecurityTypeFilter,
+      }));
+    } catch {
+      // LocalStorage can be blocked in private or embedded contexts.
+    }
+  }, [
+    activeType,
+    columnStates,
+    confirmedFilter,
+    dateFrom,
+    dateTo,
+    floatPctMax,
+    floatPctMin,
+    institutionalPctMax,
+    institutionalPctMin,
+    ipoSecurityTypeFilter,
+    marketCapMax,
+    marketCapMin,
+    searchQuery,
+    selectedDatePreset,
+    selectedIndustries,
+    selectedWatchlistId,
+    sortDirection,
+    sortField,
+  ]);
 
   const toggleSelectedIndustry = (industry: string) => {
     const trimmed = industry.trim();
     if (!trimmed) return;
     setSelectedIndustries((previous) => {
-      if (previous.includes(trimmed)) {
-        return previous.filter((item) => item !== trimmed);
+      if (industryOptions.length === 0) {
+        if (previous.includes(trimmed)) {
+          return previous.filter((item) => item !== trimmed);
+        }
+        return [...previous, trimmed].sort((left, right) => left.localeCompare(right));
       }
-      return [...previous, trimmed].sort((left, right) => left.localeCompare(right));
+
+      const wasAllSelected = previous.length === 0 || previous.length >= industryOptions.length;
+      if (wasAllSelected) {
+        return industryOptions.filter((item) => item !== trimmed);
+      }
+
+      const nextSet = new Set(previous);
+      if (nextSet.has(trimmed)) {
+        nextSet.delete(trimmed);
+      } else {
+        nextSet.add(trimmed);
+      }
+      const next = industryOptions.filter((item) => nextSet.has(item));
+      return next.length >= industryOptions.length ? [] : next;
     });
   };
 
@@ -778,7 +956,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
           dateFrom,
           dateTo,
           supportsWatchlistFilter && selectedWatchlistId !== 'all' ? selectedWatchlistId : undefined,
-          supportsIndustryFilter && selectedIndustries.length > 0 ? selectedIndustries : undefined,
+          supportsIndustryFilter && activeIndustryFilters.length > 0 ? activeIndustryFilters : undefined,
         );
         if (cancelled) {
           return;
@@ -801,7 +979,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     return () => {
       cancelled = true;
     };
-  }, [activeType, dateFrom, dateTo, hasRequiredDateRange, reloadToken, selectedIndustries, selectedWatchlistId, supportsIndustryFilter, supportsWatchlistFilter]);
+  }, [activeType, activeIndustryFilters, dateFrom, dateTo, hasRequiredDateRange, reloadToken, selectedWatchlistId, supportsIndustryFilter, supportsWatchlistFilter]);
 
   useEffect(() => {
     if (!jobId || (jobStatus && jobStatus.status !== 'running')) {
@@ -977,9 +1155,57 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     setDraggedColumnKey(null);
   };
 
+  const handleColumnResizeStart = (event: React.MouseEvent<HTMLButtonElement>, columnKey: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const targetColumn = currentColumns.find((column) => column.key === columnKey);
+    const startWidth = clampColumnWidth(parseColumnWidthPx(targetColumn?.width));
+    resizingColumnRef.current = { key: columnKey, startX: event.clientX, startWidth };
+
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const handleMouseMove = (mouseEvent: MouseEvent) => {
+      const resizeState = resizingColumnRef.current;
+      if (!resizeState) return;
+      const nextWidth = clampColumnWidth(resizeState.startWidth + mouseEvent.clientX - resizeState.startX);
+      setColumnStates((previous) => {
+        const sourceColumns = previous[activeType] ?? currentColumns;
+        return {
+          ...previous,
+          [activeType]: sourceColumns.map((column) =>
+            column.key === resizeState.key ? { ...column, width: `${nextWidth}px` } : column,
+          ),
+        };
+      });
+    };
+
+    const handleMouseUp = () => {
+      resizingColumnRef.current = null;
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  };
+
   const tabFilteredEvents = useMemo(() => {
     return events.filter((event) => event.type === activeType);
   }, [events, activeType]);
+
+  const activeCalendarTickers = useMemo(() => {
+    return Array.from(new Set(
+      tabFilteredEvents
+        .map((event) => typeof event.ticker === 'string' ? event.ticker.trim().toUpperCase() : '')
+        .filter(Boolean),
+    )).sort((left, right) => left.localeCompare(right));
+  }, [tabFilteredEvents]);
 
   const ipoSecurityTypeOptions = useMemo(() => {
     const values = Array.from(new Set(
@@ -1221,6 +1447,25 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     });
   };
 
+  const handleYahooDescriptionUpdate = async () => {
+    if (activeCalendarTickers.length === 0) {
+      setActionError('Yahoo description update requires loaded calendar rows with tickers.');
+      return;
+    }
+
+    await startCalendarJob({
+      url: '/api/company-profiles/pull-yahoo',
+      label: `Yahoo description update (${activeCalendarTickers.length} tickers)`,
+      failureMessage: 'Yahoo description update failed',
+      requestBody: {
+        tickers: activeCalendarTickers,
+        concurrency: readStoredNumberInRange('yahoo-concurrency', DEFAULT_YAHOO_DESCRIPTION_CONCURRENCY, 1, 20),
+        requestIntervalMs: readStoredNumberInRange('yahoo-request-interval-ms', DEFAULT_YAHOO_DESCRIPTION_INTERVAL_MS, 0, 5000),
+        skipExisting: readStoredBoolean('yahoo-skip-existing', true),
+      },
+    });
+  };
+
   const cancelJob = async () => {
     if (!jobId || !jobStatus || jobStatus.status !== 'running') {
       return;
@@ -1371,7 +1616,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
 
     if (column.key === 'company_description') {
       const text = formatValue(row, column.key);
-      return <span className="block max-w-[320px] truncate" title={text}>{text}</span>;
+      return <span className="block truncate" style={{ maxWidth: column.width }} title={text}>{text}</span>;
     }
 
     if (column.key === 'surprise_pct' && typeof value === 'number') {
@@ -1401,9 +1646,6 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                 setActiveType(typeConfig.key);
                 setSortField(getDefaultSortFieldForType(typeConfig.key));
                 setSortDirection('desc');
-                if (typeConfig.key === 'economics') {
-                  setSelectedIndustries([]);
-                }
                 setShowIndustryMenu(false);
                 setTickerContextMenu(null);
               }}
@@ -1516,7 +1758,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                   setShowFmpSettingsMenu(false);
                 }}
                 className={`flex max-w-[190px] items-center gap-1 px-3 py-2 text-sm border rounded hover:bg-gray-50 dark:hover:bg-gray-600 ${hasIndustryFilter ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600'}`}
-                title={hasIndustryFilter ? selectedIndustries.join(', ') : 'Industry filter'}
+                title={hasIndustryFilter ? selectedIndustries.join(', ') : 'All industries selected'}
               >
                 <span className="truncate">{selectedIndustryLabel}</span>
                 <ChevronDown className="h-4 w-4 shrink-0" />
@@ -1529,17 +1771,39 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                     onClick={() => { setShowIndustryMenu(false); setIndustryInstructionMenu(null); }}
                   />
                   <div className="absolute right-0 top-full mt-1 max-h-80 w-72 overflow-auto rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg z-20 p-2">
-                    <label className={`flex w-full cursor-pointer items-center gap-2 rounded px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 ${!hasIndustryFilter ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : ''}`}>
+                    <div className="sticky top-0 z-10 bg-white pb-1 dark:bg-gray-800">
+                      <div className="relative">
+                        <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+                        <input
+                          type="text"
+                          value={industrySearchQuery}
+                          onChange={(event) => setIndustrySearchQuery(event.target.value)}
+                          placeholder="Search industries..."
+                          className="w-full rounded border border-gray-200 bg-white py-1.5 pl-7 pr-7 text-xs text-gray-800 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+                        />
+                        {industrySearchQuery && (
+                          <button
+                            type="button"
+                            onClick={() => setIndustrySearchQuery('')}
+                            className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                            title="Clear industry search"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <label className={`flex w-full cursor-pointer items-center gap-2 rounded px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 ${isAllIndustrySelection ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : ''}`}>
                       <input
                         type="checkbox"
-                        checked={!hasIndustryFilter}
+                        checked={isAllIndustrySelection}
                         onChange={() => setSelectedIndustries([])}
                         className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                       />
                       <span className="truncate">All Industries</span>
                     </label>
-                    {industryOptions.map((industry) => {
-                      const checked = selectedIndustrySet.has(industry);
+                    {filteredIndustryOptions.map((industry) => {
+                      const checked = isAllIndustrySelection || selectedIndustrySet.has(industry);
                       return (
                         <label
                           key={industry}
@@ -1559,6 +1823,9 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                     })}
                     {industryOptions.length === 0 && (
                       <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">No industries found</div>
+                    )}
+                    {industryOptions.length > 0 && filteredIndustryOptions.length === 0 && (
+                      <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">No matching industries</div>
                     )}
                   </div>
                   {industryInstructionMenu && (
@@ -1726,6 +1993,18 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                 Download SEC Data
               </button>
             </>
+          )}
+
+          {activeType !== 'economics' && (
+            <button
+              onClick={handleYahooDescriptionUpdate}
+              disabled={updatePending || activeCalendarTickers.length === 0}
+              title={activeCalendarTickers.length > 0 ? `Fetch Yahoo descriptions for ${activeCalendarTickers.length} loaded tickers` : 'No loaded tickers'}
+              className={`flex items-center gap-2 px-3 py-2 text-sm rounded text-white ${(updatePending || activeCalendarTickers.length === 0) ? 'bg-sky-400 cursor-not-allowed' : 'bg-sky-600 hover:bg-sky-700'}`}
+            >
+              <RefreshCw className={`w-4 h-4 ${updatePending ? 'animate-spin' : ''}`} />
+              Update Yahoo Desc
+            </button>
           )}
 
           {hasActiveFilters && (
@@ -1921,19 +2200,19 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
         ) : error ? (
           <div className="flex items-center justify-center h-40 text-red-600 dark:text-red-400">{error}</div>
         ) : (
-          <table className="w-full border-collapse">
+          <table className="w-full table-fixed border-collapse" style={{ minWidth: `${visibleTableMinWidth}px` }}>
             <thead className="sticky top-0 bg-gray-100 dark:bg-gray-800 z-10">
               <tr>
                 {visibleColumns.map((column) => (
                   <th
                     key={column.key}
-                    style={{ width: column.width }}
+                    style={{ width: column.width, minWidth: column.width }}
                     draggable
                     onDragStart={(event) => handleColumnDragStart(event, column.key)}
                     onDragOver={handleColumnDragOver}
                     onDrop={(event) => handleColumnDrop(event, column.key)}
                     onDragEnd={handleColumnDragEnd}
-                    className={`px-3 py-2 text-xs font-medium border-b border-gray-300 dark:border-gray-700 ${column.align === 'right' ? 'text-right' : column.align === 'center' ? 'text-center' : 'text-left'} ${draggedColumnKey === column.key ? 'opacity-50' : ''}`}
+                    className={`relative px-3 py-2 text-xs font-medium border-b border-gray-300 dark:border-gray-700 ${column.align === 'right' ? 'text-right' : column.align === 'center' ? 'text-center' : 'text-left'} ${draggedColumnKey === column.key ? 'opacity-50' : ''}`}
                   >
                     <div className={`inline-flex w-full items-center gap-1 ${column.align === 'right' ? 'justify-end' : column.align === 'center' ? 'justify-center' : 'justify-start'}`}>
                       <GripVertical className="h-3 w-3 shrink-0 text-gray-400" />
@@ -1946,6 +2225,15 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                         {sortField === column.key && sortDirection === 'desc' && <ChevronDown className="w-3 h-3" />}
                       </button>
                     </div>
+                    <button
+                      type="button"
+                      aria-label={`Resize ${column.label}`}
+                      title={`Resize ${column.label}`}
+                      onMouseDown={(event) => handleColumnResizeStart(event, column.key)}
+                      onClick={(event) => event.stopPropagation()}
+                      onDragStart={(event) => event.preventDefault()}
+                      className="absolute right-0 top-0 h-full w-2 cursor-col-resize touch-none border-r border-transparent hover:border-blue-400 hover:bg-blue-400/20"
+                    />
                   </th>
                 ))}
               </tr>
@@ -1959,6 +2247,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                   {visibleColumns.map((column) => (
                     <td
                       key={column.key}
+                      style={{ width: column.width, minWidth: column.width }}
                       className={`px-3 py-2 text-sm ${column.align === 'right' ? 'text-right' : column.align === 'center' ? 'text-center' : 'text-left'}`}
                     >
                       {renderCell(row, column)}
