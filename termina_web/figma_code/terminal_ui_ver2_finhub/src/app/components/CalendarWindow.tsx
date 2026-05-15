@@ -9,9 +9,11 @@ import {
   Search,
   Settings2,
   X,
+  CircleHelp,
 } from 'lucide-react';
 import { getCompanyTickerDataAttrs } from '../companyDescription';
 import { CalendarFinancialDialog } from './CalendarFinancialDialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 
 interface CalendarWindowProps {
   onTickerClick?: (ticker: string) => void;
@@ -28,6 +30,41 @@ function formatIndustryButtonLabel(industries: string[]): string {
 function formatIndustryStatusLabel(industries: string[]): string {
   if (industries.length <= 2) return industries.join(', ');
   return `${industries.slice(0, 2).join(', ')} +${industries.length - 2}`;
+}
+
+interface IndustryInstructionTickerRow {
+  ticker: string;
+  exchange: string | null;
+  name: string | null;
+  sector: string | null;
+  industry: string | null;
+  marketCap: number | null;
+  marketCapSource: string | null;
+  description: string | null;
+}
+
+interface IndustryInstructionDetail {
+  industry: string;
+  description: string;
+  totalTickers: number;
+  tickersWithMarketCap: number;
+  sectors: string[];
+  topTickers: string[];
+  tickers: IndustryInstructionTickerRow[];
+  limit: number;
+  truncated: boolean;
+  dataSource: string;
+}
+
+function getInstructionMenuStyle(x: number, y: number): React.CSSProperties {
+  const width = 188;
+  const height = 92;
+  const maxX = typeof window !== 'undefined' ? window.innerWidth - width - 8 : x;
+  const maxY = typeof window !== 'undefined' ? window.innerHeight - height - 8 : y;
+  return {
+    left: Math.max(8, Math.min(x, maxX)),
+    top: Math.max(8, Math.min(y, maxY)),
+  };
 }
 
 type SortDirection = 'asc' | 'desc' | null;
@@ -502,6 +539,11 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const [showColumnMenu, setShowColumnMenu] = useState(false);
   const [showWatchlistMenu, setShowWatchlistMenu] = useState(false);
   const [showIndustryMenu, setShowIndustryMenu] = useState(false);
+  const [industryInstructionMenu, setIndustryInstructionMenu] = useState<null | { x: number; y: number; industry: string }>(null);
+  const [industryInstructionTarget, setIndustryInstructionTarget] = useState<string | null>(null);
+  const [industryInstructionDetail, setIndustryInstructionDetail] = useState<IndustryInstructionDetail | null>(null);
+  const [industryInstructionLoading, setIndustryInstructionLoading] = useState(false);
+  const [industryInstructionError, setIndustryInstructionError] = useState<string | null>(null);
   const [showFmpSettingsMenu, setShowFmpSettingsMenu] = useState(false);
   const [draggedColumnKey, setDraggedColumnKey] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
@@ -562,6 +604,46 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
       }
       return [...previous, trimmed].sort((left, right) => left.localeCompare(right));
     });
+  };
+
+  const openIndustryInstructionMenu = (event: React.MouseEvent, industry: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = event.currentTarget instanceof HTMLElement ? event.currentTarget.getBoundingClientRect() : null;
+    const x = Number.isFinite(event.clientX) && event.clientX > 0 ? event.clientX : (rect?.right ?? 16);
+    const y = Number.isFinite(event.clientY) && event.clientY > 0 ? event.clientY : (rect?.top ?? 16);
+    setIndustryInstructionMenu({ industry, x, y });
+  };
+
+  const openIndustryInstructionDialog = async (industry: string) => {
+    const trimmed = industry.trim();
+    if (!trimmed) return;
+    setIndustryInstructionMenu(null);
+    setShowIndustryMenu(false);
+    setIndustryInstructionTarget(trimmed);
+    setIndustryInstructionDetail(null);
+    setIndustryInstructionError(null);
+    setIndustryInstructionLoading(true);
+    try {
+      const params = new URLSearchParams({ industry: trimmed, limit: '250' });
+      const response = await fetch(`${API_BASE}/api/industries/detail?${params.toString()}`);
+      if (!response.ok) {
+        throw new Error(`Industry detail fetch failed: HTTP ${response.status}`);
+      }
+      const data = await response.json() as IndustryInstructionDetail;
+      setIndustryInstructionDetail(data);
+    } catch (fetchError) {
+      setIndustryInstructionError(fetchError instanceof Error ? fetchError.message : 'Failed to load industry details');
+    } finally {
+      setIndustryInstructionLoading(false);
+    }
+  };
+
+  const closeIndustryInstructionDialog = () => {
+    setIndustryInstructionTarget(null);
+    setIndustryInstructionDetail(null);
+    setIndustryInstructionError(null);
+    setIndustryInstructionLoading(false);
   };
 
   useEffect(() => {
@@ -781,6 +863,28 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
       window.removeEventListener('resize', closeMenu);
     };
   }, [tickerContextMenu]);
+
+  useEffect(() => {
+    if (!industryInstructionMenu) {
+      return;
+    }
+
+    const closeMenu = () => {
+      setIndustryInstructionMenu(null);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeMenu();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('resize', closeMenu);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('resize', closeMenu);
+    };
+  }, [industryInstructionMenu]);
 
   const saveEarningsUpdateConcurrency = (value: number) => {
     const nextValue = Number.isFinite(value) ? Math.max(1, Math.min(20, Math.floor(value))) : DEFAULT_EARNINGS_UPDATE_CONCURRENCY;
@@ -1406,6 +1510,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
               <button
                 onClick={() => {
                   setShowIndustryMenu((value) => !value);
+                  setIndustryInstructionMenu(null);
                   setShowWatchlistMenu(false);
                   setShowColumnMenu(false);
                   setShowFmpSettingsMenu(false);
@@ -1421,7 +1526,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                 <>
                   <div
                     className="fixed inset-0 z-10"
-                    onClick={() => setShowIndustryMenu(false)}
+                    onClick={() => { setShowIndustryMenu(false); setIndustryInstructionMenu(null); }}
                   />
                   <div className="absolute right-0 top-full mt-1 max-h-80 w-72 overflow-auto rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg z-20 p-2">
                     <label className={`flex w-full cursor-pointer items-center gap-2 rounded px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 ${!hasIndustryFilter ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : ''}`}>
@@ -1438,7 +1543,9 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                       return (
                         <label
                           key={industry}
+                          onContextMenu={(event) => openIndustryInstructionMenu(event, industry)}
                           className={`flex w-full cursor-pointer items-center gap-2 rounded px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 ${checked ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : ''}`}
+                          title="Right-click for Instruction"
                         >
                           <input
                             type="checkbox"
@@ -1454,6 +1561,25 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                       <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">No industries found</div>
                     )}
                   </div>
+                  {industryInstructionMenu && (
+                    <div
+                      className="fixed z-30 w-[188px] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
+                      style={getInstructionMenuStyle(industryInstructionMenu.x, industryInstructionMenu.y)}
+                    >
+                      <div className="border-b border-gray-100 px-3 py-2 dark:border-gray-800">
+                        <div className="truncate text-xs font-semibold text-gray-900 dark:text-gray-100">{industryInstructionMenu.industry}</div>
+                        <div className="text-[10px] uppercase text-gray-400">Industry</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void openIndustryInstructionDialog(industryInstructionMenu.industry)}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
+                      >
+                        <CircleHelp className="h-3.5 w-3.5 text-blue-500" />
+                        <span>Instruction</span>
+                      </button>
+                    </div>
+                  )}
                 </>
               )}
             </div>
@@ -1903,6 +2029,87 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
           </div>
         </>
       )}
+
+      <Dialog open={Boolean(industryInstructionTarget)} onOpenChange={(open) => { if (!open) closeIndustryInstructionDialog(); }}>
+        <DialogContent className="max-h-[86vh] overflow-hidden border-gray-200 bg-white p-0 sm:max-w-4xl dark:border-gray-700 dark:bg-gray-900">
+          <DialogHeader className="border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+            <DialogTitle className="text-left text-base font-semibold text-gray-950 dark:text-gray-50">
+              Industry Instruction: {industryInstructionDetail?.industry ?? industryInstructionTarget}
+            </DialogTitle>
+            <DialogDescription className="text-left text-xs text-gray-500 dark:text-gray-400">
+              App DB 기준 industry 요약과 market cap 순 ticker 목록입니다.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[calc(86vh-96px)] overflow-y-auto px-5 py-4">
+            {industryInstructionLoading ? (
+              <div className="py-10 text-center text-sm text-gray-500 dark:text-gray-400">Loading industry details...</div>
+            ) : industryInstructionError ? (
+              <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300">
+                {industryInstructionError}
+              </div>
+            ) : industryInstructionDetail ? (
+              <div className="space-y-4">
+                <p className="text-sm leading-6 text-gray-700 dark:text-gray-200">{industryInstructionDetail.description}</p>
+                <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                  <div className="rounded border border-gray-200 px-3 py-2 dark:border-gray-700">
+                    <div className="text-gray-500 dark:text-gray-400">Tickers</div>
+                    <div className="mt-1 font-semibold text-gray-900 dark:text-gray-100">{industryInstructionDetail.totalTickers}</div>
+                  </div>
+                  <div className="rounded border border-gray-200 px-3 py-2 dark:border-gray-700">
+                    <div className="text-gray-500 dark:text-gray-400">With Market Cap</div>
+                    <div className="mt-1 font-semibold text-gray-900 dark:text-gray-100">{industryInstructionDetail.tickersWithMarketCap}</div>
+                  </div>
+                  <div className="rounded border border-gray-200 px-3 py-2 dark:border-gray-700 sm:col-span-2">
+                    <div className="text-gray-500 dark:text-gray-400">Sectors</div>
+                    <div className="mt-1 truncate font-semibold text-gray-900 dark:text-gray-100" title={industryInstructionDetail.sectors.join(', ')}>
+                      {industryInstructionDetail.sectors.length > 0 ? industryInstructionDetail.sectors.join(', ') : '-'}
+                    </div>
+                  </div>
+                </div>
+                <div className="overflow-auto rounded border border-gray-200 dark:border-gray-700">
+                  <table className="min-w-[760px] w-full text-left text-xs">
+                    <thead className="sticky top-0 bg-gray-50 text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                      <tr>
+                        <th className="px-3 py-2 font-medium">Ticker</th>
+                        <th className="px-3 py-2 font-medium">Company</th>
+                        <th className="px-3 py-2 font-medium">Sector</th>
+                        <th className="px-3 py-2 text-right font-medium">Market Cap</th>
+                        <th className="px-3 py-2 font-medium">Source</th>
+                        <th className="px-3 py-2 font-medium">Company Description</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                      {industryInstructionDetail.tickers.map((row) => (
+                        <tr key={row.ticker} className="hover:bg-gray-50 dark:hover:bg-gray-800/70">
+                          <td className="px-3 py-2 font-semibold text-blue-600 dark:text-blue-300">
+                            <button type="button" className="hover:underline" onClick={() => onTickerClick?.(row.ticker)}>{row.ticker}</button>
+                          </td>
+                          <td className="max-w-[180px] px-3 py-2 text-gray-700 dark:text-gray-200">
+                            <div className="truncate" title={row.name ?? ''}>{row.name ?? '-'}</div>
+                            {row.exchange ? <div className="text-[10px] text-gray-400">{row.exchange}</div> : null}
+                          </td>
+                          <td className="max-w-[160px] px-3 py-2 text-gray-600 dark:text-gray-300"><div className="truncate" title={row.sector ?? ''}>{row.sector ?? '-'}</div></td>
+                          <td className="px-3 py-2 text-right tabular-nums text-gray-900 dark:text-gray-100">{row.marketCap === null || row.marketCap === undefined ? '-' : formatCompactCurrency(row.marketCap)}</td>
+                          <td className="px-3 py-2 text-gray-500 dark:text-gray-400">{row.marketCapSource ?? '-'}</td>
+                          <td className="max-w-[260px] px-3 py-2 text-gray-600 dark:text-gray-300">
+                            <div className="truncate" title={row.description ?? ''}>{row.description ?? '-'}</div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {industryInstructionDetail.truncated ? (
+                  <div className="text-xs text-amber-600 dark:text-amber-300">
+                    Showing first {industryInstructionDetail.tickers.length} of {industryInstructionDetail.totalTickers} tickers by market cap.
+                  </div>
+                ) : null}
+                <div className="text-[11px] text-gray-400">Source: {industryInstructionDetail.dataSource}</div>
+              </div>
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <CalendarFinancialDialog
         open={Boolean(financialTarget)}

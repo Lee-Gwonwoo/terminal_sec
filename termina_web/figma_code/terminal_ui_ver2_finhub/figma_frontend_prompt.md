@@ -11,7 +11,7 @@
 - `News` 창도 `GET /api/news`, `POST /api/news/pull-eodhd`를 실제로 호출하지만, 현재 운영 기준의 주력 뉴스 창은 아니다.
 - `Watchlist` 창은 backend `watchlists` API와 연결되어 있고, 종목 이름/가격 일부는 프론트의 fallback lookup을 함께 사용한다.
 - `Calendar` 창은 backend `calendar_events` 기반의 실데이터 창이며, 현재 earnings + IPO 탭과 background job polling을 지원한다. IPO 탭에는 `Security Type` 컬럼과 dropdown 필터가 있고, 이 값은 FMP의 `ticker/company_name` 문자열에서 파생된다.
-- `Finnhub News` 창과 `Calendar` 창은 `GET /api/industries` 목록을 읽어 `All Industries` dropdown을 표시한다. 메뉴 항목은 checkbox multi-select이며, 선택된 industry 목록을 `industries` 반복 query로 backend에 넘겨 server-side 필터링한다.
+- `Finnhub News` 창과 `Calendar` 창은 `GET /api/industries` 목록을 읽어 `All Industries` dropdown을 표시한다. 메뉴 항목은 checkbox multi-select이며, 선택된 industry 목록을 `industries` 반복 query로 backend에 넘겨 server-side 필터링한다. 개별 industry row를 우클릭하면 `Instruction` 버튼이 뜨고, 버튼을 누르면 `GET /api/industries/detail` 결과로 industry 설명과 시총순 관련 ticker 목록을 dialog에 표시한다.
 - `App.tsx`는 `open-case-description`, `open-company-description`, `open-data-control-how-to-use` custom event를 받아 `case-description`, `company-description`, `data-control-how-to-use` 보조 창을 현재 탭에 동적으로 추가한다.
 - ticker가 있는 주요 창에서는 클릭으로 `Company Description` 창을 열 수 있고, ticker hover 3초 뒤 `CompanyDescriptionHoverPreview` overlay가 뜬다.
 - `BraveNewsWindow.tsx` 파일은 남아 있지만 현재 `WindowType`에 연결되어 있지 않아 UI에서 열 수 없다.
@@ -238,7 +238,32 @@ GET /api/news?source_names=FINNHUB,RTPR,FMP&limit=500
 - `Inst %`
 - `Insider %`
 
-각 항목은 `Min/Max` 범위 입력 2개를 가지며, 값이 바뀌면 backend `/api/news`, `/api/model1/news`를 같은 범위 조건으로 다시 조회한다. Industry dropdown도 같은 서버 조회 경로를 사용하며, 저장 검색 payload와 뉴스 earnings 확인 job payload에도 선택 배열이 포함된다.
+각 항목은 `Min/Max` 범위 입력 2개를 가지며, 값이 바뀌면 backend `/api/news`, `/api/model1/news`를 같은 범위 조건으로 다시 조회한다. Industry dropdown도 같은 서버 조회 경로를 사용하며, 저장 검색 payload와 뉴스 earnings 확인 job payload에도 선택 배열이 포함된다. industry menu row 우클릭은 선택 상태를 바꾸지 않고, `Instruction` 버튼을 통해 별도 상세 dialog를 연다.
+
+### Industry Instruction Dialog
+
+`FinnhubNewsWindow`와 `CalendarWindow`의 industry dropdown에서 개별 industry row를 우클릭하면 작은 context menu가 뜨고, 그 안의 `Instruction` 버튼으로 상세 dialog를 연다. dialog는 `GET /api/industries/detail?industry=<name>&limit=250`를 호출한다.
+
+응답 사용 컬럼:
+
+- `[][][]industry[][][]`: dialog title에 표시하는 industry label.
+- `[][][]description[][][]`: app DB 기준 industry 설명/요약.
+- `[][][]totalTickers[][][]`: 전체 관련 ticker 수.
+- `[][][]tickersWithMarketCap[][][]`: market cap 값이 있는 ticker 수.
+- `[][][]sectors[][][]`: sector 요약 표시.
+- `[][][]tickers[][][]`: 시총순 table rows.
+- `[][][]truncated[][][]`: table row가 limit으로 잘렸는지 표시.
+- `[][][]dataSource[][][]`: dialog footer source 표시.
+
+`tickers` row 사용 컬럼:
+
+- `[][][]ticker[][][]`
+- `[][][]exchange[][][]`
+- `[][][]name[][][]`
+- `[][][]sector[][][]`
+- `[][][]marketCap[][][]`
+- `[][][]marketCapSource[][][]`
+- `[][][]description[][][]`
 
 ### 뉴스 창 UI 락 규칙 기준표
 
@@ -1143,6 +1168,7 @@ API:
   - 메뉴 항목은 checkbox이며 여러 industry를 동시에 선택할 수 있다.
   - 선택값은 client memory state만 사용하며 영속 저장되지 않는다.
   - 선택 시 server-side `industries` filter가 걸린 결과 집합으로 다시 fetch한다.
+  - 개별 industry row를 우클릭하면 `Instruction` 버튼이 뜬다. 버튼을 누르면 `GET /api/industries/detail?industry=...`를 호출해 industry 설명, ticker 수, market cap 보유 수, sector 요약, 시총순 ticker table을 dialog로 표시한다.
 - 기본 날짜 정렬은 늦은 날짜 우선(`desc`)이다.
   - 초기 진입, 탭 전환, Reset 모두 이 기준을 사용한다.
 - search는 client-side로 `ticker`, `company`, `title`, `industry`, `source`, `status`, `company_description`을 대상으로 동작한다.

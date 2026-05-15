@@ -20,7 +20,7 @@
 - EODHD 토큰은 `POST /api/news/pull-eodhd` 호출 시 파일에서 읽는다.
 - `GET /api/news`는 `news_items` 단독 조회가 아니라 `news_change_metrics`, `news_fulltext`, `news_ai_analysis`, sentiment snapshot, peers, company description, IPO date, market cap, industry를 join/병합해서 내려준다.
 - `GET /api/news`의 `keyword`는 서버 검색 조건이다. Finnhub News 창의 `Keyword Filter` exclude profile은 backend request param이나 DB 컬럼으로 내려오지 않고, 프론트 localStorage (`finnhub-news-keyword-filters-v1`, `activeProfileIds` 포함) + client-side filter로만 동작한다. 여러 profile이 동시에 active일 수 있어도 backend 조회 조건은 바뀌지 않는다.
-- `GET /api/industries`는 `securities.industry`의 non-empty distinct 목록을 반환하며, Finnhub News / Calendar 창의 industry dropdown source로 사용한다.
+- `GET /api/industries`는 `securities.industry`의 non-empty distinct 목록을 반환하며, Finnhub News / Calendar 창의 industry dropdown source로 사용한다. `GET /api/industries/detail`은 특정 industry의 DB 기준 설명과 시총순 관련 ticker 목록을 반환한다.
 - `POST /api/news/pull-investing`가 존재하며 Investing.com의 stock market / cryptocurrency category를 `news_items`에 적재한다.
 - `news_change_metrics`는 `CREATE TABLE IF NOT EXISTS`로 유지되는 영구 테이블이며, change update 작업이 metric 단위로 UPSERT 한다.
 - `news_items`의 dedupe/unique 기준은 `UNIQUE (source, source_type, url)`이다. 같은 URL이라도 `source_type`이 다르면 별도 row로 공존할 수 있다.
@@ -517,6 +517,7 @@ SEC filing companion table.
 - `GET /api/news/fulltext/stats`
 - `GET /api/news/ai-analysis/validate`
 - `GET /api/industries`
+- `GET /api/industries/detail`
 
 ### 뉴스 적재 / 후처리
 
@@ -673,6 +674,39 @@ SEC filing companion table.
 응답 컬럼:
 
 - `[][][]industries[][][]`: string array. Finnhub News / Calendar 창의 industry dropdown option으로 사용한다.
+
+### `GET /api/industries/detail`
+
+특정 industry를 `securities.industry` 기준으로 조회하고, 관련 ticker를 최신 `company_profiles.market_cap` 기준 내림차순으로 반환한다. industry 설명은 외부 생성 데이터가 아니라 현재 app DB의 `securities`, `company_profiles` 메타데이터로 만든 요약이다.
+
+지원 query:
+
+- `industry`: 필수. 예: `Aerospace%20%26%20Defense`
+- `limit`: 선택. 기본 250, 범위 1..500. 응답 ticker list만 제한하고 `totalTickers`는 전체 매칭 수를 유지한다.
+
+응답 컬럼:
+
+- `[][][]industry[][][]`: canonical industry label.
+- `[][][]description[][][]`: app DB 기준 industry 설명/요약.
+- `[][][]totalTickers[][][]`: 해당 industry 전체 ticker 수.
+- `[][][]tickersWithMarketCap[][][]`: market cap 값이 있는 ticker 수.
+- `[][][]sectors[][][]`: 해당 industry ticker의 sector 목록.
+- `[][][]topTickers[][][]`: 시총순 상위 ticker symbol 목록.
+- `[][][]tickers[][][]`: 시총순 ticker row 배열.
+- `[][][]limit[][][]`: 적용된 ticker row 제한값.
+- `[][][]truncated[][][]`: 전체 ticker 수가 `limit`보다 커서 목록이 잘렸는지 여부.
+- `[][][]dataSource[][][]`: `securities + latest company_profiles`.
+
+`tickers` row 컬럼:
+
+- `[][][]ticker[][][]`
+- `[][][]exchange[][][]`
+- `[][][]name[][][]`
+- `[][][]sector[][][]`
+- `[][][]industry[][][]`
+- `[][][]marketCap[][][]`
+- `[][][]marketCapSource[][][]`
+- `[][][]description[][][]`
 
 ### `POST /api/news/pull-finhub`
 
@@ -1800,6 +1834,39 @@ SSE endpoint.
 응답 컬럼:
 
 - `[][][]industries[][][]`: string array. Finnhub News / Calendar 창의 industry dropdown option으로 사용한다.
+
+### `GET /api/industries/detail`
+
+특정 industry를 `securities.industry` 기준으로 조회하고, 관련 ticker를 최신 `company_profiles.market_cap` 기준 내림차순으로 반환한다. industry 설명은 외부 생성 데이터가 아니라 현재 app DB의 `securities`, `company_profiles` 메타데이터로 만든 요약이다.
+
+지원 query:
+
+- `industry`: 필수. 예: `Aerospace%20%26%20Defense`
+- `limit`: 선택. 기본 250, 범위 1..500. 응답 ticker list만 제한하고 `totalTickers`는 전체 매칭 수를 유지한다.
+
+응답 컬럼:
+
+- `[][][]industry[][][]`: canonical industry label.
+- `[][][]description[][][]`: app DB 기준 industry 설명/요약.
+- `[][][]totalTickers[][][]`: 해당 industry 전체 ticker 수.
+- `[][][]tickersWithMarketCap[][][]`: market cap 값이 있는 ticker 수.
+- `[][][]sectors[][][]`: 해당 industry ticker의 sector 목록.
+- `[][][]topTickers[][][]`: 시총순 상위 ticker symbol 목록.
+- `[][][]tickers[][][]`: 시총순 ticker row 배열.
+- `[][][]limit[][][]`: 적용된 ticker row 제한값.
+- `[][][]truncated[][][]`: 전체 ticker 수가 `limit`보다 커서 목록이 잘렸는지 여부.
+- `[][][]dataSource[][][]`: `securities + latest company_profiles`.
+
+`tickers` row 컬럼:
+
+- `[][][]ticker[][][]`
+- `[][][]exchange[][][]`
+- `[][][]name[][][]`
+- `[][][]sector[][][]`
+- `[][][]industry[][][]`
+- `[][][]marketCap[][][]`
+- `[][][]marketCapSource[][][]`
+- `[][][]description[][][]`
 
 ## 뉴스 적재 API
 

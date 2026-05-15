@@ -332,6 +332,17 @@ type TickerListRow = {
   insiderSource: string | null;
 };
 
+type IndustryDetailTickerRow = {
+  ticker: string;
+  exchange: string | null;
+  name: string | null;
+  sector: string | null;
+  industry: string | null;
+  market_cap: number | null;
+  market_cap_source: string | null;
+  description: string | null;
+};
+
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function parseList(input: unknown): string[] | undefined {
@@ -351,6 +362,63 @@ function parseList(input: unknown): string[] | undefined {
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
+}
+
+function parseIndustryDetailLimit(input: unknown): number {
+  const parsed = typeof input === "string" ? Number(input) : typeof input === "number" ? input : NaN;
+  if (!Number.isFinite(parsed)) {
+    return 250;
+  }
+  return Math.max(1, Math.min(500, Math.floor(parsed)));
+}
+
+function formatCompactUsd(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "market cap n/a";
+  }
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000_000_000) return `$${(value / 1_000_000_000_000).toFixed(2)}T`;
+  if (abs >= 1_000_000_000) return `$${(value / 1_000_000_000).toFixed(2)}B`;
+  if (abs >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
+  return `$${value.toFixed(0)}`;
+}
+
+function buildIndustryDetailDescription(industry: string, rows: IndustryDetailTickerRow[]): string {
+  if (rows.length === 0) {
+    return `${industry} industry has no matching tracked tickers in the current securities table.`;
+  }
+
+  const sectorCounts = new Map<string, number>();
+  for (const row of rows) {
+    const sector = row.sector?.trim();
+    if (sector) {
+      sectorCounts.set(sector, (sectorCounts.get(sector) ?? 0) + 1);
+    }
+  }
+  const sectorSummary = Array.from(sectorCounts.entries())
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, 3)
+    .map(([sector, count]) => `${sector} ${count}`)
+    .join(", ");
+  const marketCapRows = rows.filter((row) => row.market_cap !== null && row.market_cap !== undefined && Number.isFinite(row.market_cap));
+  const topTickers = marketCapRows
+    .slice(0, 5)
+    .map((row) => `${row.ticker} ${formatCompactUsd(row.market_cap)}`)
+    .join(", ");
+
+  const parts = [
+    `${industry} industry is summarized from the app DB securities and latest company profile metadata.`,
+    `It currently contains ${rows.length} tracked ticker${rows.length === 1 ? "" : "s"}.`,
+  ];
+  if (sectorSummary) {
+    parts.push(`Main sector mix: ${sectorSummary}.`);
+  }
+  if (topTickers) {
+    parts.push(`Largest tracked names by market cap: ${topTickers}.`);
+  } else {
+    parts.push("Market cap values have not been populated for these tracked tickers yet.");
+  }
+  return parts.join(" ");
 }
 
 function normalizeCalendarFromParam(value: string | undefined): string | undefined {
@@ -849,6 +917,91 @@ app.get("/api/industries", async (_req, res, next) => {
        ORDER BY industry COLLATE NOCASE`,
     );
     res.json({ industries: rows.map((row) => row.industry).filter(Boolean) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/industries/detail", async (req, res, next) => {
+  try {
+    const industry = typeof req.query.industry === "string" ? req.query.industry.trim() : "";
+    if (!industry) {
+      res.status(400).json({ error: "industry is required" });
+      return;
+    }
+
+    const limit = parseIndustryDetailLimit(req.query.limit);
+    const rows = await getDb().all<Array<IndustryDetailTickerRow>>(
+      `SELECT
+         s.ticker,
+         s.exchange,
+         s.name,
+         s.sector,
+         TRIM(s.industry) AS industry,
+         (
+           SELECT cp.market_cap
+           FROM company_profiles cp
+           WHERE cp.security_id = s.id AND cp.market_cap IS NOT NULL
+           ORDER BY cp.fetched_at DESC, cp.id DESC
+           LIMIT 1
+         ) AS market_cap,
+         (
+           SELECT cp.market_cap_source
+           FROM company_profiles cp
+           WHERE cp.security_id = s.id AND cp.market_cap IS NOT NULL
+           ORDER BY cp.fetched_at DESC, cp.id DESC
+           LIMIT 1
+         ) AS market_cap_source,
+         (
+           SELECT cp.description
+           FROM company_profiles cp
+           WHERE cp.security_id = s.id AND cp.description IS NOT NULL AND TRIM(cp.description) != ''
+           ORDER BY cp.fetched_at DESC, cp.id DESC
+           LIMIT 1
+         ) AS description
+       FROM securities s
+       WHERE s.industry IS NOT NULL
+         AND TRIM(s.industry) != ''
+         AND LOWER(TRIM(s.industry)) = LOWER(TRIM(?))
+       ORDER BY
+         CASE WHEN market_cap IS NULL THEN 1 ELSE 0 END,
+         market_cap DESC,
+         s.ticker COLLATE NOCASE`,
+      [industry],
+    );
+
+    if (rows.length === 0) {
+      res.status(404).json({ error: "industry not found", industry });
+      return;
+    }
+
+    const canonicalIndustry = rows[0]?.industry?.trim() || industry;
+    const sectors = Array.from(new Set(rows.map((row) => row.sector?.trim()).filter((sector): sector is string => Boolean(sector))))
+      .sort((left, right) => left.localeCompare(right));
+    const tickersWithMarketCap = rows.filter((row) => row.market_cap !== null && row.market_cap !== undefined && Number.isFinite(row.market_cap)).length;
+    const tickers = rows.slice(0, limit).map((row) => ({
+      ticker: row.ticker,
+      exchange: row.exchange ?? null,
+      name: row.name ?? null,
+      sector: row.sector ?? null,
+      industry: row.industry ?? canonicalIndustry,
+      marketCap: row.market_cap ?? null,
+      marketCapSource: row.market_cap_source ?? null,
+      description: row.description ?? null,
+    }));
+
+    res.json({
+      industry: canonicalIndustry,
+      description: buildIndustryDetailDescription(canonicalIndustry, rows),
+      totalTickers: rows.length,
+      tickersWithMarketCap,
+      sectors,
+      topTickers: rows.slice(0, 5).map((row) => row.ticker),
+      tickers,
+      limit,
+      truncated: rows.length > tickers.length,
+      dataSource: "securities + latest company_profiles",
+    });
   } catch (error) {
     next(error);
   }
