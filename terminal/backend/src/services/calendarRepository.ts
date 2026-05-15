@@ -97,6 +97,7 @@ export type CalendarEventsQuery = {
   type: string;
   tickers?: string[];
   watchlistId?: string;
+  industries?: string[];
   from?: string;
   to?: string;
   timeOfDay?: "BMO" | "AMC" | "Unknown";
@@ -247,6 +248,19 @@ export async function listCalendarEvents(query: CalendarEventsQuery): Promise<{
     values.push(query.watchlistId, query.userId);
   }
 
+  const industryFilters = normalizeIndustryFilters(query.industries);
+  if (industryFilters.length > 0) {
+    const placeholders = industryFilters.map(() => "?").join(",");
+    where.push(`ticker IN (
+      SELECT ticker
+      FROM securities
+      WHERE industry IS NOT NULL
+        AND TRIM(industry) != ''
+        AND LOWER(TRIM(industry)) IN (${placeholders})
+    )`);
+    values.push(...industryFilters);
+  }
+
   if (query.from) {
     where.push("event_at >= ?");
     values.push(query.from);
@@ -292,6 +306,14 @@ export async function listCalendarEvents(query: CalendarEventsQuery): Promise<{
   const items = hasMore ? mapped.slice(0, limit) : mapped;
   const nextCursor = hasMore ? encodeCursor(items[items.length - 1] as any) : undefined;
   return { items, nextCursor };
+}
+
+function normalizeIndustryFilters(industries: string[] | undefined): string[] {
+  return Array.from(new Set(
+    (industries ?? [])
+      .map((industry) => industry.trim().toLowerCase())
+      .filter(Boolean),
+  ));
 }
 
 export async function getCalendarEventById(id: string): Promise<Record<string, unknown> | null> {

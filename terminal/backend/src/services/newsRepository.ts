@@ -63,6 +63,59 @@ function buildPrimaryTickerSql(alias: string): string {
   END`;
 }
 
+function buildPrimaryTickerIndustrySql(alias: string): string {
+  const primaryTickerSql = buildPrimaryTickerSql(alias);
+  return `(
+    SELECT s.industry
+    FROM securities s
+    WHERE s.ticker = ${primaryTickerSql}
+      AND s.industry IS NOT NULL
+      AND TRIM(s.industry) != ''
+    ORDER BY s.id ASC
+    LIMIT 1
+  )`;
+}
+
+function normalizeIndustryFilters(industries: string[] | undefined): string[] {
+  return Array.from(new Set(
+    (industries ?? [])
+      .map((industry) => industry.trim().toLowerCase())
+      .filter(Boolean),
+  ));
+}
+
+async function getTickersForIndustryFilters(industries: string[] | undefined): Promise<string[] | undefined> {
+  const industryFilters = normalizeIndustryFilters(industries);
+  if (industryFilters.length === 0) {
+    return undefined;
+  }
+
+  const placeholders = industryFilters.map(() => "?").join(",");
+  const rows = await getDb().all<Array<{ ticker: string }>>(
+    `SELECT DISTINCT ticker
+     FROM securities
+     WHERE industry IS NOT NULL
+       AND TRIM(industry) != ''
+       AND LOWER(TRIM(industry)) IN (${placeholders})`,
+    industryFilters,
+  );
+  return rows.map((row) => row.ticker.toUpperCase()).filter(Boolean);
+}
+
+function appendIndustryTickerWhereClause(where: string[], values: unknown[], newsAlias: string, tickers: string[] | undefined): void {
+  if (!tickers) {
+    return;
+  }
+  if (tickers.length === 0) {
+    where.push("1 = 0");
+    return;
+  }
+
+  const placeholders = tickers.map(() => "?").join(",");
+  where.push(`${buildPrimaryTickerSql(newsAlias)} IN (${placeholders})`);
+  values.push(...tickers);
+}
+
 function buildLatestCompanyProfileScalarSql(
   alias: string,
   fieldName: CompanyProfileNumericField,
@@ -197,6 +250,7 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
   const where: string[] = [];
   const values: unknown[] = [];
   let extraJoins = "";
+  const industryTickers = await getTickersForIndustryFilters(query.industries);
 
   // Bookmark folder filter: join bookmark_items to restrict to bookmarked news
   if (query.bookmarkFolderId) {
@@ -237,6 +291,8 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
     where.push(`(${tagClauses.join(" OR ")})`);
   }
 
+  appendIndustryTickerWhereClause(where, values, "ni", industryTickers);
+
   if (query.from) {
     values.push(query.from);
     where.push(`ni.published_at >= ?`);
@@ -260,6 +316,7 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
     "cp.institutional_pct IS NOT NULL AND cp.institutional_source = 'yahoo'",
   );
   const insiderPctSql = buildLatestCompanyProfileScalarSql("ni", "insider_pct", "cp.insider_pct IS NOT NULL");
+  const securityIndustrySql = buildPrimaryTickerIndustrySql("ni");
 
   appendNumericRangeWhereClause(where, values, floatPctSql, query.floatPctMin, query.floatPctMax);
   appendNumericRangeWhereClause(
@@ -280,10 +337,13 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
   const volatilityMetricSql = buildVolatilityMetricSql("ni");
 
   const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+  const newsItemsSourceSql = industryTickers
+    ? "news_items ni INDEXED BY idx_news_items_primary_ticker_published"
+    : "news_items ni";
   const sql = `
     WITH candidate_news AS (
       SELECT ni.id, ni.published_at
-      FROM news_items ni
+      FROM ${newsItemsSourceSql}
       ${extraJoins}
       ${whereSql}
       ORDER BY ni.published_at DESC, ni.id DESC
@@ -316,6 +376,7 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
            naa.score_evidence AS ai_score_evidence,
            naa.analysis_status AS ai_analysis_status,
               naa.keywords_json AS ai_keywords_json,
+              ${securityIndustrySql} AS security_industry,
               ${floatPctSql} AS float_pct,
               ${institutionalPctSql} AS institutional_pct,
               ${insiderPctSql} AS insider_pct
@@ -355,6 +416,7 @@ export async function getNewsById(id: string): Promise<NewsItem | null> {
     "cp.institutional_pct IS NOT NULL AND cp.institutional_source = 'yahoo'",
   );
   const insiderPctSql = buildLatestCompanyProfileScalarSql("ni", "insider_pct", "cp.insider_pct IS NOT NULL");
+  const securityIndustrySql = buildPrimaryTickerIndustrySql("ni");
   const volatilityMetricSql = buildVolatilityMetricSql("ni");
   const row = await getDb().get<any>(
         `SELECT ni.id, ni.published_at, ni.source, ni.publisher, COALESCE(ni.origin_url, sf.filing_url, sf.report_url) AS origin_url, ni.source_type, ni.title, ni.body, ni.url, ni.tickers_csv, ni.tags_csv, ni.created_at,
@@ -384,6 +446,7 @@ export async function getNewsById(id: string): Promise<NewsItem | null> {
             naa.score_evidence AS ai_score_evidence,
             naa.analysis_status AS ai_analysis_status,
                  naa.keywords_json AS ai_keywords_json,
+                ${securityIndustrySql} AS security_industry,
                  ${floatPctSql} AS float_pct,
                  ${institutionalPctSql} AS institutional_pct,
                  ${insiderPctSql} AS insider_pct
@@ -466,6 +529,7 @@ export async function listNewsEarningsCandidates(
   const where: string[] = [];
   const values: unknown[] = [];
   let extraJoins = "";
+  const industryTickers = await getTickersForIndustryFilters(query.industries);
 
   if (query.bookmarkFolderId) {
     extraJoins += ` INNER JOIN bookmark_items bi ON bi.news_id = ni.id AND bi.folder_id = ?`;
@@ -505,6 +569,8 @@ export async function listNewsEarningsCandidates(
     where.push(`(${tagClauses.join(" OR ")})`);
   }
 
+  appendIndustryTickerWhereClause(where, values, "ni", industryTickers);
+
   if (query.from) {
     values.push(query.from);
     where.push(`ni.published_at >= ?`);
@@ -539,6 +605,9 @@ export async function listNewsEarningsCandidates(
   }
 
   const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+  const newsItemsSourceSql = industryTickers
+    ? "news_items ni INDEXED BY idx_news_items_primary_ticker_published"
+    : "news_items ni";
   const rows = await getDb().all<any[]>(
     `SELECT ni.id,
             ni.published_at,
@@ -550,7 +619,7 @@ export async function listNewsEarningsCandidates(
             nec.upcoming_earnings_date AS existing_upcoming_earnings_date,
             nec.upcoming_earnings_confirmed AS existing_upcoming_earnings_confirmed,
             nec.last_checked_at AS existing_last_checked_at
-     FROM news_items ni
+    FROM ${newsItemsSourceSql}
      LEFT JOIN news_change_metrics cm_1d ON cm_1d.news_id = ni.id AND cm_1d.metric_key = 'change_1d_pct'
      LEFT JOIN news_earnings_context nec ON nec.news_id = ni.id
      ${extraJoins}
@@ -577,6 +646,7 @@ export async function getModel1News(query: NewsQuery): Promise<{ items: Model1Ne
   const where: string[] = [];
   const values: unknown[] = [];
   let extraJoins = "";
+  const industryTickers = await getTickersForIndustryFilters(query.industries);
 
   if (query.bookmarkFolderId) {
     extraJoins += ` INNER JOIN bookmark_items bi ON bi.news_id = mn.id AND bi.folder_id = ?`;
@@ -616,6 +686,8 @@ export async function getModel1News(query: NewsQuery): Promise<{ items: Model1Ne
     where.push(`(${tagClauses.join(" OR ")})`);
   }
 
+  appendIndustryTickerWhereClause(where, values, "mn", industryTickers);
+
   if (query.from) {
     values.push(query.from);
     where.push(`mn.published_at >= ?`);
@@ -639,6 +711,7 @@ export async function getModel1News(query: NewsQuery): Promise<{ items: Model1Ne
     "cp.institutional_pct IS NOT NULL AND cp.institutional_source = 'yahoo'",
   );
   const insiderPctSql = buildLatestCompanyProfileScalarSql("mn", "insider_pct", "cp.insider_pct IS NOT NULL");
+  const securityIndustrySql = buildPrimaryTickerIndustrySql("mn");
 
   appendNumericRangeWhereClause(where, values, floatPctSql, query.floatPctMin, query.floatPctMax);
   appendNumericRangeWhereClause(
@@ -667,6 +740,7 @@ export async function getModel1News(query: NewsQuery): Promise<{ items: Model1Ne
           nec.lookup_status AS earnings_lookup_status,
           mn.has_full_text, mn.keywords_json, mn.keywords_status,
           mn.ai_score, mn.ai_score_evidence, mn.ai_analysis_status, mn.ai_keywords_json,
+          ${securityIndustrySql} AS security_industry,
           ${floatPctSql} AS float_pct,
           ${institutionalPctSql} AS institutional_pct,
           ${insiderPctSql} AS insider_pct
@@ -697,6 +771,7 @@ export async function getModel1NewsById(id: string): Promise<Model1NewsItem | nu
     "cp.institutional_pct IS NOT NULL AND cp.institutional_source = 'yahoo'",
   );
   const insiderPctSql = buildLatestCompanyProfileScalarSql("mn", "insider_pct", "cp.insider_pct IS NOT NULL");
+  const securityIndustrySql = buildPrimaryTickerIndustrySql("mn");
   const row = await getDb().get<any>(
         `SELECT mn.id, mn.published_at, mn.source, mn.publisher, COALESCE(mn.origin_url, sf.filing_url, sf.report_url) AS origin_url, mn.source_type, mn.title, mn.body, mn.url, mn.tickers_csv, mn.tags_csv, mn.created_at,
           nec.context_ticker AS earnings_context_ticker,
@@ -707,6 +782,7 @@ export async function getModel1NewsById(id: string): Promise<Model1NewsItem | nu
           nec.lookup_status AS earnings_lookup_status,
             mn.has_full_text, mn.keywords_json, mn.keywords_status,
             mn.ai_score, mn.ai_score_evidence, mn.ai_analysis_status, mn.ai_keywords_json,
+            ${securityIndustrySql} AS security_industry,
             ${floatPctSql} AS float_pct,
             ${institutionalPctSql} AS institutional_pct,
             ${insiderPctSql} AS insider_pct
@@ -924,10 +1000,7 @@ function mapNewsRow(
     hasFullText: row.has_full_text === 1,
     keywords: aiKeywords,
     keywordsStatus: row.keywords_status ?? null,
-    industry: (() => {
-      for (const t of tickers) { const ind = getIndustry(t); if (ind) return ind; }
-      return null;
-    })(),
+    industry: resolveNewsIndustry(row.security_industry, tickers),
     ipoDate: (primaryTicker && ipoMap ? ipoMap.get(primaryTicker) : undefined) ?? null,
     marketCap: (primaryTicker && marketCapMap ? marketCapMap.get(primaryTicker) : undefined) ?? null,
     floatPct: row.float_pct ?? null,
@@ -983,13 +1056,7 @@ function mapModel1NewsRow(
     hasFullText: row.has_full_text === 1,
     keywords: parseKeywords(row),
     keywordsStatus: row.keywords_status ?? null,
-    industry: (() => {
-      for (const ticker of tickers) {
-        const industry = getIndustry(ticker);
-        if (industry) return industry;
-      }
-      return null;
-    })(),
+    industry: resolveNewsIndustry(row.security_industry, tickers),
     ipoDate: (primaryTicker && ipoMap ? ipoMap.get(primaryTicker) : undefined) ?? null,
     marketCap: (primaryTicker && marketCapMap ? marketCapMap.get(primaryTicker) : undefined) ?? null,
     floatPct: row.float_pct ?? null,
@@ -1011,6 +1078,17 @@ function mapModel1NewsRow(
     peers: (primaryTicker && peersMap ? peersMap.get(primaryTicker) : undefined) ?? [],
     companyDescription: (primaryTicker && descMap ? descMap.get(primaryTicker) : undefined) ?? null,
   };
+}
+
+function resolveNewsIndustry(securityIndustry: unknown, tickers: string[]): string | null {
+  if (typeof securityIndustry === "string" && securityIndustry.trim()) {
+    return securityIndustry.trim();
+  }
+  for (const ticker of tickers) {
+    const industry = getIndustry(ticker);
+    if (industry) return industry;
+  }
+  return null;
 }
 
 function parseKeywords(row: { ai_analysis_status?: string | null; ai_keywords_json?: string | null; keywords_json?: string | null }): string[] {

@@ -11,6 +11,7 @@
 - `News` 창도 `GET /api/news`, `POST /api/news/pull-eodhd`를 실제로 호출하지만, 현재 운영 기준의 주력 뉴스 창은 아니다.
 - `Watchlist` 창은 backend `watchlists` API와 연결되어 있고, 종목 이름/가격 일부는 프론트의 fallback lookup을 함께 사용한다.
 - `Calendar` 창은 backend `calendar_events` 기반의 실데이터 창이며, 현재 earnings + IPO 탭과 background job polling을 지원한다. IPO 탭에는 `Security Type` 컬럼과 dropdown 필터가 있고, 이 값은 FMP의 `ticker/company_name` 문자열에서 파생된다.
+- `Finnhub News` 창과 `Calendar` 창은 `GET /api/industries` 목록을 읽어 `All Industries` dropdown을 표시한다. 메뉴 항목은 checkbox multi-select이며, 선택된 industry 목록을 `industries` 반복 query로 backend에 넘겨 server-side 필터링한다.
 - `App.tsx`는 `open-case-description`, `open-company-description`, `open-data-control-how-to-use` custom event를 받아 `case-description`, `company-description`, `data-control-how-to-use` 보조 창을 현재 탭에 동적으로 추가한다.
 - ticker가 있는 주요 창에서는 클릭으로 `Company Description` 창을 열 수 있고, ticker hover 3초 뒤 `CompanyDescriptionHoverPreview` overlay가 뜬다.
 - `BraveNewsWindow.tsx` 파일은 남아 있지만 현재 `WindowType`에 연결되어 있지 않아 UI에서 열 수 없다.
@@ -181,6 +182,7 @@ GET /api/news?source_names=FINNHUB,RTPR,FMP&limit=500
 - `institutionalPctMin`, `institutionalPctMax`
 - `insiderPctMin`, `insiderPctMax`
 - `bookmarkFolderId` (북마크 폴더 필터)
+- `industries` (industry checkbox dropdown 다중 선택값, 반복 query)
 - `cursor` (cursor 기반 페이지네이션)
 
 검색은 서버사이드다.
@@ -221,7 +223,7 @@ GET /api/news?source_names=FINNHUB,RTPR,FMP&limit=500
   - 넓은 From / To 날짜 입력 (Calendar 아이콘)
 - 우측 제어 블록
   - source type filter 버튼 묶음
-  - `Full View` / `Model_1 Safe`, `Bookmark view`, `Display mode`
+  - `Full View` / `Model_1 Safe`, `Bookmark view`, `All Industries`, `Display mode`
   - `Update`, `View Log`, `Full Text`, `Refresh`, `Control`, `Keyword Filter`, `Save`, `Load`
 - 하단 유틸리티 줄
   - item count / loading 상태
@@ -236,7 +238,7 @@ GET /api/news?source_names=FINNHUB,RTPR,FMP&limit=500
 - `Inst %`
 - `Insider %`
 
-각 항목은 `Min/Max` 범위 입력 2개를 가지며, 값이 바뀌면 backend `/api/news`, `/api/model1/news`를 같은 범위 조건으로 다시 조회한다.
+각 항목은 `Min/Max` 범위 입력 2개를 가지며, 값이 바뀌면 backend `/api/news`, `/api/model1/news`를 같은 범위 조건으로 다시 조회한다. Industry dropdown도 같은 서버 조회 경로를 사용하며, 저장 검색 payload와 뉴스 earnings 확인 job payload에도 선택 배열이 포함된다.
 
 ### 뉴스 창 UI 락 규칙 기준표
 
@@ -657,7 +659,7 @@ localStorage 사용:
 
 저장되는 것:
 
-- `finhub-news-ui-state`: `visibleCols`, `displayMode`, `sourceTypeFilter`, `fromDate`, `toDate`, `selectedBookmarkFolderId`, `marketCapMin`, `marketCapMax`
+- `finhub-news-ui-state`: `visibleCols`, `displayMode`, `sourceTypeFilter`, `fromDate`, `toDate`, `selectedBookmarkFolderId`, `selectedIndustries`, `marketCapMin`, `marketCapMax`
 - `terminal-workspace-v1`: 탭 순서, 탭/창 레이아웃, `isDarkMode`, `fontScale`, `newsTitleFontSize`, `newsSummaryFontSize`, `linkedTicker`
 - `data-control-active-tab`: DataControl의 현재 탭(`updates | settings | appdb`)
 - `ft-concurrency`: Full Text Update 동시성 설정
@@ -1113,6 +1115,8 @@ API:
 - `GET /api/calendar/types`로 탭 목록을 읽는다.
 - `GET /api/calendar/events`로 현재 탭 + 날짜 범위 데이터를 읽는다.
   - economics를 제외한 탭에서는 선택된 watchlist가 있으면 `watchlist_id` query를 함께 보낸다.
+  - economics를 제외한 탭에서는 선택된 industry가 있으면 `industries` 반복 query도 함께 보낸다.
+- `GET /api/industries`로 industry dropdown option을 읽는다.
 - ticker 우클릭 `Financial` dialog를 열 때 `GET /api/calendar/financials/:ticker`로 annual / quarterly 재무 series를 읽는다.
 - earnings 탭에서 `POST /api/fmp/calendar/earnings/update`를 실행하고 `GET /api/jobs/:jobId`로 polling 한다.
 - earnings 탭에서 `POST /api/fmp/calendar/financials/update`도 실행할 수 있고, 같은 `GET /api/jobs/:jobId` polling 패턴으로 default ticker financial history sync 상태를 보여준다.
@@ -1134,6 +1138,11 @@ API:
   - 목록은 `GET /api/watchlists`에서 읽는다.
   - 선택값은 client memory state만 사용하며 영속 저장되지 않는다.
   - 선택 시 server-side `watchlist_id` filter가 걸린 결과 집합으로 다시 fetch한다.
+- economics를 제외한 탭에서는 industry dropdown도 표시한다.
+  - 목록은 `GET /api/industries`에서 읽는다.
+  - 메뉴 항목은 checkbox이며 여러 industry를 동시에 선택할 수 있다.
+  - 선택값은 client memory state만 사용하며 영속 저장되지 않는다.
+  - 선택 시 server-side `industries` filter가 걸린 결과 집합으로 다시 fetch한다.
 - 기본 날짜 정렬은 늦은 날짜 우선(`desc`)이다.
   - 초기 진입, 탭 전환, Reset 모두 이 기준을 사용한다.
 - search는 client-side로 `ticker`, `company`, `title`, `industry`, `source`, `status`, `company_description`을 대상으로 동작한다.

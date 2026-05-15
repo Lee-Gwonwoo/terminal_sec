@@ -6,6 +6,7 @@ export type NewsQuery = {
   sources?: string[];
   sourceNames?: string[];
   tags?: string[];
+  industries?: string[];
   from?: string;
   to?: string;
   floatPctMin?: number;

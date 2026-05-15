@@ -47,6 +47,15 @@ export async function initDb(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_news_items_published ON news_items (published_at DESC, id DESC);
     CREATE INDEX IF NOT EXISTS idx_news_items_source_published ON news_items (source, published_at DESC, id DESC);
     CREATE INDEX IF NOT EXISTS idx_news_items_source_type_source_published ON news_items (source_type, source, published_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_news_items_primary_ticker_published ON news_items (
+      (CASE
+        WHEN tickers_csv IS NULL OR TRIM(tickers_csv) = '' THEN NULL
+        WHEN instr(substr(tickers_csv, 2), ',') <= 0 THEN NULL
+        ELSE substr(tickers_csv, 2, instr(substr(tickers_csv, 2), ',') - 1)
+      END),
+      published_at DESC,
+      id DESC
+    );
 
     CREATE TABLE IF NOT EXISTS news_saved_views (
       id TEXT PRIMARY KEY,
@@ -159,6 +168,17 @@ export async function initDb(): Promise<void> {
   await db.exec(
     "CREATE INDEX IF NOT EXISTS idx_news_items_source_type_source_published ON news_items (source_type, source, published_at DESC, id DESC);"
   );
+  await db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_news_items_primary_ticker_published ON news_items (
+      (CASE
+        WHEN tickers_csv IS NULL OR TRIM(tickers_csv) = '' THEN NULL
+        WHEN instr(substr(tickers_csv, 2), ',') <= 0 THEN NULL
+        ELSE substr(tickers_csv, 2, instr(substr(tickers_csv, 2), ',') - 1)
+      END),
+      published_at DESC,
+      id DESC
+    );
+  `);
 
   // Step 4-2: news_change_metrics table (separate change data — forward-looking)
   // PLAN CHANGE #10: renamed anchor_date→target_date, lookback→forward

@@ -19,6 +19,17 @@ interface CalendarWindowProps {
 
 const API_BASE = '';
 
+function formatIndustryButtonLabel(industries: string[]): string {
+  if (industries.length === 0) return 'All Industries';
+  if (industries.length === 1) return industries[0];
+  return `${industries[0]} +${industries.length - 1}`;
+}
+
+function formatIndustryStatusLabel(industries: string[]): string {
+  if (industries.length <= 2) return industries.join(', ');
+  return `${industries.slice(0, 2).join(', ')} +${industries.length - 2}`;
+}
+
 type SortDirection = 'asc' | 'desc' | null;
 
 interface CalendarTypeConfig {
@@ -92,6 +103,10 @@ interface CalendarWatchlist {
   id: string;
   name: string;
   itemCount: number;
+}
+
+interface IndustryResponse {
+  industries?: string[];
 }
 
 interface JobStatus {
@@ -425,7 +440,7 @@ function matchesNumericRange(
   return true;
 }
 
-async function fetchCalendarEvents(type: string, from: string, to: string, watchlistId?: string): Promise<CalendarRow[]> {
+async function fetchCalendarEvents(type: string, from: string, to: string, watchlistId?: string, industries?: string[]): Promise<CalendarRow[]> {
   const allItems: CalendarRow[] = [];
   let cursor: string | undefined;
 
@@ -443,6 +458,9 @@ async function fetchCalendarEvents(type: string, from: string, to: string, watch
     }
     if (watchlistId) {
       params.set('watchlist_id', watchlistId);
+    }
+    for (const industry of industries ?? []) {
+      params.append('industries', industry);
     }
     if (cursor) {
       params.set('cursor', cursor);
@@ -468,6 +486,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const [typeConfigs, setTypeConfigs] = useState<CalendarTypeConfig[]>(FALLBACK_TYPES);
   const [events, setEvents] = useState<CalendarRow[]>([]);
   const [watchlists, setWatchlists] = useState<CalendarWatchlist[]>([]);
+  const [industryOptions, setIndustryOptions] = useState<string[]>([]);
   const [activeType, setActiveType] = useState('earnings');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -482,6 +501,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   );
   const [showColumnMenu, setShowColumnMenu] = useState(false);
   const [showWatchlistMenu, setShowWatchlistMenu] = useState(false);
+  const [showIndustryMenu, setShowIndustryMenu] = useState(false);
   const [showFmpSettingsMenu, setShowFmpSettingsMenu] = useState(false);
   const [draggedColumnKey, setDraggedColumnKey] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
@@ -499,6 +519,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const [institutionalPctMax, setInstitutionalPctMax] = useState('');
   const [confirmedFilter, setConfirmedFilter] = useState<boolean | null>(null);
   const [selectedWatchlistId, setSelectedWatchlistId] = useState<string>('all');
+  const [selectedIndustries, setSelectedIndustries] = useState<string[]>([]);
   const [ipoSecurityTypeFilter, setIpoSecurityTypeFilter] = useState('all');
   const [tickerContextMenu, setTickerContextMenu] = useState<{
     x: number;
@@ -523,9 +544,25 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const numericFilters = NUMERIC_FILTERS_BY_TYPE[activeType] ?? [];
   const hasRequiredDateRange = Boolean(dateFrom && dateTo);
   const supportsWatchlistFilter = activeType !== 'economics';
+  const supportsIndustryFilter = activeType !== 'economics';
   const selectedWatchlistLabel = selectedWatchlistId === 'all'
     ? 'All Watchlists'
     : watchlists.find((watchlist) => watchlist.id === selectedWatchlistId)?.name ?? 'Watch Lists';
+  const selectedIndustrySet = useMemo(() => new Set(selectedIndustries), [selectedIndustries]);
+  const selectedIndustryLabel = formatIndustryButtonLabel(selectedIndustries);
+  const selectedIndustryStatusLabel = formatIndustryStatusLabel(selectedIndustries);
+  const hasIndustryFilter = selectedIndustries.length > 0;
+
+  const toggleSelectedIndustry = (industry: string) => {
+    const trimmed = industry.trim();
+    if (!trimmed) return;
+    setSelectedIndustries((previous) => {
+      if (previous.includes(trimmed)) {
+        return previous.filter((item) => item !== trimmed);
+      }
+      return [...previous, trimmed].sort((left, right) => left.localeCompare(right));
+    });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -607,6 +644,40 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   useEffect(() => {
     let cancelled = false;
 
+    const loadIndustries = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/industries`);
+        if (!response.ok) {
+          throw new Error(`Industry fetch failed: HTTP ${response.status}`);
+        }
+        const data = await response.json() as IndustryResponse;
+        if (cancelled || !Array.isArray(data.industries)) {
+          return;
+        }
+        setIndustryOptions(data.industries.filter((industry) => typeof industry === 'string' && industry.trim()).sort((left, right) => left.localeCompare(right)));
+      } catch {
+        if (!cancelled) {
+          setIndustryOptions([]);
+        }
+      }
+    };
+
+    void loadIndustries();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!supportsIndustryFilter) {
+      setSelectedIndustries([]);
+      setShowIndustryMenu(false);
+    }
+  }, [supportsIndustryFilter]);
+
+  useEffect(() => {
+    let cancelled = false;
+
     if (!hasRequiredDateRange) {
       setEvents([]);
       setError(null);
@@ -625,6 +696,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
           dateFrom,
           dateTo,
           supportsWatchlistFilter && selectedWatchlistId !== 'all' ? selectedWatchlistId : undefined,
+          supportsIndustryFilter && selectedIndustries.length > 0 ? selectedIndustries : undefined,
         );
         if (cancelled) {
           return;
@@ -647,7 +719,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     return () => {
       cancelled = true;
     };
-  }, [activeType, dateFrom, dateTo, hasRequiredDateRange, reloadToken, selectedWatchlistId, supportsWatchlistFilter]);
+  }, [activeType, dateFrom, dateTo, hasRequiredDateRange, reloadToken, selectedIndustries, selectedWatchlistId, supportsIndustryFilter, supportsWatchlistFilter]);
 
   useEffect(() => {
     if (!jobId || (jobStatus && jobStatus.status !== 'running')) {
@@ -849,6 +921,10 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
       filtered = filtered.filter((event) => event.ipo_security_type === ipoSecurityTypeFilter);
     }
 
+    if (supportsIndustryFilter && hasIndustryFilter) {
+      filtered = filtered.filter((event) => selectedIndustrySet.has(String(event.industry ?? '')));
+    }
+
     filtered = filtered.filter((event) =>
       matchesNumericRange(event.market_cap, marketCapMin, marketCapMax, 1_000_000_000) &&
       matchesNumericRange(event.float_pct, floatPctMin, floatPctMax) &&
@@ -861,6 +937,9 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     searchQuery,
     activeType,
     ipoSecurityTypeFilter,
+    hasIndustryFilter,
+    selectedIndustrySet,
+    supportsIndustryFilter,
     marketCapMin,
     marketCapMax,
     floatPctMin,
@@ -927,6 +1006,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     dateTo ||
     confirmedFilter !== null ||
     (supportsWatchlistFilter && selectedWatchlistId !== 'all') ||
+    (supportsIndustryFilter && hasIndustryFilter) ||
     ipoSecurityTypeFilter !== 'all' ||
     marketCapMin ||
     marketCapMax ||
@@ -943,6 +1023,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     setSearchQuery('');
     setConfirmedFilter(null);
     setSelectedWatchlistId('all');
+    setSelectedIndustries([]);
     setIpoSecurityTypeFilter('all');
     setMarketCapMin('');
     setMarketCapMax('');
@@ -1216,6 +1297,10 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                 setActiveType(typeConfig.key);
                 setSortField(getDefaultSortFieldForType(typeConfig.key));
                 setSortDirection('desc');
+                if (typeConfig.key === 'economics') {
+                  setSelectedIndustries([]);
+                }
+                setShowIndustryMenu(false);
                 setTickerContextMenu(null);
               }}
               className={`px-4 py-2 text-sm font-medium rounded transition-colors ${
@@ -1269,6 +1354,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                 onClick={() => {
                   setShowWatchlistMenu((value) => !value);
                   setShowColumnMenu(false);
+                  setShowIndustryMenu(false);
                   setShowFmpSettingsMenu(false);
                 }}
                 className="flex max-w-[180px] items-center gap-1 px-3 py-2 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-600"
@@ -1315,11 +1401,70 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
             </div>
           )}
 
+          {supportsIndustryFilter && (
+            <div className="relative">
+              <button
+                onClick={() => {
+                  setShowIndustryMenu((value) => !value);
+                  setShowWatchlistMenu(false);
+                  setShowColumnMenu(false);
+                  setShowFmpSettingsMenu(false);
+                }}
+                className={`flex max-w-[190px] items-center gap-1 px-3 py-2 text-sm border rounded hover:bg-gray-50 dark:hover:bg-gray-600 ${hasIndustryFilter ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600'}`}
+                title={hasIndustryFilter ? selectedIndustries.join(', ') : 'Industry filter'}
+              >
+                <span className="truncate">{selectedIndustryLabel}</span>
+                <ChevronDown className="h-4 w-4 shrink-0" />
+              </button>
+
+              {showIndustryMenu && (
+                <>
+                  <div
+                    className="fixed inset-0 z-10"
+                    onClick={() => setShowIndustryMenu(false)}
+                  />
+                  <div className="absolute right-0 top-full mt-1 max-h-80 w-72 overflow-auto rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg z-20 p-2">
+                    <label className={`flex w-full cursor-pointer items-center gap-2 rounded px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 ${!hasIndustryFilter ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : ''}`}>
+                      <input
+                        type="checkbox"
+                        checked={!hasIndustryFilter}
+                        onChange={() => setSelectedIndustries([])}
+                        className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="truncate">All Industries</span>
+                    </label>
+                    {industryOptions.map((industry) => {
+                      const checked = selectedIndustrySet.has(industry);
+                      return (
+                        <label
+                          key={industry}
+                          className={`flex w-full cursor-pointer items-center gap-2 rounded px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 ${checked ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : ''}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleSelectedIndustry(industry)}
+                            className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="block truncate">{industry}</span>
+                        </label>
+                      );
+                    })}
+                    {industryOptions.length === 0 && (
+                      <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">No industries found</div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
           <div className="relative">
             <button
               onClick={() => {
                 setShowColumnMenu(!showColumnMenu);
                 setShowWatchlistMenu(false);
+                setShowIndustryMenu(false);
               }}
               className="flex items-center gap-1 px-3 py-2 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-600"
             >
@@ -1378,6 +1523,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                   onClick={() => {
                     setShowFmpSettingsMenu((value) => !value);
                     setShowWatchlistMenu(false);
+                    setShowIndustryMenu(false);
                   }}
                   className="flex items-center gap-2 px-3 py-2 text-sm rounded bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
                 >
@@ -1707,7 +1853,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
 
       <div className="px-4 py-2 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-600 dark:text-gray-400">
         {hasRequiredDateRange
-          ? `Showing ${filteredAndSortedEvents.length} of ${tabFilteredEvents.length} events${supportsWatchlistFilter && selectedWatchlistId !== 'all' ? ` · Watchlist: ${selectedWatchlistLabel}` : ''}`
+          ? `Showing ${filteredAndSortedEvents.length} of ${tabFilteredEvents.length} events${supportsWatchlistFilter && selectedWatchlistId !== 'all' ? ` · Watchlist: ${selectedWatchlistLabel}` : ''}${supportsIndustryFilter && hasIndustryFilter ? ` · Industry: ${selectedIndustryStatusLabel}` : ''}`
           : 'Select a start and end date to load events'}
       </div>
 

@@ -669,6 +669,7 @@ function parseNewsQuery(query: Record<string, unknown>): NewsQuery {
 
   // Support both `sources` (original) and `source_type` (Step 4-5 alias)
   const sourcesRaw = parseList(query.sources) ?? parseList(query.source_type);
+  const industriesRaw = parseList(query.industries) ?? parseList(query.industry);
 
   return {
     keyword: typeof query.keyword === "string" ? query.keyword : undefined,
@@ -676,6 +677,7 @@ function parseNewsQuery(query: Record<string, unknown>): NewsQuery {
     sources: sourcesRaw,
     sourceNames: parseList(query.source_names),
     tags: parseList(query.tags),
+    industries: industriesRaw,
     from: typeof query.from === "string" ? query.from : undefined,
     to: typeof query.to === "string" ? query.to : undefined,
     floatPctMin: parseFiniteQueryNumber(query.floatPctMin ?? query.float_pct_min),
@@ -834,6 +836,20 @@ app.get("/api/tickers", async (req, res, next) => {
       res.status(400).json({ error: error.message });
       return;
     }
+    next(error);
+  }
+});
+
+app.get("/api/industries", async (_req, res, next) => {
+  try {
+    const rows = await getDb().all<Array<{ industry: string }>>(
+      `SELECT DISTINCT TRIM(industry) AS industry
+       FROM securities
+       WHERE industry IS NOT NULL AND TRIM(industry) != ''
+       ORDER BY industry COLLATE NOCASE`,
+    );
+    res.json({ industries: rows.map((row) => row.industry).filter(Boolean) });
+  } catch (error) {
     next(error);
   }
 });
@@ -4653,6 +4669,7 @@ app.get("/api/calendar/events", async (req, res, next) => {
       type: typeof req.query.type === "string" ? req.query.type : "earnings",
       tickers: parseList(req.query.tickers),
       watchlistId: typeof req.query.watchlist_id === "string" ? req.query.watchlist_id : undefined,
+      industries: parseList(req.query.industries) ?? parseList(req.query.industry),
       from,
       to,
       timeOfDay:
@@ -4682,6 +4699,7 @@ app.get("/api/calendar/events/export.csv", async (req, res, next) => {
       type: typeof req.query.type === "string" ? req.query.type : "earnings",
       tickers: parseList(req.query.tickers),
       watchlistId: typeof req.query.watchlist_id === "string" ? req.query.watchlist_id : undefined,
+      industries: parseList(req.query.industries) ?? parseList(req.query.industry),
       from,
       to,
       timeOfDay:

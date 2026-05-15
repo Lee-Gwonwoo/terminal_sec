@@ -22,6 +22,34 @@ const ET_TIME_FORMATTER = new Intl.DateTimeFormat('en-US', {
 });
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
 
+function normalizeSelectedIndustries(value: unknown, fallbackValue?: unknown): string[] {
+  const rawValues = Array.isArray(value)
+    ? value
+    : Array.isArray(fallbackValue)
+      ? fallbackValue
+      : typeof value === 'string'
+        ? [value]
+        : typeof fallbackValue === 'string'
+          ? [fallbackValue]
+          : [];
+  return Array.from(new Set(
+    rawValues
+      .map((industry) => String(industry ?? '').trim())
+      .filter((industry) => industry && industry !== 'all'),
+  )).sort((left, right) => left.localeCompare(right));
+}
+
+function formatIndustryButtonLabel(industries: string[]): string {
+  if (industries.length === 0) return 'All Industries';
+  if (industries.length === 1) return industries[0];
+  return `${industries[0]} +${industries.length - 1}`;
+}
+
+function formatIndustryStatusLabel(industries: string[]): string {
+  if (industries.length <= 2) return industries.join(', ');
+  return `${industries.slice(0, 2).join(', ')} +${industries.length - 2}`;
+}
+
 // ─── Heights ───
 const STICKY_DATE_HEADER_HEIGHT = 32;
 const ROW_HEIGHT_TITLE_ONLY = 96;
@@ -472,6 +500,10 @@ interface BookmarkFolder {
   parent_id?: string | null;
 }
 
+interface IndustryResponse {
+  industries?: string[];
+}
+
 function hasExplicitTimeZone(value: string): boolean {
   return /(?:Z|[+-]\d{2}:\d{2})$/i.test(value);
 }
@@ -673,12 +705,15 @@ export function FinnhubNewsWindow({
   const [bookmarkFolderCtxMenu, setBookmarkFolderCtxMenu] = useState<null | { x: number; y: number; folderId: string }>(null);
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [showWatchlistMenu, setShowWatchlistMenu] = useState(false);
+  const [showIndustryMenu, setShowIndustryMenu] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showLoadMenu, setShowLoadMenu] = useState(false);
   const [showKeywordFilterMenu, setShowKeywordFilterMenu] = useState(false);
   const [showKeywordFilterModal, setShowKeywordFilterModal] = useState(false);
   const [showDisplayModeMenu, setShowDisplayModeMenu] = useState(false);
   const [selectedWatchlist, setSelectedWatchlist] = useState('All');
+  const [selectedIndustries, setSelectedIndustries] = useState<string[]>(() => normalizeSelectedIndustries(persistedUiState?.selectedIndustries, persistedUiState?.selectedIndustry));
+  const [industryOptions, setIndustryOptions] = useState<string[]>([]);
   const [listHeight, setListHeight] = useState(500);
   const [stickyDate, setStickyDate] = useState('');
   const [saveName, setSaveName] = useState('');
@@ -884,6 +919,7 @@ export function FinnhubNewsWindow({
   const listRef = useRef<List>(null);
   const filterMenuRef = useRef<HTMLDivElement>(null);
   const watchlistMenuRef = useRef<HTMLDivElement>(null);
+  const industryMenuRef = useRef<HTMLDivElement>(null);
   const loadMenuRef = useRef<HTMLDivElement>(null);
   const keywordFilterMenuRef = useRef<HTMLDivElement>(null);
   const displayModeMenuRef = useRef<HTMLDivElement>(null);
@@ -898,6 +934,21 @@ export function FinnhubNewsWindow({
     insiderPctMax,
   ].filter((value) => value.trim()).length;
   const hasNumericFilters = activeNumericFilterCount > 0;
+  const selectedIndustrySet = useMemo(() => new Set(selectedIndustries), [selectedIndustries]);
+  const selectedIndustryLabel = formatIndustryButtonLabel(selectedIndustries);
+  const selectedIndustryStatusLabel = formatIndustryStatusLabel(selectedIndustries);
+  const hasIndustryFilter = selectedIndustries.length > 0;
+
+  const toggleSelectedIndustry = useCallback((industry: string) => {
+    const trimmed = industry.trim();
+    if (!trimmed) return;
+    setSelectedIndustries((previous) => {
+      if (previous.includes(trimmed)) {
+        return previous.filter((item) => item !== trimmed);
+      }
+      return [...previous, trimmed].sort((left, right) => left.localeCompare(right));
+    });
+  }, []);
 
   const applyOwnershipFilterParams = useCallback((params: URLSearchParams) => {
     if (floatPctMin.trim()) params.set('floatPctMin', floatPctMin.trim());
@@ -938,6 +989,10 @@ export function FinnhubNewsWindow({
       payload.tickers = [currentTicker.toUpperCase()];
     }
 
+    if (selectedIndustries.length > 0) {
+      payload.industries = selectedIndustries;
+    }
+
     const effectiveFrom = overrides?.from ?? fromDate;
     const effectiveTo = overrides?.to ?? toDate;
     if (effectiveFrom) {
@@ -964,6 +1019,7 @@ export function FinnhubNewsWindow({
     institutionalPctMax,
     institutionalPctMin,
     selectedBookmarkFolderId,
+    selectedIndustries,
     sourceTypeFilter,
     toDate,
   ]);
@@ -1044,6 +1100,8 @@ export function FinnhubNewsWindow({
     name: string;
     searchQuery: string;
     sourceTypeFilter: SourceTypeFilter;
+    selectedIndustries?: string[];
+    selectedIndustry?: string;
   }
   const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
   const activeKeywordFilters = useMemo(
@@ -1268,6 +1326,33 @@ export function FinnhubNewsWindow({
     }
   }, [activeKeywordFilterIds, keywordFilterProfiles]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadIndustries = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/industries`);
+        if (!response.ok) {
+          throw new Error(`Industry fetch failed: HTTP ${response.status}`);
+        }
+        const data = await response.json() as IndustryResponse;
+        if (cancelled || !Array.isArray(data.industries)) {
+          return;
+        }
+        setIndustryOptions(data.industries.filter((industry) => typeof industry === 'string' && industry.trim()).sort((left, right) => left.localeCompare(right)));
+      } catch {
+        if (!cancelled) {
+          setIndustryOptions([]);
+        }
+      }
+    };
+
+    void loadIndustries();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // ─── Fetch news from backend (server-side search via keyword param) ───
   const fetchNews = useCallback(async (keyword?: string) => {
     // Cancel any in-flight request to avoid stale responses overwriting fresh data
@@ -1300,6 +1385,9 @@ export function FinnhubNewsWindow({
       if (currentTicker) {
         params.set('tickers', currentTicker.toUpperCase());
       }
+      for (const industry of selectedIndustries) {
+        params.append('industries', industry);
+      }
       if (fromDate) {
         params.set('from', fromDate);
       }
@@ -1324,7 +1412,7 @@ export function FinnhubNewsWindow({
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, [selectedBookmarkFolderId, sourceTypeFilter, fromDate, toDate, newsApiBase, applyOwnershipFilterParams]);
+  }, [selectedBookmarkFolderId, selectedIndustries, sourceTypeFilter, fromDate, toDate, newsApiBase, applyOwnershipFilterParams]);
 
   // ─── Fetch more (cursor-based append) ───
   const fetchMore = useCallback(async () => {
@@ -1352,6 +1440,9 @@ export function FinnhubNewsWindow({
       if (currentTicker) {
         params.set('tickers', currentTicker.toUpperCase());
       }
+      for (const industry of selectedIndustries) {
+        params.append('industries', industry);
+      }
       if (fromDate) {
         params.set('from', fromDate);
       }
@@ -1376,7 +1467,7 @@ export function FinnhubNewsWindow({
       setLoadingMore(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nextCursor, loadingMore, selectedBookmarkFolderId, sourceTypeFilter, fromDate, toDate, newsApiBase, applyOwnershipFilterParams]);
+  }, [nextCursor, loadingMore, selectedBookmarkFolderId, selectedIndustries, sourceTypeFilter, fromDate, toDate, newsApiBase, applyOwnershipFilterParams]);
 
   useEffect(() => {
     if (isModel1SafeMode && sort.column && MODEL1_HIDDEN_CHANGE_COLUMNS.includes(sort.column)) {
@@ -2208,16 +2299,17 @@ export function FinnhubNewsWindow({
     const handleClickOutside = (event: MouseEvent) => {
       if (filterMenuRef.current && !filterMenuRef.current.contains(event.target as Node)) setShowFilterMenu(false);
       if (watchlistMenuRef.current && !watchlistMenuRef.current.contains(event.target as Node)) setShowWatchlistMenu(false);
+      if (industryMenuRef.current && !industryMenuRef.current.contains(event.target as Node)) setShowIndustryMenu(false);
       if (loadMenuRef.current && !loadMenuRef.current.contains(event.target as Node)) setShowLoadMenu(false);
       if (keywordFilterMenuRef.current && !keywordFilterMenuRef.current.contains(event.target as Node)) setShowKeywordFilterMenu(false);
       if (displayModeMenuRef.current && !displayModeMenuRef.current.contains(event.target as Node)) setShowDisplayModeMenu(false);
       if (columnMenuRef.current && !columnMenuRef.current.contains(event.target as Node)) setShowColumnMenu(false);
     };
-    if (showFilterMenu || showWatchlistMenu || showLoadMenu || showKeywordFilterMenu || showDisplayModeMenu || showColumnMenu) {
+    if (showFilterMenu || showWatchlistMenu || showIndustryMenu || showLoadMenu || showKeywordFilterMenu || showDisplayModeMenu || showColumnMenu) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
-  }, [showFilterMenu, showWatchlistMenu, showLoadMenu, showKeywordFilterMenu, showDisplayModeMenu, showColumnMenu]);
+  }, [showFilterMenu, showWatchlistMenu, showIndustryMenu, showLoadMenu, showKeywordFilterMenu, showDisplayModeMenu, showColumnMenu]);
 
   // ─── Sort helper ───
   const getSortValue = useCallback((item: DisplayItem, col: ColumnId): string | number => {
@@ -2360,6 +2452,7 @@ export function FinnhubNewsWindow({
         displayMode,
         newsProjection,
         sourceTypeFilter,
+        selectedIndustries,
         searchQuery,
         tickerQuery,
         fromDate,
@@ -2373,18 +2466,19 @@ export function FinnhubNewsWindow({
         selectedBookmarkFolderId,
       }));
     } catch { /* quota / SSR */ }
-  }, [visibleCols, displayMode, newsProjection, sourceTypeFilter, searchQuery, tickerQuery, fromDate, toDate, floatPctMin, floatPctMax, institutionalPctMin, institutionalPctMax, insiderPctMin, insiderPctMax, selectedBookmarkFolderId]);
+  }, [visibleCols, displayMode, newsProjection, sourceTypeFilter, selectedIndustries, searchQuery, tickerQuery, fromDate, toDate, floatPctMin, floatPctMax, institutionalPctMin, institutionalPctMax, insiderPctMin, insiderPctMax, selectedBookmarkFolderId]);
 
   // ─── Save / Load ───
   const handleSaveSearch = () => {
     if (!saveName.trim()) return;
-    setSavedSearches(prev => [...prev, { id: Date.now().toString(), name: saveName, searchQuery, sourceTypeFilter }]);
+    setSavedSearches(prev => [...prev, { id: Date.now().toString(), name: saveName, searchQuery, sourceTypeFilter, selectedIndustries }]);
     setSaveName('');
     setShowSaveModal(false);
   };
   const handleLoadSearch = (search: SavedSearch) => {
     setSearchQuery(search.searchQuery);
     setSourceTypeFilter(search.sourceTypeFilter);
+    setSelectedIndustries(normalizeSelectedIndustries(search.selectedIndustries, search.selectedIndustry));
     setShowLoadMenu(false);
     fetchNews(search.searchQuery || undefined);
   };
@@ -3032,9 +3126,54 @@ export function FinnhubNewsWindow({
                 )}
               </div>
 
+              <div className="relative" ref={industryMenuRef}>
+                <button
+                  onClick={() => { setShowIndustryMenu(!showIndustryMenu); setShowFilterMenu(false); setShowLoadMenu(false); setShowDisplayModeMenu(false); setShowWatchlistMenu(false); setShowKeywordFilterMenu(false); }}
+                  className={`px-3 py-1.5 border rounded-lg transition-colors flex max-w-[190px] items-center gap-1.5 ${hasIndustryFilter ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-300 dark:border-gray-600 hover:bg-white dark:hover:bg-gray-800 bg-white dark:bg-gray-900'}`}
+                  title={hasIndustryFilter ? selectedIndustries.join(', ') : 'Industry filter'}
+                >
+                  <Filter className="w-3.5 h-3.5" />
+                  <span className="truncate text-xs">{selectedIndustryLabel}</span>
+                  <ChevronDown className="w-3 h-3 shrink-0" />
+                </button>
+                {showIndustryMenu && (
+                  <div className="absolute top-full left-0 mt-1 max-h-80 w-72 overflow-auto rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg z-30 p-1.5">
+                    <label className={`flex w-full cursor-pointer items-center gap-2 rounded px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800 ${!hasIndustryFilter ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : ''}`}>
+                      <input
+                        type="checkbox"
+                        checked={!hasIndustryFilter}
+                        onChange={() => setSelectedIndustries([])}
+                        className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="truncate">All Industries</span>
+                    </label>
+                    {industryOptions.map((industry) => {
+                      const checked = selectedIndustrySet.has(industry);
+                      return (
+                        <label
+                          key={industry}
+                          className={`flex w-full cursor-pointer items-center gap-2 rounded px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800 ${checked ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : ''}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleSelectedIndustry(industry)}
+                            className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="block truncate">{industry}</span>
+                        </label>
+                      );
+                    })}
+                    {industryOptions.length === 0 && (
+                      <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">No industries found</div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div className="relative" ref={displayModeMenuRef}>
                 <button
-                  onClick={() => { setShowDisplayModeMenu(!showDisplayModeMenu); setShowFilterMenu(false); setShowLoadMenu(false); setShowWatchlistMenu(false); }}
+                  onClick={() => { setShowDisplayModeMenu(!showDisplayModeMenu); setShowFilterMenu(false); setShowLoadMenu(false); setShowWatchlistMenu(false); setShowIndustryMenu(false); }}
                   className="px-2.5 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-white dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 bg-white dark:bg-gray-900"
                   title="Display mode"
                 >
@@ -3478,6 +3617,7 @@ export function FinnhubNewsWindow({
                     setShowLoadMenu(false);
                     setShowDisplayModeMenu(false);
                     setShowWatchlistMenu(false);
+                    setShowIndustryMenu(false);
                   }}
                   className={`px-3 py-1.5 border rounded-lg transition-colors flex items-center gap-1.5 ${activeKeywordFilters.length > 0 ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-300 dark:border-gray-600 hover:bg-white dark:hover:bg-gray-800 bg-white dark:bg-gray-900'}`}
                   title="Exclude rows using a saved keyword filter profile"
@@ -3569,7 +3709,7 @@ export function FinnhubNewsWindow({
               </button>
 
               <div className="relative" ref={loadMenuRef}>
-                <button onClick={() => { setShowLoadMenu(!showLoadMenu); setShowFilterMenu(false); setShowWatchlistMenu(false); setShowDisplayModeMenu(false); setShowKeywordFilterMenu(false); }} className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-white dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 bg-white dark:bg-gray-900" title="Load search settings">
+                <button onClick={() => { setShowLoadMenu(!showLoadMenu); setShowFilterMenu(false); setShowWatchlistMenu(false); setShowIndustryMenu(false); setShowDisplayModeMenu(false); setShowKeywordFilterMenu(false); }} className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-white dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 bg-white dark:bg-gray-900" title="Load search settings">
                   <FolderOpen className="w-3.5 h-3.5" /><span className="text-xs">Load</span>
                 </button>
                 {showLoadMenu && (
@@ -3599,6 +3739,9 @@ export function FinnhubNewsWindow({
             {loadingMore && <span className="text-blue-500">Loading more...</span>}
             {selectedWatchlist !== 'All' && (
               <span className="text-gray-500 dark:text-gray-400">Watch list: {selectedWatchlist}</span>
+            )}
+            {hasIndustryFilter && (
+              <span className="text-blue-600 dark:text-blue-300" title={selectedIndustries.join(', ')}>Industry: {selectedIndustryStatusLabel}</span>
             )}
             {activeKeywordFilters.length > 0 && (
               <span className="text-blue-600 dark:text-blue-300" title={activeKeywordFilters.map((profile) => profile.query).join(' | ')}>
@@ -3655,7 +3798,7 @@ export function FinnhubNewsWindow({
 
             <div className="relative" ref={filterMenuRef}>
               <button
-                onClick={() => { setShowFilterMenu(!showFilterMenu); setShowColumnMenu(false); setShowLoadMenu(false); setShowDisplayModeMenu(false); setShowWatchlistMenu(false); setShowKeywordFilterMenu(false); }}
+                onClick={() => { setShowFilterMenu(!showFilterMenu); setShowColumnMenu(false); setShowLoadMenu(false); setShowDisplayModeMenu(false); setShowWatchlistMenu(false); setShowIndustryMenu(false); setShowKeywordFilterMenu(false); }}
                 className={`px-2.5 py-1.5 text-xs border rounded-lg transition-colors flex items-center gap-1.5 ${
                   hasNumericFilters
                     ? 'border-blue-300 bg-blue-50 text-blue-600 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
@@ -3749,7 +3892,7 @@ export function FinnhubNewsWindow({
 
             <div className="relative" ref={columnMenuRef}>
             <button
-              onClick={() => { setShowColumnMenu(!showColumnMenu); setShowFilterMenu(false); setShowLoadMenu(false); setShowDisplayModeMenu(false); setShowWatchlistMenu(false); setShowKeywordFilterMenu(false); }}
+              onClick={() => { setShowColumnMenu(!showColumnMenu); setShowFilterMenu(false); setShowLoadMenu(false); setShowDisplayModeMenu(false); setShowWatchlistMenu(false); setShowIndustryMenu(false); setShowKeywordFilterMenu(false); }}
               className="px-2.5 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-white dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 bg-white dark:bg-gray-900"
               title="Show/hide columns"
             >
@@ -3790,7 +3933,7 @@ export function FinnhubNewsWindow({
           </div>
 
           <div className="relative" ref={watchlistMenuRef}>
-            <button onClick={() => { setShowWatchlistMenu(!showWatchlistMenu); setShowFilterMenu(false); setShowLoadMenu(false); setShowDisplayModeMenu(false); setShowKeywordFilterMenu(false); }}
+            <button onClick={() => { setShowWatchlistMenu(!showWatchlistMenu); setShowFilterMenu(false); setShowLoadMenu(false); setShowDisplayModeMenu(false); setShowIndustryMenu(false); setShowKeywordFilterMenu(false); }}
               className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-white dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 bg-white dark:bg-gray-900">
               <span>Watch Lists</span><ChevronDown className="w-3 h-3" />
             </button>

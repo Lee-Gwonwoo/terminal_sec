@@ -20,6 +20,7 @@
 - EODHD 토큰은 `POST /api/news/pull-eodhd` 호출 시 파일에서 읽는다.
 - `GET /api/news`는 `news_items` 단독 조회가 아니라 `news_change_metrics`, `news_fulltext`, `news_ai_analysis`, sentiment snapshot, peers, company description, IPO date, market cap, industry를 join/병합해서 내려준다.
 - `GET /api/news`의 `keyword`는 서버 검색 조건이다. Finnhub News 창의 `Keyword Filter` exclude profile은 backend request param이나 DB 컬럼으로 내려오지 않고, 프론트 localStorage (`finnhub-news-keyword-filters-v1`, `activeProfileIds` 포함) + client-side filter로만 동작한다. 여러 profile이 동시에 active일 수 있어도 backend 조회 조건은 바뀌지 않는다.
+- `GET /api/industries`는 `securities.industry`의 non-empty distinct 목록을 반환하며, Finnhub News / Calendar 창의 industry dropdown source로 사용한다.
 - `POST /api/news/pull-investing`가 존재하며 Investing.com의 stock market / cryptocurrency category를 `news_items`에 적재한다.
 - `news_change_metrics`는 `CREATE TABLE IF NOT EXISTS`로 유지되는 영구 테이블이며, change update 작업이 metric 단위로 UPSERT 한다.
 - `news_items`의 dedupe/unique 기준은 `UNIQUE (source, source_type, url)`이다. 같은 URL이라도 `source_type`이 다르면 별도 row로 공존할 수 있다.
@@ -515,6 +516,7 @@ SEC filing companion table.
 - `GET /api/news/fulltext/:newsId`
 - `GET /api/news/fulltext/stats`
 - `GET /api/news/ai-analysis/validate`
+- `GET /api/industries`
 
 ### 뉴스 적재 / 후처리
 
@@ -599,6 +601,8 @@ SEC filing companion table.
 - `sources=company_news,press_release`
 - `source_type=company_news,press_release`
 - `source_names=FINNHUB,EODHD`
+- `industry=Aerospace%20%26%20Defense`
+- `industries=Aerospace%20%26%20Defense,Biotechnology`
 - `tags=earnings,macro`
 - `from`
 - `to`
@@ -654,12 +658,21 @@ SEC filing companion table.
 - sentiment 3개 필드는 대표 ticker의 최신 snapshot 기준이다.
 - peers/companyDescription/ipoDate/marketCap도 대표 ticker 기준 최근 company profile row를 사용한다.
 - `industry`는 `company_profiles` 컬럼이 아니라 `securities.industry` 또는 CSV fallback에서 온다.
+- industry filter는 `securities.industry` 기준으로 normalize(`LOWER(TRIM(...))`)한 뒤 대표 ticker(primary ticker)에 적용한다. 응답 표시용 `industry`는 DB 값을 우선하고 없으면 CSV fallback을 사용한다.
 
 ### `GET /api/news/stream`
 
 - `GET /api/news`와 같은 query parser 사용
 - 20초 heartbeat
 - 새 뉴스 insert 시 filter를 만족하는 클라이언트에만 push
+
+### `GET /api/industries`
+
+`securities.industry`에서 공백이 아닌 distinct industry 목록을 정렬해 반환한다.
+
+응답 컬럼:
+
+- `[][][]industries[][][]`: string array. Finnhub News / Calendar 창의 industry dropdown option으로 사용한다.
 
 ### `POST /api/news/pull-finhub`
 
@@ -1087,6 +1100,8 @@ Control Window / localStorage 공통 설정:
 - `type`
 - `tickers`
 - `watchlist_id`
+- `industry`
+- `industries`
 - `from`
 - `to`
 - `time_of_day`
@@ -1626,6 +1641,8 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `sources=company_news,press_release`
 - `source_type=company_news,press_release` (`sources`의 alias)
 - `source_names=FINNHUB,EODHD`
+- `industry=Aerospace%20%26%20Defense`
+- `industries=Aerospace%20%26%20Defense,Biotechnology`
 - `tags=earnings,macro`
 - `from`
 - `to`
@@ -1639,6 +1656,7 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `sources`: `news_items.source_type IN (...)`
 - `source_names`: `news_items.source IN (...)`
 - `tags`: `tags_csv LIKE '%,tag,%'`
+- `industry` / `industries`: `securities.industry` 기준 대표 ticker 필터. 대량 `news_items` 조회 성능을 위해 primary ticker expression index(`idx_news_items_primary_ticker_published`)를 사용한다.
 - `cursor`: 정렬 `(published_at DESC, id DESC)` 기준 base64 커서
 
 limit 정책:
@@ -1774,6 +1792,14 @@ SSE endpoint.
 - `StreamHub`가 client별 filter를 저장
 - heartbeat는 20초마다 발생
 - 새 뉴스가 insert될 때 filter를 만족하는 client에만 push
+
+### `GET /api/industries`
+
+`securities.industry`에서 공백이 아닌 distinct industry 목록을 정렬해 반환한다.
+
+응답 컬럼:
+
+- `[][][]industries[][][]`: string array. Finnhub News / Calendar 창의 industry dropdown option으로 사용한다.
 
 ## 뉴스 적재 API
 
@@ -2446,6 +2472,8 @@ query:
 - `type`
 - `tickers`
 - `watchlist_id`
+- `industry`
+- `industries`
 - `from`
 - `to`
 - `time_of_day` (`BMO | AMC | Unknown`)
@@ -2458,6 +2486,7 @@ query:
 
 - `from`, `to`에 `YYYY-MM-DD`를 주면 backend가 각각 `00:00:00.000Z`, `23:59:59.999Z`로 정규화한다.
 - 따라서 같은 날짜를 From/To에 넣어도 그 날짜의 event가 빠지지 않는다.
+- `industry` / `industries` query는 economics를 제외한 ticker 기반 event에서 `securities.industry` 기준으로 server-side 필터링한다.
 - earnings row는 `calendar_events.meta_json` 외에도 DB company metadata를 enrich해서 내려준다.
   - `[][][]name[][][]`
   - `[][][]industry[][][]`
