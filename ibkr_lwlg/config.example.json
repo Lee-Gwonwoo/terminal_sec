@@ -1,0 +1,16 @@
+{
+  "host": "127.0.0.1",
+  "port": 4001,
+  "client_id": 191,
+  "symbol": "LWLG",
+  "expiry": "20260618",
+  "right": "C",
+  "strikes": [15, 20],
+  "days": 31,
+  "bar_size": "10 secs",
+  "duration": "14400 S",
+  "use_rth": true,
+  "sleep_sec": 1.0,
+  "risk_free_rate": 0.045,
+  "dividend_yield": 0.0
+}

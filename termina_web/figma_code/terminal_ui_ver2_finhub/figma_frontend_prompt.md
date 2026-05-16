@@ -1174,9 +1174,10 @@ API:
   - 메뉴 항목은 checkbox이며 여러 industry를 동시에 선택할 수 있다.
   - 선택값은 `calendar-window-ui-state` localStorage에 저장되어 Calendar 창을 떠났다가 돌아와도 유지된다.
   - 선택 시 server-side `industries` filter가 걸린 결과 집합으로 다시 fetch한다.
+  - `All Industries` checkbox를 체크하면 전체 선택/no filter 상태가 되고, 다시 체크 해제하면 개별 industry checkbox도 모두 해제되는 none 선택 상태가 된다.
   - 개별 industry row를 우클릭하면 `Instruction` 버튼이 뜬다. 버튼을 누르면 `GET /api/industries/detail?industry=...`를 호출해 industry 설명, ticker 수, market cap 보유 수, sector 요약, 시총순 ticker table을 dialog로 표시한다.
 - Calendar UI 상태는 `calendar-window-ui-state` localStorage에 저장된다.
-  - 저장 대상: active tab, date range, quick range 선택값, search, sort, column visibility/order/width, watchlist, industry, IPO security type, 숫자 필터, earnings confirmed filter.
+  - 저장 대상: active tab, date range, quick range 선택값, search, sort, column visibility/order/width, watchlist, industry 선택 목록과 선택 모드(all/custom/none), IPO security type, 숫자 필터, earnings confirmed filter.
   - 저장하지 않는 대상: 실행 중인 job 상태, menu open/close 상태, ticker context menu, financial dialog target.
 - 기본 날짜 정렬은 늦은 날짜 우선(`desc`)이다.
   - 초기 진입, 탭 전환, Reset 모두 이 기준을 사용한다.

@@ -71,6 +71,7 @@ function getInstructionMenuStyle(x: number, y: number): React.CSSProperties {
 }
 
 type SortDirection = 'asc' | 'desc' | null;
+type IndustrySelectionMode = 'all' | 'custom' | 'none';
 
 interface CalendarTypeConfig {
   key: string;
@@ -321,6 +322,10 @@ function isDatePresetKey(value: unknown): value is DatePresetKey {
 
 function isSortDirection(value: unknown): value is SortDirection {
   return value === 'asc' || value === 'desc' || value === null;
+}
+
+function isIndustrySelectionMode(value: unknown): value is IndustrySelectionMode {
+  return value === 'all' || value === 'custom' || value === 'none';
 }
 
 function humanizeKey(key: string): string {
@@ -621,6 +626,9 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const storedSelectedIndustries = Array.isArray(storedUiState.selectedIndustries)
     ? storedUiState.selectedIndustries.filter((industry): industry is string => typeof industry === 'string' && industry.trim().length > 0)
     : [];
+  const storedIndustrySelectionMode = isIndustrySelectionMode(storedUiState.industrySelectionMode)
+    ? storedUiState.industrySelectionMode
+    : storedSelectedIndustries.length > 0 ? 'custom' : 'all';
 
   const [typeConfigs, setTypeConfigs] = useState<CalendarTypeConfig[]>(FALLBACK_TYPES);
   const [events, setEvents] = useState<CalendarRow[]>([]);
@@ -664,6 +672,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const [confirmedFilter, setConfirmedFilter] = useState<boolean | null>(typeof storedUiState.confirmedFilter === 'boolean' || storedUiState.confirmedFilter === null ? storedUiState.confirmedFilter : null);
   const [selectedWatchlistId, setSelectedWatchlistId] = useState<string>(typeof storedUiState.selectedWatchlistId === 'string' && storedUiState.selectedWatchlistId ? storedUiState.selectedWatchlistId : 'all');
   const [selectedIndustries, setSelectedIndustries] = useState<string[]>(storedSelectedIndustries);
+  const [industrySelectionMode, setIndustrySelectionMode] = useState<IndustrySelectionMode>(storedIndustrySelectionMode);
   const [ipoSecurityTypeFilter, setIpoSecurityTypeFilter] = useState(typeof storedUiState.ipoSecurityTypeFilter === 'string' && storedUiState.ipoSecurityTypeFilter ? storedUiState.ipoSecurityTypeFilter : 'all');
   const [tickerContextMenu, setTickerContextMenu] = useState<{
     x: number;
@@ -692,15 +701,16 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const selectedWatchlistLabel = selectedWatchlistId === 'all'
     ? 'All Watchlists'
     : watchlists.find((watchlist) => watchlist.id === selectedWatchlistId)?.name ?? 'Watch Lists';
-  const isAllIndustrySelection = selectedIndustries.length === 0 || (industryOptions.length > 0 && selectedIndustries.length >= industryOptions.length);
+  const isAllIndustrySelection = industrySelectionMode === 'all' || (industrySelectionMode === 'custom' && industryOptions.length > 0 && selectedIndustries.length >= industryOptions.length);
+  const isNoIndustrySelection = industrySelectionMode === 'none';
   const activeIndustryFilters = useMemo(
-    () => isAllIndustrySelection ? [] : selectedIndustries,
-    [isAllIndustrySelection, selectedIndustries],
+    () => industrySelectionMode === 'custom' && !isAllIndustrySelection ? selectedIndustries : [],
+    [industrySelectionMode, isAllIndustrySelection, selectedIndustries],
   );
   const selectedIndustrySet = useMemo(() => new Set(activeIndustryFilters), [activeIndustryFilters]);
-  const selectedIndustryLabel = formatIndustryButtonLabel(selectedIndustries, industryOptions.length);
-  const selectedIndustryStatusLabel = formatIndustryStatusLabel(selectedIndustries, industryOptions.length);
-  const hasIndustryFilter = activeIndustryFilters.length > 0;
+  const selectedIndustryLabel = isNoIndustrySelection ? 'No Industries' : formatIndustryButtonLabel(isAllIndustrySelection ? [] : selectedIndustries, industryOptions.length);
+  const selectedIndustryStatusLabel = isNoIndustrySelection ? 'No industries selected' : formatIndustryStatusLabel(isAllIndustrySelection ? [] : selectedIndustries, industryOptions.length);
+  const hasIndustryFilter = isNoIndustrySelection || activeIndustryFilters.length > 0;
   const filteredIndustryOptions = useMemo(() => {
     const query = industrySearchQuery.trim().toLowerCase();
     if (!query) return industryOptions;
@@ -731,6 +741,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
         confirmedFilter,
         selectedWatchlistId,
         selectedIndustries,
+        industrySelectionMode,
         ipoSecurityTypeFilter,
       }));
     } catch {
@@ -744,6 +755,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     dateTo,
     floatPctMax,
     floatPctMin,
+    industrySelectionMode,
     institutionalPctMax,
     institutionalPctMin,
     ipoSecurityTypeFilter,
@@ -760,28 +772,52 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const toggleSelectedIndustry = (industry: string) => {
     const trimmed = industry.trim();
     if (!trimmed) return;
-    setSelectedIndustries((previous) => {
-      if (industryOptions.length === 0) {
-        if (previous.includes(trimmed)) {
-          return previous.filter((item) => item !== trimmed);
-        }
-        return [...previous, trimmed].sort((left, right) => left.localeCompare(right));
-      }
+    if (industryOptions.length === 0) {
+      const next = selectedIndustries.includes(trimmed)
+        ? selectedIndustries.filter((item) => item !== trimmed)
+        : [...selectedIndustries, trimmed].sort((left, right) => left.localeCompare(right));
+      setSelectedIndustries(next);
+      setIndustrySelectionMode(next.length > 0 ? 'custom' : 'none');
+      return;
+    }
 
-      const wasAllSelected = previous.length === 0 || previous.length >= industryOptions.length;
-      if (wasAllSelected) {
-        return industryOptions.filter((item) => item !== trimmed);
-      }
+    if (isAllIndustrySelection) {
+      const next = industryOptions.filter((item) => item !== trimmed);
+      setSelectedIndustries(next);
+      setIndustrySelectionMode(next.length > 0 ? 'custom' : 'none');
+      return;
+    }
 
-      const nextSet = new Set(previous);
-      if (nextSet.has(trimmed)) {
-        nextSet.delete(trimmed);
-      } else {
-        nextSet.add(trimmed);
-      }
-      const next = industryOptions.filter((item) => nextSet.has(item));
-      return next.length >= industryOptions.length ? [] : next;
-    });
+    if (isNoIndustrySelection) {
+      setSelectedIndustries([trimmed]);
+      setIndustrySelectionMode('custom');
+      return;
+    }
+
+    const nextSet = new Set(selectedIndustries);
+    if (nextSet.has(trimmed)) {
+      nextSet.delete(trimmed);
+    } else {
+      nextSet.add(trimmed);
+    }
+    const next = industryOptions.filter((item) => nextSet.has(item));
+    if (next.length === 0) {
+      setSelectedIndustries([]);
+      setIndustrySelectionMode('none');
+      return;
+    }
+    if (next.length >= industryOptions.length) {
+      setSelectedIndustries([]);
+      setIndustrySelectionMode('all');
+      return;
+    }
+    setSelectedIndustries(next);
+    setIndustrySelectionMode('custom');
+  };
+
+  const toggleAllIndustries = (checked: boolean) => {
+    setSelectedIndustries([]);
+    setIndustrySelectionMode(checked ? 'all' : 'none');
   };
 
   const openIndustryInstructionMenu = (event: React.MouseEvent, industry: string) => {
@@ -1231,6 +1267,10 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   }, [tabFilteredEvents]);
 
   const baseFilteredEvents = useMemo(() => {
+    if (supportsIndustryFilter && isNoIndustrySelection) {
+      return [];
+    }
+
     let filtered = [...tabFilteredEvents];
 
     if (searchQuery.trim()) {
@@ -1268,6 +1308,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     activeType,
     ipoSecurityTypeFilter,
     hasIndustryFilter,
+    isNoIndustrySelection,
     selectedIndustrySet,
     supportsIndustryFilter,
     marketCapMin,
@@ -1354,6 +1395,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     setConfirmedFilter(null);
     setSelectedWatchlistId('all');
     setSelectedIndustries([]);
+    setIndustrySelectionMode('all');
     setIpoSecurityTypeFilter('all');
     setMarketCapMin('');
     setMarketCapMax('');
@@ -1758,7 +1800,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                   setShowFmpSettingsMenu(false);
                 }}
                 className={`flex max-w-[190px] items-center gap-1 px-3 py-2 text-sm border rounded hover:bg-gray-50 dark:hover:bg-gray-600 ${hasIndustryFilter ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600'}`}
-                title={hasIndustryFilter ? selectedIndustries.join(', ') : 'All industries selected'}
+                title={isNoIndustrySelection ? 'No industries selected' : hasIndustryFilter ? selectedIndustries.join(', ') : 'All industries selected'}
               >
                 <span className="truncate">{selectedIndustryLabel}</span>
                 <ChevronDown className="h-4 w-4 shrink-0" />
@@ -1797,13 +1839,13 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                       <input
                         type="checkbox"
                         checked={isAllIndustrySelection}
-                        onChange={() => setSelectedIndustries([])}
+                        onChange={(event) => toggleAllIndustries(event.target.checked)}
                         className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                       />
                       <span className="truncate">All Industries</span>
                     </label>
                     {filteredIndustryOptions.map((industry) => {
-                      const checked = isAllIndustrySelection || selectedIndustrySet.has(industry);
+                      const checked = isAllIndustrySelection || (!isNoIndustrySelection && selectedIndustrySet.has(industry));
                       return (
                         <label
                           key={industry}
