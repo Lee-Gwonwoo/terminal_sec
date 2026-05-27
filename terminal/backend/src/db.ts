@@ -250,6 +250,7 @@ export async function initDb(): Promise<void> {
            ni.source_type,
            ni.title,
            ni.body,
+           nf.full_text,
            ni.url,
            ni.tickers_csv,
            ni.tags_csv,

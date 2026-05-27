@@ -53,6 +53,29 @@ function encodeCursor(item: Pick<NewsItem, "published_at" | "id">): string {
   return Buffer.from(`${item.published_at}|${item.id}`).toString("base64");
 }
 
+function buildNormalizedPublishedAtSql(alias: string): string {
+  return `substr(replace(${alias}.published_at, 'T', ' '), 1, 23)`;
+}
+
+function normalizePublishedAtText(value: string): string {
+  return value.trim().replace("T", " ").replace(/Z$/, "").slice(0, 23);
+}
+
+function normalizePublishedAtBoundary(value: string, boundary: "from" | "to"): string {
+  const trimmed = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return `${trimmed} ${boundary === "from" ? "00:00:00.000" : "23:59:59.999"}`;
+  }
+  const normalized = normalizePublishedAtText(trimmed);
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(normalized)) {
+    return `${normalized}:${boundary === "from" ? "00.000" : "59.999"}`;
+  }
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(normalized)) {
+    return `${normalized}${boundary === "from" ? ".000" : ".999"}`;
+  }
+  return normalized;
+}
+
 type CompanyProfileNumericField = "float_pct" | "institutional_pct" | "insider_pct";
 
 function buildPrimaryTickerSql(alias: string): string {
@@ -647,6 +670,7 @@ export async function getModel1News(query: NewsQuery): Promise<{ items: Model1Ne
   const values: unknown[] = [];
   let extraJoins = "";
   const industryTickers = await getTickersForIndustryFilters(query.industries);
+  const normalizedPublishedAtSql = buildNormalizedPublishedAtSql("mn");
 
   if (query.bookmarkFolderId) {
     extraJoins += ` INNER JOIN bookmark_items bi ON bi.news_id = mn.id AND bi.folder_id = ?`;
@@ -655,7 +679,7 @@ export async function getModel1News(query: NewsQuery): Promise<{ items: Model1Ne
 
   if (query.keyword) {
     values.push(`%${query.keyword.toLowerCase()}%`);
-    where.push(`LOWER(mn.title || ' ' || mn.body) LIKE ?`);
+    where.push(`LOWER(COALESCE(mn.title, '') || ' ' || COALESCE(mn.body, '') || ' ' || COALESCE(mn.full_text, '')) LIKE ?`);
   }
 
   if (query.tickers?.length) {
@@ -689,19 +713,20 @@ export async function getModel1News(query: NewsQuery): Promise<{ items: Model1Ne
   appendIndustryTickerWhereClause(where, values, "mn", industryTickers);
 
   if (query.from) {
-    values.push(query.from);
-    where.push(`mn.published_at >= ?`);
+    values.push(normalizePublishedAtBoundary(query.from, "from"));
+    where.push(`${normalizedPublishedAtSql} >= ?`);
   }
 
   if (query.to) {
-    values.push(`${query.to}T23:59:59.999Z`);
-    where.push(`mn.published_at <= ?`);
+    values.push(normalizePublishedAtBoundary(query.to, "to"));
+    where.push(`${normalizedPublishedAtSql} <= ?`);
   }
 
   const cursor = decodeCursor(query.cursor);
   if (cursor) {
-    values.push(cursor.publishedAt, cursor.publishedAt, cursor.id);
-    where.push(`(mn.published_at < ? OR (mn.published_at = ? AND mn.id < ?))`);
+    const normalizedCursorPublishedAt = normalizePublishedAtText(cursor.publishedAt);
+    values.push(normalizedCursorPublishedAt, normalizedCursorPublishedAt, cursor.id);
+    where.push(`(${normalizedPublishedAtSql} < ? OR (${normalizedPublishedAtSql} = ? AND mn.id < ?))`);
   }
 
   const floatPctSql = buildLatestCompanyProfileScalarSql("mn", "float_pct", "cp.float_pct IS NOT NULL");
@@ -731,7 +756,7 @@ export async function getModel1News(query: NewsQuery): Promise<{ items: Model1Ne
 
   const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
   const sql = `
-        SELECT mn.id, mn.published_at, mn.source, mn.publisher, COALESCE(mn.origin_url, sf.filing_url, sf.report_url) AS origin_url, mn.source_type, mn.title, mn.body, mn.url, mn.tickers_csv, mn.tags_csv, mn.created_at,
+        SELECT mn.id, mn.published_at, mn.source, mn.publisher, COALESCE(mn.origin_url, sf.filing_url, sf.report_url) AS origin_url, mn.source_type, mn.title, mn.body, mn.full_text, mn.url, mn.tickers_csv, mn.tags_csv, mn.created_at,
           nec.context_ticker AS earnings_context_ticker,
           nec.recent_earnings_date,
           nec.recent_earnings_confirmed,
@@ -749,7 +774,7 @@ export async function getModel1News(query: NewsQuery): Promise<{ items: Model1Ne
         LEFT JOIN news_earnings_context nec ON nec.news_id = mn.id
     ${extraJoins}
     ${whereSql}
-    ORDER BY mn.published_at DESC, mn.id DESC
+    ORDER BY ${normalizedPublishedAtSql} DESC, mn.id DESC
     LIMIT ?
   `;
 
@@ -773,7 +798,7 @@ export async function getModel1NewsById(id: string): Promise<Model1NewsItem | nu
   const insiderPctSql = buildLatestCompanyProfileScalarSql("mn", "insider_pct", "cp.insider_pct IS NOT NULL");
   const securityIndustrySql = buildPrimaryTickerIndustrySql("mn");
   const row = await getDb().get<any>(
-        `SELECT mn.id, mn.published_at, mn.source, mn.publisher, COALESCE(mn.origin_url, sf.filing_url, sf.report_url) AS origin_url, mn.source_type, mn.title, mn.body, mn.url, mn.tickers_csv, mn.tags_csv, mn.created_at,
+        `SELECT mn.id, mn.published_at, mn.source, mn.publisher, COALESCE(mn.origin_url, sf.filing_url, sf.report_url) AS origin_url, mn.source_type, mn.title, mn.body, mn.full_text, mn.url, mn.tickers_csv, mn.tags_csv, mn.created_at,
           nec.context_ticker AS earnings_context_ticker,
           nec.recent_earnings_date,
           nec.recent_earnings_confirmed,
@@ -1049,6 +1074,7 @@ function mapModel1NewsRow(
     source_type: row.source_type,
     title: row.title,
     body: row.body,
+    fullText: row.full_text ?? null,
     url: row.url,
     tickers,
     tags: splitCsvEnvelope(row.tags_csv),

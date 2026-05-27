@@ -1129,7 +1129,7 @@ export function CaseResearchWindow() {
       setPages(prev => [...prev, page]);
       setActivePageId(page.id);
       setActivePage(page);
-      setTimeout(() => titleRef.current?.focus(), 50);
+      setTimeout(() => titleRef.current?.focus({ preventScroll: true }), 50);
     } catch (err) {
       console.error('Page creation failed', err);
     }

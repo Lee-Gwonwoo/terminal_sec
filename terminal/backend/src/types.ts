@@ -65,6 +65,7 @@ export type NewsItem = {
   change_computed_at?: string | null;
   // fulltext columns (Step 10)
   hasFullText?: boolean;
+  fullText?: string | null;
   keywords?: string[];
   keywordsStatus?: string | null;
   // industry (Step 5-22)

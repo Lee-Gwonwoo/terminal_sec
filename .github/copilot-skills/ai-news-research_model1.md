@@ -171,8 +171,8 @@
   - `company news 데이터`: 현재 앱의 company-news dataset (`source_type='company_news'`, 주로 `source='FINNHUB'`)
 - 즉 `Model_1`에서 보도자료 계열을 볼 때는 **FMP PR만 보고 끝내면 안 되고**, `press release` provider 데이터와 `company_news`도 같이 확인해야 한다. 세 feed는 제목, ticker 매핑, 본문 길이, coverage가 완전히 같지 않을 수 있다.
 - `company_news`는 단순 보조 노이즈가 아니라, PR/SEC에 바로 드러나지 않는 시장 해석 기사, 후속 보도, publisher commentary를 통해 **과거 유사사례의 실제 반응 맥락**을 보강하는 기본 source로 취급한다.
-- `FMP SEC`는 `Model_1`에서 **모든 form을 다 보는 것이 아니라 `8-K`만 확인**한다. 기본 해석 대상은 material event disclosure이며, `10-K`, `10-Q`, `S-3`, `424B5`, `FWP`, `6-K` 등 다른 form은 사용자가 명시적으로 요청하지 않는 한 `Model_1` 기본 조사 범위에 포함하지 않는다.
-- 따라서 `Model_1`의 source check가 완료되었다고 쓰려면, 최소한 `FMP PR 확인`, `press release provider 확인`, `FMP SEC 8-K 확인`, `company_news 확인`의 4개 체크가 모두 끝나 있어야 한다.
+- `FMP SEC`는 `Model_1`에서 **모든 form을 다 보는 것이 아니라 material event disclosure 중심으로 확인**한다. 기본은 `8-K`이고, foreign issuer/ADR처럼 8-K 대신 `6-K`로 material disclosure가 나오는 구조라면 `6-K`를 `8-K equivalent`로 따로 채택한다. `10-K`, `10-Q`, `S-3`, `424B5`, `FWP` 등은 사용자가 명시적으로 요청하지 않는 한 `Model_1` 기본 조사 범위에 포함하지 않는다.
+- 따라서 `Model_1`의 source check가 완료되었다고 쓰려면, 최소한 `FMP PR 확인`, `press release provider 확인`, `FMP SEC 8-K 확인(외국 issuer는 6-K equivalent 포함)`, `company_news 확인`의 4개 체크가 모두 끝나 있어야 한다.
 - 네 소스 중 일부가 비어 있거나 DB에 아직 적재되지 않았으면 이를 숨기지 말고 `소스 없음`, `결과 0건`, `적재 확인 필요`처럼 명시한다. 데이터 부재를 다른 소스가 자동 대체한다고 가정하지 않는다.
 
 **Model_1 데이터 사용 가드레일 (필수)**
@@ -184,8 +184,11 @@
 - 따라서 현재 기사의 importance는 먼저 `headline / body / full_text / 기업 컨텍스트`로 1차 판단하고, 그 다음 `과거 유사사례의 change 분포`로만 보강한다.
 - 이 원칙은 `change_from_open_pct`에도 동일하게 적용된다. intraday 반응 구조 해석은 과거 유사사례에 대해서만 가능하며, 현재 기사에 대해서는 같은 날 intraday move를 보고 importance를 올리거나 내리면 안 된다.
 - 구현 레벨에서는 **current-news용 API와 일반 뉴스 API를 분리**하는 것을 기본값으로 둔다. 현재 레포 기준으로는 backend `[][][]/api/model1/news[][][]`, `[][][]/api/model1/news/:id[][][]`가 `[][][]model1_current_news_view[][][]`만 조회하는 Model_1 safe endpoint다.
-- 위 Model_1 safe endpoint는 `news_items` / `news_fulltext` / `news_ai_analysis` 기반 projection만 반환하고, current-news용 응답 JSON에는 `[][][]change_*[][][]`, `[][][]ohlc_*[][][]` 필드를 포함하지 않는다.
+- 위 Model_1 safe endpoint는 `news_items` / `news_fulltext` / `news_ai_analysis` 기반 projection만 반환하고, current-news용 응답 JSON에는 `[][][]change_*[][][]`, `[][][]ohlc_*[][][]` 필드를 포함하지 않는다. 단, `[][][]full_text[][][]`는 현재 뉴스의 경제적 의미를 판단하는 1차 텍스트이므로 safe endpoint에서 검색/반환되어야 한다.
 - 따라서 **현재 뉴스 목록/상세를 Model_1로 읽는 UI나 agent는 공용 `[][][]/api/news[][][]`가 아니라 `[][][]/api/model1/news[][][]` 계열을 사용**해야 한다. 공용 `[][][]/api/news[][][]`는 일반 운영/모니터링용이며 change 필드를 계속 포함할 수 있다.
+- `Model_1`에서 keyword 검색을 할 때는 `title/body`만 보지 말고 `news_fulltext.full_text`까지 포함한다. 핵심 문구가 `full_text`에만 있는 경우(예: 계약 조건, fixed volume, pricing 구조, analyst note의 EPS/FCF reset)는 title/body 검색 결과가 0건이어도 후보에서 제외하지 않는다.
+- `published_at`은 DB 안에서 `YYYY-MM-DDTHH:mm:ss`와 `YYYY-MM-DD HH:mm:ss` 형태가 섞일 수 있다. custom window를 직접 SQL로 확인할 때는 `replace(published_at, 'T', ' ')` 또는 backend Model_1 endpoint의 정규화 필터를 사용하고, raw 문자열 비교만으로 누락/포함을 판단하지 않는다.
+- ticker filter는 `tickers_csv` 매핑 품질에 의존하므로, Investing/company_news처럼 ticker mapping이 비어 있거나 잘못 들어간 source에서는 `title/body/full_text`에 회사명, ticker, `In this article:` 라인이 보이는지 별도로 확인한다. `tickers_csv`가 비어 있다는 이유만으로 해당 기사와 ticker의 관련성을 부정하지 않는다.
 
 **Model_1 company news / event-date 보정 규칙 (필수, Model_100 참조)**
 
@@ -223,6 +226,19 @@
 - `Model_1` 최종 서술에서는 **현재 분석 대상 ticker의 시가총액을 숫자로 직접 명시**해야 한다. 가능하면 `Market Cap 4.64B`처럼 현재 기사 요약 바로 아래에 적고, 이 시총 구간이 왜 같은 사건이라도 반응 크기 해석에 중요한지 한 줄 설명한다.
 - 현재 ticker의 `market_cap` 값이 없으면 추정하지 말고 `market_cap 데이터 없음`이라고 적고, 그래서 small-cap / mid-cap / large-cap 맥락 보정에 한계가 있다고 함께 적는다.
 
+**Model_1 sell-side regime reset / 대폭 목표가 상향 규칙 (필수)**
+
+- analyst rating/target raise는 기본적으로 low-impact로 뭉뚱그리지 않는다. 아래 조건 중 2개 이상이 동시에 있으면 `일반 analyst note`가 아니라 **sell-side regime reset** 후보로 분리한다.
+  - 목표가가 기존 대비 2배 이상, 또는 드물게 3배 이상으로 상향된다.
+  - 새 목표가가 Street-high 또는 기존 consensus를 크게 이탈한다.
+  - EPS, FCF, gross margin, long-term revenue/volume assumption이 함께 재설정된다.
+  - 장기 공급계약, fixed volume, partially fixed pricing, pricing floor, capacity reservation처럼 실적 구조를 바꾸는 근거가 붙는다.
+  - 같은 시각대에 Investing/company_news/FMP stock news 등 여러 source가 같은 thesis를 반복 보도한다.
+- 이 유형은 PR/8-K가 없더라도 현재 뉴스의 경제적 의미가 클 수 있다. PR/8-K 부재는 `source directness 약함`으로 적되, `market narrative / estimate reset impact`를 자동으로 낮추는 근거로만 쓰면 안 된다.
+- 1단계에서는 theme basket 안에 묶지 말고 ticker 단독 row로 분리한다. 특히 반도체/AI/crypto/space처럼 basket headline이 많은 날에는 `basket decompose pass`를 따로 수행해 각 ticker의 독립 thesis가 있는지 본다.
+- 2단계 유사사례 검색에서는 `analyst target raise`만 쓰지 말고 `price target doubled`, `Street-high`, `EPS raised`, `free cash flow raised`, `long-term agreement`, `fixed volume`, `pricing` 같은 구조 단어를 함께 사용한다.
+- 최종 note에는 `일반 목표가 상향인지`, `sell-side regime reset인지`, `왜 구분했는지`를 한 줄로 명시한다.
+
 **Model_1 기관보유율 제외 가드레일 (필수)**
 
 - `Model_1`의 기본 직접 분석 대상은 **`institutional ownership % < 90` 인 ticker**로 제한한다.
@@ -230,6 +246,8 @@
 - 이유는 기관 보유율이 지나치게 높은 종목은 신규 수급 여지와 유통 구조가 매우 제한적일 수 있어, 일반적인 이벤트성 뉴스 반응 분포를 그대로 이식하면 해석이 왜곡되기 쉽기 때문이다.
 - 이 경우 research page나 상단 스크리닝 표에는 `제외 사유: Institutional 90%+`처럼 짧게 남길 수 있지만, 기본 운영에서는 2단계/3단계 직접 분석 대상으로 넘기지 않는다.
 - 단, `institutional ownership % >= 90` 인 ticker 뉴스가 **유사 경제 사건의 reference case**로 쓰이는 것은 허용한다. 즉 직접 분석은 제외하되, 분포 비교용 보조 사례로는 남길 수 있다.
+- 단, `institutional ownership %` 값이 `100%`를 초과하거나 source별 값이 충돌하면 이를 즉시 hard exclusion 근거로 쓰지 않고 `ownership data-quality warning`으로 표시한다. 이 경우 `Inst 90%+`는 자동 탈락이 아니라 보수적 감점/확인 대기 항목이다.
+- `institutional ownership % >= 90`라도 사건이 `signed contract`, `binding approval`, `major financing overhang removal`, `sell-side regime reset`, `direct asset/control change`처럼 회사 가치/실적 가정을 크게 바꾸는 직접 catalyst이면, 1단계에서 바로 삭제하지 말고 `override review` 후보로 남긴 뒤 2단계 진입 여부를 명시적으로 판단한다.
 - 사용자가 명시적으로 `inst 90% 이상도 분석` 또는 `institutional 90% 이상도 포함`하라고 지시한 경우에만 이 제한을 해제한다.
 - DB에 `institutional ownership %` 값이 없으면 추정하지 말고 `데이터 없음`으로 적는다. 값이 없는 경우에는 제외 규칙을 자동 적용하지 않되, 오너쉽 해석 한계가 있다고 함께 적는다.
 
@@ -239,7 +257,7 @@
 - 오너쉽 데이터는 **항상 app DB(Default Ticker Window / `company_profiles` 테이블) 값**을 사용한다. 외부 사이트(GuruFocus, Finnhub ownership API, Yahoo, SEC 등)에서 별도로 받아오거나 fallback 계산을 하지 않는다. DB에 해당 값이 없으면 `데이터 없음`으로 적고, 외부에서 보강하지 않는다.
 - 여기서 DB 값은 `GET /api/tickers` default-universe row에 노출되는 `floatPct`, `institutionalPct`, `insiderPct`를 뜻한다.
 - `Model_1`에서는 뉴스 사건 자체와 과거 유사사례 분포가 1차 판단 기준이고, 오너쉽 데이터는 그 뒤에 붙는 **가감점 보조 요소**로 사용한다.
-- 단, `institutional ownership % >= 90` 는 예외다. 이 구간은 단순 감점 밴드가 아니라 **직접 분석 제외 조건**으로 취급하며, 기본 운영에서는 1단계에서 후보군에서 빼고 `제외 사유 기록`만 남긴다.
+- 단, `institutional ownership % >= 90` 는 예외다. 이 구간은 기본적으로 직접 분석 제외 조건으로 취급하되, `100% 초과`, source 충돌, stale value, 강한 direct catalyst/sell-side regime reset이 있으면 `ownership data-quality warning` 또는 `override review`로 표시하고 자동 삭제하지 않는다.
 - 오너쉽 데이터의 점수 방향은 아래처럼 고정한다.
   - `float %`가 **높을수록 +**, 낮을수록 **-**. 유동물량이 넓으면 뉴스 기반 반응성이 커질 수 있고, 좁으면 유동성 제약으로 반응 해석이 왜곡될 수 있다.
   - `institutional ownership %`가 **낮을수록 +**, 높을수록 **-**. 기관 포지셔닝이 덜 차 있으면 신규 유입 여지가 크고, 이미 높으면 추가 유입 여력이 작다.
@@ -254,7 +272,7 @@
   - `🔻🔻 중간 감점 (-)`: `float % < 45` 이면서 (`institutional % >= 65` 이거나 `insider % >= 30`)
   - `🔻 약한 감점 (-)`: 위 조건 중 일부만 불리한 경우
 - **중립:** 가산점도 감점도 적용하기 어려운 중간 구간. `⚪ Neutral`로 표기한다.
-- `institutional ownership % >= 90` 는 위 감점 밴드에 넣지 않고 `분석 제외`로 따로 처리한다.
+- `institutional ownership % >= 90` 는 위 감점 밴드에 넣지 않고 기본적으로 `분석 제외`로 따로 처리한다. 다만 `100% 초과` 또는 direct catalyst override 조건이면 `확인 대기 / override review`로 남기고, 왜 제외/유지했는지 표에 적는다.
 - 최종 평가 반영 규칙:
   - `강한 가산점 (+)`: 사건·유사사례가 최소 `B+` 이상이면 **최종 등급을 최대 한 단계 상향**. 예: `B+ -> A-`. 동급 후보 사이에서 rank를 앞세우는 근거로도 쓴다.
   - `중간 가산점 (+)`: 동급 후보 사이에서 우선순위를 앞당기거나, 경계선 후보를 한 단계 올릴 수 있다.
@@ -280,7 +298,7 @@
 - 즉 상단 표는 필요하면 기존 `Ticker / mcap / Industry / Headline / 분류 / 근거`만으로 끝내지 말고, 최소한 final 경쟁 후보들에 대해서는 `방향`, `float %`, `institutional %`, `insider %`, `가감점`, `최종 등급`이 보이도록 확장한다.
 - `short interest %`는 표 폭이 너무 넓어지면 상단 표의 필수 컬럼으로 강제하지는 않지만, 자리가 허용되면 추가한다. 대신 본문 오너쉽 데이터/포지셔닝 섹션에는 계속 적는다.
 - 상단 표에서 DB에 오너쉽 데이터가 없는 후보는 `N/A`로 적고 `provisional`로 명시한다. **최종 등급 칸을 비우거나 `보류`로 둔다.** 가감점 반영 전에는 `A+`, `A`, `A-` 같은 확정 등급을 닫지 않는다.
-- 상단 표에서 `institutional % >= 90` 인 후보는 `오너쉽 가감점` 칸에 `제외 (Inst 90%+)`를 적고, `최종 등급`은 `분석 제외` 또는 `보류`로 둔다. 이런 행은 2단계/3단계 상세 분석 대상으로 넘기지 않는다.
+- 상단 표에서 `institutional % >= 90` 인 후보는 `오너쉽 가감점` 칸에 `제외 (Inst 90%+)` 또는 `override review`를 적고, `최종 등급`은 `분석 제외`, `보류`, `확인 대기` 중 하나로 둔다. `institutional % > 100`이면 반드시 `data-quality warning`을 같이 적는다.
 - `insider %`가 실제로 확보되지 않았으면 추정하지 말고 `N/A` 또는 `데이터 없음`으로 적는다. 빈 칸으로 숨기지 않는다.
 - 표 안의 숫자는 가능하면 `%`까지 붙인 짧은 형식으로 적는다. 예: `82.7%`, `24.1%`, `N/A`.
 - 상단 표는 raw Markdown에서도 한눈에 스캔되어야 하므로, 컬럼 수가 많아지면 headline/근거 문장을 짧게 줄이고 오너쉽/등급 컬럼을 유지하는 쪽을 우선한다.
@@ -405,7 +423,7 @@
   - 가격 영향 경로가 최소한 하나라도 보이는가
   - 단순 홍보성, 정보량이 낮은 형식적 공지, 법무법인 소송 알림 같은 잡음은 제외
   - 현재 ticker의 시가총액 구간이 무엇이며, 그 구간을 이후 반응 해석에서 어떻게 보정해야 하는지 메모할 수 있는가
-  - `institutional ownership % >= 90` 인가 (그렇다면 기본적으로 직접 분석 대상에서 제외하고 `Institutional 90%+` 제외 메모 또는 reference 후보로만 남긴다)
+  - `institutional ownership % >= 90` 인가 (기본적으로 직접 분석 제외 후보이지만, `100% 초과`, source 충돌, 강한 direct catalyst/sell-side regime reset이면 `override review`로 남긴다)
 - 산출물: **후보 리스트** (예: 뉴스 30~50건, 또는 전체 뉴스 대비 상위 10~30% 수준)
 - 핵심 원칙: 이 단계에서 엄격하게 자르면, 2단계에서 유사사례를 조사해볼 기회 자체가 사라진다. 따라서 **false negative를 줄이는 것**이 1단계의 최우선 목표다.
 - 이 단계에서는 `final primary`, `최종 rank 1`, `확정 top pick`처럼 **확정형 ranking 표현을 쓰지 않는다.** 필요하면 `임시 상위 후보`까지만 적는다.
@@ -450,13 +468,13 @@
   7. 각 유사사례에 대해 **change 데이터 전체**(8개 metric)를 수집한다.
   8. final 경쟁 후보들에 대해서는 유사사례 조사와 병행해 DB에서 `market_cap`, `float %`, `institutional %`를 확인해 둔다.
 - 추가 수행 규칙:
-  1. 현재 기사 해석 메모에는 `FMP PR 확인 여부`, `press release provider 확인 여부`, `FMP SEC 8-K 확인 여부`, `company_news 확인 여부`를 가능하면 짧게 같이 남긴다. 예: `source check: FMP PR 있음 / RTPR 없음 / FMP SEC 8-K 없음 / company_news 있음`.
+  1. 현재 기사 해석 메모에는 `FMP PR 확인 여부`, `press release provider 확인 여부`, `FMP SEC 8-K 확인 여부(외국 issuer는 6-K equivalent 포함)`, `company_news 확인 여부`를 가능하면 짧게 같이 남긴다. 예: `source check: FMP PR 있음 / RTPR 없음 / FMP SEC 8-K 없음 / company_news 있음`.
   7. **확증 사례와 반례를 함께 수집한다.** 현재 뉴스를 bullish/bearish로 보고 싶더라도, 그 방향과 반대였던 유사사례를 의도적으로 같이 모은다.
   8. **시가총액 구간을 같이 기록한다.** other-ticker 사례를 쓸 때는 small-cap 사례만 잔뜩 모아 놓고 large-cap 현재 뉴스에 그대로 대입하지 않는다.
   9. **선반영 가능성을 같이 점검한다.** 가능하면 현재 ticker의 뉴스 직전 `1d / 3d / 5d / 20d` 가격 흐름을 확인해, 이미 유사 재료로 먼저 오른 상태인지 본다.
   10. **사례 수가 부족하면 더 조사한다.** same-ticker 또는 other-ticker가 1~2건만 잡혔다고 바로 3단계로 넘기지 말고, 키워드/peer/industry 축을 바꿔 추가 탐색한다.
   11. 현재 분석 대상 기간의 기사에는 `change` 계열 데이터를 붙여서 판단하지 않는다. 현재 기사에 대한 price move를 보고 importance를 정하는 대신, 반드시 `현재 기사 이전`에 나온 유사사례의 반응만 수집한다.
-  12. `FMP SEC`를 확인할 때는 `8-K`만 대상으로 삼는다. symbol search 결과에 다른 form이 함께 섞여 있어도 `Model_1` 기본 조사 로그에는 `8-K`만 채택하고, 나머지는 `비대상 form`으로 분리한다.
+  12. `FMP SEC`를 확인할 때는 기본적으로 `8-K`를 대상으로 삼고, foreign issuer/ADR은 `6-K`를 `8-K equivalent`로 분리 채택한다. symbol search 결과에 다른 form이 함께 섞여 있으면 `비대상 form`으로 분리한다.
   13. `company_news`를 유사사례 표에 포함할 때는 `Model_100` 방식으로 `event_date`, `published_at`, `change_anchor`를 가능하면 함께 적고, 후속 해설 기사라면 기사 게시일 reaction이 아니라 **실제 이벤트 기준일 reaction**을 우선 사용한다.
   14. `company_news` 기반 유사사례는 가능하면 `change/HV/z-score` 삼중항과 `직전/다음 어닝 날짜`를 함께 적는다. 특히 earnings follow-up, financing follow-up, post-filing 해설 기사에서는 이 보정이 없으면 반응 해석이 왜곡되기 쉽다.
 - 사례 수 목표는 **same-ticker 3건 이상, other-ticker 3건 이상을 각각 따로 확보하려고 시도하는 것**을 최소 기준으로 둔다.
@@ -531,7 +549,7 @@
   5. 반례 비중이 높으면 importance를 낮추거나 `high variance`, `선반영 가능`, `증거 부족` 태그를 붙인다.
   6. 현재 기사 자체의 당일/후행 change 데이터가 이미 보이더라도, 그것을 근거로 importance를 확정하지 않는다. `Model_1` 재판단은 과거 유사사례 분포만으로 방어 가능해야 한다.
   7. 시가총액이 큰 ticker도 직접 분석 대상이 될 수 있지만, 소형주 사례의 반응 크기를 그대로 이식하지 않고 시총 구간에 맞는 반응 상한과 선반영 리스크를 따로 적는다.
-  8. `institutional ownership % >= 90` ticker는 특별한 사용자 지시가 없는 한 최종 직접 분석 대상에서 제외하고, 필요하면 `Institutional 90%+` 제외 메모 또는 reference case로만 남긴다.
+  8. `institutional ownership % >= 90` ticker는 특별한 사용자 지시가 없는 한 최종 직접 분석 대상에서 제외 후보로 두되, `100% 초과`, source 충돌, stale value, direct catalyst/sell-side regime reset이면 `ownership data-quality warning` 또는 `override review`로 재판단한다.
 - 다시 말해, **대표 사례 2~3개가 강하다고 해서 바로 중요도를 높이지 않는다.** 조사된 사례들의 전체 분포가 정말 그 결론을 지지하는지 먼저 확인한다.
 - 조사 후에도 사례 수가 너무 적거나, 시총/산업/선반영 조건이 현재 뉴스와 너무 다르면 `정확한 판단 불가`, `보수적 분류`, `추가 조사 필요` 중 하나로 남긴다. 억지로 강한 결론을 내리지 않는다.
 - 기술적/오너쉽 데이터가 없어서 선반영 판단을 충분히 못 하는 경우에도, 그 한계를 note에 명시하고 confidence를 한 단계 낮춘다.
@@ -581,8 +599,8 @@
 - `Model_1`로 최종 주요 이슈와 ticker를 분석할 때는, **현재 뉴스 1건만 요약하고 끝내면 안 된다.** 반드시 과거 유사사례 비교 결과를 같이 적는다.
 - `primary`뿐 아니라 `secondary`로 최종 note에 남긴 ticker도 동일하다. 즉 `secondary`도 현재 뉴스 요약만 적고 끝내지 말고, same-ticker / other-ticker 비교 결과를 함께 적는다.
 - 최종 답변, research note, 날짜별 스크리닝 note의 시작 부분에는 **`분석 데이터 기간: YYYY-MM-DD HH:mm ~ YYYY-MM-DD HH:mm (timezone)`** 줄을 반드시 넣는다. 이 줄은 가능하면 제목 바로 아래 첫 본문 줄에 둔다. 날짜 제목만 있고 시각이 없는 출력은 완료본으로 보지 않는다.
-- 최종 현재 뉴스 요약에는 가능하면 `source check`를 함께 적는다. 기본 형식은 `FMP PR / press release / FMP SEC 8-K / company_news` 4축이며, 예: `source check: FMP PR 있음, RTPR press release 있음, FMP SEC 8-K 없음, company_news 있음`.
-- 또한 `Model_1` 최종 주요 이슈 리스트는 **시가총액으로 직접 제외하지 않는다.** 대신 각 ticker의 `market_cap`을 함께 적고, 특히 large-cap / mega-cap일수록 개별 기사 반응 상한, 선반영 가능성, 비교 사례 보정 근거를 더 엄격히 설명한다. 단, `institutional ownership % >= 90` 제외 규칙은 별도로 계속 적용한다.
+- 최종 현재 뉴스 요약에는 가능하면 `source check`를 함께 적는다. 기본 형식은 `FMP PR / press release / FMP SEC 8-K(외국 issuer는 6-K equivalent) / company_news` 4축이며, 예: `source check: FMP PR 있음, RTPR press release 있음, FMP SEC 8-K 없음, company_news 있음`.
+- 또한 `Model_1` 최종 주요 이슈 리스트는 **시가총액으로 직접 제외하지 않는다.** 대신 각 ticker의 `market_cap`을 함께 적고, 특히 large-cap / mega-cap일수록 개별 기사 반응 상한, 선반영 가능성, 비교 사례 보정 근거를 더 엄격히 설명한다. 단, `institutional ownership % >= 90` 제외 규칙은 별도로 적용하되, `100% 초과`/source 충돌/direct catalyst override 조건이 있으면 자동 제외하지 않고 재판단한다.
 - 최종 답변이나 research note에서 same-ticker 또는 other-ticker 중 한 축이라도 빠져 있으면, 원칙적으로 `Model_1 분석 완료`로 보지 않는다. 각 축에서 우선 `3건 이상` 찾으려고 시도해야 하며, 일반적으로는 `5건 안팎`이면 더 좋다. 한쪽 사례가 0건이거나 3건 미만이면 그 실제 확보 건수와 검색 시도 내역을 적는 방식으로라도 **반드시 섹션을 남긴다.**
 - `watch`는 상세 Model_1 완료 대상으로 보지 않더라도, 최소한 `ticker`, `headline 요약`, `watch로 둔 이유`는 상단 스크리닝 표 또는 바로 아래 watch 보조 표에서 반드시 보이게 남긴다.
 - 최종 답변에는 최소한 아래 2개 비교 축을 **동시에** 포함한다.
