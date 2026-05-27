@@ -8,6 +8,7 @@
 		}
 	],
 	"settings": {
-		"python-envs.defaultEnvManager": "ms-python.python:system"
+		"python-envs.defaultEnvManager": "ms-python.python:system",
+		"powershell.cwd": "unusual_whales"
 	}
 }
