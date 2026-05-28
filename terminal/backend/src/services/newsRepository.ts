@@ -717,6 +717,11 @@ export async function getModel1News(query: NewsQuery): Promise<{ items: Model1Ne
     where.push(`${normalizedPublishedAtSql} >= ?`);
   }
 
+  if (query.after) {
+    values.push(normalizePublishedAtText(query.after));
+    where.push(`${normalizedPublishedAtSql} > ?`);
+  }
+
   if (query.to) {
     values.push(normalizePublishedAtBoundary(query.to, "to"));
     where.push(`${normalizedPublishedAtSql} <= ?`);

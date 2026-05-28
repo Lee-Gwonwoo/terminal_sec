@@ -486,6 +486,27 @@ export async function initDb(): Promise<void> {
   await db.exec("CREATE INDEX IF NOT EXISTS idx_research_pages_fts ON research_pages(title, body);");
 
   await db.exec(`
+    CREATE TABLE IF NOT EXISTS model1_analysis_runs (
+      id TEXT PRIMARY KEY,
+      page_id TEXT REFERENCES research_pages(id) ON DELETE SET NULL,
+      scope_key TEXT NOT NULL DEFAULT 'default',
+      window_start TEXT NOT NULL,
+      window_end TEXT NOT NULL,
+      timezone TEXT NOT NULL DEFAULT 'America/New_York',
+      filters_json TEXT NOT NULL DEFAULT '{}',
+      analyzed_news_ids_json TEXT NOT NULL DEFAULT '[]',
+      current_news_count INTEGER NOT NULL DEFAULT 0,
+      selected_news_count INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'completed',
+      note TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+  await db.exec("CREATE INDEX IF NOT EXISTS idx_model1_runs_scope_page_window ON model1_analysis_runs(scope_key, page_id, status, window_end DESC, created_at DESC);");
+  await db.exec("CREATE INDEX IF NOT EXISTS idx_model1_runs_page ON model1_analysis_runs(page_id, window_end DESC, created_at DESC);");
+
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS model2_analysis_runs (
       id TEXT PRIMARY KEY,
       page_id TEXT REFERENCES research_pages(id) ON DELETE SET NULL,

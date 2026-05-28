@@ -13,6 +13,21 @@
 - 이 줄은 상단 요약 표, 현재 뉴스 요약, `source check`, `primary/secondary/watch` 표보다 먼저 와야 한다.
 - 사용자가 문서를 펼쳤을 때 **이번에 실제로 분석한 데이터의 날짜/시각 범위**를 즉시 알 수 있어야 하며, 날짜만 적거나 시각이 빠진 출력은 완료본으로 보지 않는다.
 
+**Model_1 이어서 계속 / 분석 범위 ledger 규칙 (필수)**
+
+- 사용자가 `이어서 계속`, `현재시각까지 이어서`, `continue to now`, `분석한 범위 제외하고 다음 범위`처럼 말하면, 이전 research page 본문만 눈으로 추정하지 말고 먼저 backend ledger를 확인한다.
+- 기본 조회 순서:
+  1. `GET /api/model1/analysis-runs/continue-window?pageId=<page_id>&scopeKey=<scope_key>`로 마지막 완료 run의 `window_end`를 확인한다.
+  2. 응답의 `after`가 있으면 현재 뉴스 조회는 `GET /api/model1/news?after=<after>&to=<to>`처럼 strict `after` 필터를 사용한다. `from=<after>`를 쓰면 경계 시각 뉴스가 중복될 수 있으므로 피한다.
+  3. 분석 산출물을 저장한 뒤 `POST /api/model1/analysis-runs`에 `pageId`, `scopeKey`, `windowStart`, `windowEnd`, `timezone`, `filters`, `analyzedNewsIds`, `currentNewsCount`, `selectedNewsCount`, `status`를 저장한다.
+- `continue-window` 응답의 `hasNewWindow`가 `false`이면 마지막 완료 run의 `window_end`가 이미 요청 종료시각 이상이라는 뜻이다. 이 경우 새 Model_1 분석을 시작하지 말고 `새로 분석할 publish 시각 범위 없음`으로 보고한다.
+- `continue-window`에 `to`를 넘기지 않으면 서버가 현재 시각을 `America/New_York` 기준 naive datetime으로 계산해 반환한다. 사용자가 명시한 종료 시각이 있으면 그 값을 우선한다.
+- `scopeKey`는 같은 이어가기 단위를 구분하는 키다. page 기반 분석이면 `page:<page_id>` 또는 사용자가 정한 날짜/유니버스 키를 사용하고, 없으면 `default`를 사용한다.
+- ledger가 없으면 기존 규칙대로 사용자가 지정한 분석 기간을 사용하되, 완료 후 반드시 `POST /api/model1/analysis-runs`로 첫 run을 기록한다.
+- ledger의 `window_end`는 실제 `/api/model1/news` 조회에 사용한 `to`와 일치해야 한다. note 표시용으로 분 단위만 적더라도 ledger에는 가능한 한 초/밀리초까지 보존한다.
+- 기존 research page 안에 `분석 데이터 기간:` 줄이 있더라도 ledger와 충돌하면 ledger를 우선하고, 충돌 사실을 note에 `범위 ledger와 본문 표기 불일치`로 짧게 남긴다.
+- 이 규칙은 프롬프트 운영 규칙만이 아니라 앱 DB/API 기능에 의존한다. 단순히 스킬 문서만 수정해서는 이미 분석한 범위를 자동 제외할 수 없다.
+
 **AI Research Preview 표 작성 규칙 (필수)**
 
 - `AI Research Window`의 `Preview`에서 **행/열 구조가 보이는 정보는 markdown table로 작성하는 것**을 기본값으로 둔다.

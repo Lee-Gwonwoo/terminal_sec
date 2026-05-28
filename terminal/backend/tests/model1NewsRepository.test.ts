@@ -167,4 +167,9 @@ describe("model1 news repository", () => {
     const result = await getModel1News({ from: "2026-03-11 14:00", to: "2026-03-11 15:30", limit: 10 });
     expect(result.items.map((item) => item.id)).toEqual(["model1-news-003", "model1-news-002", "model1-news-001"]);
   });
+
+  it("supports strict after filters for continuation windows", async () => {
+    const result = await getModel1News({ after: "2026-03-11 15:15:00", to: "2026-03-11 16:00", limit: 10 });
+    expect(result.items.map((item) => item.id)).toEqual(["model1-news-003"]);
+  });
 });

@@ -100,6 +100,11 @@ import {
   listModel2CaseSummaries,
   listModel2EvidenceRows,
 } from "./services/model2AnalysisRepository.js";
+import {
+  createModel1AnalysisRun,
+  getLatestModel1AnalysisRun,
+  getModel1ContinueWindow,
+} from "./services/model1AnalysisRepository.js";
 import { fetchRtprArticles, fetchRtprArticlesByTicker } from "./services/ptprNewsProvider.js";
 import { fetchFmpPressReleasesByTicker } from "./services/fmpPressReleaseProvider.js";
 import { fetchFmpStockNewsByTicker } from "./services/fmpStockNewsProvider.js";
@@ -746,6 +751,7 @@ function parseNewsQuery(query: Record<string, unknown>): NewsQuery {
     sourceNames: parseList(query.source_names),
     tags: parseList(query.tags),
     industries: industriesRaw,
+    after: typeof query.after === "string" ? query.after : undefined,
     from: typeof query.from === "string" ? query.from : undefined,
     to: typeof query.to === "string" ? query.to : undefined,
     floatPctMin: parseFiniteQueryNumber(query.floatPctMin ?? query.float_pct_min),
@@ -758,6 +764,28 @@ function parseNewsQuery(query: Record<string, unknown>): NewsQuery {
     cursor: typeof query.cursor === "string" ? query.cursor : undefined,
     bookmarkFolderId: typeof query.bookmarkFolderId === "string" ? query.bookmarkFolderId : undefined,
   };
+}
+
+const model1AnalysisRunSchema = z.object({
+  pageId: z.string().optional().nullable(),
+  scopeKey: z.string().optional().nullable(),
+  windowStart: z.string().min(1),
+  windowEnd: z.string().min(1),
+  timezone: z.string().optional().nullable(),
+  filters: z.record(z.unknown()).optional().nullable(),
+  analyzedNewsIds: z.array(z.string()).optional().nullable(),
+  currentNewsCount: z.number().int().nonnegative().optional().nullable(),
+  selectedNewsCount: z.number().int().nonnegative().optional().nullable(),
+  status: z.enum(["stage1", "completed", "failed", "superseded"]).optional().nullable(),
+  note: z.string().optional().nullable(),
+});
+
+function optionalStringQuery(value: unknown): string | null | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || null;
 }
 
 function normalizeJobFingerprintList(values: string[] | undefined): string[] | null {
@@ -4600,6 +4628,43 @@ app.get("/api/model1/news", async (req, res, next) => {
     const parsedQuery = parseNewsQuery(req.query as Record<string, unknown>);
     const result = await getModel1News(parsedQuery);
     res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/model1/analysis-runs/latest", async (req, res, next) => {
+  try {
+    const run = await getLatestModel1AnalysisRun({
+      pageId: optionalStringQuery(req.query.pageId),
+      scopeKey: optionalStringQuery(req.query.scopeKey),
+      status: optionalStringQuery(req.query.status),
+    });
+    res.json({ run });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/model1/analysis-runs/continue-window", async (req, res, next) => {
+  try {
+    const result = await getModel1ContinueWindow({
+      pageId: optionalStringQuery(req.query.pageId),
+      scopeKey: optionalStringQuery(req.query.scopeKey),
+      status: optionalStringQuery(req.query.status),
+      to: optionalStringQuery(req.query.to),
+    });
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/model1/analysis-runs", async (req, res, next) => {
+  try {
+    const input = model1AnalysisRunSchema.parse(req.body ?? {});
+    const run = await createModel1AnalysisRun(input);
+    res.status(201).json(run);
   } catch (error) {
     next(error);
   }
