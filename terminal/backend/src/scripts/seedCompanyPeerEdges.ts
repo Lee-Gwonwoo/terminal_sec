@@ -26,6 +26,7 @@ interface DefaultUniversePeerRow {
   market_cap: number | null;
   peers_json: string | null;
   peer_groups_json: string | null;
+  tags_json: string | null;
 }
 
 interface CandidatePeer {
@@ -43,6 +44,11 @@ interface ParsedPeerGroup {
   category: string;
   label: string;
   tickers: string[];
+  grade: CompanyPeerGrade | null;
+  relationType: CompanyPeerRelationType | null;
+  direction: "directed" | "bidirectional" | null;
+  score: number | null;
+  reason: string | null;
 }
 
 async function main(): Promise<void> {
@@ -96,7 +102,13 @@ async function loadDefaultUniverseRows(): Promise<DefaultUniversePeerRow[]> {
               FROM company_profile_enrichment cpe
               WHERE cpe.security_id = s.id
               LIMIT 1
-            ) AS peer_groups_json
+            ) AS peer_groups_json,
+            (
+              SELECT cpe.tags_json
+              FROM company_profile_enrichment cpe
+              WHERE cpe.security_id = s.id
+              LIMIT 1
+            ) AS tags_json
        FROM ticker_universe_items ui
        JOIN securities s ON s.id = ui.security_id
        WHERE ui.universe_id = ?
@@ -131,6 +143,9 @@ function addIndustryPeers(
   byIndustry: Map<string, DefaultUniversePeerRow[]>,
   candidates: Map<string, CandidatePeer>,
 ): void {
+  if (usesCuratedGroupsAsSourceOfTruth(source)) {
+    return;
+  }
   const industryKey = normalizeBucket(source.industry);
   if (!industryKey) {
     return;
@@ -166,6 +181,9 @@ function addSectorFillPeers(
   bySector: Map<string, DefaultUniversePeerRow[]>,
   candidates: Map<string, CandidatePeer>,
 ): void {
+  if (usesCuratedGroupsAsSourceOfTruth(source)) {
+    return;
+  }
   const visibleCandidateCount = Array.from(candidates.values()).filter((item) => item.grade !== "EXCLUDE").length;
   if (visibleCandidateCount >= 4) {
     return;
@@ -198,6 +216,7 @@ function addRawProviderPeers(
   byIndustry: Map<string, DefaultUniversePeerRow[]>,
   candidates: Map<string, CandidatePeer>,
 ): void {
+  const useCuratedGroupsAsSourceOfTruth = usesCuratedGroupsAsSourceOfTruth(source);
   const industrySize = byIndustry.get(normalizeBucket(source.industry))?.length ?? 0;
   for (const peerTicker of parseTickerListJson(source.peers_json)) {
     if (peerTicker === normalizeTicker(source.ticker)) {
@@ -220,9 +239,13 @@ function addRawProviderPeers(
     const sameIndustry = normalizeBucket(source.industry) && normalizeBucket(source.industry) === normalizeBucket(related.industry);
     const sameSector = normalizeBucket(source.sector) && normalizeBucket(source.sector) === normalizeBucket(related.sector);
     const tightSameIndustry = Boolean(sameIndustry && industrySize <= 8);
-    const grade: CompanyPeerGrade = tightSameIndustry ? "A" : sameIndustry ? "B" : "C";
+    const grade: CompanyPeerGrade = useCuratedGroupsAsSourceOfTruth
+      ? "C"
+      : tightSameIndustry ? "A" : sameIndustry ? "B" : "C";
     const relationType: CompanyPeerRelationType = sameIndustry
-      ? tightSameIndustry ? "direct_competitor" : "adjacent_competitor"
+      ? useCuratedGroupsAsSourceOfTruth
+        ? "weak_provider_candidate"
+        : tightSameIndustry ? "direct_competitor" : "adjacent_competitor"
       : "weak_provider_candidate";
     addCandidate(candidates, {
       source,
@@ -237,7 +260,9 @@ function addRawProviderPeers(
         : sameSector
           ? 0.46
           : 0.4,
-      reason: tightSameIndustry
+      reason: useCuratedGroupsAsSourceOfTruth
+        ? "Provider candidate kept only as weak evidence because this source uses manually curated peer groups as the primary graph."
+        : tightSameIndustry
         ? `Provider candidate confirmed by tight same industry: ${source.industry ?? "unknown industry"}.`
         : sameIndustry
           ? `Provider candidate is same broad industry: ${source.industry ?? "unknown industry"}. Treated as adjacent until product-level review confirms direct overlap.`
@@ -290,6 +315,16 @@ function classifyPeerGroup(
   related: DefaultUniversePeerRow,
   group: ParsedPeerGroup,
 ): Pick<CandidatePeer, "grade" | "relationType" | "direction" | "score" | "reason"> {
+  if (group.grade && group.relationType) {
+    return {
+      grade: group.grade,
+      relationType: group.relationType,
+      direction: group.direction ?? (group.grade === "A" && group.relationType === "direct_competitor" ? "bidirectional" : "directed"),
+      score: group.score ?? defaultExplicitGroupScore(group.grade, group.relationType),
+      reason: group.reason ?? "Explicit curated peer metadata supplied by enrichment seed.",
+    };
+  }
+
   const text = `${group.category} ${group.label}`.toLowerCase();
   const sameIndustry = normalizeBucket(source.industry) && normalizeBucket(source.industry) === normalizeBucket(related.industry);
   if (text.includes("read_through") || text.includes("upstream") || text.includes("supplier")) {
@@ -328,6 +363,19 @@ function classifyPeerGroup(
   };
 }
 
+function defaultExplicitGroupScore(grade: CompanyPeerGrade, relationType: CompanyPeerRelationType): number {
+  if (grade === "A") {
+    return relationType === "direct_competitor" ? 0.92 : 0.88;
+  }
+  if (grade === "B") {
+    return relationType === "weak_provider_candidate" ? 0.54 : 0.76;
+  }
+  if (grade === "C") {
+    return 0.42;
+  }
+  return 0;
+}
+
 function addReciprocalDirectPeers(
   edgeMap: Map<string, CandidatePeer>,
   byTicker: Map<string, DefaultUniversePeerRow>,
@@ -340,6 +388,9 @@ function addReciprocalDirectPeers(
     const reciprocalSource = byTicker.get(normalizeTicker(edge.related.ticker));
     const reciprocalRelated = byTicker.get(normalizeTicker(edge.source.ticker));
     if (!reciprocalSource || !reciprocalRelated) {
+      continue;
+    }
+    if (usesCuratedGroupsAsSourceOfTruth(reciprocalSource)) {
       continue;
     }
     upsertEdge(edgeMap, {
@@ -374,6 +425,10 @@ function upsertEdge(edgeMap: Map<string, CandidatePeer>, candidate: CandidatePee
   const existingRank = gradeRank(existing.grade);
   const candidateRank = gradeRank(candidate.grade);
   const mergedEvidence = mergeEvidence(existing.evidence, candidate.evidence);
+  if (candidate.grade === "EXCLUDE" && existing.grade !== "EXCLUDE") {
+    edgeMap.set(key, normalizeCandidate({ ...candidate, evidence: mergedEvidence }));
+    return;
+  }
   if (candidateRank > existingRank || (candidateRank === existingRank && candidate.score > existing.score)) {
     edgeMap.set(key, normalizeCandidate({ ...candidate, evidence: mergedEvidence }));
     return;
@@ -472,6 +527,18 @@ function parseTickerListJson(raw: string | null): string[] {
   }
 }
 
+function hasTag(row: DefaultUniversePeerRow, tag: string): boolean {
+  const normalizedTag = normalizeBucket(tag);
+  return parseTickerListJson(row.tags_json).some((value) => normalizeBucket(value) === normalizedTag);
+}
+
+function usesCuratedGroupsAsSourceOfTruth(row: DefaultUniversePeerRow): boolean {
+  return hasTag(row, "industry_override_needed")
+    || hasTag(row, "full_peer_curation_batch_002")
+    || hasTag(row, "full_peer_curation_batch_003")
+    || hasTag(row, "full_peer_curation_batch_004");
+}
+
 function parsePeerGroups(raw: string | null): ParsedPeerGroup[] {
   if (!raw) {
     return [];
@@ -496,11 +563,40 @@ function parsePeerGroups(raw: string | null): ParsedPeerGroup[] {
         category: typeof row.category === "string" && row.category.trim() ? row.category.trim() : "other",
         label: typeof row.label === "string" && row.label.trim() ? row.label.trim() : "Other",
         tickers,
+        grade: parsePeerGrade(row.grade),
+        relationType: parseRelationType(row.relationType ?? row.relation_type),
+        direction: parseDirection(row.direction),
+        score: typeof row.score === "number" && Number.isFinite(row.score) ? roundScore(row.score) : null,
+        reason: typeof row.reason === "string" && row.reason.trim() ? row.reason.trim() : null,
       }];
     });
   } catch {
     return [];
   }
+}
+
+function parsePeerGrade(value: unknown): CompanyPeerGrade | null {
+  return value === "A" || value === "B" || value === "C" || value === "EXCLUDE" ? value : null;
+}
+
+function parseRelationType(value: unknown): CompanyPeerRelationType | null {
+  if (
+    value === "direct_competitor"
+    || value === "adjacent_competitor"
+    || value === "customer_supplier"
+    || value === "infrastructure_read_through"
+    || value === "platform_overlap"
+    || value === "theme_overlap"
+    || value === "weak_provider_candidate"
+    || value === "excluded_self"
+  ) {
+    return value;
+  }
+  return null;
+}
+
+function parseDirection(value: unknown): "directed" | "bidirectional" | null {
+  return value === "directed" || value === "bidirectional" ? value : null;
 }
 
 function groupRows<T>(rows: T[], getKey: (row: T) => string): Map<string, T[]> {

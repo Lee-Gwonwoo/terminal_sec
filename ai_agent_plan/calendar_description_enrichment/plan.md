@@ -1,10 +1,31 @@
 # Calendar 회사 Description 강화 계획
 
+## PLAN CHANGE (2026-05-29) — 전체 description + peer curation을 batch 방식으로 전환
+
+사용자가 `LWLG` 같은 공식 industry와 실제 투자 테마가 어긋나는 ticker까지 포함해 default universe 전체 peer를 다시 정리하라고 요청했고, 이후 peer만 따로 정리하기보다 description 정리와 peer 정리를 industry 우선순위대로 함께 진행하는 편이 효율적이라고 지적했기 때문에, 작업 방식을 아래처럼 확장한다.
+
+- 목표 범위를 default universe 전체 2,278개 ticker로 둔다.
+- 한 번에 완료했다고 선언하지 않고, 테마/제품/value-chain batch 단위로 진행한다.
+- 각 batch는 `회사 이해 -> enhanced description 작성 -> products/revenue/watch/risk 정리 -> curated peer group 작성 -> company_peer_edges 재생성 -> DB/API 검증 -> 사용자 확인 대기` 순서로 처리한다.
+- 다음 batch부터는 industry 우선순위 파일의 순서를 기본 큐로 사용하고, 한 ticker를 볼 때 description과 peer group을 같은 seed entry 안에서 함께 작성한다.
+- 이미 peer만 먼저 정리한 Batch 001~003도 seed 구조상 description 필드를 같이 보유하지만, 이후 검증 보고에서는 description 품질과 peer 품질을 둘 다 명시한다.
+- 진행 현황은 [peer_curation_progress.md](peer_curation_progress.md)에 누적 기록한다.
+- `company_profile_enrichment.peer_groups_json`은 단순 ticker 목록뿐 아니라 `grade`, `relationType`, `direction`, `score`, `reason`을 보존할 수 있게 확장한다.
+- `industry_override_needed` tag가 있는 ticker는 자동 same-industry / same-sector peer 생성을 건너뛴다. 이는 `LWLG`처럼 provider industry가 실제 peer 축을 왜곡하는 경우를 처리하기 위한 규칙이다.
+- Batch 001은 `Optical / photonics / AI data-center interconnect`로 시작한다. 처리 ticker는 `LWLG`, `POET`, `COHR`, `LITE`, `AAOI`, `CIEN`, `FN`, `MTSI`, `IPGP`, `GLW`, `MRVL`, `CRDO`, `AVGO`, `ANET`이다.
+- Batch 002는 `AI semiconductor / accelerator / memory / connectivity`로 처리했다. 처리 ticker는 `NVDA`, `AMD`, `AVGO`, `MRVL`, `MU`, `INTC`, `QCOM`, `TXN`, `ADI`, `MPWR`, `NXPI`, `LRCX`, `AMAT`, `KLAC`, `TER`, `ON`, `MCHP`, `GFS`, `ALAB`, `RMBS`, `CRDO`, `LSCC`, `MTSI`이다.
+- `full_peer_curation_batch_002` tag가 있는 ticker는 curated peer group을 source of truth로 보며, 자동 same-industry/same-sector peer 생성은 건너뛰고 provider raw peers는 C `weak_provider_candidate`로 낮춘다. 이는 semiconductor라는 넓은 industry 때문에 accelerator, memory, analog, equipment가 모두 B로 섞이는 문제를 막기 위한 규칙이다.
+- Batch 003은 `AI server / power / cooling / EMS`로 처리했다. 처리 ticker는 `DELL`, `SMCI`, `HPE`, `VRT`, `CLS`, `JBL`, `FLEX`, `ETN`, `TT`, `NVT`, `HUBB`이다.
+- `full_peer_curation_batch_003` tag가 있는 ticker도 curated peer group을 source of truth로 보며, 자동 same-industry/same-sector peer 생성은 건너뛰고 provider raw peers는 C `weak_provider_candidate`로 낮춘다. 이는 server OEM, EMS/ODM, electrical power, thermal/cooling이 broad hardware/industrial bucket에서 섞이는 문제를 막기 위한 규칙이다.
+- Batch 004는 `Software / Data / AI Platform`을 description + peer 동시 curation 방식으로 처리했다. 처리 ticker는 `MSFT`, `ORCL`, `PLTR`, `PANW`, `CRWD`, `ADBE`, `NOW`, `FTNT`, `DDOG`, `NET`, `CRWV`, `SNOW`, `MDB`, `ZS`, `AKAM`, `CRM`이다.
+- `full_peer_curation_batch_004` tag가 있는 ticker도 curated peer group을 source of truth로 보며, 자동 same-industry/same-sector peer 생성은 건너뛰고 provider raw peers는 C `weak_provider_candidate`로 낮춘다. 이는 broad `Software - Infrastructure`와 `Software - Application` bucket 때문에 cloud platform, data platform, security, observability, edge/CDN, GPU cloud, enterprise applications가 모두 B로 섞이는 문제를 막기 위한 규칙이다.
+- reciprocal direct peer generator는 수동 curated source에 외부 A edge를 역주입하지 않는다. 예를 들어 `ANET -> AVGO` old direct edge가 `AVGO -> ANET` A edge로 강제 생성되지 않게 한다.
+
 ### 목표
 - Calendar Window와 ticker hover에서 기존 provider 원문 description만 보여주는 수준을 넘어, 사용자가 earnings/IPO/SEC 이벤트를 볼 때 바로 이해할 수 있는 **구체적 사업 설명**을 제공한다.
 - 추가 description에는 회사가 실제로 판매하는 상품과 서비스, 사용 고객/사용 사례, 매출이 발생하는 방식, 실적에서 봐야 할 핵심 지표를 포함한다.
 - `peers`는 현재 provider가 준 단순 ticker 배열을 그대로 쓰지 않고, `진짜 동종 peer`, `인접/부분 경쟁`, `read-through`, `약한 후보/제외`로 분류한다.
-- peers는 description보다 먼저 정리해야 하는 핵심 데이터로 본다. 관련주 목록은 A/B/C 등급과 관계 유형을 가진 별도 curated graph로 관리한다.
+- description과 peers는 같은 회사 이해 단계에서 함께 정리한다. 관련주 목록은 A/B/C 등급과 관계 유형을 가진 별도 curated graph로 관리하되, seed 작성은 description과 같은 entry에서 진행한다.
 - 원문 데이터(FMP/Yahoo/Finnhub)는 보존하고, 사람이 검토 가능한 강화 layer를 별도로 둔다.
 
 ### 현재 레포 상태(중요, 확인됨)

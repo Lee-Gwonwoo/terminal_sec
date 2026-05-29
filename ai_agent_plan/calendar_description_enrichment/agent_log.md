@@ -164,3 +164,258 @@
   - `get_errors` 기준 `CalendarWindow.tsx` 오류 0개.
   - frontend `npm.cmd run build` 성공.
 - 사용자 확인 상태: 확인 대기.
+
+## 2026-05-29
+**작성 시각:** 2026-05-29 15:40 (local)
+
+### 전체 Peer Curation Batch 001 — Optical / Photonics / AI Data-Center Interconnect
+- 상태: 확인 대기
+- 적용 지침: `planning.md`
+- 배경:
+  - 사용자가 `LWLG`처럼 공식 industry와 실제 투자 테마가 어긋나는 ticker까지 전체 default universe peer를 다시 정리하라고 요청했다.
+  - 현재 default universe는 2,278개 ticker, 141개 industry, 기존 enrichment는 12개 ticker뿐이라 provider raw peers와 broad industry baseline 의존도가 높았다.
+- 변경 파일:
+  - `terminal/backend/src/services/companyProfileEnrichmentRepository.ts`
+  - `terminal/backend/src/scripts/seedCompanyPeerEdges.ts`
+  - `terminal/backend/src/scripts/seedCompanyProfileEnrichment.ts`
+  - `ai_agent_plan/calendar_description_enrichment/plan.md`
+  - `ai_agent_plan/calendar_description_enrichment/peer_curation_progress.md`
+  - `ai_agent_plan/calendar_description_enrichment/agent_log.md`
+- 구현 내용:
+  - `company_profile_enrichment.peer_groups_json`에 `grade`, `relationType`, `direction`, `score`, `reason` metadata를 보존하도록 확장했다.
+  - 기존 description이 있는 ticker도 description을 덮지 않고 peer group/tag를 merge할 수 있게 변경했다.
+  - `seedCompanyPeerEdges.ts`가 explicit peer group metadata를 우선 사용하고, metadata가 없을 때만 기존 category/label 추론을 사용하도록 변경했다.
+  - curated `EXCLUDE`가 자동 industry/provider candidate보다 우선하도록 변경했다.
+  - `industry_override_needed` tag가 있는 ticker는 same-industry/same-sector 자동 peer 생성을 건너뛰도록 변경했다.
+  - enrichment seed에 Batch 001 ticker 14개를 추가했다: `LWLG`, `POET`, `COHR`, `LITE`, `AAOI`, `CIEN`, `FN`, `MTSI`, `IPGP`, `GLW`, `MRVL`, `CRDO`, `AVGO`, `ANET`.
+  - `LWLG/POET`는 mature optical component 직접 경쟁이 아니라 `platform_overlap`으로 두고, `COHR/LITE/AAOI` 직접 component peer와 구분했다.
+- 실행 결과:
+  - `npm.cmd run seed:company-enrichment`: 전체 실행에서 11 inserted, 15 skipped/merged.
+  - `npm.cmd run seed:company-enrichment -- --force --tickers=LWLG,POET,COHR,LITE,AAOI`: optical core 5개 force refresh.
+  - `npm.cmd run seed:company-peers`: 28,014 edges 생성, visible coverage 2,276/2,278, grade counts `A=808`, `B=20,826`, `C=4,843`, `EXCLUDE=1,537`.
+- 검증 결과:
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 수정 대상 TypeScript 파일 `get_errors` 기준 0 errors |
+| 데이터 seed | ✅ | enrichment seed 및 peer edge 재생성 성공 |
+| DB spot check | ✅ | `LWLG` A peer가 `AAOI/COHR/LITE/POET` `platform_overlap`으로 정리되고, `CIEN/CRDO/FN/GLW/MRVL/MTSI`는 B `infrastructure_read_through`로 확인됨 |
+| false positive 제거 | ✅ | `LWLG`의 chemicals 후보는 EXCLUDE 처리되고, same-industry 자동 B 생성은 `industry_override_needed`로 차단됨 |
+| backend build | ✅ | `terminal/backend`에서 `npm.cmd run build` 성공 |
+| backend tests | ✅ | `terminal/backend`에서 `npm.cmd run test`: 17 files / 104 tests passed |
+| frontend build | ✅ | `termina_web/figma_code/terminal_ui_ver2_finhub`에서 `npm.cmd run build` 성공 |
+| 런타임 API | ✅ | `GET /api/company-profiles/LWLG` 응답에서 curated peers A/B/C 확인 |
+
+- 현재 `LWLG` 기대 결과:
+  - A: `AAOI`, `COHR`, `LITE`, `POET` (`platform_overlap`)
+  - B: `CIEN`, `CRDO`, `FN`, `GLW`, `MRVL`, `MTSI` (`infrastructure_read_through`)
+  - C: `AIRG`, `AMPG`, `APH`, `BDC`, `BELFA`, `CPSH`, `KN`, `MPTI` (`weak_provider_candidate`)
+  - EXCLUDE: chemicals false positive + self
+- 다음 단계 후보:
+  - Batch 002: AI Semiconductor / Accelerator / Memory
+  - Batch 003: AI Server / Power / Cooling / EMS
+  - Batch 004: Software / Data / AI Platform
+- 남은 확인:
+  - 사용자가 Calendar Window에서 `Curated Peers` 표시를 직접 확인하면 `사용자 확인 후 완료`로 갱신
+
+## 2026-05-29
+**작성 시각:** 2026-05-29 15:57 (local)
+
+### 전체 Peer Curation Batch 002 — AI Semiconductor / Accelerator / Memory / Connectivity
+- 상태: 확인 대기
+- 적용 지침: `planning.md`
+- 배경:
+  - 사용자가 Batch 001 하나만 고치는 것이 아니라 default universe 전체를 회사별로 이해하고 단계적으로 정리하라고 지시했다.
+  - Batch 002는 AI accelerator, custom/networking silicon, HBM/memory, CPU/foundry, analog/embedded, semiconductor equipment가 모두 같은 `Semiconductors` basket으로 뭉개지는 문제를 줄이는 데 초점을 뒀다.
+- 변경 파일:
+  - `terminal/backend/src/scripts/seedCompanyProfileEnrichment.ts`
+  - `terminal/backend/src/scripts/seedCompanyPeerEdges.ts`
+  - `ai_agent_plan/calendar_description_enrichment/peer_curation_progress.md`
+  - `ai_agent_plan/calendar_description_enrichment/agent_log.md`
+- 처리 ticker:
+  - `NVDA`, `AMD`, `AVGO`, `MRVL`, `MU`, `INTC`, `QCOM`, `TXN`, `ADI`, `MPWR`, `NXPI`, `LRCX`, `AMAT`, `KLAC`, `TER`, `ON`, `MCHP`, `GFS`, `ALAB`, `RMBS`, `CRDO`, `LSCC`, `MTSI`
+- 구현 내용:
+  - Batch 002용 `SEMICONDUCTOR_SEED`를 추가하고 23개 ticker에 상세 description, product/revenue/watch/risk, explicit peer group metadata를 작성했다.
+  - 기존 AI pilot/optical seed에서 남은 stale peer groups를 정리하기 위해 Batch 002 ticker를 `--force`로 refresh했다.
+  - `full_peer_curation_batch_002` tag가 있는 source는 curated peer group을 source of truth로 보고 same-industry/same-sector 자동 peer 생성을 건너뛰도록 변경했다.
+  - Batch 002 source의 raw provider peers는 숨기지 않고 C `weak_provider_candidate`로 낮춰, Calendar cell 확장 시 감사용 후보로 볼 수 있게 했다.
+  - reciprocal direct peer generator가 Batch 002 source에 외부 A edge를 역주입하지 않도록 막았다.
+  - seed script 출력 theme 이름을 `ai_tech_plus_optical_photonics_plus_semiconductors`로 갱신했다.
+- 주요 peer 결정:
+  - `NVDA`: A `AMD`; B `AVGO/MRVL` custom AI silicon, `MU/RMBS` memory read-through; semicap은 C read-through.
+  - `AMD`: A `NVDA`, `INTC/QCOM` compute platform overlap; B `AVGO/MRVL` custom AI silicon adjacent.
+  - `AVGO/MRVL/CRDO/ALAB`: AI connectivity/custom silicon/SerDes/PCIe-CXL/optical-electrical interconnect cluster.
+  - `MU/RMBS`: memory/HBM/interface cluster, accelerator vendors는 demand read-through.
+  - `TXN/ADI/MPWR/NXPI/MCHP/ON`: analog/embedded/auto/power cluster.
+  - `LRCX/AMAT/KLAC/TER`: semicap equipment/test cluster.
+  - `INTC/GFS`: CPU/foundry/manufacturing 축으로 별도 분리.
+- 실행 결과:
+  - `npm.cmd run seed:company-enrichment -- --force --tickers=...`: Batch 002 ticker force refresh 성공.
+  - `npm.cmd run seed:company-peers`: 28,025 edges 생성, visible coverage 2,276/2,278, grade counts `A=855`, `B=20,656`, `C=4,977`, `EXCLUDE=1,537`.
+- 검증 결과:
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 수정 TypeScript 파일 `get_errors` 기준 0 errors |
+| 데이터 seed | ✅ | enrichment seed force refresh 및 peer edge 재생성 성공 |
+| DB spot check | ✅ | `NVDA`, `AMD`, `AVGO`, `CRDO`, `MU`, `TXN`, `LRCX`, `ALAB` 대표 peer rank 확인 |
+| reciprocal cleanup | ✅ | `AVGO/CRDO`에 `ANET` A direct edge가 역주입되지 않는 것 확인 |
+| 런타임 API | ✅ | `GET /api/company-profiles/NVDA`, `TXN`, `ALAB` 응답에서 refreshed `curated_peers` 확인 |
+| backend build | ✅ | `terminal/backend`에서 `npm.cmd run build` 성공 |
+| backend tests | ✅ | `terminal/backend`에서 `npm.cmd run test`: 17 files / 104 tests passed |
+| frontend build | ✅ | `termina_web/figma_code/terminal_ui_ver2_finhub`에서 `npm.cmd run build` 성공 |
+
+- 주의/리스크:
+  - `TSM`, `ASML`, `Samsung Memory`, `ARM`처럼 실제 peer로 중요한 회사가 default universe에 없거나 이번 default query에 없어서 ticker edge로는 생성하지 않고 `companies` evidence로만 남겼다.
+  - provider raw peers는 C 후보로 남겨 두었으므로, Calendar 셀을 펼치면 약한 후보까지 보인다. 이는 감사 가능성을 위한 의도된 동작이다.
+  - seed 실행 때 기존 `initDb()` migration 로그 `[db] purged legacy FINNHUB sec_filing rows: news_items=0, sec_filings=70635`가 반복 출력됐다. 이번 변경 로직은 아니며 별도 점검 후보로 남긴다.
+- 다음 단계 후보:
+  - Batch 003: AI Server / Power / Cooling / EMS (`DELL`, `SMCI`, `HPE`, `VRT`, `CLS`, `JBL`, `FLEX`, `ETN`, `TT`, `NVT`, `HUBB`).
+- 사용자 확인 상태: 확인 대기.
+
+## 2026-05-29
+**작성 시각:** 2026-05-29 16:11 (local)
+
+### 전체 Peer Curation Batch 003 — AI Server / Power / Cooling / EMS
+- 상태: 확인 대기
+- 적용 지침: `planning.md`
+- 배경:
+  - 사용자가 Batch 002 이후 계속 진행하라고 지시했다.
+  - Batch 003은 AI server OEM, EMS/ODM manufacturing, electrical power, thermal/cooling infrastructure가 broad hardware/industrial bucket에서 섞이는 문제를 줄이는 데 초점을 뒀다.
+- 변경 파일:
+  - `terminal/backend/src/scripts/seedCompanyProfileEnrichment.ts`
+  - `terminal/backend/src/scripts/seedCompanyPeerEdges.ts`
+  - `ai_agent_plan/calendar_description_enrichment/plan.md`
+  - `ai_agent_plan/calendar_description_enrichment/peer_curation_progress.md`
+  - `ai_agent_plan/calendar_description_enrichment/agent_log.md`
+- 처리 ticker:
+  - `DELL`, `SMCI`, `HPE`, `VRT`, `CLS`, `JBL`, `FLEX`, `ETN`, `TT`, `NVT`, `HUBB`
+- 구현 내용:
+  - Batch 003용 `SERVER_POWER_SEED`를 추가하고 11개 ticker에 상세 description, product/revenue/watch/risk, explicit peer group metadata를 작성했다.
+  - 기존 AI pilot에 있던 `DELL`, `SMCI`, `HPE`, `VRT`는 `--force`로 refresh해 metadata 없는 old peer group을 최신 구조로 교체했다.
+  - `full_peer_curation_batch_003` tag가 있는 source도 curated peer group을 source of truth로 보고 same-industry/same-sector 자동 peer 생성을 건너뛰도록 변경했다.
+  - Batch 003 source의 raw provider peers는 숨기지 않고 C `weak_provider_candidate`로 낮춰, Calendar cell 확장 시 감사용 후보로 볼 수 있게 했다.
+  - seed script 출력 theme 이름을 `ai_tech_plus_optical_photonics_plus_semiconductors_plus_server_power`로 갱신했다.
+- 주요 peer 결정:
+  - `DELL/SMCI/HPE`: A server OEM/system peer.
+  - `CLS/JBL/FLEX`: A EMS/ODM and hardware manufacturing peer.
+  - `DELL/SMCI/HPE -> CLS/JBL/FLEX`: B `customer_supplier` value-chain read-through.
+  - `VRT/ETN/NVT/HUBB`: A/B power, electrical, enclosure, data-center physical infrastructure group.
+  - `TT`: 공식 industry는 `Construction`이지만 Batch 003에서는 HVAC/thermal/cooling exposure로만 반영. `VRT`와 A `platform_overlap`, electrical names와 B adjacent로 구분.
+  - `DELL/SMCI/HPE -> VRT/ETN/TT/NVT/HUBB`: B `infrastructure_read_through`.
+- 실행 결과:
+  - `npm.cmd run seed:company-enrichment -- --force --tickers=DELL,SMCI,HPE,VRT,CLS,JBL,FLEX,ETN,TT,NVT,HUBB`: 7 inserted, 8 updated. 중복 update는 기존 AI pilot entry와 Batch 003 entry가 모두 filter에 걸린 뒤 Batch 003 entry가 마지막으로 적용된 결과다.
+  - `npm.cmd run seed:company-peers`: 28,004 edges 생성, visible coverage 2,276/2,278, grade counts `A=853`, `B=20,610`, `C=5,004`, `EXCLUDE=1,537`.
+- 검증 결과:
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 수정 TypeScript 파일 `get_errors` 기준 0 errors |
+| 데이터 seed | ✅ | enrichment seed force refresh 및 peer edge 재생성 성공 |
+| DB spot check | ✅ | `DELL`, `SMCI`, `HPE`, `CLS`, `JBL`, `FLEX`, `VRT`, `ETN`, `TT`, `NVT`, `HUBB` 대표 peer rank 확인 |
+| 런타임 API | ✅ | `GET /api/company-profiles/DELL`, `VRT`, `CLS` 응답에서 refreshed `curated_peers` 확인 |
+| backend build | ✅ | `terminal/backend`에서 `npm.cmd run build` 성공 |
+| backend tests | ✅ | `terminal/backend`에서 `npm.cmd run test`: 17 files / 104 tests passed |
+| frontend build | ✅ | `termina_web/figma_code/terminal_ui_ver2_finhub`에서 `npm.cmd run build` 성공 |
+
+- 주의/리스크:
+  - `TT`는 일반 HVAC/Construction bucket에서 들어온 이름이라, AI 관련성은 data-center cooling/thermal로 제한해서 봐야 한다.
+  - provider raw peers는 C 후보로 남겨 두었으므로, Calendar 셀을 펼치면 약한 후보까지 보인다. 이는 감사 가능성을 위한 의도된 동작이다.
+  - seed 실행 때 기존 `initDb()` migration 로그 `[db] purged legacy FINNHUB sec_filing rows: news_items=0, sec_filings=70635`가 반복 출력됐다. 이번 변경 로직은 아니며 별도 점검 후보로 남긴다.
+- 다음 단계 후보:
+  - Batch 004: Software / Data / AI Platform (`SNOW`, `PLTR`, `MDB`, `DDOG`, `NET`, `CRWD`, `ZS`, `PANW`, `ORCL`, `MSFT`, `CRM`, `NOW`).
+- 사용자 확인 상태: 확인 대기.
+
+## 2026-05-29
+**작성 시각:** 2026-05-29 16:13 (local)
+
+### PLAN CHANGE — Description + Peer를 같은 industry batch에서 함께 정리
+- 상태: 확인 대기
+- 적용 지침: `planning.md`
+- 배경:
+  - 사용자가 peer만 따로 정리하기보다 description 정리와 peer 정리를 industry 우선순위대로 함께 진행하는 편이 token 효율과 작업 품질 측면에서 낫다고 지적했다.
+  - 현재 `company_profile_enrichment` seed 구조는 이미 `shortDescription`, `enhancedDescription`, products/revenue/watch/risk, `peerGroups`를 한 entry 안에 함께 담을 수 있다.
+- 변경 파일:
+  - `ai_agent_plan/calendar_description_enrichment/plan.md`
+  - `ai_agent_plan/calendar_description_enrichment/peer_curation_progress.md`
+  - `ai_agent_plan/calendar_description_enrichment/default_ticker_industry_priority.md`
+  - `ai_agent_plan/calendar_description_enrichment/agent_log.md`
+- 결정:
+  - 다음 batch부터는 “peer curation batch”가 아니라 “description + peer curation batch”로 부른다.
+  - industry 우선순위와 market cap 순서를 기본 큐로 사용한다.
+  - 한 ticker를 볼 때 enhanced description, products, revenue model, key metrics, watch points, risks, A/B/C peer group을 같은 seed entry에서 함께 정리한다.
+  - Batch 완료 보고에는 description 품질 검증과 peer graph 검증을 둘 다 포함한다.
+- 검증 상태:
+  - 문서 3개와 log를 갱신했고, diagnostics 0 errors 확인 예정.
+- 사용자 확인 상태: 확인 대기.
+
+## 2026-05-29
+**작성 시각:** 2026-05-29 16:21 (local)
+
+### 전체 Description + Peer Curation Batch 004 — Software / Data / AI Platform
+- 상태: 확인 대기
+- 적용 지침: `planning.md`
+- 배경:
+  - 사용자가 peer만 따로 정리하지 말고 description 정리와 peer 정리를 industry 우선순위대로 함께 하라고 지시했다.
+  - Batch 004는 `default_ticker_industry_priority.md`의 Software - Infrastructure / Software - Application 상위 ticker를 중심으로, cloud platform, data/AI platform, security, observability, edge/CDN, GPU cloud, enterprise application, creative/digital experience software를 분리했다.
+- 변경 파일:
+  - `terminal/backend/src/scripts/seedCompanyProfileEnrichment.ts`
+  - `terminal/backend/src/scripts/seedCompanyPeerEdges.ts`
+  - `ai_agent_plan/calendar_description_enrichment/plan.md`
+  - `ai_agent_plan/calendar_description_enrichment/peer_curation_progress.md`
+  - `ai_agent_plan/calendar_description_enrichment/agent_log.md`
+- 처리 ticker:
+  - `MSFT`, `ORCL`, `PLTR`, `PANW`, `CRWD`, `ADBE`, `NOW`, `FTNT`, `DDOG`, `NET`, `CRWV`, `SNOW`, `MDB`, `ZS`, `AKAM`, `CRM`
+- 구현 내용:
+  - `SOFTWARE_PLATFORM_SEED`를 추가하고 16개 ticker에 `shortDescription`, `enhancedDescription`, products, revenue model, key metrics, watch points, risks, explicit peer group metadata를 함께 작성했다.
+  - 기존 AI pilot에 있던 `PLTR`, `SNOW` old seed entry를 제거해 Batch 004 entry를 단일 source로 정리했다.
+  - `full_peer_curation_batch_004` tag가 있는 source도 curated peer group을 source of truth로 보고 same-industry/same-sector 자동 peer 생성을 건너뛰도록 변경했다.
+  - Batch 004 source의 raw provider peers는 C `weak_provider_candidate`로 낮춰, Calendar cell 확장 시 감사용 후보로 볼 수 있게 했다.
+  - seed script 출력 theme 이름을 `ai_tech_plus_optical_photonics_plus_semiconductors_plus_server_power_plus_software_platform`으로 갱신했다.
+- 주요 peer 결정:
+  - `MSFT/ORCL`: hyperscale cloud, enterprise software, database/AI platform overlap.
+  - `PLTR/SNOW/MDB`: data/AI platform cluster. PLTR은 operational AI/ontology, SNOW는 cloud data platform, MDB는 developer database/data platform으로 분리.
+  - `PANW/CRWD/FTNT/ZS`: cybersecurity platform cluster. `NET/AKAM`은 edge/security adjacent로 처리.
+  - `DDOG`: observability/devops cluster. security/data platform names는 B adjacent.
+  - `NET/AKAM`: edge/CDN/application delivery cluster.
+  - `CRWV`: GPU cloud/AI infrastructure로 분리. `NBIS/APLD/CORZ`는 A, `MSFT/ORCL/NVDA/DELL/SMCI/VRT`는 B adjacent/read-through.
+  - `CRM/NOW/ADBE`: enterprise application/workflow/creative-digital-experience software cluster.
+- 실행 결과:
+  - `npm.cmd run seed:company-enrichment -- --force --tickers=MSFT,ORCL,PLTR,PANW,CRWD,ADBE,NOW,FTNT,DDOG,NET,CRWV,SNOW,MDB,ZS,AKAM,CRM`: clean 재실행 기준 16 updated, limit 16.
+  - `npm.cmd run seed:company-peers`: 28,014 edges 생성, visible coverage 2,276/2,278, grade counts `A=888`, `B=20,538`, `C=5,051`, `EXCLUDE=1,537`.
+- 검증 결과:
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 수정 TypeScript 파일 `get_errors` 기준 0 errors |
+| 데이터 seed | ✅ | enrichment seed force refresh 및 peer edge 재생성 성공 |
+| description completeness | ✅ | Batch 004 ticker 16/16에서 short/enhanced/products/peerGroups/tag 존재 확인 |
+| DB spot check | ✅ | `MSFT`, `PANW`, `SNOW`, `NET`, `CRWV` 대표 peer rank 확인 |
+| 런타임 API | ✅ | `GET /api/company-profiles/MSFT`, `PANW`, `SNOW`, `NET`, `CRWV` 응답에서 `short_description`과 `curated_peers` 확인 |
+| backend build | ✅ | `terminal/backend`에서 `npm.cmd run build` 성공 |
+| backend tests | ✅ | `terminal/backend`에서 `npm.cmd run test`: 17 files / 104 tests passed |
+| frontend build | ✅ | `termina_web/figma_code/terminal_ui_ver2_finhub`에서 `npm.cmd run build` 성공 |
+
+- 주의/리스크:
+  - `MSFT/ORCL` 같은 hyperscaler peer에는 `Amazon Web Services`, `Google Cloud`, `Databricks`, `Canva`, `Figma`, `Lambda`, `Runpod`처럼 default ticker edge가 아닌 `companies` evidence만 있는 대상이 있다.
+  - provider raw peers는 C 후보로 남겨 두었으므로, Calendar 셀을 펼치면 약한 후보까지 보인다. 이는 감사 가능성을 위한 의도된 동작이다.
+  - seed 실행 때 기존 `initDb()` migration 로그 `[db] purged legacy FINNHUB sec_filing rows: news_items=0, sec_filings=70635`가 반복 출력됐다. 이번 변경 로직은 아니며 별도 점검 후보로 남긴다.
+- 다음 단계 후보:
+  - Software - Infrastructure/Application 남은 상위 ticker를 이어서 처리하거나, 사용자가 원하면 Space / Defense / Satellite / Dual-use tech queue로 넘어간다.
+- 사용자 확인 상태: 확인 대기.
+
+## 2026-05-29
+**작성 시각:** 2026-05-29 16:26 (local)
+
+### Description + Peer 정리 완료 ticker 요약 파일 생성
+- 상태: 확인 대기
+- 적용 지침: `planning.md`
+- 작업 내용:
+  - 사용자가 지금까지 description/peers 정리된 ticker만 따로 간단히 볼 수 있는 파일 생성을 요청했다.
+  - Batch 001~004 처리 ticker를 기준으로 중복 제거한 unique 60개 ticker 목록을 정리했다.
+- 생성 파일:
+  - `ai_agent_plan/calendar_description_enrichment/description_peer_curated_tickers.md`
+- 검증 결과:
+  - diagnostics 0 errors.
+  - DB 확인 결과 `rows=60`, `short_ok=60`, `enhanced_ok=60`, `peer_groups_ok=60`.
+- 사용자 확인 상태: 확인 대기.

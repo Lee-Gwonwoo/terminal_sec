@@ -6,8 +6,9 @@
 - market cap coverage: 2,276/2,278개. market cap이 없는 ticker는 각 industry 맨 아래에 둔다.
 - market cap: `company_profiles`의 ticker별 최신 non-null `market_cap`을 사용한다.
 - 정렬: AI/tech 관련 industry를 먼저 배치하고, 각 industry 내부는 market cap 내림차순으로 정렬한다.
-- 용도: description enrichment를 어떤 industry/ticker부터 추가 작성할지 정하는 작업 큐다.
+- 용도: description enrichment와 peer group curation을 어떤 industry/ticker부터 함께 작성할지 정하는 작업 큐다.
 - 중복 처리: 같은 ticker가 여러 industry/subset에 중복 등장하면 description은 한 번만 작성한다. 이미 enrichment가 있으면 재작성하지 않고, 필요한 경우 theme/category tag만 추가한다.
+- Batch 처리 방식: industry 우선순위와 market cap 순서를 기본으로 하되, 한 ticker를 볼 때 `shortDescription`, `enhancedDescription`, products/revenue/watch/risk, A/B/C peer group을 같은 seed entry 안에서 함께 정리한다.
 
 ## AI/Tech 우선 Industry 순서
 | 우선순위 | Industry | Ticker 수 | Top tickers by market cap |

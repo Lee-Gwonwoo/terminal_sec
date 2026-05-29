@@ -6,6 +6,19 @@ export interface CompanyProfilePeerGroup {
   tickers?: string[];
   companies?: string[];
   note?: string;
+  grade?: "A" | "B" | "C" | "EXCLUDE";
+  relationType?:
+    | "direct_competitor"
+    | "adjacent_competitor"
+    | "customer_supplier"
+    | "infrastructure_read_through"
+    | "platform_overlap"
+    | "theme_overlap"
+    | "weak_provider_candidate"
+    | "excluded_self";
+  direction?: "directed" | "bidirectional";
+  score?: number;
+  reason?: string;
 }
 
 export interface CompanyProfileEnrichmentInput {
@@ -112,14 +125,16 @@ export async function upsertCompanyProfileEnrichment(
   const source = normalizeText(params.source) ?? "curated";
   const version = normalizeText(params.version) ?? "v1";
   const nextTags = normalizeStringArray(params.tags);
+  const nextPeerGroups = normalizePeerGroups(params.peerGroups);
 
   if (existing && params.skipExistingDescription !== false && existing.enhanced_description.trim()) {
     const mergedTags = mergeStringArrays(parseStringJsonArray(existing.tags_json), nextTags);
+    const mergedPeerGroups = mergePeerGroups(parsePeerGroupJsonArray(existing.peer_groups_json), nextPeerGroups);
     await db.run(
       `UPDATE company_profile_enrichment
-       SET tags_json = ?, updated_at = ?
+       SET peer_groups_json = ?, tags_json = ?, updated_at = ?
        WHERE id = ?`,
-      [JSON.stringify(mergedTags), now, existing.id],
+      [JSON.stringify(mergedPeerGroups), JSON.stringify(mergedTags), now, existing.id],
     );
     const row = await getCompanyProfileEnrichmentByTicker(ticker);
     if (!row) {
@@ -140,7 +155,7 @@ export async function upsertCompanyProfileEnrichment(
     JSON.stringify(normalizeStringArray(params.keyMetrics)),
     JSON.stringify(normalizeStringArray(params.watchPoints)),
     JSON.stringify(normalizeStringArray(params.risks)),
-    JSON.stringify(normalizePeerGroups(params.peerGroups)),
+    JSON.stringify(nextPeerGroups),
     JSON.stringify(existing ? mergeStringArrays(parseStringJsonArray(existing.tags_json), nextTags) : nextTags),
     JSON.stringify(normalizeStringArray(params.sourceUrls)),
     normalizeText(params.sourceNote),
@@ -216,18 +231,60 @@ function mergeStringArrays(first: string[], second: string[]): string[] {
   return merged;
 }
 
+function mergePeerGroups(first: CompanyProfilePeerGroup[], second: CompanyProfilePeerGroup[]): CompanyProfilePeerGroup[] {
+  const byKey = new Map<string, CompanyProfilePeerGroup>();
+  for (const group of [...first, ...second]) {
+    const normalized = normalizePeerGroups([group])[0];
+    if (!normalized) {
+      continue;
+    }
+    const key = `${normalized.category.toLowerCase()}|${normalized.label.toLowerCase()}`;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, normalized);
+      continue;
+    }
+    byKey.set(key, {
+      ...existing,
+      ...normalized,
+      tickers: mergeStringArrays(existing.tickers ?? [], normalized.tickers ?? []).map((ticker) => ticker.toUpperCase()),
+      companies: mergeStringArrays(existing.companies ?? [], normalized.companies ?? []),
+      note: normalized.note ?? existing.note,
+      reason: normalized.reason ?? existing.reason,
+      grade: normalized.grade ?? existing.grade,
+      relationType: normalized.relationType ?? existing.relationType,
+      direction: normalized.direction ?? existing.direction,
+      score: normalized.score ?? existing.score,
+    });
+  }
+  return Array.from(byKey.values());
+}
+
 function normalizePeerGroups(groups: CompanyProfilePeerGroup[] | undefined): CompanyProfilePeerGroup[] {
   if (!Array.isArray(groups)) {
     return [];
   }
   return groups
-    .map((group) => ({
-      category: normalizeText(group.category) ?? "other",
-      label: normalizeText(group.label) ?? normalizeText(group.category) ?? "Other",
-      tickers: normalizeStringArray(group.tickers).map((ticker) => ticker.toUpperCase()),
-      companies: normalizeStringArray(group.companies),
-      note: normalizeText(group.note) ?? undefined,
-    }))
+    .map((group) => {
+      const grade = normalizePeerGrade(group.grade);
+      const relationType = normalizePeerRelationType(group.relationType);
+      const direction = normalizePeerDirection(group.direction);
+      const score = typeof group.score === "number" && Number.isFinite(group.score)
+        ? Math.max(0, Math.min(1, Math.round(group.score * 1000) / 1000))
+        : undefined;
+      return {
+        category: normalizeText(group.category) ?? "other",
+        label: normalizeText(group.label) ?? normalizeText(group.category) ?? "Other",
+        tickers: normalizeStringArray(group.tickers).map((ticker) => ticker.toUpperCase()),
+        companies: normalizeStringArray(group.companies),
+        note: normalizeText(group.note) ?? undefined,
+        grade: grade ?? undefined,
+        relationType: relationType ?? undefined,
+        direction: direction ?? undefined,
+        score,
+        reason: normalizeText(group.reason) ?? undefined,
+      };
+    })
     .filter((group) => group.category && (group.tickers.length > 0 || group.companies.length > 0 || group.note));
 }
 
@@ -240,17 +297,52 @@ function parsePeerGroupJsonArray(raw: string | null | undefined): CompanyProfile
   const parsed = parseJsonArray(raw);
   return parsed
     .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
-    .map((item) => ({
-      category: normalizeText(item.category) ?? "other",
-      label: normalizeText(item.label) ?? normalizeText(item.category) ?? "Other",
-      tickers: Array.isArray(item.tickers)
-        ? item.tickers.filter((ticker): ticker is string => typeof ticker === "string")
-        : [],
-      companies: Array.isArray(item.companies)
-        ? item.companies.filter((company): company is string => typeof company === "string")
-        : [],
-      note: normalizeText(item.note) ?? undefined,
-    }));
+    .map((item) => {
+      const score = typeof item.score === "number" && Number.isFinite(item.score)
+        ? item.score
+        : undefined;
+      return {
+        category: normalizeText(item.category) ?? "other",
+        label: normalizeText(item.label) ?? normalizeText(item.category) ?? "Other",
+        tickers: Array.isArray(item.tickers)
+          ? item.tickers.filter((ticker): ticker is string => typeof ticker === "string")
+          : [],
+        companies: Array.isArray(item.companies)
+          ? item.companies.filter((company): company is string => typeof company === "string")
+          : [],
+        note: normalizeText(item.note) ?? undefined,
+        grade: normalizePeerGrade(item.grade) ?? undefined,
+        relationType: normalizePeerRelationType(item.relationType ?? item.relation_type) ?? undefined,
+        direction: normalizePeerDirection(item.direction) ?? undefined,
+        score,
+        reason: normalizeText(item.reason) ?? undefined,
+      };
+    });
+}
+
+function normalizePeerGrade(value: unknown): CompanyProfilePeerGroup["grade"] | null {
+  return value === "A" || value === "B" || value === "C" || value === "EXCLUDE" ? value : null;
+}
+
+function normalizePeerRelationType(value: unknown): CompanyProfilePeerGroup["relationType"] | null {
+  const normalized = normalizeText(value);
+  if (
+    normalized === "direct_competitor"
+    || normalized === "adjacent_competitor"
+    || normalized === "customer_supplier"
+    || normalized === "infrastructure_read_through"
+    || normalized === "platform_overlap"
+    || normalized === "theme_overlap"
+    || normalized === "weak_provider_candidate"
+    || normalized === "excluded_self"
+  ) {
+    return normalized;
+  }
+  return null;
+}
+
+function normalizePeerDirection(value: unknown): CompanyProfilePeerGroup["direction"] | null {
+  return value === "directed" || value === "bidirectional" ? value : null;
 }
 
 function parseJsonArray(raw: string | null | undefined): unknown[] {
