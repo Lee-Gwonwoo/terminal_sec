@@ -13,6 +13,7 @@ export const CALENDAR_TYPE_CONFIG = [
       "ipo_date",
       "company_name",
       "industry",
+      "peers",
       "report_date",
       "time_of_day",
       "session",
@@ -39,6 +40,7 @@ export const CALENDAR_TYPE_CONFIG = [
       "company_name",
       "exchange",
       "industry",
+      "peers",
       "status",
       "price_range",
       "shares",
@@ -61,25 +63,25 @@ export const CALENDAR_TYPE_CONFIG = [
     key: "dividends",
     label: "Dividends",
     supports: [],
-    columns: ["ticker", "name", "industry", "ex_date", "pay_date", "amount", "yield", "market_cap"]
+    columns: ["ticker", "name", "industry", "peers", "ex_date", "pay_date", "amount", "yield", "market_cap"]
   },
   {
     key: "splits",
     label: "Splits",
     supports: [],
-    columns: ["ticker", "name", "industry", "split_date", "ratio", "market_cap"]
+    columns: ["ticker", "name", "industry", "peers", "split_date", "ratio", "market_cap"]
   },
   {
     key: "analyst_ratings",
     label: "Analyst Ratings",
     supports: [],
-    columns: ["ticker", "firm", "action", "rating", "price_target", "date"]
+    columns: ["ticker", "peers", "firm", "action", "rating", "price_target", "date"]
   },
   {
     key: "sec_filings",
     label: "SEC Filings",
     supports: [],
-    columns: ["ticker", "form_type", "filed_at", "link"]
+    columns: ["ticker", "peers", "form_type", "filed_at", "link"]
   },
   {
     key: "economics",
@@ -131,6 +133,7 @@ type CalendarTickerMetadataRow = {
   sector: string | null;
   industry: string | null;
   market_cap: number | null;
+  peers_json: string | null;
   float_pct: number | null;
   institutional_pct: number | null;
   insider_pct: number | null;
@@ -413,6 +416,7 @@ function mapCalendarRow(
     sector: metadata?.sector ?? getStringField(fieldsJson.sector) ?? null,
     industry: metadata?.industry ?? ipoSec?.sec_industry ?? getStringField(fieldsJson.industry) ?? null,
     market_cap: metadata?.market_cap ?? null,
+    peers: parsePeersJson(metadata?.peers_json),
     float_pct: metadata?.float_pct ?? null,
     institutional_pct: metadata?.institutional_pct ?? null,
     insider_pct: metadata?.insider_pct ?? null,
@@ -485,6 +489,16 @@ async function getCalendarTickerMetadataMap(
               LIMIT 1
             ) AS market_cap,
             (
+              SELECT cp.peers_json
+              FROM company_profiles cp
+              WHERE cp.security_id = s.id
+                AND cp.peers_json IS NOT NULL
+                AND TRIM(cp.peers_json) != ''
+                AND TRIM(cp.peers_json) != '[]'
+              ORDER BY cp.fetched_at DESC, cp.id DESC
+              LIMIT 1
+            ) AS peers_json,
+            (
               SELECT cp.float_pct
               FROM company_profiles cp
               WHERE cp.security_id = s.id AND cp.float_pct IS NOT NULL
@@ -539,6 +553,26 @@ async function getCalendarTickerMetadataMap(
   );
 
   return new Map(rows.map((row) => [row.ticker.toUpperCase(), row]));
+}
+
+function parsePeersJson(raw: string | null | undefined): string[] {
+  if (!raw) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return Array.from(new Set(
+      parsed
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim().toUpperCase())
+        .filter(Boolean),
+    ));
+  } catch {
+    return [];
+  }
 }
 
 function parseFieldsJson(raw: string): Record<string, unknown> {

@@ -587,6 +587,7 @@ SEC filing companion table.
 - `POST /api/company-profiles/pull-fmp`
 - `POST /api/company-profiles/pull-yahoo`
 - `POST /api/company-profiles/pull-peers`
+- `POST /api/company-profiles/pull-fmp-peers`
 - `POST /api/company-profiles/pull-market-cap`
 - `POST /api/company-profiles/pull-ipo-date`
 - `GET /api/db/inspect`
@@ -1144,7 +1145,7 @@ Control Window / localStorage 공통 설정:
 - `cursor`
 - `limit`
 
-응답 row는 `calendar_events.meta_json` 값에 더해 ticker metadata를 병합한다. earnings 같은 비-IPO 이벤트의 `[][][]ipo_date[][][]`는 `company_profiles.ipo_date`의 최신 non-empty 값이며, IPO 이벤트의 `[][][]ipo_date[][][]`는 IPO event date/direct field를 우선 사용한다.
+응답 row는 `calendar_events.meta_json` 값에 더해 ticker metadata를 병합한다. earnings 같은 비-IPO 이벤트의 `[][][]ipo_date[][][]`는 `company_profiles.ipo_date`의 최신 non-empty 값이며, IPO 이벤트의 `[][][]ipo_date[][][]`는 IPO event date/direct field를 우선 사용한다. `[][][]peers[][][]`는 `company_profiles.peers_json`의 최신 non-empty JSON 배열을 string 배열로 파싱해 내려주며, 없으면 빈 배열이다.
 
 ### `POST /api/ibkr/calendar/update`
 
@@ -1211,6 +1212,16 @@ Control Window / localStorage 공통 설정:
 
 요청 body 옵션: `tickerConcurrency` (기본=1), `skipExisting` (기본=true)
 
+### `POST /api/company-profiles/pull-fmp-peers`
+
+응답 컬럼:
+
+- `[][][]jobId[][][]`
+
+요청 body 옵션: `[][][]tickers[][][]`, `[][][]maxTickers[][][]`, `[][][]concurrency[][][]` 또는 `[][][]tickerConcurrency[][][]` (기본=5), `[][][]requestIntervalMs[][][]` (기본=250ms), `[][][]skipExisting[][][]` (기본=true)
+
+동작: FMP `stable/stock-peers?symbol=...` 응답의 `symbol` 목록을 `company_profiles.peers_json`에 `source = 'fmp'`로 저장한다. `skipExisting=true`이면 Finnhub/FMP 등 source와 무관하게 이미 non-empty `peers_json`이 있는 ticker는 건너뛴다.
+
 ### `POST /api/company-profiles/pull-market-cap`
 
 응답 컬럼:
@@ -1265,7 +1276,7 @@ Control Window / localStorage 공통 설정:
 - `CaseResearchWindow`는 `/api/research/*` 전체를 사용해 섹션/페이지 CRUD, reorder, 검색, 자동 저장을 수행한다.
 - `EvidenceTableWindow`는 `GET /api/model2/analyses`, `GET /api/model2/analyses/:analysisId/cases`, `GET /api/model2/analyses/:analysisId/evidence`를 사용한다.
 - `CaseDescriptionWindow`는 backend 호출 없이 `EvidenceTableWindow`가 보낸 case metadata를 같은 탭 안의 보조 창으로 렌더링한다.
-- `CalendarWindow`는 `GET /api/calendar/types`, `GET /api/calendar/events`, `GET /api/calendar/financials/:ticker`, `POST /api/fmp/calendar/earnings/update`, `POST /api/fmp/calendar/financials/update`, `POST /api/fmp/calendar/ipos/update`, `POST /api/fmp/calendar/ipos/sec-download`, `GET /api/jobs/:jobId`를 사용한다.
+- `CalendarWindow`는 `GET /api/calendar/types`, `GET /api/calendar/events`, `GET /api/calendar/financials/:ticker`, `POST /api/fmp/calendar/earnings/update`, `POST /api/fmp/calendar/financials/update`, `POST /api/fmp/calendar/ipos/update`, `POST /api/fmp/calendar/ipos/sec-download`, `POST /api/company-profiles/pull-yahoo`, `POST /api/company-profiles/pull-fmp-peers`, `GET /api/jobs/:jobId`를 사용한다.
 - 현재 `WatchlistWindow`만 backend API와 직접 연결되어 있지 않다.
 
 ## Case Research API
@@ -1556,8 +1567,9 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 
 - 종목별 회사 프로필 canonical 저장소. `source` 컬럼으로 데이터 출처를 구분한다.
 - `source = 'fmp'`: FMP(Financial Modeling Prep)에서 가져온 description/ceo/employees 등.
+- `source = 'fmp'` + `peers_json`만 채워진 row: FMP `stable/stock-peers`에서 가져온 peers 데이터.
 - `source = 'finnhub'`: Finnhub `/stock/peers`에서 가져온 peers 데이터. 이 경우 `peers_json`만 채워지고 나머지(description 등)는 비어 있을 수 있다.
-- `peers_json`: JSON 배열 문자열. 예: `["DELL","WDC","HPE"]`. Finnhub peers API 결과를 그대로 저장한다.
+- `peers_json`: JSON 배열 문자열. 예: `["DELL","WDC","HPE"]`. Finnhub 또는 FMP peers API에서 얻은 ticker 목록을 저장한다.
 - `security_id`는 `securities` 테이블과 FK로 연결된다.
 
 #### `update_status`
@@ -2560,6 +2572,7 @@ query:
   - `[][][]name[][][]`
   - `[][][]industry[][][]`
   - `[][][]market_cap[][][]`
+  - `[][][]peers[][][]`
   - `[][][]float_pct[][][]`
   - `[][][]institutional_pct[][][]`
   - `[][][]insider_pct[][][]`
@@ -3100,6 +3113,29 @@ Finnhub `/stock/peers` API로 관련 종목 데이터를 수집해 `company_prof
 4. 결과를 `company_profiles`에 `source = 'finnhub'`로 upsert한다.
 5. ticker별 `N peers saved` 또는 error 로그를 job log에 append한다.
 6. 완료 후 result summary에는 `[][][]requested[][][]`, `[][][]tickersUpdated[][][]`, `[][][]tickersFailed[][][]`, `[][][]totalRowsUpserted[][][]`, `[][][]errors[][][]`, `[][][]cancelled[][][]`가 들어간다.
+
+### `POST /api/company-profiles/pull-fmp-peers`
+
+FMP `stable/stock-peers?symbol=X` API로 관련 종목 데이터를 수집해 `company_profiles.peers_json`에 `source = 'fmp'`로 저장한다. Calendar의 `Update FMP Peers` 버튼이 이 API를 사용한다.
+
+요청 body:
+
+```json
+{ "tickers": ["AAPL", "MSFT"], "maxTickers": 50, "concurrency": 5, "requestIntervalMs": 250, "skipExisting": true }
+```
+
+- `tickers` 생략 시 `ticker_universes/default` 기준으로 대상을 결정한다.
+- `[][][]concurrency[][][]`는 1~20 범위다. `[][][]tickerConcurrency[][][]`도 호환 입력으로 받는다.
+- `[][][]requestIntervalMs[][][]`는 0~5000ms 범위다.
+- `[][][]skipExisting[][][]` 기본값은 true이며, 이때 source와 무관하게 non-empty `peers_json`이 이미 있는 ticker는 건너뛴다.
+
+동작:
+
+1. 대상 ticker 목록을 정규화/중복 제거한다.
+2. `skipExisting`이면 기존 `company_profiles.peers_json` non-empty 보유 ticker를 제외한다.
+3. background worker가 FMP `stable/stock-peers?symbol=X`를 호출한다.
+4. 응답 배열의 `symbol` 값을 모아 JSON 배열 문자열로 저장한다.
+5. 완료 후 result summary에는 `[][][]requested[][][]`, `[][][]fetched[][][]`, `[][][]tickersUpdated[][][]`, `[][][]tickersFailed[][][]`, `[][][]totalRowsUpserted[][][]`, `[][][]skippedExisting[][][]`, `[][][]errors[][][]`, `[][][]source[][][]`가 들어간다.
 
 ### `POST /api/company-profiles/pull-market-cap`
 

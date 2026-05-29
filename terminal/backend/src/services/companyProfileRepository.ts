@@ -202,6 +202,20 @@ export async function getTickersWithExistingPeers(): Promise<Set<string>> {
 }
 
 /**
+ * Return ticker symbols that already have non-empty peers_json from any source.
+ */
+export async function getTickersWithAnyExistingPeers(): Promise<Set<string>> {
+  const rows = await getDb().all<{ ticker: string }[]>(
+    `SELECT s.ticker FROM company_profiles cp
+     JOIN securities s ON s.id = cp.security_id
+     WHERE cp.peers_json IS NOT NULL
+       AND TRIM(cp.peers_json) != ''
+       AND TRIM(cp.peers_json) != '[]'`,
+  );
+  return new Set((rows as { ticker: string }[]).map((r) => r.ticker.toUpperCase()));
+}
+
+/**
  * Return ticker symbols that already have a non-null ipo_date from Finnhub source.
  */
 export async function getTickersWithExistingIpoDate(): Promise<Set<string>> {

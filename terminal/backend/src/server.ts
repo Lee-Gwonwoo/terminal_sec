@@ -6694,8 +6694,9 @@ app.get("/api/universes/:id/items", async (req, res) => {
 import { fetchFmpProfile, fetchFmpProfilesBatch, clampFmpConcurrency, clampFmpIntervalMs, getFmpDefaults } from "./services/fmpCompanyProfileProvider.js";
 import { fetchFinnhubProfilesBatch } from "./services/finnhubProfile2Provider.js";
 import { fetchYahooProfilesBatch, clampYahooConcurrency, clampYahooIntervalMs, getYahooDefaults } from "./services/yahooCompanyProfileProvider.js";
-import { upsertCompanyProfile, getCompanyProfileByTicker, countCompanyProfiles, upsertPeers, getPeersByTicker, getTickersWithFmpProfile, getTickersWithYahooProfile, getTickersWithExistingPeers, getTickersWithExistingIpoDate } from "./services/companyProfileRepository.js";
+import { upsertCompanyProfile, getCompanyProfileByTicker, countCompanyProfiles, upsertPeers, getPeersByTicker, getTickersWithFmpProfile, getTickersWithYahooProfile, getTickersWithExistingPeers, getTickersWithAnyExistingPeers, getTickersWithExistingIpoDate } from "./services/companyProfileRepository.js";
 import { fetchFinnhubPeersBatch } from "./services/finnhubPeersProvider.js";
+import { fetchFmpPeersBatch, clampFmpPeersConcurrency, clampFmpPeersIntervalMs } from "./services/fmpPeersProvider.js";
 
 app.get("/api/company-profiles/:ticker", async (req, res) => {
   try {
@@ -7279,6 +7280,112 @@ app.post("/api/company-profiles/pull-peers", async (req, res) => {
           skippedExisting: skippedCount,
           errors: fetchErrors.size,
           source: "finnhub-peers",
+        });
+      } catch (error) {
+        failJob(jobId, error instanceof Error ? error.message : String(error));
+      }
+    })();
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Unknown error" });
+  }
+});
+
+// ── Pull FMP Peers ─────────────────────────────────────────────────────────
+app.post("/api/company-profiles/pull-fmp-peers", async (req, res) => {
+  try {
+    const body = req.body as {
+      tickers?: string[];
+      maxTickers?: number;
+      concurrency?: number;
+      tickerConcurrency?: number;
+      requestIntervalMs?: number;
+      skipExisting?: boolean;
+    };
+    let tickers = body.tickers;
+    if (!tickers || tickers.length === 0) {
+      tickers = await getDefaultUniverseTickers();
+    }
+
+    const max = body.maxTickers ?? tickers.length;
+    let target = Array.from(new Set(
+      tickers
+        .map((ticker) => ticker.trim().toUpperCase())
+        .filter(Boolean),
+    )).slice(0, max);
+    const concurrency = clampFmpPeersConcurrency(body.concurrency ?? body.tickerConcurrency);
+    const requestIntervalMs = clampFmpPeersIntervalMs(body.requestIntervalMs);
+    const skipExisting = body.skipExisting !== false;
+
+    let skippedCount = 0;
+    if (skipExisting) {
+      const existingSet = await getTickersWithAnyExistingPeers();
+      const before = target.length;
+      target = target.filter((ticker) => !existingSet.has(ticker));
+      skippedCount = before - target.length;
+    }
+
+    const jobId = createJob(target.length);
+    appendLog(jobId, `Starting FMP peers update for ${target.length} tickers (concurrency=${concurrency}, intervalMs=${requestIntervalMs}, skipExisting=${skipExisting}, skipped=${skippedCount})`);
+    res.json({ jobId });
+
+    void (async () => {
+      try {
+        if (target.length === 0) {
+          appendLog(jobId, "No missing peers requested - nothing to do");
+          await setLastSuccess("company_profiles", new Date().toISOString(), {
+            source: "fmp-peers",
+            requested: 0,
+            fetched: 0,
+            updated: 0,
+            errors: 0,
+            skippedExisting: skippedCount,
+          });
+          completeJob(jobId, { requested: 0, tickersUpdated: 0, tickersFailed: 0, totalRowsUpserted: 0, skippedExisting: skippedCount, source: "fmp-peers" });
+          return;
+        }
+
+        const { results, errors: fetchErrors, cancelled } = await fetchFmpPeersBatch(target, {
+          concurrency,
+          requestIntervalMs,
+          onProgress: (done, total) => { updateProgress(jobId, done, total); },
+          shouldCancel: () => isJobCancelled(jobId),
+        });
+
+        if (cancelled || isJobCancelled(jobId)) {
+          appendLog(jobId, `Cancelled - processed ${results.size + fetchErrors.size}/${target.length} tickers`);
+          return;
+        }
+
+        let updated = 0;
+        for (const [ticker, peers] of results) {
+          const securityId = await upsertSecurity(ticker, null, null, null, null);
+          await upsertPeers(securityId, "fmp", JSON.stringify(peers));
+          updated++;
+          appendLog(jobId, `${ticker}: ${peers.length} FMP peers saved`);
+        }
+
+        for (const [ticker, message] of fetchErrors) {
+          appendLog(jobId, `${ticker}: error - ${message}`);
+        }
+
+        await setLastSuccess("company_profiles", new Date().toISOString(), {
+          source: "fmp-peers",
+          requested: target.length,
+          fetched: results.size,
+          updated,
+          errors: fetchErrors.size,
+          skippedExisting: skippedCount,
+        });
+
+        completeJob(jobId, {
+          requested: target.length,
+          fetched: results.size,
+          tickersUpdated: updated,
+          tickersFailed: fetchErrors.size,
+          totalRowsUpserted: updated,
+          skippedExisting: skippedCount,
+          errors: fetchErrors.size,
+          source: "fmp-peers",
         });
       } catch (error) {
         failJob(jobId, error instanceof Error ? error.message : String(error));

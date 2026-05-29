@@ -10,13 +10,13 @@
 - 실제 API 연동이 살아 있는 주요 창은 `Finnhub News`, `Investing News`, `Calendar`, `Default Ticker`, `Daily Change History`, `Data Control`, `AI Research Window`, `Evidence Table`, `Watchlist` 이다.
 - `News` 창도 `GET /api/news`, `POST /api/news/pull-eodhd`를 실제로 호출하지만, 현재 운영 기준의 주력 뉴스 창은 아니다.
 - `Watchlist` 창은 backend `watchlists` API와 연결되어 있고, 종목 이름/가격 일부는 프론트의 fallback lookup을 함께 사용한다.
-- `Calendar` 창은 backend `calendar_events` 기반의 실데이터 창이며, 현재 earnings + IPO 탭과 background job polling을 지원한다. IPO 탭에는 `Security Type` 컬럼과 dropdown 필터가 있고, 이 값은 FMP의 `ticker/company_name` 문자열에서 파생된다.
+- `Calendar` 창은 backend `calendar_events` 기반의 실데이터 창이며, 현재 earnings + IPO 탭과 background job polling을 지원한다. IPO 탭에는 `Security Type` 컬럼과 dropdown 필터가 있고, 이 값은 FMP의 `ticker/company_name` 문자열에서 파생된다. ticker 기반 탭에서는 `Peers` 컬럼을 column selector에서 켤 수 있고, 현재 로드된 ticker의 누락 peers는 `Update FMP Peers` 버튼으로 채운다.
 - `Finnhub News` 창과 `Calendar` 창은 `GET /api/industries` 목록을 읽어 `All Industries` dropdown을 표시한다. 메뉴 항목은 checkbox multi-select이며, 선택된 industry 목록을 `industries` 반복 query로 backend에 넘겨 server-side 필터링한다. `All Industries` 상태에서는 모든 industry checkbox가 체크된 것처럼 보이고, 개별 항목을 해제하면 전체 중 일부만 선택한 상태로 전환된다. 메뉴 상단에는 industry 명칭 검색 input이 있다. `Calendar` 창은 현재 체크된 industry 목록을 localStorage preset으로 저장/삭제할 수 있고, 저장된 preset의 `Apply`를 누르면 해당 industry 목록이 즉시 선택값으로 적용되어 calendar events를 다시 조회한다. 개별 industry row를 우클릭하면 `Instruction` 버튼이 뜨고, 버튼을 누르면 `GET /api/industries/detail` 결과로 industry 설명과 시총순 관련 ticker 목록을 dialog에 표시한다.
 - `App.tsx`는 `open-case-description`, `open-company-description`, `open-data-control-how-to-use` custom event를 받아 `case-description`, `company-description`, `data-control-how-to-use` 보조 창을 현재 탭에 동적으로 추가한다.
 - ticker가 있는 주요 창에서는 클릭으로 `Company Description` 창을 열 수 있고, ticker hover 3초 뒤 `CompanyDescriptionHoverPreview` overlay가 뜬다.
 - `BraveNewsWindow.tsx` 파일은 남아 있지만 현재 `WindowType`에 연결되어 있지 않아 UI에서 열 수 없다.
 - 탭/창 레이아웃, 다크 모드, 전역 글자 크기, 뉴스 제목/요약 글자 크기, linked ticker는 `terminal-workspace-v1`로 localStorage에 저장된다.
-- 추가 UI 상태로 `finhub-news-ui-state`, `investing-news-ui-state`, `finnhub-last-update-config`, `data-control-active-tab`, `ft-concurrency`, `fmp-pr-fulltext-concurrency`, `fmp-stock-fulltext-concurrency`, `change-fmp-concurrency`, `finnhub-ticker-concurrency`, `finnhub-request-interval-sec`, `finnhub-company-news-ticker-concurrency`, `finnhub-company-news-request-interval-sec`, `rtpr-ticker-concurrency`, `fmp-concurrency`, `fmp-request-interval-ms`, `fmp-pr-page-limit`, `fmp-pr-max-pages`, `fmp-sec-max-pages`, `fmp-skip-existing`, `peers-skip-existing`, `ipo-skip-existing`, `yahoo-concurrency`, `yahoo-request-interval-ms`, `yahoo-skip-existing`, `finnhub-news-keyword-filters-v1`를 사용한다.
+- 추가 UI 상태로 `finhub-news-ui-state`, `investing-news-ui-state`, `calendar-window-ui-state`, `calendar-industry-filter-presets-v1`, `finnhub-last-update-config`, `data-control-active-tab`, `ft-concurrency`, `fmp-pr-fulltext-concurrency`, `fmp-stock-fulltext-concurrency`, `change-fmp-concurrency`, `finnhub-ticker-concurrency`, `finnhub-request-interval-sec`, `finnhub-company-news-ticker-concurrency`, `finnhub-company-news-request-interval-sec`, `rtpr-ticker-concurrency`, `fmp-concurrency`, `fmp-request-interval-ms`, `fmp-pr-page-limit`, `fmp-pr-max-pages`, `fmp-sec-max-pages`, `fmp-skip-existing`, `peers-skip-existing`, `ipo-skip-existing`, `yahoo-concurrency`, `yahoo-request-interval-ms`, `yahoo-skip-existing`, `finnhub-news-keyword-filters-v1`를 사용한다.
 - `FinnhubNewsWindow`는 `finnhub-news-keyword-filters-v1`에 keyword exclude profile 목록과 `activeProfileIds`를 저장한다. 이 저장소는 검색 저장(`Save` / `Load`)과 별개다.
 - `FinnhubNewsWindow`의 `Control` modal과 `DataControlWindow` Settings 탭은 `fmp-concurrency`, `fmp-request-interval-ms`를 공유한다. 즉 FMP press release / FMP stock news / FMP SEC filing pull 속도 설정은 두 화면에서 같은 값을 편집한다.
 - 같은 두 화면은 `fmp-pr-page-limit`, `fmp-pr-max-pages`, `fmp-sec-max-pages`도 공유한다. 즉 FMP press release / FMP stock news / FMP SEC filing의 페이지 단위 수집 제한도 같은 저장 키를 본다.
@@ -835,6 +835,7 @@ localStorage 사용:
 - `POST /api/company-profiles/pull-fmp`
 - `POST /api/company-profiles/pull-yahoo`
 - `POST /api/company-profiles/pull-peers`
+- `POST /api/company-profiles/pull-fmp-peers`
 - `POST /api/company-profiles/pull-ipo-date`
 - `POST /api/news/change/update-recent`
 - `POST /api/news/change/update-recent-fmp-missing`
@@ -1152,7 +1153,12 @@ API:
 - economics를 제외한 탭에서는 `POST /api/company-profiles/pull-yahoo`를 실행하는 `Update Yahoo Desc` 버튼을 표시한다.
   - 현재 active tab에서 로드된 row의 `ticker`를 중복 제거해 `tickers` body로 보낸다.
   - Yahoo 실행 설정은 Data Control 창과 같은 localStorage key(`yahoo-concurrency`, `yahoo-request-interval-ms`, `yahoo-skip-existing`)를 읽어 사용한다.
-- earnings 탭의 회사 IPO date(`ipo_date`)와 industry / ownership(`float_pct`, `institutional_pct`, `insider_pct`)는 column selector에서 켜고 끌 수 있다.
+- economics를 제외한 탭에서는 `POST /api/company-profiles/pull-fmp-peers`를 실행하는 `Update FMP Peers` 버튼도 표시한다.
+  - 현재 active tab에서 로드된 row의 `ticker`를 중복 제거해 `tickers` body로 보낸다.
+  - body는 `[][][]skipExisting[][][]=true`, `[][][]concurrency[][][]=5`, `[][][]requestIntervalMs[][][]=250`을 사용한다.
+  - job 완료 뒤 Calendar events를 다시 읽어 `[][][]peers[][][]` 컬럼 값이 갱신된다.
+- earnings 탭의 회사 IPO date(`ipo_date`), peers(`peers`), industry / ownership(`float_pct`, `institutional_pct`, `insider_pct`)는 column selector에서 켜고 끌 수 있다.
+  - `peers` cell은 저장된 ticker 배열 전체를 chip으로 렌더링한다. 컬럼 폭/높이가 부족하면 overflow로 가려질 수 있지만 `+N` 축약 badge로 데이터를 생략하지 않는다.
 - IPO direct/SEC 컬럼(`ipo_date`, `company_name`, `exchange`, `status`, `price_range`, `shares`, `offer_amount`, `company_description`, `sec_max_owner_pct`, `sec_total_owner_pct`, `prospectus_url`, `disclosure_url`)도 column selector에서 켜고 끌 수 있다.
 - earnings에서는 `Inst %`, `Float %`, `Market Cap(B$)` min/max 숫자 필터를 사용할 수 있다.
 - dividends / splits에서는 `Market Cap(B$)` min/max 숫자 필터를 사용할 수 있다.
@@ -1196,6 +1202,8 @@ API:
   - visible column만 현재 순서 기준으로 drag-and-drop 할 수 있다.
   - 각 header 오른쪽 resize handle을 드래그해 column width를 px 단위로 조정할 수 있다.
   - column visibility, order, width는 `calendar-window-ui-state` localStorage에 저장된다.
+  - 새로고침 직후 backend column config를 다시 받기 전에도 저장된 column order/width를 보존하고, backend config 로드 후 새 컬럼만 뒤에 append한다.
+  - column resize 최소 폭은 44px이다.
 - earnings stable source에는 reliable time/session이 없으므로, 관련 column 값은 비어 있을 수 있다.
 - earnings 탭에는 `FMP Sync Settings` 버튼이 있고, 여기서 다음 실행에 쓸 concurrency 값을 수정할 수 있다.
   - `Earnings Update` concurrency
@@ -1204,6 +1212,7 @@ API:
 - earnings `Update FMP Earnings Dates` 버튼은 현재 date filter가 있으면 그 범위를 body에 같이 보내고, 현재 설정된 earnings concurrency도 함께 보낸다.
 - earnings `Sync Financial + Past Estimates` 버튼은 현재 date filter와 무관하게 default universe 전체를 대상으로 실행되며, 현재 설정된 financial sync concurrency를 body에 같이 보낸다.
   - 목적은 ticker financial history뿐 아니라 past quarterly estimate cache까지 다시 적재하는 것이다.
+- `Update FMP Peers` 버튼은 현재 화면에 로드된 ticker만 대상으로 `POST /api/company-profiles/pull-fmp-peers`를 실행한다. 이미 `company_profiles.peers_json`이 non-empty인 ticker는 backend에서 건너뛴다.
 - earnings 화면은 현재 필터 결과 기준 `Confirmed / Pending` count를 함께 보여준다.
   - 현재 범위가 confirmed-only면 종료일을 더 미래로 늘리라는 안내를 같이 표시한다.
 - IPO 탭의 `Download SEC Data` 버튼은 선택한 날짜 범위가 있어야 활성화된다.

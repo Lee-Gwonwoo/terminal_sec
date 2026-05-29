@@ -109,6 +109,7 @@ interface CalendarRow {
   revenue_actual?: number | null;
   surprise_pct?: number | null;
   market_cap?: number | null;
+  peers?: string[] | null;
   float_pct?: number | null;
   institutional_pct?: number | null;
   insider_pct?: number | null;
@@ -186,20 +187,20 @@ interface NumericFilterConfig {
 type DatePresetKey = 'this_week' | 'next_5_days' | 'next_2_weeks' | 'this_month' | 'next_month';
 
 const FALLBACK_TYPES: CalendarTypeConfig[] = [
-  { key: 'earnings', label: 'Earnings', supports: [], columns: ['report_date', 'ticker', 'name', 'ipo_date', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual', 'industry', 'float_pct', 'institutional_pct', 'insider_pct', 'session', 'source'] },
-  { key: 'ipos', label: 'IPOs', supports: [], columns: ['ipo_date', 'ticker', 'ipo_security_type', 'company_name', 'industry', 'float_pct', 'institutional_pct', 'insider_pct', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'company_description', 'sec_form', 'sec_filing_date', 'sec_accepted_date', 'sec_owner_count', 'sec_max_owner_pct', 'sec_total_owner_pct', 'prospectus_url', 'disclosure_url', 'source'] },
-  { key: 'dividends', label: 'Dividends', supports: [], columns: ['ex_date', 'ticker', 'name', 'amount', 'yield', 'pay_date', 'industry', 'market_cap', 'source'] },
-  { key: 'splits', label: 'Splits', supports: [], columns: ['split_date', 'ticker', 'name', 'ratio', 'industry', 'market_cap', 'source'] },
-  { key: 'analyst_ratings', label: 'Analyst Ratings', supports: [], columns: ['ticker', 'title', 'source'] },
-  { key: 'sec_filings', label: 'SEC Filings', supports: [], columns: ['event_date', 'ticker', 'title', 'source'] },
+  { key: 'earnings', label: 'Earnings', supports: [], columns: ['report_date', 'ticker', 'name', 'ipo_date', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual', 'industry', 'peers', 'float_pct', 'institutional_pct', 'insider_pct', 'session', 'source'] },
+  { key: 'ipos', label: 'IPOs', supports: [], columns: ['ipo_date', 'ticker', 'ipo_security_type', 'company_name', 'industry', 'peers', 'float_pct', 'institutional_pct', 'insider_pct', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'company_description', 'sec_form', 'sec_filing_date', 'sec_accepted_date', 'sec_owner_count', 'sec_max_owner_pct', 'sec_total_owner_pct', 'prospectus_url', 'disclosure_url', 'source'] },
+  { key: 'dividends', label: 'Dividends', supports: [], columns: ['ex_date', 'ticker', 'name', 'amount', 'yield', 'pay_date', 'industry', 'peers', 'market_cap', 'source'] },
+  { key: 'splits', label: 'Splits', supports: [], columns: ['split_date', 'ticker', 'name', 'ratio', 'industry', 'peers', 'market_cap', 'source'] },
+  { key: 'analyst_ratings', label: 'Analyst Ratings', supports: [], columns: ['ticker', 'peers', 'title', 'source'] },
+  { key: 'sec_filings', label: 'SEC Filings', supports: [], columns: ['event_date', 'ticker', 'peers', 'title', 'source'] },
   { key: 'economics', label: 'Economics', supports: [], columns: ['event_date', 'title', 'source'] },
 ];
 
 const TYPE_COLUMN_ORDER: Record<string, string[]> = {
-  earnings: ['report_date', 'ticker', 'name', 'ipo_date', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual', 'industry', 'float_pct', 'institutional_pct', 'insider_pct', 'session', 'source'],
-  ipos: ['ipo_date', 'ticker', 'ipo_security_type', 'company_name', 'industry', 'float_pct', 'institutional_pct', 'insider_pct', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'company_description', 'sec_form', 'sec_filing_date', 'sec_accepted_date', 'sec_owner_count', 'sec_max_owner_pct', 'sec_total_owner_pct', 'prospectus_url', 'disclosure_url', 'source'],
-  dividends: ['ex_date', 'ticker', 'name', 'amount', 'yield', 'pay_date', 'industry', 'market_cap', 'source'],
-  splits: ['split_date', 'ticker', 'name', 'ratio', 'industry', 'market_cap', 'source'],
+  earnings: ['report_date', 'ticker', 'name', 'ipo_date', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual', 'industry', 'peers', 'float_pct', 'institutional_pct', 'insider_pct', 'session', 'source'],
+  ipos: ['ipo_date', 'ticker', 'ipo_security_type', 'company_name', 'industry', 'peers', 'float_pct', 'institutional_pct', 'insider_pct', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'company_description', 'sec_form', 'sec_filing_date', 'sec_accepted_date', 'sec_owner_count', 'sec_max_owner_pct', 'sec_total_owner_pct', 'prospectus_url', 'disclosure_url', 'source'],
+  dividends: ['ex_date', 'ticker', 'name', 'amount', 'yield', 'pay_date', 'industry', 'peers', 'market_cap', 'source'],
+  splits: ['split_date', 'ticker', 'name', 'ratio', 'industry', 'peers', 'market_cap', 'source'],
 };
 
 const VISIBLE_COLUMNS_BY_TYPE: Record<string, string[]> = {
@@ -227,6 +228,7 @@ const COLUMN_DEFINITIONS: Record<string, Omit<ColumnConfig, 'visible'>> = {
   title: { key: 'title', label: 'Title', width: '240px' },
   source: { key: 'source', label: 'Source', width: '100px' },
   industry: { key: 'industry', label: 'Industry', width: '180px' },
+  peers: { key: 'peers', label: 'Peers', width: '220px' },
   exchange: { key: 'exchange', label: 'Exchange', width: '110px' },
   sector: { key: 'sector', label: 'Sector', width: '140px' },
   status: { key: 'status', label: 'Status', width: '100px', align: 'center' },
@@ -275,11 +277,13 @@ const NUMERIC_FILTERS_BY_TYPE: Record<string, NumericFilterConfig[]> = {
 const IPO_SECURITY_TYPE_ORDER = ['Common Stock', 'Unit', 'Warrant', 'Rights', 'ADS', 'ETF', 'Fund/Trust', 'Preferred', 'Other'];
 const DEFAULT_EARNINGS_UPDATE_CONCURRENCY = 1;
 const DEFAULT_FINANCIAL_SYNC_CONCURRENCY = 1;
+const DEFAULT_FMP_PEERS_CONCURRENCY = 5;
+const DEFAULT_FMP_PEERS_INTERVAL_MS = 250;
 const DEFAULT_YAHOO_DESCRIPTION_CONCURRENCY = 5;
 const DEFAULT_YAHOO_DESCRIPTION_INTERVAL_MS = 200;
 const CALENDAR_UI_STATE_STORAGE_KEY = 'calendar-window-ui-state';
 const CALENDAR_INDUSTRY_FILTER_PRESETS_STORAGE_KEY = 'calendar-industry-filter-presets-v1';
-const MIN_COLUMN_WIDTH_PX = 64;
+const MIN_COLUMN_WIDTH_PX = 44;
 const MAX_COLUMN_WIDTH_PX = 720;
 const DATE_PRESET_OPTIONS: Array<{ key: DatePresetKey; label: string }> = [
   { key: 'this_week', label: 'This Week' },
@@ -445,18 +449,23 @@ function getDefaultSortFieldForType(type: string): string {
   return 'event_date';
 }
 
-function mergeColumns(existing: ColumnConfig[] | undefined, next: ColumnConfig[]): ColumnConfig[] {
+function mergeColumns(existing: ColumnConfig[] | undefined, next: ColumnConfig[], options: { preserveUnknown?: boolean } = {}): ColumnConfig[] {
   if (!existing || existing.length === 0) {
     return next;
   }
   const nextByKey = new Map(next.map((column) => [column.key, column]));
   const preserved = existing
-    .filter((column) => nextByKey.has(column.key))
-    .map((column) => ({
-      ...nextByKey.get(column.key)!,
-      visible: column.visible,
-      width: column.width,
-    }));
+    .flatMap((column) => {
+      const nextColumn = nextByKey.get(column.key);
+      if (!nextColumn) {
+        return options.preserveUnknown ? [column] : [];
+      }
+      return [{
+        ...nextColumn,
+        visible: column.visible,
+        width: column.width,
+      }];
+    });
   const preservedKeys = new Set(preserved.map((column) => column.key));
   const appended = next.filter((column) => !preservedKeys.has(column.key));
   return [...preserved, ...appended];
@@ -503,7 +512,7 @@ function restoreColumnStates(value: unknown, typeConfigs: CalendarTypeConfig[]):
   for (const typeConfig of typeConfigs) {
     const storedColumns = normalizeStoredColumns(stored[typeConfig.key]);
     if (storedColumns) {
-      next[typeConfig.key] = mergeColumns(storedColumns, defaults[typeConfig.key]);
+      next[typeConfig.key] = mergeColumns(storedColumns, defaults[typeConfig.key], { preserveUnknown: true });
     }
   }
   return next;
@@ -1599,6 +1608,25 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     });
   };
 
+  const handleFmpPeersUpdate = async () => {
+    if (activeCalendarTickers.length === 0) {
+      setActionError('FMP peers update requires loaded calendar rows with tickers.');
+      return;
+    }
+
+    await startCalendarJob({
+      url: '/api/company-profiles/pull-fmp-peers',
+      label: `FMP peers update (${activeCalendarTickers.length} tickers)`,
+      failureMessage: 'FMP peers update failed',
+      requestBody: {
+        tickers: activeCalendarTickers,
+        concurrency: DEFAULT_FMP_PEERS_CONCURRENCY,
+        requestIntervalMs: DEFAULT_FMP_PEERS_INTERVAL_MS,
+        skipExisting: true,
+      },
+    });
+  };
+
   const cancelJob = async () => {
     if (!jobId || !jobStatus || jobStatus.status !== 'running') {
       return;
@@ -1689,6 +1717,24 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
         <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200">
           {formatValue(row, column.key)}
         </span>
+      );
+    }
+
+    if (column.key === 'peers') {
+      const peers = Array.isArray(value)
+        ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        : [];
+      if (peers.length === 0) {
+        return <span>-</span>;
+      }
+      return (
+        <div className="flex max-h-12 flex-wrap gap-1 overflow-hidden" title={peers.join(', ')} style={{ maxWidth: column.width }}>
+          {peers.map((peer) => (
+            <span key={peer} className="inline-flex items-center rounded border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[11px] font-medium text-violet-700 dark:border-violet-700/60 dark:bg-violet-900/30 dark:text-violet-200">
+              {peer}
+            </span>
+          ))}
+        </div>
       );
     }
 
@@ -2203,15 +2249,26 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
           )}
 
           {activeType !== 'economics' && (
-            <button
-              onClick={handleYahooDescriptionUpdate}
-              disabled={updatePending || activeCalendarTickers.length === 0}
-              title={activeCalendarTickers.length > 0 ? `Fetch Yahoo descriptions for ${activeCalendarTickers.length} loaded tickers` : 'No loaded tickers'}
-              className={`flex items-center gap-2 px-3 py-2 text-sm rounded text-white ${(updatePending || activeCalendarTickers.length === 0) ? 'bg-sky-400 cursor-not-allowed' : 'bg-sky-600 hover:bg-sky-700'}`}
-            >
-              <RefreshCw className={`w-4 h-4 ${updatePending ? 'animate-spin' : ''}`} />
-              Update Yahoo Desc
-            </button>
+            <>
+              <button
+                onClick={handleYahooDescriptionUpdate}
+                disabled={updatePending || activeCalendarTickers.length === 0}
+                title={activeCalendarTickers.length > 0 ? `Fetch Yahoo descriptions for ${activeCalendarTickers.length} loaded tickers` : 'No loaded tickers'}
+                className={`flex items-center gap-2 px-3 py-2 text-sm rounded text-white ${(updatePending || activeCalendarTickers.length === 0) ? 'bg-sky-400 cursor-not-allowed' : 'bg-sky-600 hover:bg-sky-700'}`}
+              >
+                <RefreshCw className={`w-4 h-4 ${updatePending ? 'animate-spin' : ''}`} />
+                Update Yahoo Desc
+              </button>
+              <button
+                onClick={handleFmpPeersUpdate}
+                disabled={updatePending || activeCalendarTickers.length === 0}
+                title={activeCalendarTickers.length > 0 ? `Fetch missing FMP peers for ${activeCalendarTickers.length} loaded tickers` : 'No loaded tickers'}
+                className={`flex items-center gap-2 px-3 py-2 text-sm rounded text-white ${(updatePending || activeCalendarTickers.length === 0) ? 'bg-violet-400 cursor-not-allowed' : 'bg-violet-600 hover:bg-violet-700'}`}
+              >
+                <RefreshCw className={`w-4 h-4 ${updatePending ? 'animate-spin' : ''}`} />
+                Update FMP Peers
+              </button>
+            </>
           )}
 
           {hasActiveFilters && (
@@ -2421,13 +2478,13 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                     onDragEnd={handleColumnDragEnd}
                     className={`relative px-3 py-2 text-xs font-medium border-b border-gray-300 dark:border-gray-700 ${column.align === 'right' ? 'text-right' : column.align === 'center' ? 'text-center' : 'text-left'} ${draggedColumnKey === column.key ? 'opacity-50' : ''}`}
                   >
-                    <div className={`inline-flex w-full items-center gap-1 ${column.align === 'right' ? 'justify-end' : column.align === 'center' ? 'justify-center' : 'justify-start'}`}>
+                    <div className={`inline-flex w-full min-w-0 items-center gap-1 overflow-hidden ${column.align === 'right' ? 'justify-end' : column.align === 'center' ? 'justify-center' : 'justify-start'}`}>
                       <GripVertical className="h-3 w-3 shrink-0 text-gray-400" />
                       <button
                         onClick={() => handleSort(column.key)}
-                        className="inline-flex items-center gap-1 hover:text-blue-600 dark:hover:text-blue-400"
+                        className="inline-flex min-w-0 items-center gap-1 hover:text-blue-600 dark:hover:text-blue-400"
                       >
-                        {column.label}
+                        <span className="truncate">{column.label}</span>
                         {sortField === column.key && sortDirection === 'asc' && <ChevronUp className="w-3 h-3" />}
                         {sortField === column.key && sortDirection === 'desc' && <ChevronDown className="w-3 h-3" />}
                       </button>
