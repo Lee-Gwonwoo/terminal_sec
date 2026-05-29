@@ -82,6 +82,16 @@ interface CalendarTypeConfig {
   columns: string[];
 }
 
+interface CalendarPeerEdge {
+  ticker: string;
+  name?: string | null;
+  grade?: string | null;
+  relation_type?: string | null;
+  direction?: string | null;
+  score?: number | null;
+  reason?: string | null;
+}
+
 interface CalendarRow {
   id: string;
   type: string;
@@ -110,6 +120,7 @@ interface CalendarRow {
   surprise_pct?: number | null;
   market_cap?: number | null;
   peers?: string[] | null;
+  curated_peers?: CalendarPeerEdge[] | null;
   float_pct?: number | null;
   institutional_pct?: number | null;
   insider_pct?: number | null;
@@ -187,25 +198,25 @@ interface NumericFilterConfig {
 type DatePresetKey = 'this_week' | 'next_5_days' | 'next_2_weeks' | 'this_month' | 'next_month';
 
 const FALLBACK_TYPES: CalendarTypeConfig[] = [
-  { key: 'earnings', label: 'Earnings', supports: [], columns: ['report_date', 'ticker', 'name', 'ipo_date', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual', 'industry', 'peers', 'float_pct', 'institutional_pct', 'insider_pct', 'session', 'source'] },
-  { key: 'ipos', label: 'IPOs', supports: [], columns: ['ipo_date', 'ticker', 'ipo_security_type', 'company_name', 'industry', 'peers', 'float_pct', 'institutional_pct', 'insider_pct', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'company_description', 'sec_form', 'sec_filing_date', 'sec_accepted_date', 'sec_owner_count', 'sec_max_owner_pct', 'sec_total_owner_pct', 'prospectus_url', 'disclosure_url', 'source'] },
-  { key: 'dividends', label: 'Dividends', supports: [], columns: ['ex_date', 'ticker', 'name', 'amount', 'yield', 'pay_date', 'industry', 'peers', 'market_cap', 'source'] },
-  { key: 'splits', label: 'Splits', supports: [], columns: ['split_date', 'ticker', 'name', 'ratio', 'industry', 'peers', 'market_cap', 'source'] },
-  { key: 'analyst_ratings', label: 'Analyst Ratings', supports: [], columns: ['ticker', 'peers', 'title', 'source'] },
-  { key: 'sec_filings', label: 'SEC Filings', supports: [], columns: ['event_date', 'ticker', 'peers', 'title', 'source'] },
+  { key: 'earnings', label: 'Earnings', supports: [], columns: ['report_date', 'ticker', 'name', 'ipo_date', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual', 'industry', 'peers', 'curated_peers', 'float_pct', 'institutional_pct', 'insider_pct', 'session', 'source'] },
+  { key: 'ipos', label: 'IPOs', supports: [], columns: ['ipo_date', 'ticker', 'ipo_security_type', 'company_name', 'industry', 'peers', 'curated_peers', 'float_pct', 'institutional_pct', 'insider_pct', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'company_description', 'sec_form', 'sec_filing_date', 'sec_accepted_date', 'sec_owner_count', 'sec_max_owner_pct', 'sec_total_owner_pct', 'prospectus_url', 'disclosure_url', 'source'] },
+  { key: 'dividends', label: 'Dividends', supports: [], columns: ['ex_date', 'ticker', 'name', 'amount', 'yield', 'pay_date', 'industry', 'peers', 'curated_peers', 'market_cap', 'source'] },
+  { key: 'splits', label: 'Splits', supports: [], columns: ['split_date', 'ticker', 'name', 'ratio', 'industry', 'peers', 'curated_peers', 'market_cap', 'source'] },
+  { key: 'analyst_ratings', label: 'Analyst Ratings', supports: [], columns: ['ticker', 'peers', 'curated_peers', 'title', 'source'] },
+  { key: 'sec_filings', label: 'SEC Filings', supports: [], columns: ['event_date', 'ticker', 'peers', 'curated_peers', 'title', 'source'] },
   { key: 'economics', label: 'Economics', supports: [], columns: ['event_date', 'title', 'source'] },
 ];
 
 const TYPE_COLUMN_ORDER: Record<string, string[]> = {
-  earnings: ['report_date', 'ticker', 'name', 'ipo_date', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual', 'industry', 'peers', 'float_pct', 'institutional_pct', 'insider_pct', 'session', 'source'],
-  ipos: ['ipo_date', 'ticker', 'ipo_security_type', 'company_name', 'industry', 'peers', 'float_pct', 'institutional_pct', 'insider_pct', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'company_description', 'sec_form', 'sec_filing_date', 'sec_accepted_date', 'sec_owner_count', 'sec_max_owner_pct', 'sec_total_owner_pct', 'prospectus_url', 'disclosure_url', 'source'],
-  dividends: ['ex_date', 'ticker', 'name', 'amount', 'yield', 'pay_date', 'industry', 'peers', 'market_cap', 'source'],
-  splits: ['split_date', 'ticker', 'name', 'ratio', 'industry', 'peers', 'market_cap', 'source'],
+  earnings: ['report_date', 'ticker', 'name', 'ipo_date', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual', 'industry', 'peers', 'curated_peers', 'float_pct', 'institutional_pct', 'insider_pct', 'session', 'source'],
+  ipos: ['ipo_date', 'ticker', 'ipo_security_type', 'company_name', 'industry', 'peers', 'curated_peers', 'float_pct', 'institutional_pct', 'insider_pct', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'company_description', 'sec_form', 'sec_filing_date', 'sec_accepted_date', 'sec_owner_count', 'sec_max_owner_pct', 'sec_total_owner_pct', 'prospectus_url', 'disclosure_url', 'source'],
+  dividends: ['ex_date', 'ticker', 'name', 'amount', 'yield', 'pay_date', 'industry', 'peers', 'curated_peers', 'market_cap', 'source'],
+  splits: ['split_date', 'ticker', 'name', 'ratio', 'industry', 'peers', 'curated_peers', 'market_cap', 'source'],
 };
 
 const VISIBLE_COLUMNS_BY_TYPE: Record<string, string[]> = {
-  earnings: ['report_date', 'ticker', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual'],
-  ipos: ['ipo_date', 'ticker', 'ipo_security_type', 'company_name', 'industry', 'institutional_pct', 'insider_pct', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'sec_max_owner_pct', 'company_description'],
+  earnings: ['report_date', 'ticker', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual', 'curated_peers'],
+  ipos: ['ipo_date', 'ticker', 'ipo_security_type', 'company_name', 'industry', 'curated_peers', 'institutional_pct', 'insider_pct', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'sec_max_owner_pct', 'company_description'],
   dividends: ['ex_date', 'ticker', 'amount', 'yield', 'pay_date'],
   splits: ['split_date', 'ticker', 'ratio'],
   analyst_ratings: ['event_date', 'ticker', 'title'],
@@ -229,6 +240,7 @@ const COLUMN_DEFINITIONS: Record<string, Omit<ColumnConfig, 'visible'>> = {
   source: { key: 'source', label: 'Source', width: '100px' },
   industry: { key: 'industry', label: 'Industry', width: '180px' },
   peers: { key: 'peers', label: 'Peers', width: '220px' },
+  curated_peers: { key: 'curated_peers', label: 'Curated Peers', width: '300px' },
   exchange: { key: 'exchange', label: 'Exchange', width: '110px' },
   sector: { key: 'sector', label: 'Sector', width: '140px' },
   status: { key: 'status', label: 'Status', width: '100px', align: 'center' },
@@ -329,6 +341,40 @@ function readStoredObject(key: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+function isCalendarPeerEdge(value: unknown): value is CalendarPeerEdge {
+  return Boolean(value)
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && typeof (value as CalendarPeerEdge).ticker === 'string'
+    && (value as CalendarPeerEdge).ticker.trim().length > 0;
+}
+
+function getCuratedPeerChipClass(grade: string): string {
+  if (grade === 'A') {
+    return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-700/60 dark:bg-emerald-900/30 dark:text-emerald-200';
+  }
+  if (grade === 'B') {
+    return 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-700/60 dark:bg-sky-900/30 dark:text-sky-200';
+  }
+  return 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200';
+}
+
+function formatRelationLabel(value: string | null | undefined): string {
+  if (!value) return '';
+  return value.split('_').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+}
+
+function formatCuratedPeerTitle(peer: CalendarPeerEdge): string {
+  const grade = String(peer.grade ?? '').trim().toUpperCase() || '?';
+  const relation = formatRelationLabel(peer.relation_type);
+  const reason = typeof peer.reason === 'string' && peer.reason.trim() ? peer.reason.trim() : '';
+  return [grade, peer.ticker, relation, reason].filter(Boolean).join(' - ');
+}
+
+function getCuratedPeerRowKey(row: CalendarRow): string {
+  return row.id || `${row.type}-${row.ticker ?? ''}-${row.event_time}`;
 }
 
 function normalizeIndustryArray(value: unknown): string[] {
@@ -736,6 +782,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const [sortField, setSortField] = useState<string | null>(storedSortField);
   const [sortDirection, setSortDirection] = useState<SortDirection>(storedSortDirection);
   const [columnStates, setColumnStates] = useState<Record<string, ColumnConfig[]>>(() => restoreColumnStates(storedUiState.columnStates, FALLBACK_TYPES));
+  const [expandedCuratedPeerRows, setExpandedCuratedPeerRows] = useState<Set<string>>(() => new Set());
   const [showColumnMenu, setShowColumnMenu] = useState(false);
   const [showWatchlistMenu, setShowWatchlistMenu] = useState(false);
   const [showIndustryMenu, setShowIndustryMenu] = useState(false);
@@ -1664,6 +1711,19 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     return String(value);
   };
 
+  const toggleCuratedPeerRow = (row: CalendarRow) => {
+    const rowKey = getCuratedPeerRowKey(row);
+    setExpandedCuratedPeerRows((previous) => {
+      const next = new Set(previous);
+      if (next.has(rowKey)) {
+        next.delete(rowKey);
+      } else {
+        next.add(rowKey);
+      }
+      return next;
+    });
+  };
+
   const renderCell = (row: CalendarRow, column: ColumnConfig) => {
     const value = row[column.key];
 
@@ -1735,6 +1795,44 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
             </span>
           ))}
         </div>
+      );
+    }
+
+    if (column.key === 'curated_peers') {
+      const peers = Array.isArray(value)
+        ? value.filter(isCalendarPeerEdge).filter((peer) => String(peer.grade ?? '').toUpperCase() !== 'EXCLUDE')
+        : [];
+      if (peers.length === 0) {
+        return <span>-</span>;
+      }
+      const rowKey = getCuratedPeerRowKey(row);
+      const expanded = expandedCuratedPeerRows.has(rowKey);
+      const visiblePeers = expanded ? peers : peers.slice(0, 12);
+      return (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-label={`${expanded ? 'Collapse' : 'Expand'} curated peers for ${row.ticker ?? row.title ?? row.id}`}
+          className={`flex w-full flex-wrap gap-1 text-left ${expanded ? 'max-h-none overflow-visible' : 'max-h-16 overflow-hidden'} rounded-sm focus:outline-none focus:ring-1 focus:ring-blue-400`}
+          title={peers.map(formatCuratedPeerTitle).join('\n')}
+          style={{ maxWidth: column.width }}
+          onClick={() => toggleCuratedPeerRow(row)}
+        >
+          {visiblePeers.map((peer) => {
+            const grade = String(peer.grade ?? '').trim().toUpperCase() || '?';
+            return (
+              <span key={`${grade}-${peer.ticker}-${peer.relation_type ?? ''}`} className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] font-medium ${getCuratedPeerChipClass(grade)}`}>
+                <span className="text-[10px] font-semibold">{grade}</span>
+                <span>{peer.ticker}</span>
+              </span>
+            );
+          })}
+          {!expanded && peers.length > visiblePeers.length && (
+            <span className="inline-flex items-center rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300">
+              +{peers.length - visiblePeers.length}
+            </span>
+          )}
+        </button>
       );
     }
 

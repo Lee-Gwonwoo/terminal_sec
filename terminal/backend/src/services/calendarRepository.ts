@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getDb } from "../db.js";
 import { getIpoSecEnrichmentMap, type IpoSecEnrichmentRow } from "./ipoSecEnrichmentRepository.js";
+import { getCompanyPeerEdgesByTickers, type CompanyPeerEdgeView } from "./companyPeerRepository.js";
 
 export const CALENDAR_TYPE_CONFIG = [
   {
@@ -14,6 +15,7 @@ export const CALENDAR_TYPE_CONFIG = [
       "company_name",
       "industry",
       "peers",
+      "curated_peers",
       "report_date",
       "time_of_day",
       "session",
@@ -41,6 +43,7 @@ export const CALENDAR_TYPE_CONFIG = [
       "exchange",
       "industry",
       "peers",
+      "curated_peers",
       "status",
       "price_range",
       "shares",
@@ -63,25 +66,25 @@ export const CALENDAR_TYPE_CONFIG = [
     key: "dividends",
     label: "Dividends",
     supports: [],
-    columns: ["ticker", "name", "industry", "peers", "ex_date", "pay_date", "amount", "yield", "market_cap"]
+    columns: ["ticker", "name", "industry", "peers", "curated_peers", "ex_date", "pay_date", "amount", "yield", "market_cap"]
   },
   {
     key: "splits",
     label: "Splits",
     supports: [],
-    columns: ["ticker", "name", "industry", "peers", "split_date", "ratio", "market_cap"]
+    columns: ["ticker", "name", "industry", "peers", "curated_peers", "split_date", "ratio", "market_cap"]
   },
   {
     key: "analyst_ratings",
     label: "Analyst Ratings",
     supports: [],
-    columns: ["ticker", "peers", "firm", "action", "rating", "price_target", "date"]
+    columns: ["ticker", "peers", "curated_peers", "firm", "action", "rating", "price_target", "date"]
   },
   {
     key: "sec_filings",
     label: "SEC Filings",
     supports: [],
-    columns: ["ticker", "peers", "form_type", "filed_at", "link"]
+    columns: ["ticker", "peers", "curated_peers", "form_type", "filed_at", "link"]
   },
   {
     key: "economics",
@@ -134,6 +137,10 @@ type CalendarTickerMetadataRow = {
   industry: string | null;
   market_cap: number | null;
   peers_json: string | null;
+  enhanced_description: string | null;
+  short_description: string | null;
+  peer_groups_json: string | null;
+  enrichment_tags_json: string | null;
   float_pct: number | null;
   institutional_pct: number | null;
   insider_pct: number | null;
@@ -357,6 +364,7 @@ async function mapCalendarRows(rows: CalendarDbRow[]): Promise<Array<Record<stri
       .filter((ticker): ticker is string => Boolean(ticker))
   ));
   const metadataMap = await getCalendarTickerMetadataMap(tickers);
+  const curatedPeerMap = await getCompanyPeerEdgesByTickers(tickers);
   const ipoUniqueKeys = rows
     .filter((row) => row.event_type === "ipos" && row.unique_key)
     .map((row) => row.unique_key);
@@ -365,6 +373,7 @@ async function mapCalendarRows(rows: CalendarDbRow[]): Promise<Array<Record<stri
     row,
     metadataMap.get(row.ticker?.toUpperCase() ?? ""),
     ipoSecMap.get(row.unique_key),
+    curatedPeerMap.get(row.ticker?.toUpperCase() ?? "") ?? [],
   ));
 }
 
@@ -372,6 +381,7 @@ function mapCalendarRow(
   row: CalendarDbRow,
   metadata?: CalendarTickerMetadataRow,
   ipoSec?: IpoSecEnrichmentRow,
+  curatedPeers: CompanyPeerEdgeView[] = [],
 ): Record<string, unknown> {
   const fieldsJson = parseFieldsJson(row.meta_json);
   const eventDate = getEventDate(row.event_at);
@@ -379,7 +389,8 @@ function mapCalendarRow(
   const ipoSecurityType = row.event_type === "ipos"
     ? deriveIpoSecurityType(row.ticker, companyName)
     : null;
-  const companyDescription = getStringField(fieldsJson.company_description) ?? ipoSec?.company_description ?? metadata?.description ?? null;
+  const enhancedDescription = metadata?.short_description ?? metadata?.enhanced_description ?? null;
+  const companyDescription = getStringField(fieldsJson.company_description) ?? ipoSec?.company_description ?? enhancedDescription ?? metadata?.description ?? null;
   const epsEstimated = getNumberField(fieldsJson.eps_est);
   const epsActual = getNumberField(fieldsJson.eps_actual);
   const revenueEstimated = getNumberField(fieldsJson.revenue_est);
@@ -411,12 +422,18 @@ function mapCalendarRow(
     ipo_security_type: ipoSecurityType,
     company_name: companyName,
     company_description: companyDescription,
+    raw_company_description: metadata?.description ?? null,
+    enhanced_description: metadata?.enhanced_description ?? null,
+    short_description: metadata?.short_description ?? null,
+    peer_groups: parsePeerGroupsJson(metadata?.peer_groups_json),
+    enrichment_tags: parseStringListJson(metadata?.enrichment_tags_json),
     name: metadata?.name ?? companyName ?? (row.ticker || null),
     exchange: metadata?.exchange ?? getStringField(fieldsJson.exchange) ?? null,
     sector: metadata?.sector ?? getStringField(fieldsJson.sector) ?? null,
     industry: metadata?.industry ?? ipoSec?.sec_industry ?? getStringField(fieldsJson.industry) ?? null,
     market_cap: metadata?.market_cap ?? null,
     peers: parsePeersJson(metadata?.peers_json),
+    curated_peers: curatedPeers,
     float_pct: metadata?.float_pct ?? null,
     institutional_pct: metadata?.institutional_pct ?? null,
     insider_pct: metadata?.insider_pct ?? null,
@@ -499,6 +516,30 @@ async function getCalendarTickerMetadataMap(
               LIMIT 1
             ) AS peers_json,
             (
+              SELECT cpe.enhanced_description
+              FROM company_profile_enrichment cpe
+              WHERE cpe.security_id = s.id
+              LIMIT 1
+            ) AS enhanced_description,
+            (
+              SELECT cpe.short_description
+              FROM company_profile_enrichment cpe
+              WHERE cpe.security_id = s.id
+              LIMIT 1
+            ) AS short_description,
+            (
+              SELECT cpe.peer_groups_json
+              FROM company_profile_enrichment cpe
+              WHERE cpe.security_id = s.id
+              LIMIT 1
+            ) AS peer_groups_json,
+            (
+              SELECT cpe.tags_json
+              FROM company_profile_enrichment cpe
+              WHERE cpe.security_id = s.id
+              LIMIT 1
+            ) AS enrichment_tags_json,
+            (
               SELECT cp.float_pct
               FROM company_profiles cp
               WHERE cp.security_id = s.id AND cp.float_pct IS NOT NULL
@@ -568,6 +609,41 @@ function parsePeersJson(raw: string | null | undefined): string[] {
       parsed
         .filter((item): item is string => typeof item === "string")
         .map((item) => item.trim().toUpperCase())
+        .filter(Boolean),
+    ));
+  } catch {
+    return [];
+  }
+}
+
+function parsePeerGroupsJson(raw: string | null | undefined): Array<Record<string, unknown>> {
+  if (!raw) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item));
+  } catch {
+    return [];
+  }
+}
+
+function parseStringListJson(raw: string | null | undefined): string[] {
+  if (!raw) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return Array.from(new Set(
+      parsed
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
         .filter(Boolean),
     ));
   } catch {

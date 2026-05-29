@@ -8,10 +8,27 @@ export interface CompanyProfileData {
   ticker: string;
   source: string | null;
   description: string | null;
+  shortDescription: string | null;
+  enhancedDescription: string | null;
+  products: string[];
+  revenueModel: string[];
+  keyMetrics: string[];
+  watchPoints: string[];
+  risks: string[];
+  peerGroups: CompanyPeerGroup[];
+  enrichmentTags: string[];
   website: string | null;
   ceo: string | null;
   ipoDate: string | null;
   marketCap: number | null;
+}
+
+export interface CompanyPeerGroup {
+  category: string;
+  label: string;
+  tickers: string[];
+  companies: string[];
+  note?: string;
 }
 
 const profileCache = new Map<string, CompanyProfileData | null>();
@@ -49,7 +66,7 @@ export async function fetchCompanyProfile(
 
   if (profileCache.has(normalizedTicker)) {
     const cachedProfile = profileCache.get(normalizedTicker) ?? null;
-    if (cachedProfile?.description) {
+    if (cachedProfile?.description || cachedProfile?.enhancedDescription) {
       return cachedProfile;
     }
   }
@@ -70,6 +87,15 @@ export async function fetchCompanyProfile(
     ticker: normalizedTicker,
     source: typeof data?.source === 'string' && data.source ? data.source : null,
     description: typeof data?.description === 'string' && data.description.trim() ? data.description.trim() : null,
+    shortDescription: typeof data?.short_description === 'string' && data.short_description.trim() ? data.short_description.trim() : null,
+    enhancedDescription: typeof data?.enhanced_description === 'string' && data.enhanced_description.trim() ? data.enhanced_description.trim() : null,
+    products: normalizeStringArray(data?.products),
+    revenueModel: normalizeStringArray(data?.revenue_model),
+    keyMetrics: normalizeStringArray(data?.key_metrics),
+    watchPoints: normalizeStringArray(data?.watch_points),
+    risks: normalizeStringArray(data?.risks),
+    peerGroups: normalizePeerGroups(data?.peer_groups),
+    enrichmentTags: normalizeStringArray(data?.enrichment_tags),
     website: typeof data?.website === 'string' && data.website ? data.website : null,
     ceo: typeof data?.ceo === 'string' && data.ceo ? data.ceo : null,
     ipoDate: typeof data?.ipo_date === 'string' && data.ipo_date ? data.ipo_date : null,
@@ -78,6 +104,42 @@ export async function fetchCompanyProfile(
 
   profileCache.set(normalizedTicker, profile);
   return profile;
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const items: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string') {
+      continue;
+    }
+    const trimmed = item.trim();
+    if (!trimmed || seen.has(trimmed.toLowerCase())) {
+      continue;
+    }
+    seen.add(trimmed.toLowerCase());
+    items.push(trimmed);
+  }
+  return items;
+}
+
+function normalizePeerGroups(value: unknown): CompanyPeerGroup[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
+    .map((item) => ({
+      category: typeof item.category === 'string' && item.category.trim() ? item.category.trim() : 'other',
+      label: typeof item.label === 'string' && item.label.trim() ? item.label.trim() : 'Other',
+      tickers: normalizeStringArray(item.tickers),
+      companies: normalizeStringArray(item.companies),
+      note: typeof item.note === 'string' && item.note.trim() ? item.note.trim() : undefined,
+    }))
+    .filter((group) => group.tickers.length > 0 || group.companies.length > 0 || group.note);
 }
 
 export function formatCompanyMarketCap(value: number | null): string {

@@ -6695,6 +6695,8 @@ import { fetchFmpProfile, fetchFmpProfilesBatch, clampFmpConcurrency, clampFmpIn
 import { fetchFinnhubProfilesBatch } from "./services/finnhubProfile2Provider.js";
 import { fetchYahooProfilesBatch, clampYahooConcurrency, clampYahooIntervalMs, getYahooDefaults } from "./services/yahooCompanyProfileProvider.js";
 import { upsertCompanyProfile, getCompanyProfileByTicker, countCompanyProfiles, upsertPeers, getPeersByTicker, getTickersWithFmpProfile, getTickersWithYahooProfile, getTickersWithExistingPeers, getTickersWithAnyExistingPeers, getTickersWithExistingIpoDate } from "./services/companyProfileRepository.js";
+import { getCompanyProfileEnrichmentByTicker } from "./services/companyProfileEnrichmentRepository.js";
+import { getCompanyPeerEdgesByTicker } from "./services/companyPeerRepository.js";
 import { fetchFinnhubPeersBatch } from "./services/finnhubPeersProvider.js";
 import { fetchFmpPeersBatch, clampFmpPeersConcurrency, clampFmpPeersIntervalMs } from "./services/fmpPeersProvider.js";
 
@@ -6703,7 +6705,24 @@ app.get("/api/company-profiles/:ticker", async (req, res) => {
     const ticker = req.params.ticker.toUpperCase();
     const profile = await getCompanyProfileByTicker(ticker);
     if (!profile) { res.status(404).json({ error: "Profile not found" }); return; }
-    res.json(profile);
+    const enrichment = await getCompanyProfileEnrichmentByTicker(ticker);
+    const curatedPeers = await getCompanyPeerEdgesByTicker(ticker);
+    res.json({
+      ...profile,
+      enrichment: enrichment ?? null,
+      enhanced_description: enrichment?.enhanced_description ?? null,
+      short_description: enrichment?.short_description ?? null,
+      products: enrichment?.products ?? [],
+      revenue_model: enrichment?.revenue_model ?? [],
+      key_metrics: enrichment?.key_metrics ?? [],
+      watch_points: enrichment?.watch_points ?? [],
+      risks: enrichment?.risks ?? [],
+      peer_groups: enrichment?.peer_groups ?? [],
+      curated_peers: curatedPeers,
+      enrichment_tags: enrichment?.tags ?? [],
+      enrichment_source_note: enrichment?.source_note ?? null,
+      enrichment_updated_at: enrichment?.updated_at ?? null,
+    });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : "Unknown error" });
   }

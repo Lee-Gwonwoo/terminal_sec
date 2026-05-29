@@ -431,6 +431,67 @@ export async function initDb(): Promise<void> {
   );
 
   await db.exec(`
+    CREATE TABLE IF NOT EXISTS company_profile_enrichment (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      security_id INTEGER NOT NULL REFERENCES securities(id) ON DELETE CASCADE,
+      ticker TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'curated',
+      version TEXT NOT NULL DEFAULT 'v1',
+      short_description TEXT,
+      enhanced_description TEXT NOT NULL,
+      products_json TEXT NOT NULL DEFAULT '[]',
+      revenue_model_json TEXT NOT NULL DEFAULT '[]',
+      key_metrics_json TEXT NOT NULL DEFAULT '[]',
+      watch_points_json TEXT NOT NULL DEFAULT '[]',
+      risks_json TEXT NOT NULL DEFAULT '[]',
+      peer_groups_json TEXT NOT NULL DEFAULT '[]',
+      tags_json TEXT NOT NULL DEFAULT '[]',
+      source_urls_json TEXT NOT NULL DEFAULT '[]',
+      source_note TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (security_id)
+    );
+  `);
+  await db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_company_profile_enrichment_ticker ON company_profile_enrichment (ticker);"
+  );
+  await db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_company_profile_enrichment_updated ON company_profile_enrichment (updated_at DESC, id DESC);"
+  );
+
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS company_peer_edges (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_security_id INTEGER NOT NULL REFERENCES securities(id) ON DELETE CASCADE,
+      related_security_id INTEGER REFERENCES securities(id) ON DELETE SET NULL,
+      source_ticker TEXT NOT NULL,
+      related_ticker TEXT NOT NULL,
+      related_name TEXT,
+      grade TEXT NOT NULL CHECK (grade IN ('A', 'B', 'C', 'EXCLUDE')),
+      relation_type TEXT NOT NULL,
+      direction TEXT NOT NULL DEFAULT 'directed',
+      score REAL,
+      reason TEXT,
+      evidence_json TEXT NOT NULL DEFAULT '[]',
+      source TEXT NOT NULL DEFAULT 'default_universe_baseline',
+      version TEXT NOT NULL DEFAULT 'v1',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (source_security_id, related_ticker, source, version)
+    );
+  `);
+  await db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_company_peer_edges_source_ticker ON company_peer_edges (source_ticker, grade, score DESC);"
+  );
+  await db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_company_peer_edges_related_ticker ON company_peer_edges (related_ticker);"
+  );
+  await db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_company_peer_edges_source_version ON company_peer_edges (source, version);"
+  );
+
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS ticker_universes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL UNIQUE,
