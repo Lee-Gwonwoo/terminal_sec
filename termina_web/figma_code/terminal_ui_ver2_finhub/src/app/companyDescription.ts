@@ -48,7 +48,10 @@ export async function fetchCompanyProfile(
   }
 
   if (profileCache.has(normalizedTicker)) {
-    return profileCache.get(normalizedTicker) ?? null;
+    const cachedProfile = profileCache.get(normalizedTicker) ?? null;
+    if (cachedProfile?.description) {
+      return cachedProfile;
+    }
   }
 
   const response = await fetch(`/api/company-profiles/${encodeURIComponent(normalizedTicker)}`, { signal });

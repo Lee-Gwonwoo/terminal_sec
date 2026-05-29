@@ -10,6 +10,7 @@ export const CALENDAR_TYPE_CONFIG = [
     columns: [
       "ticker",
       "name",
+      "ipo_date",
       "company_name",
       "industry",
       "report_date",
@@ -126,6 +127,7 @@ type CalendarTickerMetadataRow = {
   exchange: string | null;
   name: string | null;
   description: string | null;
+  ipo_date: string | null;
   sector: string | null;
   industry: string | null;
   market_cap: number | null;
@@ -383,7 +385,9 @@ function mapCalendarRow(
   const surprisePct = getNumberField(fieldsJson.surprise_pct) ?? computeSurprisePct(epsActual, epsEstimated);
   const confirmed = getBooleanField(fieldsJson.confirmed) ?? (epsActual != null || revenueActual != null);
   const session = getStringField(fieldsJson.session) ?? deriveSession(timeOfDay);
-  const ipoDate = getStringField(fieldsJson.ipo_date) ?? eventDate;
+  const ipoDate = row.event_type === "ipos"
+    ? getStringField(fieldsJson.ipo_date) ?? eventDate
+    : getStringField(fieldsJson.ipo_date) ?? metadata?.ipo_date ?? null;
   const secFilingDate = ipoSec?.filing_date ? ipoSec.filing_date.slice(0, 10) : null;
   const secAcceptedDate = ipoSec?.accepted_date ? ipoSec.accepted_date.slice(0, 10) : null;
 
@@ -464,6 +468,13 @@ async function getCalendarTickerMetadataMap(
               ORDER BY cp.fetched_at DESC, cp.id DESC
               LIMIT 1
             ) AS description,
+            (
+              SELECT cp.ipo_date
+              FROM company_profiles cp
+              WHERE cp.security_id = s.id AND cp.ipo_date IS NOT NULL AND cp.ipo_date != ''
+              ORDER BY cp.fetched_at DESC, cp.id DESC
+              LIMIT 1
+            ) AS ipo_date,
             s.sector,
             s.industry,
             (

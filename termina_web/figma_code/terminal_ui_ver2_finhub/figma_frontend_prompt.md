@@ -1152,7 +1152,7 @@ API:
 - economics를 제외한 탭에서는 `POST /api/company-profiles/pull-yahoo`를 실행하는 `Update Yahoo Desc` 버튼을 표시한다.
   - 현재 active tab에서 로드된 row의 `ticker`를 중복 제거해 `tickers` body로 보낸다.
   - Yahoo 실행 설정은 Data Control 창과 같은 localStorage key(`yahoo-concurrency`, `yahoo-request-interval-ms`, `yahoo-skip-existing`)를 읽어 사용한다.
-- industry / ownership(`float_pct`, `institutional_pct`, `insider_pct`)는 column selector에서 켜고 끌 수 있다.
+- earnings 탭의 회사 IPO date(`ipo_date`)와 industry / ownership(`float_pct`, `institutional_pct`, `insider_pct`)는 column selector에서 켜고 끌 수 있다.
 - IPO direct/SEC 컬럼(`ipo_date`, `company_name`, `exchange`, `status`, `price_range`, `shares`, `offer_amount`, `company_description`, `sec_max_owner_pct`, `sec_total_owner_pct`, `prospectus_url`, `disclosure_url`)도 column selector에서 켜고 끌 수 있다.
 - earnings에서는 `Inst %`, `Float %`, `Market Cap(B$)` min/max 숫자 필터를 사용할 수 있다.
 - dividends / splits에서는 `Market Cap(B$)` min/max 숫자 필터를 사용할 수 있다.
@@ -1182,7 +1182,7 @@ API:
   - 초기 진입, 탭 전환, Reset 모두 이 기준을 사용한다.
 - search는 client-side로 `ticker`, `company`, `title`, `industry`, `source`, `status`, `company_description`을 대상으로 동작한다.
 - ticker chip interaction은 좌/우 클릭이 분리돼 있다.
-  - 좌클릭: 기존 linked ticker 동작
+  - 좌클릭: 기존 linked ticker 동작과 함께 `Company Description` window 열기
   - 우클릭: context menu 열기
   - context menu의 `Financial` action: annual / quarterly toggle dialog 열기
 - 숫자 범위 필터는 현재 fetch된 row 집합에 대해 client-side로 즉시 적용된다.

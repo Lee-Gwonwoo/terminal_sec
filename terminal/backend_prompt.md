@@ -1144,6 +1144,8 @@ Control Window / localStorage 공통 설정:
 - `cursor`
 - `limit`
 
+응답 row는 `calendar_events.meta_json` 값에 더해 ticker metadata를 병합한다. earnings 같은 비-IPO 이벤트의 `[][][]ipo_date[][][]`는 `company_profiles.ipo_date`의 최신 non-empty 값이며, IPO 이벤트의 `[][][]ipo_date[][][]`는 IPO event date/direct field를 우선 사용한다.
+
 ### `POST /api/ibkr/calendar/update`
 
 - 요청 body의 `mode`는 `backfill | refresh`
@@ -3001,7 +3003,7 @@ folder와 연관 bookmark_items가 함께 삭제된다.
 
 ### `GET /api/company-profiles/:ticker`
 
-지정 ticker의 회사 프로필을 반환한다. `securities` 테이블과 `company_profiles`를 join해서 가장 최근 프로필을 내려준다.
+지정 ticker의 회사 프로필을 반환한다. `securities` 테이블과 source별 `company_profiles` row를 join한 뒤, `[][][]description[][][]`, `[][][]website[][][]`, `[][][]ipo_date[][][]`, `[][][]market_cap[][][]`처럼 field별 최신 non-empty/non-null 값을 병합해서 내려준다. 따라서 최신 FMP row에 설명이 비어 있어도 더 오래된 Yahoo row에 설명이 있으면 description은 Yahoo 값을 사용하고, market cap/IPO date는 FMP/Finnhub 등 최신 보유 row 값을 유지할 수 있다.
 
 ### `POST /api/company-profiles/pull-fmp`
 

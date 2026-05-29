@@ -92,13 +92,37 @@ export async function getCompanyProfile(securityId: number, source?: string): Pr
 }
 
 export async function getCompanyProfileByTicker(ticker: string): Promise<(CompanyProfileRow & { ticker: string }) | undefined> {
-  return getDb().get(
+  const rows = await getDb().all<Array<CompanyProfileRow & { ticker: string }>>(
     `SELECT cp.*, s.ticker FROM company_profiles cp
      JOIN securities s ON s.id = cp.security_id
      WHERE s.ticker = ?
-     ORDER BY cp.fetched_at DESC LIMIT 1`,
+     ORDER BY cp.fetched_at DESC, cp.id DESC`,
     [ticker.toUpperCase()],
   );
+
+  if (rows.length === 0) {
+    return undefined;
+  }
+
+  const latest = rows[0];
+  const descriptionRow = rows.find((row) => row.description?.trim());
+  const ceoRow = rows.find((row) => row.ceo?.trim());
+  const websiteRow = rows.find((row) => row.website?.trim());
+  const ipoDateRow = rows.find((row) => row.ipo_date?.trim());
+  const marketCapRow = rows.find((row) => row.market_cap != null);
+  const rawJsonRow = descriptionRow ?? latest;
+
+  return {
+    ...latest,
+    source: descriptionRow?.source ?? latest.source,
+    description: descriptionRow?.description ?? null,
+    ceo: ceoRow?.ceo ?? null,
+    website: websiteRow?.website ?? null,
+    ipo_date: ipoDateRow?.ipo_date ?? null,
+    market_cap: marketCapRow?.market_cap ?? null,
+    raw_json: rawJsonRow.raw_json,
+    fetched_at: descriptionRow?.fetched_at ?? latest.fetched_at,
+  };
 }
 
 export async function countCompanyProfiles(): Promise<number> {

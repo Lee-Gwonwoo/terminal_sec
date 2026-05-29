@@ -84,6 +84,7 @@ interface EditorSnapshot {
 }
 
 type EditorViewMode = 'edit' | 'split' | 'preview';
+const DEFAULT_EDITOR_VIEW_MODE: EditorViewMode = 'preview';
 type TableAlignment = 'left' | 'center' | 'right';
 
 interface PreviewTextLine {
@@ -683,7 +684,7 @@ export function CaseResearchWindow() {
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [restoringKey, setRestoringKey] = useState<string | null>(null);
   const [editorDocument, setEditorDocument] = useState<EditorDocument>({ text: '', highlights: [] });
-  const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>('edit');
+  const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>(DEFAULT_EDITOR_VIEW_MODE);
   const [selectedHighlightColor, setSelectedHighlightColor] = useState<string>(HIGHLIGHT_PRESETS[0].value);
   const [selectionRange, setSelectionRange] = useState<EditorSelectionRange>({ start: 0, end: 0 });
   const [, setHistoryVersion] = useState(0);
