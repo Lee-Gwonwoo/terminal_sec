@@ -130,3 +130,44 @@
 - 관찰 사항:
   - Windows PowerShell 5.1에서는 `Invoke-WebRequest`가 보안 경고 프롬프트를 띄우므로, 런타임 검증은 `-UseBasicParsing`을 붙여 수행했음
   - 중간 검증 중 실수로 시작된 장기 custom earnings job(`ea948690-60ac-418f-8ca0-18d3efaf0195`)은 확인 후 `POST /api/jobs/:jobId/cancel`로 정리해 워크스페이스를 깨끗한 상태로 복구했음
+
+## 2026-05-29
+**작성 시각:** 19:14 (local)
+
+### FMP Earnings Calendar cap-safe sync 리비전
+- 상태: 확인 대기
+- 변경 파일:
+  - `terminal/backend/src/server.ts`
+  - `ai_agent_plan/news_earnings_dates/plan.md`
+  - `ai_agent_plan/news_earnings_dates/agent_log.md`
+- 배경:
+  - RDW earnings date가 Calendar/Past History에 누락된 원인을 확인한 결과, FMP `stable/earnings-calendar`가 monthly/broad window에서 `4000` rows cap처럼 동작하며 일부 ticker를 누락할 수 있었음
+  - `Sync Financial + Past Estimates` 버튼은 기존에 financial series/analyst estimates만 동기화해 `calendar_events`의 earnings date 누락을 복구하지 못했음
+- 구현 내용:
+  - earnings calendar 전용 기본 chunk를 `14일`로 분리하고, 기존 `30일` 공용 calendar chunk는 IPO 등 다른 calendar flow에 유지
+  - `4000` rows 이상 반환된 earnings chunk를 cap 의심으로 보고 해당 chunk만 자동으로 절반 재분할해 큐에 추가
+  - cap 의심 chunk는 incomplete snapshot 가능성이 있으므로 delete-before-replace를 건너뛰고 upsert만 수행
+  - standalone `/api/fmp/calendar/earnings/update`와 `/api/fmp/calendar/financials/update`가 같은 cap-safe helper를 사용하도록 정리
+  - `/api/fmp/calendar/financials/update`는 선행 단계로 earnings date backfill(`오늘 - 730일 ~ 오늘 + 180일`)을 수행한 뒤 financial/past estimates sync를 이어서 실행
+  - financial sync 내부 earnings backfill 성공 시 `fmp_calendar_earnings` status도 함께 갱신
+- 검증 결과:
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `terminal/backend/src/server.ts` `get_errors` 0 errors |
+| 빌드 | ✅ | `terminal/backend`에서 `npm.cmd run build` 성공 |
+| 자동 테스트 | ✅ | backend `vitest` 17 files / 104 tests pass |
+| 런타임 job | ✅ | `POST /api/fmp/calendar/earnings/update` with `2026-05-01~2026-05-14`가 14일 chunk 1개로 시작 후 cap 감지, `05-01~05-07`, `05-08~05-14`로 자동 분할 |
+| DB 확인 | ✅ | `calendar_events`에 `FMP:earnings:RDW:2026-05-06` 저장 확인 |
+
+- 런타임 관찰:
+  - 첫 14일 chunk는 `fetched=4000`으로 cap 의심 상태였고 delete-before-replace를 건너뜀
+  - 자동 분할된 `2026-05-01~2026-05-07` chunk는 `fetched=3388`, `2026-05-08~2026-05-14` chunk는 `fetched=3385`로 cap 미만이었음
+  - RDW row는 `event_at=2026-05-06T12:00:00.000Z`, `source=FMP`, `eps_est=-0.16`, `eps_actual=-0.18`, `revenue_est=105941000`, `revenue_actual=96972000`로 저장됨
+- 사용자가 직접 확인할 수 있는 방법:
+  - Calendar Window에서 RDW를 `2026-05-01~2026-05-14` 범위로 필터링해 `2026-05-06` earnings row가 보이는지 확인
+  - 또는 backend에서 `POST /api/fmp/calendar/earnings/update`를 같은 범위로 실행한 뒤 `/api/jobs/:jobId` log에 `looks capped; queued 2 narrower chunks`가 남는지 확인
+- 리스크 / 완화 방안:
+  - 리스크: 1일 단위까지 쪼갰는데도 FMP가 `4000` rows를 반환하면 여전히 완전성을 보장할 수 없음. 완화: job log에 single-day cap 의심을 남기고 기존 row 삭제를 막아 데이터 손실을 방지
+  - 리스크: combined financial sync는 earnings backfill을 먼저 수행하므로 job 시간이 늘어날 수 있음. 완화: 기본 요청 단위는 14일로 유지하고 cap 구간만 추가 호출
+  - 리스크: 과거 2년보다 더 오래된 history는 기본 financial sync만으로는 복구되지 않을 수 있음. 완화: 필요 시 request body의 `from/to`로 더 긴 backfill 범위를 지정

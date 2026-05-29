@@ -1,5 +1,20 @@
 # News Window Earnings Dates Plan
 
+## PLAN CHANGE (2026-05-29)
+
+이번 리비전에서 Calendar Window의 FMP earnings calendar 동기화 신뢰성 요구사항을 추가 반영한다.
+
+- FMP `stable/earnings-calendar`는 busy earnings window에서 넓은 기간을 요청하면 응답이 `4000` rows 근처에서 잘릴 수 있다.
+- 따라서 earnings calendar update는 기존 공용 calendar chunk(`30일`)를 그대로 쓰지 않고, earnings 전용 chunk를 사용한다.
+- earnings 전용 기본 chunk는 `14일`로 둔다. 이것은 전체 다운로드 기간이 14일로 제한된다는 뜻이 아니라, 사용자가 선택한 전체 기간을 14일 단위 요청으로 순회한다는 뜻이다.
+- 특정 14일 chunk가 `4000` rows 이상을 반환하면 cap 의심 상태로 보고, 그 chunk만 절반으로 다시 나눠 재요청한다.
+- 재분할은 필요하면 `7일 -> 3/4일 -> 1/2일 -> 1일`처럼 계속 좁아질 수 있다.
+- cap 의심 chunk는 incomplete snapshot일 수 있으므로 해당 범위의 기존 FMP earnings row를 삭제하지 않고, 반환된 row만 upsert한다. 이후 더 좁은 non-capped chunk가 같은 하위 범위를 snapshot-replace한다.
+- `Sync Financial + Past Estimates` 버튼은 financial series/analyst estimates만 동기화하면 과거 earnings date 누락을 고칠 수 없으므로, 같은 job의 선행 단계에서 cap-safe earnings date backfill을 수행한다.
+- combined financial sync의 earnings backfill 기본 범위는 `오늘 - 730일`부터 `오늘 + 180일`까지로 둔다.
+- `fmp_calendar_earnings` freshness/status는 standalone earnings update뿐 아니라 financial sync 내부 backfill 성공 시에도 갱신한다.
+- RDW처럼 FMP에는 존재하지만 broad monthly request에서 누락되던 케이스는 narrow/adaptive chunk를 통해 `calendar_events`에 저장되어야 한다.
+
 ## PLAN CHANGE (2026-04-18)
 
 이번 리비전에서 아래 요구사항을 추가 반영한다.
