@@ -106,7 +106,7 @@ Vite dev proxy:
 
 - `evidence-table`은 실제 렌더링되는 정식 창 타입이며 backend `model2` API를 사용한다.
 - `case-description`은 Add Tab Modal에서 직접 고르는 타입이 아니라, `EvidenceTableWindow`가 `open-case-description` 이벤트를 보낼 때 같은 탭 안에 동적으로 열리는 보조 설명 창이다.
-- `company-description`은 Add Tab Modal에서 직접 고르는 타입이 아니라, ticker 클릭 이벤트를 통해 현재 탭에 동적으로 열리는 회사 설명 창이다.
+- `company-description`은 Add Tab Modal에서 직접 고르는 타입이 아니라, ticker 클릭 이벤트를 통해 현재 탭에 동적으로 열리는 회사 설명 창이다. 새로 열릴 때는 Calendar/뉴스 테이블의 좌측 헤더를 덮지 않도록 viewport 우측에 기본 배치하고, 화면 크기에 맞춰 폭/높이와 좌표를 clamp한다.
 - `data-control-how-to-use`는 Add Tab Modal에서 직접 고르는 타입이 아니라, `DataControlWindow` 또는 `FinnhubNewsWindow`의 `How To Use` 액션에서 동적으로 열리는 안내 창이다.
 - `brave-news`는 타입 정의에 없다. 즉 파일은 있지만 앱에서 선택/렌더링되지 않는다.
 

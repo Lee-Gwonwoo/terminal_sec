@@ -48,6 +48,19 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
+function getCompanyDescriptionWindowPosition(index: number) {
+  const viewportWidth = typeof globalThis.innerWidth === "number" ? globalThis.innerWidth : 1280;
+  const viewportHeight = typeof globalThis.innerHeight === "number" ? globalThis.innerHeight : 800;
+  const width = Math.min(600, Math.max(420, viewportWidth - 48));
+  const height = Math.min(500, Math.max(360, viewportHeight - 220));
+  const stagger = Math.min(index, 4) * 18;
+  const left = Math.max(24, viewportWidth - width - 24);
+  const maxTop = Math.max(76, viewportHeight - height - 24);
+  const top = Math.min(176 + stagger, maxTop);
+
+  return { top, left, width, height };
+}
+
 export default function App() {
   const [tabs, setTabs] = useState<TabData[]>([
     {
@@ -87,6 +100,7 @@ export default function App() {
         return tab;
       }
 
+      const position = getCompanyDescriptionWindowPosition(tab.windows.length);
       const existing = tab.windows.find((window) => window.type === 'company-description' && window.data && 'ticker' in window.data && window.data.ticker === normalizedTicker);
       if (existing) {
         return {
@@ -95,22 +109,17 @@ export default function App() {
             ...window,
             title: `Company Description: ${normalizedTicker}`,
             data: { ticker: normalizedTicker },
+            position,
           } : window),
         };
       }
 
-      const nextIndex = tab.windows.length;
       const newWindow: WindowInstance = {
         id: `${Date.now()}-company-description-${normalizedTicker}`,
         type: 'company-description',
         title: `Company Description: ${normalizedTicker}`,
         data: { ticker: normalizedTicker },
-        position: {
-          top: 84 + nextIndex * 18,
-          left: 110 + nextIndex * 18,
-          width: 640,
-          height: 520,
-        },
+        position,
       };
 
       return {

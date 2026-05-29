@@ -7,13 +7,14 @@
 - UI/DB/API에서 AI 뉴스 분석 결과를 같은 의미로 다뤄야 할 때.
 
 ### 목적
-이 지침은 AI 뉴스 리서치/분석 작업을 아래 5개 모델로 나눠서 정의한다.
+이 지침은 AI 뉴스 리서치/분석 작업을 아래 6개 모델로 나눠서 정의한다.
 
 1. `🟦 Model_1_new news analysis`
 2. `🟧 Model_2_case analysis`
 3. `🟥 Model_3_single-news scoring analysis`
 4. `🟩 Model_4_watchlists analysis`
 5. `🟪 Model_100_issue tier analysis`
+6. `🟫 Model_200_earning_lists analysis`
 
 기존에 문서에 있던 단일 뉴스 `Score / Score Evidence / Keywords` 생성 방식은 이제 `Model_3`로 분류한다.
 
@@ -24,6 +25,8 @@
 `Model_100_issue tier analysis`는 개별 뉴스가 아니라 **이슈 1개가 만들어낸 종목 바스켓 전체의 형성·확산·분화 라이프사이클**을 분석하는 모델이다. 관련주 정리 후 `## 오너십 데이터` 안에서 **ownership + governance / dilution risk audit**를 기본적으로 정리하고, 그 바로 아래에서 핵심 분석이슈 anchor를 먼저 고정한 뒤 선행/관련 이슈와 확산 타임라인을 비교한다. governance audit에는 share structure, founder-control, insider ownership, 5년 dilution, Form 4, ATM/shelf, red flag checklist, academic frame이 포함되며, DB에 값이 없으면 `SEC EDGAR`와 issuer IR 웹 원문을 직접 확인해 계속 진행한다. 가격 반응은 `change / HV / z-score`를 same-day, from-open, 1d, 7d, 14d, 30d window로 함께 본다. 상세 정의는 [ai-news-research_model100_issue_analysis.md](ai-news-research_model100_issue_analysis.md)에 둔다.
 
 추가로 `Model_100`에는 사용자가 명시적으로 `관련주 확장`, `related-stock expansion`, `관련주 더 넓혀`, `후보 확장`을 요청했을 때만 붙는 **선택적 추가 작업**이 있다. 이는 기본 Model_100 절차를 대체하지 않고, 기본 관련주 표를 만든 뒤 `keyword / company_profiles.description / peers / same-wave price validation` 축으로 후보를 더 넓게 발굴해 `포함 / 제외 / 관련성 정도`를 별도 섹션으로 남기는 규칙이다. 기본 Model_100 요청에서는 이 확장 절차를 자동 강제하지 않는다. 상세 정의는 [ai-news-research_model100_issue_analysis.md](ai-news-research_model100_issue_analysis.md)에 둔다.
+
+`Model_200_earning_lists`는 사용자가 지정한 기간의 earnings calendar ticker들을 뽑아 `market cap`, `institutional ownership %`, `industry` 기준으로 정리하고, software 관련 ticker에 한해 AI 대체 가능성을 4단계로 분류하는 screening / research-prep 모델이다. 핵심 축은 `AI가 그 위에서 돌아가는가`와 `AI가 그 일을 대신하는가`의 구분이다. 상세 정의는 [ai-news-research_model200_earning_lists.md](ai-news-research_model200_earning_lists.md)에 둔다.
 
 ### plan / log 문서 작성 예외
 
@@ -255,3 +258,6 @@ AI news research 작업에서는 모든 저장소를 동일하게 취급하면 �
 - `Model_1` 간접 영향 전파 점검: `model_1_2_investing` (DB 기반 분석 후 Investing 웹 기사로 외부 이슈 -> 공개 ticker 바스켓 -> watchlist/readthrough 후보를 점검)
 - 🟧 **Model_2** (기간 전체 case 분류 메타 모델): [ai-news-research_model2.md](ai-news-research_model2.md)
 - 🟥 **Model_3** (단일 뉴스 Score/Evidence/Keywords 생성): [ai-news-research_model3.md](ai-news-research_model3.md)
+- 🟩 **Model_4_watchlists** (watchlist 제한 Model_1 변형): [ai-news-research_model4_watchlists.md](ai-news-research_model4_watchlists.md)
+- 🟪 **Model_100_issue_analysis** (이슈 바스켓 tier 분석): [ai-news-research_model100_issue_analysis.md](ai-news-research_model100_issue_analysis.md)
+- 🟫 **Model_200_earning_lists** (기간별 earnings ticker 분류): [ai-news-research_model200_earning_lists.md](ai-news-research_model200_earning_lists.md)
