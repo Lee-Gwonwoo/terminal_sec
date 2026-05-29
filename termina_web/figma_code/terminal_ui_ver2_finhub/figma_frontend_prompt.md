@@ -11,7 +11,7 @@
 - `News` 창도 `GET /api/news`, `POST /api/news/pull-eodhd`를 실제로 호출하지만, 현재 운영 기준의 주력 뉴스 창은 아니다.
 - `Watchlist` 창은 backend `watchlists` API와 연결되어 있고, 종목 이름/가격 일부는 프론트의 fallback lookup을 함께 사용한다.
 - `Calendar` 창은 backend `calendar_events` 기반의 실데이터 창이며, 현재 earnings + IPO 탭과 background job polling을 지원한다. IPO 탭에는 `Security Type` 컬럼과 dropdown 필터가 있고, 이 값은 FMP의 `ticker/company_name` 문자열에서 파생된다.
-- `Finnhub News` 창과 `Calendar` 창은 `GET /api/industries` 목록을 읽어 `All Industries` dropdown을 표시한다. 메뉴 항목은 checkbox multi-select이며, 선택된 industry 목록을 `industries` 반복 query로 backend에 넘겨 server-side 필터링한다. `All Industries` 상태에서는 모든 industry checkbox가 체크된 것처럼 보이고, 개별 항목을 해제하면 전체 중 일부만 선택한 상태로 전환된다. 메뉴 상단에는 industry 명칭 검색 input이 있다. 개별 industry row를 우클릭하면 `Instruction` 버튼이 뜨고, 버튼을 누르면 `GET /api/industries/detail` 결과로 industry 설명과 시총순 관련 ticker 목록을 dialog에 표시한다.
+- `Finnhub News` 창과 `Calendar` 창은 `GET /api/industries` 목록을 읽어 `All Industries` dropdown을 표시한다. 메뉴 항목은 checkbox multi-select이며, 선택된 industry 목록을 `industries` 반복 query로 backend에 넘겨 server-side 필터링한다. `All Industries` 상태에서는 모든 industry checkbox가 체크된 것처럼 보이고, 개별 항목을 해제하면 전체 중 일부만 선택한 상태로 전환된다. 메뉴 상단에는 industry 명칭 검색 input이 있다. `Calendar` 창은 현재 체크된 industry 목록을 localStorage preset으로 저장/삭제할 수 있고, 저장된 preset의 `Apply`를 누르면 해당 industry 목록이 즉시 선택값으로 적용되어 calendar events를 다시 조회한다. 개별 industry row를 우클릭하면 `Instruction` 버튼이 뜨고, 버튼을 누르면 `GET /api/industries/detail` 결과로 industry 설명과 시총순 관련 ticker 목록을 dialog에 표시한다.
 - `App.tsx`는 `open-case-description`, `open-company-description`, `open-data-control-how-to-use` custom event를 받아 `case-description`, `company-description`, `data-control-how-to-use` 보조 창을 현재 탭에 동적으로 추가한다.
 - ticker가 있는 주요 창에서는 클릭으로 `Company Description` 창을 열 수 있고, ticker hover 3초 뒤 `CompanyDescriptionHoverPreview` overlay가 뜬다.
 - `BraveNewsWindow.tsx` 파일은 남아 있지만 현재 `WindowType`에 연결되어 있지 않아 UI에서 열 수 없다.
@@ -1173,6 +1173,9 @@ API:
   - 목록은 `GET /api/industries`에서 읽는다.
   - 메뉴 항목은 checkbox이며 여러 industry를 동시에 선택할 수 있다.
   - 선택값은 `calendar-window-ui-state` localStorage에 저장되어 Calendar 창을 떠났다가 돌아와도 유지된다.
+  - 체크된 industry 목록은 메뉴 안에서 이름을 붙여 저장할 수 있고, 저장된 filter preset은 `calendar-industry-filter-presets-v1` localStorage에 보관된다.
+  - 저장된 filter preset의 `Apply`를 누르면 해당 preset의 industry 목록이 `selectedIndustries`로 들어가며, 기존 `industries` 반복 query를 통해 server-side 필터가 즉시 다시 적용된다.
+  - 저장된 filter preset은 메뉴 안의 delete 버튼으로 삭제할 수 있다. 삭제는 preset 목록만 지우며 현재 적용된 industry 선택값은 유지한다.
   - 선택 시 server-side `industries` filter가 걸린 결과 집합으로 다시 fetch한다.
   - 개별 industry row를 우클릭하면 `Instruction` 버튼이 뜬다. 버튼을 누르면 `GET /api/industries/detail?industry=...`를 호출해 industry 설명, ticker 수, market cap 보유 수, sector 요약, 시총순 ticker table을 dialog로 표시한다.
 - Calendar UI 상태는 `calendar-window-ui-state` localStorage에 저장된다.

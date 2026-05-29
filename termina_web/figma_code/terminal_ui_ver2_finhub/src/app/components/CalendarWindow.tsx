@@ -1,13 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Calendar as CalendarIcon,
+  Check,
   ChevronDown,
   ChevronUp,
   Eye,
   GripVertical,
   RefreshCw,
+  Save,
   Search,
   Settings2,
+  Trash2,
   X,
   CircleHelp,
 } from 'lucide-react';
@@ -149,6 +152,14 @@ interface IndustryResponse {
   industries?: string[];
 }
 
+interface IndustryFilterPreset {
+  id: string;
+  name: string;
+  industries: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface JobStatus {
   status: 'running' | 'done' | 'failed' | 'cancelled';
   progress: { completed: number; total: number; pct: number };
@@ -267,6 +278,7 @@ const DEFAULT_FINANCIAL_SYNC_CONCURRENCY = 1;
 const DEFAULT_YAHOO_DESCRIPTION_CONCURRENCY = 5;
 const DEFAULT_YAHOO_DESCRIPTION_INTERVAL_MS = 200;
 const CALENDAR_UI_STATE_STORAGE_KEY = 'calendar-window-ui-state';
+const CALENDAR_INDUSTRY_FILTER_PRESETS_STORAGE_KEY = 'calendar-industry-filter-presets-v1';
 const MIN_COLUMN_WIDTH_PX = 64;
 const MAX_COLUMN_WIDTH_PX = 720;
 const DATE_PRESET_OPTIONS: Array<{ key: DatePresetKey; label: string }> = [
@@ -313,6 +325,83 @@ function readStoredObject(key: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+function normalizeIndustryArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const industries: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue;
+    const industry = entry.trim();
+    if (!industry || seen.has(industry)) continue;
+    seen.add(industry);
+    industries.push(industry);
+  }
+  return industries.sort((left, right) => left.localeCompare(right));
+}
+
+function isIndustryFilterPreset(value: unknown): value is IndustryFilterPreset {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  return typeof row.id === 'string' && row.id.trim().length > 0 &&
+    typeof row.name === 'string' && row.name.trim().length > 0 &&
+    Array.isArray(row.industries);
+}
+
+function readStoredIndustryFilterPresets(): IndustryFilterPreset[] {
+  try {
+    const raw = localStorage.getItem(CALENDAR_INDUSTRY_FILTER_PRESETS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(isIndustryFilterPreset)
+      .map((preset) => ({
+        id: preset.id.trim(),
+        name: preset.name.trim(),
+        industries: normalizeIndustryArray(preset.industries),
+        createdAt: typeof preset.createdAt === 'string' ? preset.createdAt : new Date().toISOString(),
+        updatedAt: typeof preset.updatedAt === 'string' ? preset.updatedAt : new Date().toISOString(),
+      }))
+      .filter((preset, index, presets) => presets.findIndex((item) => item.id === preset.id) === index)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredIndustryFilterPresets(presets: IndustryFilterPreset[]): void {
+  try {
+    localStorage.setItem(CALENDAR_INDUSTRY_FILTER_PRESETS_STORAGE_KEY, JSON.stringify(presets));
+  } catch {
+    // LocalStorage can be blocked in private or embedded contexts.
+  }
+}
+
+function createClientId(prefix: string): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function orderIndustriesForOptions(industries: string[], options: string[]): string[] {
+  const normalized = normalizeIndustryArray(industries);
+  if (normalized.length === 0) return [];
+  if (options.length === 0) return normalized;
+  const selected = new Set(normalized);
+  const orderedKnown = options.filter((industry) => selected.has(industry));
+  const unknown = normalized.filter((industry) => !options.includes(industry));
+  if (orderedKnown.length >= options.length && unknown.length === 0) return [];
+  return [...orderedKnown, ...unknown];
+}
+
+function areIndustrySelectionsEqual(left: string[], right: string[]): boolean {
+  const normalizedLeft = normalizeIndustryArray(left);
+  const normalizedRight = normalizeIndustryArray(right);
+  if (normalizedLeft.length !== normalizedRight.length) return false;
+  return normalizedLeft.every((industry, index) => industry === normalizedRight[index]);
 }
 
 function isDatePresetKey(value: unknown): value is DatePresetKey {
@@ -618,9 +707,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     ? storedUiState.sortField as string | null
     : getDefaultSortFieldForType(storedActiveType);
   const storedSortDirection = isSortDirection(storedUiState.sortDirection) ? storedUiState.sortDirection : 'desc';
-  const storedSelectedIndustries = Array.isArray(storedUiState.selectedIndustries)
-    ? storedUiState.selectedIndustries.filter((industry): industry is string => typeof industry === 'string' && industry.trim().length > 0)
-    : [];
+  const storedSelectedIndustries = normalizeIndustryArray(storedUiState.selectedIndustries);
 
   const [typeConfigs, setTypeConfigs] = useState<CalendarTypeConfig[]>(FALLBACK_TYPES);
   const [events, setEvents] = useState<CalendarRow[]>([]);
@@ -631,6 +718,9 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState(typeof storedUiState.searchQuery === 'string' ? storedUiState.searchQuery : '');
   const [industrySearchQuery, setIndustrySearchQuery] = useState('');
+  const [industryPresetName, setIndustryPresetName] = useState('');
+  const [industryPresetError, setIndustryPresetError] = useState<string | null>(null);
+  const [industryFilterPresets, setIndustryFilterPresets] = useState<IndustryFilterPreset[]>(() => readStoredIndustryFilterPresets());
   const [dateFrom, setDateFrom] = useState(typeof storedUiState.dateFrom === 'string' ? storedUiState.dateFrom : '');
   const [dateTo, setDateTo] = useState(typeof storedUiState.dateTo === 'string' ? storedUiState.dateTo : '');
   const [selectedDatePreset, setSelectedDatePreset] = useState<DatePresetKey | null>(storedSelectedDatePreset);
@@ -701,6 +791,10 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const selectedIndustryLabel = formatIndustryButtonLabel(selectedIndustries, industryOptions.length);
   const selectedIndustryStatusLabel = formatIndustryStatusLabel(selectedIndustries, industryOptions.length);
   const hasIndustryFilter = activeIndustryFilters.length > 0;
+  const activeIndustryPreset = useMemo(() => {
+    const selectedPresetIndustries = isAllIndustrySelection ? [] : selectedIndustries;
+    return industryFilterPresets.find((preset) => areIndustrySelectionsEqual(preset.industries, selectedPresetIndustries)) ?? null;
+  }, [industryFilterPresets, isAllIndustrySelection, selectedIndustries]);
   const filteredIndustryOptions = useMemo(() => {
     const query = industrySearchQuery.trim().toLowerCase();
     if (!query) return industryOptions;
@@ -756,6 +850,45 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     sortDirection,
     sortField,
   ]);
+
+  useEffect(() => {
+    writeStoredIndustryFilterPresets(industryFilterPresets);
+  }, [industryFilterPresets]);
+
+  const saveIndustryFilterPreset = () => {
+    const name = industryPresetName.trim();
+    if (!name) {
+      setIndustryPresetError('Preset name is required');
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const industries = isAllIndustrySelection ? [] : orderIndustriesForOptions(selectedIndustries, industryOptions);
+    setIndustryFilterPresets((previous) => {
+      const existing = previous.find((preset) => preset.name.toLowerCase() === name.toLowerCase());
+      if (existing) {
+        return previous
+          .map((preset) => preset.id === existing.id ? { ...preset, name, industries, updatedAt: now } : preset)
+          .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      }
+      return [{ id: createClientId('industry-preset'), name, industries, createdAt: now, updatedAt: now }, ...previous];
+    });
+    setIndustryPresetName('');
+    setIndustryPresetError(null);
+  };
+
+  const applyIndustryFilterPreset = (preset: IndustryFilterPreset) => {
+    setSelectedIndustries(orderIndustriesForOptions(preset.industries, industryOptions));
+    setIndustrySearchQuery('');
+    setIndustryPresetError(null);
+    setIndustryInstructionMenu(null);
+    setShowIndustryMenu(false);
+  };
+
+  const deleteIndustryFilterPreset = (presetId: string) => {
+    setIndustryFilterPresets((previous) => previous.filter((preset) => preset.id !== presetId));
+    setIndustryPresetError(null);
+  };
 
   const toggleSelectedIndustry = (industry: string) => {
     const trimmed = industry.trim();
@@ -1770,8 +1903,8 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                     className="fixed inset-0 z-10"
                     onClick={() => { setShowIndustryMenu(false); setIndustryInstructionMenu(null); }}
                   />
-                  <div className="absolute right-0 top-full mt-1 max-h-80 w-72 overflow-auto rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg z-20 p-2">
-                    <div className="sticky top-0 z-10 bg-white pb-1 dark:bg-gray-800">
+                  <div className="absolute right-0 top-full mt-1 max-h-96 w-[360px] overflow-auto rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg z-20 p-2">
+                    <div className="sticky top-0 z-10 space-y-2 bg-white pb-2 dark:bg-gray-800">
                       <div className="relative">
                         <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
                         <input
@@ -1791,6 +1924,80 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                             <X className="h-3 w-3" />
                           </button>
                         )}
+                      </div>
+                      <div className="rounded border border-gray-200 bg-gray-50 p-2 dark:border-gray-700 dark:bg-gray-900/70">
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="text"
+                            value={industryPresetName}
+                            onChange={(event) => {
+                              setIndustryPresetName(event.target.value);
+                              setIndustryPresetError(null);
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') {
+                                event.preventDefault();
+                                saveIndustryFilterPreset();
+                              }
+                            }}
+                            placeholder="Preset name"
+                            className="min-w-0 flex-1 rounded border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-800 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+                          />
+                          <button
+                            type="button"
+                            onClick={saveIndustryFilterPreset}
+                            disabled={!industryPresetName.trim()}
+                            className="inline-flex h-8 items-center gap-1 rounded border border-blue-200 bg-blue-50 px-2 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400 dark:border-blue-800 dark:bg-blue-900/30 dark:text-blue-200 dark:hover:bg-blue-900/50 dark:disabled:border-gray-700 dark:disabled:bg-gray-800 dark:disabled:text-gray-500"
+                            title="Save checked industries"
+                          >
+                            <Save className="h-3.5 w-3.5" />
+                            Save
+                          </button>
+                        </div>
+                        <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-gray-500 dark:text-gray-400">
+                          <span className="truncate">{selectedIndustryStatusLabel}</span>
+                          {activeIndustryPreset && (
+                            <span className="max-w-[140px] truncate text-blue-600 dark:text-blue-300" title={activeIndustryPreset.name}>{activeIndustryPreset.name}</span>
+                          )}
+                        </div>
+                        {industryPresetError && (
+                          <div className="mt-1 text-[10px] text-red-600 dark:text-red-400">{industryPresetError}</div>
+                        )}
+                        <div className="mt-2 max-h-28 space-y-1 overflow-auto pr-1">
+                          {industryFilterPresets.length === 0 ? (
+                            <div className="rounded bg-white px-2 py-1.5 text-[11px] text-gray-500 dark:bg-gray-800 dark:text-gray-400">No saved filters</div>
+                          ) : industryFilterPresets.map((preset) => {
+                            const isActivePreset = activeIndustryPreset?.id === preset.id;
+                            return (
+                              <div key={preset.id} className={`flex items-center gap-1 rounded border px-1.5 py-1 ${isActivePreset ? 'border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/30' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'}`}>
+                                <button
+                                  type="button"
+                                  onClick={() => applyIndustryFilterPreset(preset)}
+                                  className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-xs text-gray-700 hover:text-blue-700 dark:text-gray-200 dark:hover:text-blue-300"
+                                  title={`Apply ${preset.name}`}
+                                >
+                                  <Check className={`h-3.5 w-3.5 shrink-0 ${isActivePreset ? 'text-blue-600 dark:text-blue-300' : 'text-gray-400'}`} />
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block truncate font-medium">{preset.name}</span>
+                                    <span className="block truncate text-[10px] text-gray-500 dark:text-gray-400">{formatIndustryStatusLabel(preset.industries, industryOptions.length)}</span>
+                                  </span>
+                                  <span className="shrink-0 text-[10px] font-medium uppercase text-blue-600 dark:text-blue-300">Apply</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    deleteIndustryFilterPreset(preset.id);
+                                  }}
+                                  className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-300"
+                                  title={`Delete ${preset.name}`}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
                     <label className={`flex w-full cursor-pointer items-center gap-2 rounded px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 ${isAllIndustrySelection ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : ''}`}>
