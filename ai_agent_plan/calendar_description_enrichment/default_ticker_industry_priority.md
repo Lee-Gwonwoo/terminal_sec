@@ -28,6 +28,27 @@
 | 15 | Telecom Services | 2 | RDCM, FNGR |
 | 16 | Electrical Equipment & Parts | 30 | VRT, BE, NVT, HUBB, AEIS, POWL, FPS, AYI, ENS, PLUG, AMPX, ATKR |
 
+## Space/Defense 우선 Industry 순서
+- AI/Tech 16개 industry를 1차로 처리한 뒤, 2차 큐로 우주/방산 관련 industry와 subset을 처리한다.
+- 공식 industry 전체 처리 대상은 `Aerospace & Defense` 70개다.
+- 위성통신, 우주 하드웨어, 방산 IT/시스템 통합, 드론/센서 기업은 다른 industry 안에 섞여 있으므로 별도 subset tag로 본다.
+- 아래 표의 subset은 industry 전체를 모두 2차로 넣는다는 뜻이 아니라, 해당 industry 안에서 우주/방산 관련 ticker를 먼저 선별한다는 뜻이다.
+
+| 2차 우선순위 | 구분 | Industry / subset | 범위 | 먼저 볼 top tickers by market cap | 비고 |
+|--------------|------|-------------------|------|-----------------------------------|------|
+| 17 | Core aerospace/defense | Aerospace & Defense | 70 tickers | GE, RTX, BA, LMT, GD, NOC, RKLB, TDG, LHX, HEI, ESLT, AXON, CW, WWD, BWXT | AI/tech 다음 2차 핵심 industry |
+| 18 | Satellite/space communications | Communication Equipment subset | industry 43개 중 선별 | SATS, ASTS, VSAT, YSS, GILT, TSAT, ONDS, VIAV | 전체 industry는 AI/tech #4와 중복. 우주/위성/방산 통신 후보만 tag |
+| 19 | Space hardware/electronics | Hardware, Equipment & Parts subset | industry 55개 중 선별 | MDA, BKSY, SATL, OSIS, TDY, KEYS, MKSI | 우주 장비, 광학/계측, 위성 부품 후보 |
+| 20 | Defense IT / systems integrators | Information Technology Services subset | industry 48개 중 선별 | LDOS, CACI, SAIC, BBAI, TLS, TSSI | 방산 IT, government contractor, mission system 후보 |
+| 21 | Drone/robotics/quantum dual-use | Computer Hardware subset | industry 29개 중 선별 | IONQ, QBTS, RGTI, RCAT, UAVS, INFQ, QUBT | quantum/drone/edge hardware 후보. 직접 방산 여부는 개별 검증 필요 |
+| 22 | Sensors/radar/instruments | Scientific & Technical Instruments subset | 4 tickers | ARBE, GNSS, ODYS, SOTK | 센서/계측/상황인식 관련 후보 |
+| 23 | Aerospace components outside core industry | Industrial - Machinery subset | industry 68개 중 선별 | HWM | 공식 industry가 Aerospace & Defense가 아니지만 항공/우주 부품 exposure가 큰 후보 |
+
+### LWLG 분류 확인
+- `LWLG`는 default universe에 포함되어 있지만, 현재 공식 분류는 `Basic Materials` sector의 `Chemicals - Specialty` industry다.
+- 현재 상세 목록에서는 `Chemicals - Specialty` 섹션의 rank 27에 있으며, market cap은 약 `$2.4B`로 잡혀 있다.
+- Lightwave Logic은 photonic polymer/optical modulator 테마 때문에 AI interconnect 또는 photonics 관점에서 별도 cross-theme tag를 줄 수는 있지만, 현재 industry 기준으로는 AI/tech 1차 큐나 우주/방산 2차 core industry에는 자동 포함되지 않는다.
+
 ## 전체 Industry 요약
 | 정렬 | Industry | Sector 예시 | Ticker 수 | Market cap 보유 | Industry top ticker |
 |------|----------|-------------|-----------|-----------------|---------------------|

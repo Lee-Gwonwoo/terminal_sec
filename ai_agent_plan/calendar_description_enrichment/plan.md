@@ -91,6 +91,8 @@ Frontend UI
 - provider peers가 이상한 경우에도 숨기지 말고 `약한 후보/제외`로 남겨 감사 가능하게 한다.
 - default universe 전체 ticker는 [default_ticker_industry_priority.md](default_ticker_industry_priority.md)를 기준 작업 큐로 사용한다.
 - 먼저 추가 작성할 industry는 AI/tech 우선순위 16개이며, 각 industry 내부는 market cap 내림차순으로 처리한다.
+- AI/tech 다음 2차 큐는 우주/방산이다. 공식 industry 전체 처리 대상은 `Aerospace & Defense` 70개이고, 위성통신/우주 하드웨어/방산 IT처럼 다른 tech industry 안에 섞인 종목은 subset tag로 별도 선별한다.
+- `LWLG`는 현재 default universe 안에 있지만, 공식 분류는 `Basic Materials / Chemicals - Specialty`다. photonics/AI interconnect cross-theme 후보로 별도 tag를 줄 수는 있지만, 현 industry 기준으로 AI/tech 1차나 우주/방산 2차 core에는 자동 포함되지 않는다.
 
 #### Default ticker industry 작성 큐(2026-05-29 추가)
 
@@ -117,11 +119,27 @@ Frontend UI
 
 위 16개 AI/tech 우선 industry 합계는 624개 ticker다. 다음 실행에서는 이 624개를 먼저 대상으로 삼고, 각 industry 내부에서는 상세 파일에 적힌 market cap 순서를 그대로 따른다.
 
+#### 2차 Space/Defense industry 작성 큐(2026-05-29 추가)
+
+상세 전체 목록 및 LWLG 위치 확인: [default_ticker_industry_priority.md](default_ticker_industry_priority.md)
+
+| 2차 우선순위 | 구분 | Industry / subset | 범위 | 먼저 볼 top tickers by market cap | 비고 |
+|--------------|------|-------------------|------|-----------------------------------|------|
+| 17 | Core aerospace/defense | Aerospace & Defense | 70 tickers | GE, RTX, BA, LMT, GD, NOC, RKLB, TDG, LHX, HEI, ESLT, AXON, CW, WWD, BWXT | AI/tech 다음 2차 핵심 industry |
+| 18 | Satellite/space communications | Communication Equipment subset | industry 43개 중 선별 | SATS, ASTS, VSAT, YSS, GILT, TSAT, ONDS, VIAV | 전체 industry는 AI/tech #4와 중복. 우주/위성/방산 통신 후보만 tag |
+| 19 | Space hardware/electronics | Hardware, Equipment & Parts subset | industry 55개 중 선별 | MDA, BKSY, SATL, OSIS, TDY, KEYS, MKSI | 우주 장비, 광학/계측, 위성 부품 후보 |
+| 20 | Defense IT / systems integrators | Information Technology Services subset | industry 48개 중 선별 | LDOS, CACI, SAIC, BBAI, TLS, TSSI | 방산 IT, government contractor, mission system 후보 |
+| 21 | Drone/robotics/quantum dual-use | Computer Hardware subset | industry 29개 중 선별 | IONQ, QBTS, RGTI, RCAT, UAVS, INFQ, QUBT | quantum/drone/edge hardware 후보. 직접 방산 여부는 개별 검증 필요 |
+| 22 | Sensors/radar/instruments | Scientific & Technical Instruments subset | 4 tickers | ARBE, GNSS, ODYS, SOTK | 센서/계측/상황인식 관련 후보 |
+| 23 | Aerospace components outside core industry | Industrial - Machinery subset | industry 68개 중 선별 | HWM | 공식 industry가 Aerospace & Defense가 아니지만 항공/우주 부품 exposure가 큰 후보 |
+
+2차 실행에서는 `Aerospace & Defense` 70개를 먼저 전체 작성하고, 그 다음 subset 후보는 company description/source 확인으로 우주/방산 관련도가 높은 ticker만 선별한다. subset 후보는 기존 AI/tech 1차 큐와 중복될 수 있으므로 중복 생성하지 않고 기존 enrichment에 `space_defense_tag` 또는 동등한 category를 추가하는 방식이 좋다.
+
 ### 제안하는 구현 순서(이유)
 1. 먼저 데이터 품질과 샘플 포맷을 확정한다. 문장 구조가 확정되지 않으면 DB/API/UI를 먼저 만들어도 다시 바뀔 가능성이 높다.
 2. 저장 layer를 원문과 분리한다. provider 데이터와 AI 요약을 섞으면 나중에 출처/품질 검증이 어렵다.
 3. API 병합을 만든 뒤 UI를 바꾼다. UI가 먼저 바뀌면 실제 데이터가 없어 빈 화면이 늘어난다.
-4. batch 생성은 마지막에 하되, 대상 순서는 먼저 정리한다. 현재 기준은 default universe 2,278개 전체를 작업 큐로 두고, AI/tech 관련 16개 industry 624개를 1차 batch로 처리하는 것이다.
+4. batch 생성은 마지막에 하되, 대상 순서는 먼저 정리한다. 현재 기준은 default universe 2,278개 전체를 작업 큐로 두고, AI/tech 관련 16개 industry 624개를 1차 batch로 처리한 뒤 `Aerospace & Defense` 70개와 우주/방산 관련 subset을 2차 batch로 처리하는 것이다.
 
 ### 단계별 계획(각 단계: 구현 → 검증)
 
@@ -133,6 +151,7 @@ Frontend UI
 | 0-2 | 강화 description에 들어갈 필수 항목을 정의한다 | `ai_agent_plan/calendar_description_enrichment/plan.md` | plan 문서에 필수 항목 목록 존재 | ⏳ |
 | 0-3 | SNOW 예시를 구체 상품/서비스와 peer 분류 기준으로 작성한다 | `ai_agent_plan/calendar_description_enrichment/snow_description_sample.md` | 샘플 문서에 상품/서비스 예시와 peer category 존재 | ⏳ |
 | 0-4 | default universe 전체를 industry별/AI-tech 우선순위/시총순으로 정리한다 | `ai_agent_plan/calendar_description_enrichment/default_ticker_industry_priority.md` | 전체 2,278개, 141개 industry, market cap coverage 2,276개 확인 | ⏳ |
+| 0-5 | AI/tech 다음 2차 우주/방산 industry/subset 큐와 LWLG 위치를 정리한다 | `ai_agent_plan/calendar_description_enrichment/default_ticker_industry_priority.md`, `ai_agent_plan/calendar_description_enrichment/plan.md` | LWLG industry 확인, Space/Defense 우선 큐 존재 확인 | ⏳ |
 
 - 0-1 목적: 현재 provider description과 peers의 한계를 눈으로 확인한다.
   - 설명: SNOW의 Yahoo description, Finnhub peers를 확인해 왜 강화 layer가 필요한지 기록한다.
@@ -154,6 +173,11 @@ Frontend UI
   - 완료 조건(눈으로 확인): `default_ticker_industry_priority.md`에 141개 industry 요약과 industry별 전체 ticker 목록이 있다.
   - 사람 검증(비개발자): plan의 `Default ticker industry 작성 큐`와 상세 파일을 보고 먼저 처리할 industry와 ticker 순서를 알 수 있다.
   - 흔한 문제/주의: 전체 default universe는 2,278개로 크기 때문에 plan 본문에는 요약을 두고, 전체 ticker는 상세 파일에서 관리한다.
+- 0-5 목적: AI/tech 다음에 실행할 우주/방산 설명 작성 큐를 분리한다.
+  - 설명: `Aerospace & Defense`를 2차 core industry로 두고, 위성통신/우주 하드웨어/방산 IT/드론/센서 후보는 기존 industry 안의 subset으로 tag한다.
+  - 완료 조건(눈으로 확인): plan과 상세 inventory에 `Space/Defense 우선 Industry 순서`가 있고, `LWLG`가 `Chemicals - Specialty`로 확인되어 있다.
+  - 사람 검증(비개발자): AI/tech 다음에 어떤 우주/방산 industry와 ticker를 볼지 표로 확인할 수 있다.
+  - 흔한 문제/주의: `Communication Equipment`, `Hardware, Equipment & Parts` 등은 AI/tech와 중복되므로, 중복 생성 대신 추가 tag만 붙이는 방식이 필요하다.
 
 검증 훅:
 ```powershell
@@ -163,6 +187,7 @@ Test-Path ai_agent_plan/calendar_description_enrichment/snow_description_sample.
 Test-Path ai_agent_plan/calendar_description_enrichment/default_ticker_industry_priority.md
 Select-String -Path ai_agent_plan/calendar_description_enrichment/snow_description_sample.md -Pattern "Cortex|Snowpark|Streamlit|peer|product revenue"
 Select-String -Path ai_agent_plan/calendar_description_enrichment/default_ticker_industry_priority.md -Pattern "전체 ticker 수: 2,278개|Semiconductors|Software - Application|Industry별 전체 Ticker 목록"
+Select-String -Path ai_agent_plan/calendar_description_enrichment/default_ticker_industry_priority.md -Pattern "Space/Defense 우선 Industry 순서|Aerospace & Defense|LWLG|Chemicals - Specialty"
 ```
 사용자 확인 필요: **예**
 
@@ -325,6 +350,7 @@ npm.cmd run build
     ⏳ 0-2 강화 description 필수 항목 정의
     ⏳ 0-3 SNOW 예시 작성
     ⏳ 0-4 default universe industry 큐 작성
+    ⏳ 0-5 우주/방산 2차 큐와 LWLG 위치 확인
 
 트랙 B — 저장/API 기반
   ⬜ Step 1 Enrichment 저장 구조 설계
