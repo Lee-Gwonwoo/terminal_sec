@@ -419,3 +419,124 @@
   - diagnostics 0 errors.
   - DB 확인 결과 `rows=60`, `short_ok=60`, `enhanced_ok=60`, `peer_groups_ok=60`.
 - 사용자 확인 상태: 확인 대기.
+
+## 2026-05-29
+**작성 시각:** 2026-05-29 16:29 (local)
+
+### 완료 ticker ledger 운영 규칙 반영 및 peer-only 누락 점검
+- 상태: 확인 대기
+- 적용 지침: `planning.md`
+- 작업 내용:
+  - 사용자가 앞으로 정리 완료된 ticker를 `description_peer_curated_tickers.md`에 하나씩 추가하도록 지시했다.
+  - 해당 파일에 운영 규칙을 추가했다. 자동 `default_universe_baseline/v1` peer edge만 있는 ticker는 정리 완료로 보지 않고, 수동 description + peer 동시 curation이 끝난 ticker만 ledger에 넣는다.
+  - repo memory에도 같은 운영 규칙을 저장했다.
+- 수정 파일:
+  - `ai_agent_plan/calendar_description_enrichment/description_peer_curated_tickers.md`
+  - `ai_agent_plan/calendar_description_enrichment/agent_log.md`
+- DB 점검 결과:
+  - 수동 curated `peer_groups_json`이 있으나 description이 비어 있는 ticker: 0개.
+  - Batch tag 기준 peer는 정리됐으나 description이 비어 있는 ticker: 0개.
+  - 전체 자동 baseline peer graph 기준 peer edge는 있으나 curated description이 없는 ticker: 2,216개. 이는 자동 baseline coverage라 완료 ledger에는 넣지 않는다.
+- 검증 결과:
+  - `description_peer_curated_tickers.md` diagnostics 0 errors.
+- 사용자 확인 상태: 확인 대기.
+
+## 2026-05-29
+**작성 시각:** 2026-05-29 16:31 (local)
+
+### 진행순서 기준 정정 — default ticker industry priority 우선
+- 상태: 확인 대기
+- 적용 지침: `planning.md`
+- 배경:
+  - 사용자가 진행순서는 `default_ticker_industry_priority.md`를 따르는 것이 맞지 않냐고 지적했다.
+  - 확인 결과 해당 파일은 AI/Tech priority 1~16을 먼저 처리하고, Space/Defense는 그 뒤 2차 큐로 둔다고 명시한다.
+- 결정:
+  - 이후 batch 순서는 `ai_agent_plan/calendar_description_enrichment/default_ticker_industry_priority.md`를 우선한다.
+  - Batch 005는 Space/Defense가 아니라 Software - Infrastructure/Application의 남은 상위 ticker를 먼저 처리한다.
+  - Space/Defense는 AI/Tech 16개 industry 이후 2차 큐로 이동한다.
+- 수정 파일:
+  - `ai_agent_plan/calendar_description_enrichment/plan.md`
+  - `ai_agent_plan/calendar_description_enrichment/peer_curation_progress.md`
+  - `ai_agent_plan/calendar_description_enrichment/agent_log.md`
+- 사용자 확인 상태: 확인 대기.
+
+## 2026-05-29
+**작성 시각:** 2026-05-29 16:38 (local)
+
+### 전체 Description + Peer Curation Batch 005 — Software Infrastructure/Application Remainder
+- 상태: 확인 대기
+- 적용 지침: `planning.md`
+- 배경:
+  - 사용자가 다음 작업을 계속하라고 지시했고, 직전 정정에 따라 `default_ticker_industry_priority.md`의 Software - Infrastructure/Application 남은 상위 ticker를 먼저 처리했다.
+- 변경 파일:
+  - `terminal/backend/src/scripts/seedCompanyProfileEnrichment.ts`
+  - `terminal/backend/src/scripts/seedCompanyPeerEdges.ts`
+  - `ai_agent_plan/calendar_description_enrichment/plan.md`
+  - `ai_agent_plan/calendar_description_enrichment/peer_curation_progress.md`
+  - `ai_agent_plan/calendar_description_enrichment/description_peer_curated_tickers.md`
+  - `ai_agent_plan/calendar_description_enrichment/agent_log.md`
+- 처리 ticker:
+  - `SNPS`, `VRSN`, `FFIV`, `DOCN`, `IOT`, `OKTA`, `RBRK`, `CHKP`, `CFLT`, `APP`, `UBER`, `INTU`, `CDNS`, `MSTR`, `ADSK`, `WDAY`, `ZM`
+- 구현 내용:
+  - `SOFTWARE_REMAINDER_SEED`를 추가하고 17개 ticker에 `shortDescription`, `enhancedDescription`, products, revenue model, key metrics, watch points, risks, explicit peer group metadata를 함께 작성했다.
+  - `full_peer_curation_batch_005` tag가 있는 source도 curated peer group을 source of truth로 보고 same-industry/same-sector 자동 peer 생성을 건너뛰도록 변경했다.
+  - Batch 005 source의 raw provider peers는 C `weak_provider_candidate`로 낮춰, Calendar cell 확장 시 감사용 후보로 볼 수 있게 했다.
+  - 완료 ticker ledger `description_peer_curated_tickers.md`를 60개에서 77개 unique ticker로 갱신했다.
+- 주요 peer 결정:
+  - `SNPS/CDNS`: EDA/chip design software A direct peer.
+  - `VRSN`: DNS/domain registry infrastructure로 분리.
+  - `FFIV`: app delivery/WAF/API security, `NET/AKAM/ATEN`과 A platform overlap.
+  - `DOCN`: SMB/developer cloud로 분리.
+  - `IOT`: connected operations/fleet IoT software로 분리.
+  - `OKTA`: identity/access security로 분리.
+  - `RBRK`: data security/cyber resilience/backup recovery로 분리.
+  - `APP`: AI adtech/mobile app monetization으로 분리.
+  - `UBER`: mobility/delivery marketplace로 분리.
+  - `MSTR`: ordinary software가 아니라 Bitcoin treasury/proxy로 분리.
+  - `ADSK`: design/CAD/AEC/manufacturing software로 분리.
+  - `WDAY`: HCM/finance enterprise app으로 분리.
+  - `ZM`: communication/collaboration/contact-center software로 분리.
+- 실행 결과:
+  - `npm.cmd run seed:company-enrichment -- --force --tickers=SNPS,VRSN,FFIV,DOCN,IOT,OKTA,RBRK,CHKP,CFLT,APP,UBER,INTU,CDNS,MSTR,ADSK,WDAY,ZM`: 17 inserted, limit 17.
+  - `npm.cmd run seed:company-peers`: 28,004 edges 생성, visible coverage 2,276/2,278, grade counts `A=938`, `B=20,436`, `C=5,093`, `EXCLUDE=1,537`.
+- 검증 결과:
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | 수정 TypeScript 파일 `get_errors` 기준 0 errors |
+| 데이터 seed | ✅ | enrichment seed force refresh 및 peer edge 재생성 성공 |
+| description completeness | ✅ | Batch 005 ticker 17/17에서 short/enhanced/products/peerGroups/tag 존재 확인 |
+| DB spot check | ✅ | `SNPS`, `APP`, `UBER`, `OKTA`, `MSTR`, `ZM` 대표 peer rank 확인 |
+| 런타임 API | ✅ | `GET /api/company-profiles/SNPS`, `APP`, `UBER`, `OKTA`, `MSTR`, `ZM` 응답에서 `short_description`과 `curated_peers` 확인 |
+| backend build | ✅ | `terminal/backend`에서 `npm.cmd run build` 성공 |
+| backend tests | ✅ | `terminal/backend`에서 `npm.cmd run test`: 17 files / 104 tests passed |
+| frontend build | ✅ | `termina_web/figma_code/terminal_ui_ver2_finhub`에서 `npm.cmd run build` 성공 |
+
+- 주의/리스크:
+  - `VRSN`, `MSTR`, `UBER`처럼 official software bucket에 있지만 실제 투자 driver가 domain registry, Bitcoin treasury, mobility marketplace인 ticker는 broad software peer로 섞지 않도록 별도 축으로 둔다.
+  - provider raw peers는 C 후보로 남겨 두었으므로, Calendar 셀을 펼치면 약한 후보까지 보인다. 이는 감사 가능성을 위한 의도된 동작이다.
+  - seed 실행 때 기존 `initDb()` migration 로그 `[db] purged legacy FINNHUB sec_filing rows: news_items=0, sec_filings=70635`가 반복 출력됐다. 이번 변경 로직은 아니며 별도 점검 후보로 남긴다.
+- 다음 단계 후보:
+  - Batch 006: `default_ticker_industry_priority.md` AI/Tech priority 7 `Internet Content & Information` 상위 ticker.
+- 사용자 확인 상태: 확인 대기.
+
+## 2026-05-29
+**작성 시각:** 2026-05-29 22:13 (local)
+
+### Research page 관련주 표 시총/ownership 보강 — DELL 2026-02-27 page
+- 상태: 확인 대기
+- 적용 지침: `planning.md`, `repo-context.md`
+- 대상:
+  - `research_pages.id = dea72cd2-be67-42ee-9038-4284d6c5e9a7`
+  - 제목: `DELL 2026-02-27 상승 원인 및 SMCI 대체 기억 검증`
+- 작업 내용:
+  - 기존 `DELL/HPE 관련주 정리 (Model_100 기준)` 본문에서 관련주 표와 ownership quick audit가 분리되어 있던 부분을 보강했다.
+  - `company_profiles.market_cap`의 FMP 우선 최신 non-null 값과 Yahoo holders 기반 `institutional_pct` / `insider_pct`를 함께 붙여 `관련주 정리 + 시총/ownership 통합표`로 교체했다.
+  - supplier/customer/capex validator 표도 `검증자 / counterparty / 공급자 표 + 시총/ownership`로 교체했다.
+  - `institutional_pct`가 100%를 넘는 ticker는 provider 집계 기준/float 기준 차이로 품질 경고를 붙였다.
+- 반영 방식:
+  - backend dev server의 `PATCH /api/research/pages/:id` API로 research page body를 업데이트했다.
+- 검증 결과:
+  - `GET /api/research/pages/dea72cd2-be67-42ee-9038-4284d6c5e9a7` 응답에서 `관련주 정리 + 시총/ownership 통합표`, DELL/HPE/NVDA 핵심 row, `Ownership 데이터 해석 메모` 포함을 확인했다.
+  - API 응답 기준 `updated_at = 2026-05-29 22:12:59`, `body_len = 23554`.
+- 사용자 확인 상태: 확인 대기.

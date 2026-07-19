@@ -360,6 +360,8 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `[][][]employees[][][]`
 - `[][][]website[][][]`
 - `[][][]ipo_date[][][]`
+- `[][][]ipo_offer_price[][][]`
+- `[][][]ipo_price_range[][][]`
 - `[][][]market_cap[][][]`
 - `[][][]raw_json[][][]`
 - `[][][]fetched_at[][][]`
@@ -379,7 +381,7 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 - `company_profiles`는 현재 `fmp`, `finnhub`, `yahoo` source row가 공존할 수 있다.
 - ticker 심볼은 이 테이블 컬럼이 아니므로, raw SQL에서는 `securities`와 JOIN해서 읽는다.
 - `GET /api/news`, `GET /api/tickers`는 내부에서 대표 row를 골라 `companyDescription`, `peers`, `ipoDate`, `marketCap` 형태로 재노출한다.
-- `GET /api/tickers`의 default-universe row는 추가로 `[][][]addedAt[][][]`, `[][][]floatPct[][][]`, `[][][]institutionalPct[][][]`, `[][][]insiderPct[][][]`, `[][][]marketCapSource[][][]`, `[][][]floatSource[][][]`, `[][][]institutionalSource[][][]`, `[][][]insiderSource[][][]`를 함께 재노출한다.
+- `GET /api/tickers`의 default-universe row는 추가로 `[][][]addedAt[][][]`, `[][][]ipoOfferPrice[][][]`, `[][][]ipoPriceRange[][][]`, `[][][]floatPct[][][]`, `[][][]institutionalPct[][][]`, `[][][]insiderPct[][][]`, `[][][]marketCapSource[][][]`, `[][][]floatSource[][][]`, `[][][]institutionalSource[][][]`, `[][][]insiderSource[][][]`를 함께 재노출한다.
 - ownership 필드(`institutional_pct`, `insider_pct`)는 한 종목당 대표 row 1개에 유지되도록 정리한다. `source='yahoo'` row가 이미 있으면 그 row에 merge하고, 다른 row의 ownership 필드는 비운다.
 - `GET /api/default-tickers/daily-change-history`는 latest market cap + default universe + OHLC 일봉을 묶어 날짜별 change history를 반환하며, turnover min/max filter도 지원한다.
 
@@ -1590,7 +1592,7 @@ FINNHUB_API_KEY not found. Set env var FINNHUB_API_KEY or place key in finhub/fi
 추가 key:
 
 - `news_change_recent`, `news_change_custom` 같은 값은 DB에 row가 생기면 응답에 함께 포함된다.
-- company profile 계열은 실행 이력이 생기면 `company_profiles_market_cap`, `company_profiles_ipo_date`, `company_profiles_yahoo`, `company_profiles_holders_yahoo` 같은 key가 함께 보인다.
+- company profile 계열은 실행 이력이 생기면 `company_profiles_market_cap`, `company_profiles_ipo_date`, `company_profiles_ipo_pricing`, `company_profiles_yahoo`, `company_profiles_holders_yahoo` 같은 key가 함께 보인다.
 
 #### `news_sentiment_snapshots`
 컬럼:
@@ -3258,6 +3260,30 @@ Finnhub `/stock/profile2` API에서 IPO date와 기본 회사 메타데이터를
 4. `company_profiles`에 `source='finnhub'` row를 upsert하면서 `[][][]ipo_date[][][]`를 저장한다.
 5. 진행률/로그/결과는 `GET /api/jobs/:jobId`로 확인한다.
 6. `update_status.company_profiles_ipo_date`에 최근 실행 정보와 요약을 기록한다.
+
+### `POST /api/company-profiles/pull-ipo-pricing`
+
+FMP IPO 전용 endpoint에서 IPO price range와 확정 공모가를 가져와 `company_profiles`에 저장한다. 이 API도 background job 기반이며 `{ jobId }`를 반환한다.
+
+요청 body:
+
+```json
+{ "tickers": ["AAPL", "MSFT"], "maxTickers": 100, "requestIntervalMs": 250, "skipExisting": true }
+```
+
+- `tickers` 생략 시 `ticker_universes/default` 전체를 대상으로 한다.
+- `maxTickers`를 생략하면 전체 대상을 처리한다.
+- `[][][]requestIntervalMs[][][]`는 FMP 요청 간격이다.
+- `[][][]skipExisting[][][]` 기본값은 `true`다. `[][][]ipo_offer_price[][][]`와 `[][][]ipo_price_range[][][]`가 모두 이미 있는 ticker는 건너뛴다.
+
+동작:
+
+1. 대상 ticker의 최신 non-empty `[][][]ipo_date[][][]`를 먼저 조회한다. IPO date가 없는 ticker는 FMP pricing 요청 대상에서 제외하고 빈 값으로 남긴다.
+2. FMP `stable/ipos-calendar`에서 `[][][]priceRange[][][]`를 가져와 `[][][]company_profiles.ipo_price_range[][][]`에 저장한다.
+3. FMP `stable/ipos-prospectus`에서 `[][][]pricePublicPerShare[][][]`를 가져와 `[][][]company_profiles.ipo_offer_price[][][]`에 저장한다.
+4. `priceRange`와 `pricePublicPerShare`가 모두 없으면 새 값을 저장하지 않고 해당 ticker의 Default Ticker 컬럼은 빈 칸으로 둔다.
+5. 저장 row의 source는 `fmp_ipo`이며 raw 응답은 `[][][]raw_json[][][]`에 보관한다.
+6. `update_status.company_profiles_ipo_pricing`에 최근 실행 정보와 `updated`, `missingPricing`, `skippedExisting` 요약을 기록한다.
 
 ## AI Analysis API
 

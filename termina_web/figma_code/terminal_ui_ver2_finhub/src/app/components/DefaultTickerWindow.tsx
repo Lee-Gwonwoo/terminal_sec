@@ -18,6 +18,8 @@ interface TickerRow {
   industry: string | null;
   addedAt: string | null;
   ipoDate: string | null;
+  ipoOfferPrice: number | null;
+  ipoPriceRange: string | null;
   marketCap: number | null;
   floatPct: number | null;
   institutionalPct: number | null;
@@ -43,7 +45,7 @@ const TICKER_COLUMN_TEMPLATE = "minmax(96px,0.9fr)";
 const DELETE_COLUMN_TEMPLATE = "48px";
 const COLUMN_VISIBILITY_STORAGE_KEY = "default-ticker-visible-columns-v1";
 
-type SortKey = "ticker" | "name" | "exchange" | "industry" | "addedAt" | "ipoDate" | "marketCap" | "floatPct" | "institutionalPct" | "insiderPct";
+type SortKey = "ticker" | "name" | "exchange" | "industry" | "addedAt" | "ipoDate" | "ipoOfferPrice" | "ipoPriceRange" | "marketCap" | "floatPct" | "institutionalPct" | "insiderPct";
 type SortDirection = "asc" | "desc" | null;
 type ConfigurableColumnKey = Exclude<SortKey, "ticker">;
 
@@ -60,6 +62,8 @@ const CONFIGURABLE_COLUMN_DEFINITIONS: ColumnDefinition[] = [
   { key: "industry", label: "Industry", template: "minmax(128px,1.1fr)" },
   { key: "addedAt", label: "Added Date", template: "minmax(96px,0.9fr)" },
   { key: "ipoDate", label: "IPO Date", template: "minmax(96px,0.8fr)" },
+  { key: "ipoOfferPrice", label: "IPO Price", template: "minmax(104px,0.85fr)", align: "right" },
+  { key: "ipoPriceRange", label: "Price Range", template: "minmax(128px,1fr)" },
   { key: "marketCap", label: "Market Cap", template: "minmax(128px,1fr)", align: "right" },
   { key: "floatPct", label: "Float %", template: "minmax(96px,0.8fr)", align: "right" },
   { key: "institutionalPct", label: "Inst %", template: "minmax(96px,0.8fr)", align: "right" },
@@ -108,6 +112,8 @@ function fallbackRowsFromTickers(tickers: string[] | undefined): TickerRow[] {
     industry: null,
     addedAt: null,
     ipoDate: null,
+    ipoOfferPrice: null,
+    ipoPriceRange: null,
     marketCap: null,
     floatPct: null,
     institutionalPct: null,
@@ -129,6 +135,8 @@ function normalizeRows(data: any): TickerRow[] {
       industry: row.industry ?? null,
       addedAt: typeof row.addedAt === "string" && row.addedAt ? row.addedAt : null,
       ipoDate: typeof row.ipoDate === "string" && row.ipoDate ? row.ipoDate : null,
+      ipoOfferPrice: typeof row.ipoOfferPrice === "number" ? row.ipoOfferPrice : null,
+      ipoPriceRange: typeof row.ipoPriceRange === "string" && row.ipoPriceRange ? row.ipoPriceRange : null,
       marketCap: typeof row.marketCap === "number" ? row.marketCap : null,
       floatPct: typeof row.floatPct === "number" ? row.floatPct : null,
       institutionalPct: typeof row.institutionalPct === "number" ? row.institutionalPct : null,
@@ -166,6 +174,12 @@ function formatPct(value: number | null): string {
   return `${value.toFixed(2)}%`;
 }
 
+function formatPrice(value: number | null): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "-";
+  if (Math.abs(value) >= 100) return `$${value.toFixed(2)}`;
+  return `$${value.toFixed(4).replace(/0+$/, "").replace(/\.$/, "")}`;
+}
+
 function formatAddedDate(value: string | null): string {
   if (!value) return "-";
   const trimmed = value.trim();
@@ -188,6 +202,10 @@ function getSortValue(row: TickerRow, key: SortKey): string | number | null {
       return row.addedAt;
     case "ipoDate":
       return row.ipoDate;
+    case "ipoOfferPrice":
+      return row.ipoOfferPrice;
+    case "ipoPriceRange":
+      return row.ipoPriceRange;
     case "marketCap":
       return row.marketCap;
     case "floatPct":
@@ -231,12 +249,17 @@ function getJobSummary(kind: string, job: JobStatus): string {
   const updated = Number(job.result?.updated ?? 0);
   const total = Number(job.result?.total ?? job.progress.total ?? 0);
   const skippedRecent = Number(job.result?.skippedRecent ?? 0);
+  const skippedExisting = Number(job.result?.skippedExisting ?? 0);
+  const missingPricing = Number(job.result?.missingPricing ?? 0);
   const errors = Number(job.result?.errors ?? 0);
 
   if (job.status === "running") {
     return `${kind} update running: ${job.progress.completed}/${job.progress.total} (${job.progress.pct}%)`;
   }
   if (job.status === "done") {
+    if (kind === "IPO pricing") {
+      return `${kind} update done: updated ${updated}, missing pricing ${missingPricing}, skipped existing ${skippedExisting}, checked ${total}`;
+    }
     return `${kind} update done: updated ${updated}, errors ${errors}, skipped recent ${skippedRecent}, fetched ${total}`;
   }
   if (job.status === "failed") {
@@ -257,6 +280,10 @@ function renderColumnCell(row: TickerRow, column: ColumnDefinition): React.React
       return formatAddedDate(row.addedAt);
     case "ipoDate":
       return row.ipoDate ?? "-";
+    case "ipoOfferPrice":
+      return <>{formatPrice(row.ipoOfferPrice)}<SourceBadge source={row.ipoOfferPrice != null ? "fmp" : null} /></>;
+    case "ipoPriceRange":
+      return <>{row.ipoPriceRange ?? "-"}<SourceBadge source={row.ipoPriceRange ? "fmp" : null} /></>;
     case "marketCap":
       return <>{formatMarketCap(row.marketCap)}<SourceBadge source={row.marketCapSource} /></>;
     case "floatPct":
@@ -282,6 +309,10 @@ function getColumnTitle(row: TickerRow, column: ColumnDefinition): string | unde
       return row.addedAt ?? undefined;
     case "ipoDate":
       return row.ipoDate ?? undefined;
+    case "ipoOfferPrice":
+      return row.ipoOfferPrice != null ? formatPrice(row.ipoOfferPrice) : undefined;
+    case "ipoPriceRange":
+      return row.ipoPriceRange ?? undefined;
     default:
       return undefined;
   }
@@ -349,6 +380,10 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
   const [marketCapJobId, setMarketCapJobId] = useState<string | null>(null);
   const [marketCapJob, setMarketCapJob] = useState<JobStatus | null>(null);
   const [showLog, setShowLog] = useState(false);
+  const [ipoPricingUpdating, setIpoPricingUpdating] = useState(false);
+  const [ipoPricingJobId, setIpoPricingJobId] = useState<string | null>(null);
+  const [ipoPricingJob, setIpoPricingJob] = useState<JobStatus | null>(null);
+  const [showIpoPricingLog, setShowIpoPricingLog] = useState(false);
   const [floatUpdating, setFloatUpdating] = useState(false);
   const [floatJobId, setFloatJobId] = useState<string | null>(null);
   const [floatJob, setFloatJob] = useState<JobStatus | null>(null);
@@ -543,6 +578,30 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
     }
   };
 
+  const handleIpoPricingUpdate = async () => {
+    if (!isDefaultPath || ipoPricingUpdating) return;
+    setIpoPricingUpdating(true);
+    setError(null);
+    setNotice(null);
+    setIpoPricingJob(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/company-profiles/pull-ipo-pricing`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = await readJsonResponse(res);
+      if (!res.ok) {
+        setError(data.error || `HTTP ${res.status}`);
+        setIpoPricingUpdating(false);
+        return;
+      }
+      setIpoPricingJobId(data.jobId ?? null);
+    } catch (err: any) {
+      setError(err.message || "Failed to start IPO pricing update");
+      setIpoPricingUpdating(false);
+    }
+  };
+
   const handleFloatUpdate = async () => {
     if (!isDefaultPath || floatUpdating) return;
     setFloatUpdating(true);
@@ -593,7 +652,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
   };
 
   const handleLostJob = useCallback(async (
-    kind: "Market cap" | "Float" | "Yahoo holders",
+    kind: "Market cap" | "IPO pricing" | "Float" | "Yahoo holders",
     reset: () => void,
   ) => {
     reset();
@@ -641,6 +700,46 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
       window.clearInterval(timer);
     };
   }, [handleLostJob, marketCapJobId, loadTickers]);
+
+  useEffect(() => {
+    if (!ipoPricingJobId) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/jobs/${ipoPricingJobId}`);
+        if (res.status === 404) {
+          await handleLostJob("IPO pricing", () => {
+            setIpoPricingUpdating(false);
+            setIpoPricingJob(null);
+            setIpoPricingJobId(null);
+          });
+          return;
+        }
+        if (!res.ok) return;
+        const data = await readJsonResponse(res);
+        if (cancelled) return;
+        setIpoPricingJob(data);
+        if (data.status === "done") {
+          setIpoPricingUpdating(false);
+          setNotice(`IPO pricing update completed. Updated ${data.result?.updated ?? 0} tickers.`);
+          await loadTickers();
+        } else if (data.status === "failed") {
+          setIpoPricingUpdating(false);
+          setError(data.error || "IPO pricing update failed");
+        } else if (data.status === "cancelled") {
+          setIpoPricingUpdating(false);
+        }
+      } catch {
+        // ignore transient polling errors
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => { void poll(); }, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [handleLostJob, ipoPricingJobId, loadTickers]);
 
   useEffect(() => {
     if (!floatJobId) return;
@@ -752,6 +851,8 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
         || (row.industry ?? "").toUpperCase().includes(needle)
         || formatAddedDate(row.addedAt).toUpperCase().includes(needle)
         || (row.ipoDate ?? "").toUpperCase().includes(needle)
+        || formatPrice(row.ipoOfferPrice).toUpperCase().includes(needle)
+        || (row.ipoPriceRange ?? "").toUpperCase().includes(needle)
         || (row.exchange ?? "").toUpperCase().includes(needle)),
     );
   }, [rows, deferredFilterText, deferredTickerFilterText]);
@@ -824,6 +925,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
   }), [displayedRows, visibleColumns, gridTemplateColumns, removing, onTickerClick, handleRemove]);
 
   const showMarketCapCard = marketCapJob !== null;
+  const showIpoPricingCard = ipoPricingJob !== null;
   const showFloatCard = floatJob !== null;
   const showYahooCard = yahooJob !== null;
 
@@ -857,6 +959,15 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
             >
               <RefreshCw className={`w-3 h-3 ${marketCapUpdating ? "animate-spin" : ""}`} />
               {marketCapUpdating ? "Mkt Cap..." : "Mkt Cap"}
+            </button>
+            <button
+              onClick={handleIpoPricingUpdate}
+              disabled={ipoPricingUpdating || loading}
+              className="px-2 py-1 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-1"
+              title="Pull FMP IPO price range and confirmed public offering price. Tickers with existing pricing are skipped."
+            >
+              <RefreshCw className={`w-3 h-3 ${ipoPricingUpdating ? "animate-spin" : ""}`} />
+              {ipoPricingUpdating ? "IPO Price..." : "IPO Price"}
             </button>
             <button
               onClick={handleFloatUpdate}
@@ -934,6 +1045,28 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
           {showLog && marketCapJob.logs.length > 0 && (
             <div className="mt-2 max-h-40 overflow-y-auto bg-gray-900 text-gray-200 rounded p-2 font-mono text-[10px] leading-tight">
               {marketCapJob.logs.slice(-100).map((line, i) => (
+                <div key={i} className="whitespace-pre-wrap">{line}</div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {showIpoPricingCard && ipoPricingJob && (
+        <div className="mb-2 p-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded text-xs text-emerald-700 dark:text-emerald-300">
+          <div className="flex items-center justify-between">
+            <span>{getJobSummary("IPO pricing", ipoPricingJob)}</span>
+            <button
+              onClick={() => setShowIpoPricingLog((v) => !v)}
+              className="px-1.5 py-0.5 text-[10px] bg-emerald-200 dark:bg-emerald-800 text-emerald-700 dark:text-emerald-300 rounded hover:bg-emerald-300 dark:hover:bg-emerald-700 flex items-center gap-0.5"
+            >
+              {showIpoPricingLog ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+              {showIpoPricingLog ? "Hide Log" : "View Log"}
+            </button>
+          </div>
+          {showIpoPricingLog && ipoPricingJob.logs.length > 0 && (
+            <div className="mt-2 max-h-40 overflow-y-auto bg-gray-900 text-gray-200 rounded p-2 font-mono text-[10px] leading-tight">
+              {ipoPricingJob.logs.slice(-100).map((line, i) => (
                 <div key={i} className="whitespace-pre-wrap">{line}</div>
               ))}
             </div>

@@ -11,6 +11,7 @@ export type DataControlHowToUseKey =
   | 'yahooDesc'
   | 'peersPull'
   | 'ipoDate'
+  | 'ipoPricing'
   | 'recent'
   | 'fmpRecentChange'
   | 'custom';
@@ -245,6 +246,29 @@ export const dataControlHowToUseRegistry: Record<DataControlHowToUseKey, DataCon
       'Log에서 updated/failed ticker 수를 확인합니다.',
     ],
     route: '/api/company-profiles/pull-ipo-date',
+  },
+  ipoPricing: {
+    key: 'ipoPricing',
+    title: 'IPO Pricing Update',
+    summary: 'FMP IPO calendar/prospectus 기준으로 IPO price range와 확정 공모가를 수집합니다.',
+    purpose: 'Default Ticker의 IPO Price / Price Range 컬럼을 채워 신규 상장 종목의 공모 조건을 비교하기 위한 버튼입니다.',
+    whenToRun: [
+      'IPO date가 이미 채워진 ticker에 공모가 또는 price range가 비어 있을 때 실행합니다.',
+      '새 IPO 종목을 default universe에 추가한 뒤 IPO Date Update를 먼저 실행하고 이어서 실행합니다.',
+    ],
+    inputs: [
+      'Skip Existing 설정을 확인합니다. 기본값은 이미 IPO Price와 Price Range가 모두 있는 ticker를 건너뜁니다.',
+      '대상은 default ticker universe 전체이며, IPO date가 없는 ticker는 자동으로 건너뜁니다.',
+    ],
+    cautions: [
+      'FMP가 해당 IPO의 prospectus 가격을 구조화해서 제공하지 않으면 확정 공모가는 빈 칸으로 남습니다.',
+      'Price Range는 FMP IPO calendar의 priceRange, IPO Price는 FMP IPO prospectus의 pricePublicPerShare 기준입니다.',
+    ],
+    verify: [
+      '완료 후 Default Ticker에서 IPO Price / Price Range 컬럼이 채워졌는지 확인합니다.',
+      'Log에서 updated, missingPricing, skippedExisting 수를 확인합니다.',
+    ],
+    route: '/api/company-profiles/pull-ipo-pricing',
   },
   recent: {
     key: 'recent',

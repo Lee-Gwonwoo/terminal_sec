@@ -54,19 +54,19 @@ export function DataControlWindow({
 
   // ─── Per-section job state ───
   const [jobIds, setJobIds] = useState<Record<SectionKey, string | null>>({
-    price: null, fmpRecentOhlc: null, turnover: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, yahooDesc: null, peersPull: null, ipoDate: null, 'recent': null, fmpRecentChange: null, custom: null,
+    price: null, fmpRecentOhlc: null, turnover: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, yahooDesc: null, peersPull: null, ipoDate: null, ipoPricing: null, 'recent': null, fmpRecentChange: null, custom: null,
   });
   const [updating, setUpdating] = useState<Record<SectionKey, boolean>>({
-    price: false, fmpRecentOhlc: false, turnover: false, calendarBackfill: false, calendarRefresh: false, calendarCustom: false, companyDesc: false, yahooDesc: false, peersPull: false, ipoDate: false, 'recent': false, fmpRecentChange: false, custom: false,
+    price: false, fmpRecentOhlc: false, turnover: false, calendarBackfill: false, calendarRefresh: false, calendarCustom: false, companyDesc: false, yahooDesc: false, peersPull: false, ipoDate: false, ipoPricing: false, 'recent': false, fmpRecentChange: false, custom: false,
   });
   const [errors, setErrors] = useState<Record<SectionKey, string | null>>({
-    price: null, fmpRecentOhlc: null, turnover: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, yahooDesc: null, peersPull: null, ipoDate: null, 'recent': null, fmpRecentChange: null, custom: null,
+    price: null, fmpRecentOhlc: null, turnover: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, yahooDesc: null, peersPull: null, ipoDate: null, ipoPricing: null, 'recent': null, fmpRecentChange: null, custom: null,
   });
 
   // ─── View Log state (only one section's log at a time) ───
   const [logSection, setLogSection] = useState<SectionKey | null>(null);
   const [jobStatuses, setJobStatuses] = useState<Record<SectionKey, JobStatus | null>>({
-    price: null, fmpRecentOhlc: null, turnover: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, yahooDesc: null, peersPull: null, ipoDate: null, 'recent': null, fmpRecentChange: null, custom: null,
+    price: null, fmpRecentOhlc: null, turnover: null, calendarBackfill: null, calendarRefresh: null, calendarCustom: null, companyDesc: null, yahooDesc: null, peersPull: null, ipoDate: null, ipoPricing: null, 'recent': null, fmpRecentChange: null, custom: null,
   });
   const [showCustomPreflightModal, setShowCustomPreflightModal] = useState(false);
   const [customPreflightTitle, setCustomPreflightTitle] = useState('Custom Update Preflight');
@@ -548,6 +548,14 @@ export function DataControlWindow({
             skipExisting: ipoSkipExisting,
           });
           break;
+        case 'ipoPricing':
+          url = `${API_BASE}/api/company-profiles/pull-ipo-pricing`;
+          headers['Content-Type'] = 'application/json';
+          body = JSON.stringify({
+            requestIntervalMs: fmpRequestIntervalMs,
+            skipExisting: ipoSkipExisting,
+          });
+          break;
         case 'recent':
           url = `${API_BASE}/api/news/change/update-recent`;
           headers['Content-Type'] = 'application/json';
@@ -738,6 +746,13 @@ export function DataControlWindow({
       statusKey: 'company_profiles_ipo_date',
       group: 'Company Data',
       description: `ticker_universes/default 기준으로 Finnhub profile2의 IPO date를 수집합니다. (${ipoSkipExisting ? 'Skip Existing' : 'Overwrite All'})`,
+    },
+    {
+      key: 'ipoPricing',
+      label: 'IPO Pricing Update',
+      statusKey: 'company_profiles_ipo_pricing',
+      group: 'Company Data',
+      description: `ticker_universes/default 기준으로 FMP IPO price range와 확정 공모가를 수집합니다. (${ipoSkipExisting ? 'Skip Existing' : 'Overwrite All'}, interval=${fmpRequestIntervalMs}ms)`,
     },
 
     {

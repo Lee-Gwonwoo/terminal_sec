@@ -8,6 +8,7 @@
 - 한 번에 완료했다고 선언하지 않고, 테마/제품/value-chain batch 단위로 진행한다.
 - 각 batch는 `회사 이해 -> enhanced description 작성 -> products/revenue/watch/risk 정리 -> curated peer group 작성 -> company_peer_edges 재생성 -> DB/API 검증 -> 사용자 확인 대기` 순서로 처리한다.
 - 다음 batch부터는 industry 우선순위 파일의 순서를 기본 큐로 사용하고, 한 ticker를 볼 때 description과 peer group을 같은 seed entry 안에서 함께 작성한다.
+- 진행순서는 [default_ticker_industry_priority.md](default_ticker_industry_priority.md)를 우선한다. Space/Defense queue는 해당 파일 기준 AI/Tech 16개 industry를 처리한 뒤의 2차 큐다. 사용자가 명시적으로 우선순위를 바꾸지 않는 한 Batch 005는 Software - Infrastructure/Application의 남은 상위 ticker를 먼저 진행한다.
 - 이미 peer만 먼저 정리한 Batch 001~003도 seed 구조상 description 필드를 같이 보유하지만, 이후 검증 보고에서는 description 품질과 peer 품질을 둘 다 명시한다.
 - 진행 현황은 [peer_curation_progress.md](peer_curation_progress.md)에 누적 기록한다.
 - `company_profile_enrichment.peer_groups_json`은 단순 ticker 목록뿐 아니라 `grade`, `relationType`, `direction`, `score`, `reason`을 보존할 수 있게 확장한다.
@@ -19,6 +20,8 @@
 - `full_peer_curation_batch_003` tag가 있는 ticker도 curated peer group을 source of truth로 보며, 자동 same-industry/same-sector peer 생성은 건너뛰고 provider raw peers는 C `weak_provider_candidate`로 낮춘다. 이는 server OEM, EMS/ODM, electrical power, thermal/cooling이 broad hardware/industrial bucket에서 섞이는 문제를 막기 위한 규칙이다.
 - Batch 004는 `Software / Data / AI Platform`을 description + peer 동시 curation 방식으로 처리했다. 처리 ticker는 `MSFT`, `ORCL`, `PLTR`, `PANW`, `CRWD`, `ADBE`, `NOW`, `FTNT`, `DDOG`, `NET`, `CRWV`, `SNOW`, `MDB`, `ZS`, `AKAM`, `CRM`이다.
 - `full_peer_curation_batch_004` tag가 있는 ticker도 curated peer group을 source of truth로 보며, 자동 same-industry/same-sector peer 생성은 건너뛰고 provider raw peers는 C `weak_provider_candidate`로 낮춘다. 이는 broad `Software - Infrastructure`와 `Software - Application` bucket 때문에 cloud platform, data platform, security, observability, edge/CDN, GPU cloud, enterprise applications가 모두 B로 섞이는 문제를 막기 위한 규칙이다.
+- Batch 005는 `Software infrastructure/application remainder`를 description + peer 동시 curation 방식으로 처리했다. 처리 ticker는 `SNPS`, `VRSN`, `FFIV`, `DOCN`, `IOT`, `OKTA`, `RBRK`, `CHKP`, `CFLT`, `APP`, `UBER`, `INTU`, `CDNS`, `MSTR`, `ADSK`, `WDAY`, `ZM`이다.
+- `full_peer_curation_batch_005` tag가 있는 ticker도 curated peer group을 source of truth로 보며, 자동 same-industry/same-sector peer 생성은 건너뛰고 provider raw peers는 C `weak_provider_candidate`로 낮춘다. 이는 EDA, adtech, mobility marketplace, identity/security, data streaming, design/CAD, bitcoin proxy 같은 서로 다른 software bucket이 broad provider peers로 섞이는 문제를 막기 위한 규칙이다.
 - reciprocal direct peer generator는 수동 curated source에 외부 A edge를 역주입하지 않는다. 예를 들어 `ANET -> AVGO` old direct edge가 `AVGO -> ANET` A edge로 강제 생성되지 않게 한다.
 
 ### 목표

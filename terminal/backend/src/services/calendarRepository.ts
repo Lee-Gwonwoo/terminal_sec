@@ -171,8 +171,19 @@ export async function upsertCalendarEvent(params: {
        ticker = excluded.ticker,
        title = excluded.title,
        event_at = excluded.event_at,
-       meta_json = excluded.meta_json,
-       source = excluded.source`,
+       source = excluded.source,
+       -- earnings: preserve a previously-populated time_of_day/session (e.g. Yahoo/Finnhub
+       -- backfill) when the incoming payload leaves them null; a non-null incoming value wins.
+       -- Other event types are untouched (use the incoming meta_json as-is).
+       meta_json = CASE WHEN event_type = 'earnings' THEN
+         json_set(
+           json_set(
+             excluded.meta_json,
+             '$.time_of_day', COALESCE(json_extract(excluded.meta_json, '$.time_of_day'), json_extract(meta_json, '$.time_of_day'))
+           ),
+           '$.session', COALESCE(json_extract(excluded.meta_json, '$.session'), json_extract(meta_json, '$.session'))
+         )
+       ELSE excluded.meta_json END`,
     [
       randomUUID(),
       params.type,

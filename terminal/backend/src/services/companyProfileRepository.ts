@@ -9,6 +9,8 @@ export interface CompanyProfileRow {
   employees: number | null;
   website: string | null;
   ipo_date: string | null;
+  ipo_offer_price: number | null;
+  ipo_price_range: string | null;
   market_cap: number | null;
   raw_json: string | null;
   peers_json: string | null;
@@ -109,6 +111,8 @@ export async function getCompanyProfileByTicker(ticker: string): Promise<(Compan
   const ceoRow = rows.find((row) => row.ceo?.trim());
   const websiteRow = rows.find((row) => row.website?.trim());
   const ipoDateRow = rows.find((row) => row.ipo_date?.trim());
+  const ipoOfferPriceRow = rows.find((row) => row.ipo_offer_price != null);
+  const ipoPriceRangeRow = rows.find((row) => row.ipo_price_range?.trim());
   const marketCapRow = rows.find((row) => row.market_cap != null);
   const rawJsonRow = descriptionRow ?? latest;
 
@@ -119,6 +123,8 @@ export async function getCompanyProfileByTicker(ticker: string): Promise<(Compan
     ceo: ceoRow?.ceo ?? null,
     website: websiteRow?.website ?? null,
     ipo_date: ipoDateRow?.ipo_date ?? null,
+    ipo_offer_price: ipoOfferPriceRow?.ipo_offer_price ?? null,
+    ipo_price_range: ipoPriceRangeRow?.ipo_price_range ?? null,
     market_cap: marketCapRow?.market_cap ?? null,
     raw_json: rawJsonRow.raw_json,
     fetched_at: descriptionRow?.fetched_at ?? latest.fetched_at,
@@ -225,6 +231,67 @@ export async function getTickersWithExistingIpoDate(): Promise<Set<string>> {
      WHERE cp.source = 'finnhub' AND cp.ipo_date IS NOT NULL AND cp.ipo_date != ''`,
   );
   return new Set((rows as { ticker: string }[]).map((r) => r.ticker.toUpperCase()));
+}
+
+/**
+ * Return ticker symbols that already have both IPO offer price and IPO price range.
+ */
+export async function getTickersWithCompleteIpoPricing(): Promise<Set<string>> {
+  const rows = await getDb().all<{ ticker: string }[]>(
+    `SELECT s.ticker
+     FROM securities s
+     JOIN company_profiles cp ON cp.security_id = s.id
+     GROUP BY s.ticker
+     HAVING MAX(CASE WHEN cp.ipo_offer_price IS NOT NULL THEN 1 ELSE 0 END) = 1
+        AND MAX(CASE WHEN cp.ipo_price_range IS NOT NULL AND TRIM(cp.ipo_price_range) != '' THEN 1 ELSE 0 END) = 1`,
+  );
+  return new Set((rows as { ticker: string }[]).map((r) => r.ticker.toUpperCase()));
+}
+
+export async function upsertIpoPricing(
+  securityId: number,
+  source: string,
+  ipoOfferPrice: number | null,
+  ipoPriceRange: string | null,
+  rawJson: string | null,
+): Promise<boolean> {
+  if (ipoOfferPrice == null && !ipoPriceRange) {
+    return false;
+  }
+
+  const db = getDb();
+  const now = new Date().toISOString();
+  const existing = await db.get<CompanyProfileRow>(
+    "SELECT * FROM company_profiles WHERE security_id = ? AND source = ?",
+    [securityId, source],
+  );
+
+  if (existing) {
+    await db.run(
+      `UPDATE company_profiles SET
+         ipo_offer_price = ?,
+         ipo_price_range = ?,
+         raw_json = ?,
+         fetched_at = ?
+       WHERE id = ?`,
+      [
+        ipoOfferPrice ?? existing.ipo_offer_price,
+        ipoPriceRange ?? existing.ipo_price_range,
+        rawJson ?? existing.raw_json,
+        now,
+        existing.id,
+      ],
+    );
+    return true;
+  }
+
+  await db.run(
+    `INSERT INTO company_profiles
+       (security_id, source, ipo_offer_price, ipo_price_range, raw_json, fetched_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [securityId, source, ipoOfferPrice, ipoPriceRange, rawJson, now],
+  );
+  return true;
 }
 
 /**

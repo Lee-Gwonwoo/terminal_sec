@@ -37,8 +37,8 @@ default universe 2,278개 ticker를 industry 우선순위대로 보면서, 각 �
 | 002 | AI semiconductor / accelerator / memory / connectivity | 23 | 확인 대기 | NVDA/AMD accelerator, AVGO/MRVL/CRDO/ALAB connectivity/custom silicon, MU/RMBS memory, TXN/ADI analog, AMAT/LRCX/KLAC/TER semicap 분리 완료. backend/frontend build와 backend tests/API 검증 완료 |
 | 003 | AI server / power / cooling / EMS | 11 | 확인 대기 | DELL/SMCI/HPE server OEM, CLS/JBL/FLEX EMS/ODM, VRT/ETN/TT/NVT/HUBB power/cooling physical infra 분리 완료. backend/frontend build와 backend tests/API 검증 완료 |
 | 004 | Software/data/AI platforms | 16 | 확인 대기 | MSFT/ORCL cloud platform, PLTR/SNOW/MDB data/AI platform, PANW/CRWD/FTNT/ZS security, DDOG observability, NET/AKAM edge/CDN, CRWV GPU cloud, CRM/NOW/ADBE enterprise app/creative software 분리 완료. backend/frontend build와 backend tests/API 검증 완료 |
-| 005 | Space / defense / satellite / dual-use tech | 미정 | 미착수 | RKLB/RDW/ASTS/SATS/VSAT/LDOS/CACI/SAIC 등 분리 예정 |
-| 006+ | Healthcare, industrials, materials, energy, utilities, financials, consumer | 미정 | 미착수 | sector별 batch로 이어서 진행 |
+| 005 | Software infrastructure/application remainder | 17 | 확인 대기 | SNPS/CDNS EDA, VRSN DNS/domain infra, FFIV app delivery, DOCN developer cloud, IOT connected operations, OKTA identity, RBRK data security, CHKP security, CFLT streaming data infra, APP adtech, UBER mobility marketplace, INTU financial software, MSTR bitcoin proxy, ADSK design/CAD, WDAY HCM/finance, ZM collaboration 분리 완료. backend/frontend build와 backend tests/API 검증 완료 |
+| 006+ | AI/Tech priority 7~16, 이후 Space/Defense 2차 큐 | 미정 | 미착수 | Internet Content, IT Services, Consumer Electronics 등 AI/Tech 16개 industry를 먼저 진행한 뒤 Space/Defense queue로 이동 |
 
 ## Batch 001 — Optical / Photonics / AI Data-Center Interconnect
 
@@ -306,7 +306,57 @@ for ticker in ['MSFT','PANW','SNOW','NET','CRWV']:
 ### 남은 확인
 
 - 사용자가 Calendar Window에서 Batch 004 ticker들의 description hover와 `Curated Peers` 접힘/펼침 표시를 직접 확인하면 `사용자 확인 후 완료`로 갱신한다.
-- 다음 batch 후보는 Software - Infrastructure/Application의 남은 상위 ticker 또는 Space/Defense queue 중 사용자 우선순위에 따라 정한다.
+- 다음 batch는 [default_ticker_industry_priority.md](default_ticker_industry_priority.md)의 진행순서를 따른다. Batch 005는 Software - Infrastructure/Application의 남은 상위 ticker를 먼저 처리하고, Space/Defense는 AI/Tech 16개 industry 이후 2차 큐로 둔다.
+
+## Batch 005 — Software Infrastructure/Application Remainder
+
+### 처리 ticker
+
+`SNPS`, `VRSN`, `FFIV`, `DOCN`, `IOT`, `OKTA`, `RBRK`, `CHKP`, `CFLT`, `APP`, `UBER`, `INTU`, `CDNS`, `MSTR`, `ADSK`, `WDAY`, `ZM`
+
+### 핵심 결정
+
+- [default_ticker_industry_priority.md](default_ticker_industry_priority.md)의 Software - Infrastructure/Application 순서를 따르되, Batch 004에서 이미 처리한 ticker는 제외하고 남은 상위 ticker를 처리했다.
+- `SNPS/CDNS`는 EDA/chip design software A `direct_competitor`로 묶고, AI chip vendor는 B `infrastructure_read_through`로 둔다.
+- `VRSN`은 broad software가 아니라 DNS/domain registry internet infrastructure로 분리했다.
+- `FFIV`는 app delivery/load balancing/WAF/API security 축으로 보고 `NET/AKAM/ATEN`과 A `platform_overlap`으로 둔다.
+- `DOCN`은 SMB/developer cloud로 보고 hyperscaler와는 B adjacent로 둔다.
+- `IOT`은 connected operations/fleet IoT software로 분리하고, generic SaaS와 직접 묶지 않는다.
+- `OKTA`는 identity/access security로 분리하고, broad cloud/software raw peers는 C `weak_provider_candidate`로 낮춘다.
+- `RBRK`는 data security/cyber resilience/backup recovery로 분리하고 endpoint/network/SASE security와는 B adjacent로 둔다.
+- `APP`은 AI adtech/mobile app monetization으로 분리하고, raw provider가 섞은 EDA/enterprise software 후보는 C로 낮춘다.
+- `UBER`는 mobility/delivery marketplace로 분리하고, autonomous/mobility tech는 B read-through로 둔다.
+- `MSTR`은 ordinary application software가 아니라 Bitcoin treasury/proxy로 분리하고, legacy analytics software는 C adjacent로 둔다.
+- `full_peer_curation_batch_005` tag가 있는 ticker는 curated peer group을 source of truth로 보고, 자동 same-industry/same-sector peer 생성은 건너뛴다.
+
+### 현재 대표 기대 결과
+
+| Ticker | A 핵심 | B 보조/read-through | C/weak 처리 |
+|--------|--------|---------------------|-------------|
+| SNPS | CDNS | ALAB, AMD, AVGO, MRVL, NVDA, ADSK, BSY, PTC | APP, CRM, DDOG, INTU 등 raw broad software 후보 |
+| APP | MGNI, PUBM, TTD | GOOGL, META, SNAP | SNPS, CDNS, INTU, ADBE 등 raw broad software 후보 |
+| UBER | DASH, GRAB, LYFT | AUR, TSLA | 없음 또는 raw mobility 후보 |
+| OKTA | MSFT, SAIL | CRWD, NET, PANW, ZS | SNOW, MDB, VRSN, AKAM, DOCN 등 provider raw 후보 |
+| MSTR | COIN, MARA, RIOT | 없음 | PLTR, SNOW, DDOG, SNPS, CDNS, ADSK, WDAY 등 software false positives |
+| ZM | CRM, FIVN, MSFT | NOW, TEAM, WDAY | IOT, PTC, TRMB, TYL 등 provider raw 후보 |
+
+### 검증 결과
+
+| 검증 계층 | 결과 | 비고 |
+|-----------|------|------|
+| 정적 분석 | ✅ | `seedCompanyProfileEnrichment.ts`, `seedCompanyPeerEdges.ts` 오류 0개 |
+| 데이터 seed | ✅ | `npm.cmd run seed:company-enrichment -- --force --tickers=SNPS,VRSN,FFIV,DOCN,IOT,OKTA,RBRK,CHKP,CFLT,APP,UBER,INTU,CDNS,MSTR,ADSK,WDAY,ZM` 성공. 17 inserted, limit 17 |
+| peer graph 재생성 | ✅ | `npm.cmd run seed:company-peers`: 28,004 edges, visible coverage 2,276/2,278, grade counts `A=938`, `B=20,436`, `C=5,093`, `EXCLUDE=1,537` |
+| DB spot check | ✅ | Batch 005 ticker 17/17에서 short/enhanced/products/peerGroups/tag 존재 확인. SNPS/APP/UBER/OKTA/MSTR/ZM 대표 peer rank 확인 |
+| 런타임 API | ✅ | `GET /api/company-profiles/SNPS`, `APP`, `UBER`, `OKTA`, `MSTR`, `ZM` 응답에서 `short_description`과 `curated_peers` 확인 |
+| backend build | ✅ | `terminal/backend`에서 `npm.cmd run build` 성공 |
+| backend tests | ✅ | `terminal/backend`에서 `npm.cmd run test`: 17 files / 104 tests passed |
+| frontend build | ✅ | `termina_web/figma_code/terminal_ui_ver2_finhub`에서 `npm.cmd run build` 성공 |
+
+### 남은 확인
+
+- 사용자가 Calendar Window에서 Batch 005 ticker들의 description hover와 `Curated Peers` 접힘/펼침 표시를 직접 확인하면 `사용자 확인 후 완료`로 갱신한다.
+- 다음 batch는 [default_ticker_industry_priority.md](default_ticker_industry_priority.md)의 진행순서를 계속 따른다. Batch 006은 AI/Tech priority 7 `Internet Content & Information` 상위 ticker를 우선 검토한다.
 
 ## 완료 기록 규칙
 

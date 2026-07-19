@@ -1,16 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Calendar as CalendarIcon,
-  Check,
   ChevronDown,
   ChevronUp,
   Eye,
   GripVertical,
   RefreshCw,
-  Save,
   Search,
   Settings2,
-  Trash2,
   X,
   CircleHelp,
 } from 'lucide-react';
@@ -74,22 +71,13 @@ function getInstructionMenuStyle(x: number, y: number): React.CSSProperties {
 }
 
 type SortDirection = 'asc' | 'desc' | null;
+type IndustrySelectionMode = 'all' | 'custom' | 'none';
 
 interface CalendarTypeConfig {
   key: string;
   label: string;
   supports: string[];
   columns: string[];
-}
-
-interface CalendarPeerEdge {
-  ticker: string;
-  name?: string | null;
-  grade?: string | null;
-  relation_type?: string | null;
-  direction?: string | null;
-  score?: number | null;
-  reason?: string | null;
 }
 
 interface CalendarRow {
@@ -119,8 +107,6 @@ interface CalendarRow {
   revenue_actual?: number | null;
   surprise_pct?: number | null;
   market_cap?: number | null;
-  peers?: string[] | null;
-  curated_peers?: CalendarPeerEdge[] | null;
   float_pct?: number | null;
   institutional_pct?: number | null;
   insider_pct?: number | null;
@@ -164,14 +150,6 @@ interface IndustryResponse {
   industries?: string[];
 }
 
-interface IndustryFilterPreset {
-  id: string;
-  name: string;
-  industries: string[];
-  createdAt: string;
-  updatedAt: string;
-}
-
 interface JobStatus {
   status: 'running' | 'done' | 'failed' | 'cancelled';
   progress: { completed: number; total: number; pct: number };
@@ -198,25 +176,25 @@ interface NumericFilterConfig {
 type DatePresetKey = 'this_week' | 'next_5_days' | 'next_2_weeks' | 'this_month' | 'next_month';
 
 const FALLBACK_TYPES: CalendarTypeConfig[] = [
-  { key: 'earnings', label: 'Earnings', supports: [], columns: ['report_date', 'ticker', 'name', 'ipo_date', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual', 'industry', 'peers', 'curated_peers', 'float_pct', 'institutional_pct', 'insider_pct', 'session', 'source'] },
-  { key: 'ipos', label: 'IPOs', supports: [], columns: ['ipo_date', 'ticker', 'ipo_security_type', 'company_name', 'industry', 'peers', 'curated_peers', 'float_pct', 'institutional_pct', 'insider_pct', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'company_description', 'sec_form', 'sec_filing_date', 'sec_accepted_date', 'sec_owner_count', 'sec_max_owner_pct', 'sec_total_owner_pct', 'prospectus_url', 'disclosure_url', 'source'] },
-  { key: 'dividends', label: 'Dividends', supports: [], columns: ['ex_date', 'ticker', 'name', 'amount', 'yield', 'pay_date', 'industry', 'peers', 'curated_peers', 'market_cap', 'source'] },
-  { key: 'splits', label: 'Splits', supports: [], columns: ['split_date', 'ticker', 'name', 'ratio', 'industry', 'peers', 'curated_peers', 'market_cap', 'source'] },
-  { key: 'analyst_ratings', label: 'Analyst Ratings', supports: [], columns: ['ticker', 'peers', 'curated_peers', 'title', 'source'] },
-  { key: 'sec_filings', label: 'SEC Filings', supports: [], columns: ['event_date', 'ticker', 'peers', 'curated_peers', 'title', 'source'] },
+  { key: 'earnings', label: 'Earnings', supports: [], columns: ['report_date', 'ticker', 'name', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual', 'industry', 'float_pct', 'institutional_pct', 'insider_pct', 'session', 'source'] },
+  { key: 'ipos', label: 'IPOs', supports: [], columns: ['ipo_date', 'ticker', 'ipo_security_type', 'company_name', 'industry', 'float_pct', 'institutional_pct', 'insider_pct', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'company_description', 'sec_form', 'sec_filing_date', 'sec_accepted_date', 'sec_owner_count', 'sec_max_owner_pct', 'sec_total_owner_pct', 'prospectus_url', 'disclosure_url', 'source'] },
+  { key: 'dividends', label: 'Dividends', supports: [], columns: ['ex_date', 'ticker', 'name', 'amount', 'yield', 'pay_date', 'industry', 'market_cap', 'source'] },
+  { key: 'splits', label: 'Splits', supports: [], columns: ['split_date', 'ticker', 'name', 'ratio', 'industry', 'market_cap', 'source'] },
+  { key: 'analyst_ratings', label: 'Analyst Ratings', supports: [], columns: ['ticker', 'title', 'source'] },
+  { key: 'sec_filings', label: 'SEC Filings', supports: [], columns: ['event_date', 'ticker', 'title', 'source'] },
   { key: 'economics', label: 'Economics', supports: [], columns: ['event_date', 'title', 'source'] },
 ];
 
 const TYPE_COLUMN_ORDER: Record<string, string[]> = {
-  earnings: ['report_date', 'ticker', 'name', 'ipo_date', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual', 'industry', 'peers', 'curated_peers', 'float_pct', 'institutional_pct', 'insider_pct', 'session', 'source'],
-  ipos: ['ipo_date', 'ticker', 'ipo_security_type', 'company_name', 'industry', 'peers', 'curated_peers', 'float_pct', 'institutional_pct', 'insider_pct', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'company_description', 'sec_form', 'sec_filing_date', 'sec_accepted_date', 'sec_owner_count', 'sec_max_owner_pct', 'sec_total_owner_pct', 'prospectus_url', 'disclosure_url', 'source'],
-  dividends: ['ex_date', 'ticker', 'name', 'amount', 'yield', 'pay_date', 'industry', 'peers', 'curated_peers', 'market_cap', 'source'],
-  splits: ['split_date', 'ticker', 'name', 'ratio', 'industry', 'peers', 'curated_peers', 'market_cap', 'source'],
+  earnings: ['report_date', 'ticker', 'name', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual', 'industry', 'float_pct', 'institutional_pct', 'insider_pct', 'session', 'source'],
+  ipos: ['ipo_date', 'ticker', 'ipo_security_type', 'company_name', 'industry', 'float_pct', 'institutional_pct', 'insider_pct', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'company_description', 'sec_form', 'sec_filing_date', 'sec_accepted_date', 'sec_owner_count', 'sec_max_owner_pct', 'sec_total_owner_pct', 'prospectus_url', 'disclosure_url', 'source'],
+  dividends: ['ex_date', 'ticker', 'name', 'amount', 'yield', 'pay_date', 'industry', 'market_cap', 'source'],
+  splits: ['split_date', 'ticker', 'name', 'ratio', 'industry', 'market_cap', 'source'],
 };
 
 const VISIBLE_COLUMNS_BY_TYPE: Record<string, string[]> = {
-  earnings: ['report_date', 'ticker', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual', 'curated_peers'],
-  ipos: ['ipo_date', 'ticker', 'ipo_security_type', 'company_name', 'industry', 'curated_peers', 'institutional_pct', 'insider_pct', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'sec_max_owner_pct', 'company_description'],
+  earnings: ['report_date', 'ticker', 'confirmed', 'eps_est', 'eps_actual', 'surprise_pct', 'revenue_est', 'revenue_actual'],
+  ipos: ['ipo_date', 'ticker', 'ipo_security_type', 'company_name', 'industry', 'institutional_pct', 'insider_pct', 'exchange', 'status', 'price_range', 'shares', 'offer_amount', 'sec_max_owner_pct', 'company_description'],
   dividends: ['ex_date', 'ticker', 'amount', 'yield', 'pay_date'],
   splits: ['split_date', 'ticker', 'ratio'],
   analyst_ratings: ['event_date', 'ticker', 'title'],
@@ -239,8 +217,6 @@ const COLUMN_DEFINITIONS: Record<string, Omit<ColumnConfig, 'visible'>> = {
   title: { key: 'title', label: 'Title', width: '240px' },
   source: { key: 'source', label: 'Source', width: '100px' },
   industry: { key: 'industry', label: 'Industry', width: '180px' },
-  peers: { key: 'peers', label: 'Peers', width: '220px' },
-  curated_peers: { key: 'curated_peers', label: 'Curated Peers', width: '300px' },
   exchange: { key: 'exchange', label: 'Exchange', width: '110px' },
   sector: { key: 'sector', label: 'Sector', width: '140px' },
   status: { key: 'status', label: 'Status', width: '100px', align: 'center' },
@@ -289,13 +265,10 @@ const NUMERIC_FILTERS_BY_TYPE: Record<string, NumericFilterConfig[]> = {
 const IPO_SECURITY_TYPE_ORDER = ['Common Stock', 'Unit', 'Warrant', 'Rights', 'ADS', 'ETF', 'Fund/Trust', 'Preferred', 'Other'];
 const DEFAULT_EARNINGS_UPDATE_CONCURRENCY = 1;
 const DEFAULT_FINANCIAL_SYNC_CONCURRENCY = 1;
-const DEFAULT_FMP_PEERS_CONCURRENCY = 5;
-const DEFAULT_FMP_PEERS_INTERVAL_MS = 250;
 const DEFAULT_YAHOO_DESCRIPTION_CONCURRENCY = 5;
 const DEFAULT_YAHOO_DESCRIPTION_INTERVAL_MS = 200;
 const CALENDAR_UI_STATE_STORAGE_KEY = 'calendar-window-ui-state';
-const CALENDAR_INDUSTRY_FILTER_PRESETS_STORAGE_KEY = 'calendar-industry-filter-presets-v1';
-const MIN_COLUMN_WIDTH_PX = 44;
+const MIN_COLUMN_WIDTH_PX = 64;
 const MAX_COLUMN_WIDTH_PX = 720;
 const DATE_PRESET_OPTIONS: Array<{ key: DatePresetKey; label: string }> = [
   { key: 'this_week', label: 'This Week' },
@@ -343,123 +316,16 @@ function readStoredObject(key: string): Record<string, unknown> | null {
   }
 }
 
-function isCalendarPeerEdge(value: unknown): value is CalendarPeerEdge {
-  return Boolean(value)
-    && typeof value === 'object'
-    && !Array.isArray(value)
-    && typeof (value as CalendarPeerEdge).ticker === 'string'
-    && (value as CalendarPeerEdge).ticker.trim().length > 0;
-}
-
-function getCuratedPeerChipClass(grade: string): string {
-  if (grade === 'A') {
-    return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-700/60 dark:bg-emerald-900/30 dark:text-emerald-200';
-  }
-  if (grade === 'B') {
-    return 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-700/60 dark:bg-sky-900/30 dark:text-sky-200';
-  }
-  return 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200';
-}
-
-function formatRelationLabel(value: string | null | undefined): string {
-  if (!value) return '';
-  return value.split('_').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
-}
-
-function formatCuratedPeerTitle(peer: CalendarPeerEdge): string {
-  const grade = String(peer.grade ?? '').trim().toUpperCase() || '?';
-  const relation = formatRelationLabel(peer.relation_type);
-  const reason = typeof peer.reason === 'string' && peer.reason.trim() ? peer.reason.trim() : '';
-  return [grade, peer.ticker, relation, reason].filter(Boolean).join(' - ');
-}
-
-function getCuratedPeerRowKey(row: CalendarRow): string {
-  return row.id || `${row.type}-${row.ticker ?? ''}-${row.event_time}`;
-}
-
-function normalizeIndustryArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  const seen = new Set<string>();
-  const industries: string[] = [];
-  for (const entry of value) {
-    if (typeof entry !== 'string') continue;
-    const industry = entry.trim();
-    if (!industry || seen.has(industry)) continue;
-    seen.add(industry);
-    industries.push(industry);
-  }
-  return industries.sort((left, right) => left.localeCompare(right));
-}
-
-function isIndustryFilterPreset(value: unknown): value is IndustryFilterPreset {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const row = value as Record<string, unknown>;
-  return typeof row.id === 'string' && row.id.trim().length > 0 &&
-    typeof row.name === 'string' && row.name.trim().length > 0 &&
-    Array.isArray(row.industries);
-}
-
-function readStoredIndustryFilterPresets(): IndustryFilterPreset[] {
-  try {
-    const raw = localStorage.getItem(CALENDAR_INDUSTRY_FILTER_PRESETS_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter(isIndustryFilterPreset)
-      .map((preset) => ({
-        id: preset.id.trim(),
-        name: preset.name.trim(),
-        industries: normalizeIndustryArray(preset.industries),
-        createdAt: typeof preset.createdAt === 'string' ? preset.createdAt : new Date().toISOString(),
-        updatedAt: typeof preset.updatedAt === 'string' ? preset.updatedAt : new Date().toISOString(),
-      }))
-      .filter((preset, index, presets) => presets.findIndex((item) => item.id === preset.id) === index)
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-  } catch {
-    return [];
-  }
-}
-
-function writeStoredIndustryFilterPresets(presets: IndustryFilterPreset[]): void {
-  try {
-    localStorage.setItem(CALENDAR_INDUSTRY_FILTER_PRESETS_STORAGE_KEY, JSON.stringify(presets));
-  } catch {
-    // LocalStorage can be blocked in private or embedded contexts.
-  }
-}
-
-function createClientId(prefix: string): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return `${prefix}-${crypto.randomUUID()}`;
-  }
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function orderIndustriesForOptions(industries: string[], options: string[]): string[] {
-  const normalized = normalizeIndustryArray(industries);
-  if (normalized.length === 0) return [];
-  if (options.length === 0) return normalized;
-  const selected = new Set(normalized);
-  const orderedKnown = options.filter((industry) => selected.has(industry));
-  const unknown = normalized.filter((industry) => !options.includes(industry));
-  if (orderedKnown.length >= options.length && unknown.length === 0) return [];
-  return [...orderedKnown, ...unknown];
-}
-
-function areIndustrySelectionsEqual(left: string[], right: string[]): boolean {
-  const normalizedLeft = normalizeIndustryArray(left);
-  const normalizedRight = normalizeIndustryArray(right);
-  if (normalizedLeft.length !== normalizedRight.length) return false;
-  return normalizedLeft.every((industry, index) => industry === normalizedRight[index]);
-}
-
 function isDatePresetKey(value: unknown): value is DatePresetKey {
   return typeof value === 'string' && DATE_PRESET_OPTIONS.some((option) => option.key === value);
 }
 
 function isSortDirection(value: unknown): value is SortDirection {
   return value === 'asc' || value === 'desc' || value === null;
+}
+
+function isIndustrySelectionMode(value: unknown): value is IndustrySelectionMode {
+  return value === 'all' || value === 'custom' || value === 'none';
 }
 
 function humanizeKey(key: string): string {
@@ -495,23 +361,18 @@ function getDefaultSortFieldForType(type: string): string {
   return 'event_date';
 }
 
-function mergeColumns(existing: ColumnConfig[] | undefined, next: ColumnConfig[], options: { preserveUnknown?: boolean } = {}): ColumnConfig[] {
+function mergeColumns(existing: ColumnConfig[] | undefined, next: ColumnConfig[]): ColumnConfig[] {
   if (!existing || existing.length === 0) {
     return next;
   }
   const nextByKey = new Map(next.map((column) => [column.key, column]));
   const preserved = existing
-    .flatMap((column) => {
-      const nextColumn = nextByKey.get(column.key);
-      if (!nextColumn) {
-        return options.preserveUnknown ? [column] : [];
-      }
-      return [{
-        ...nextColumn,
-        visible: column.visible,
-        width: column.width,
-      }];
-    });
+    .filter((column) => nextByKey.has(column.key))
+    .map((column) => ({
+      ...nextByKey.get(column.key)!,
+      visible: column.visible,
+      width: column.width,
+    }));
   const preservedKeys = new Set(preserved.map((column) => column.key));
   const appended = next.filter((column) => !preservedKeys.has(column.key));
   return [...preserved, ...appended];
@@ -558,7 +419,7 @@ function restoreColumnStates(value: unknown, typeConfigs: CalendarTypeConfig[]):
   for (const typeConfig of typeConfigs) {
     const storedColumns = normalizeStoredColumns(stored[typeConfig.key]);
     if (storedColumns) {
-      next[typeConfig.key] = mergeColumns(storedColumns, defaults[typeConfig.key], { preserveUnknown: true });
+      next[typeConfig.key] = mergeColumns(storedColumns, defaults[typeConfig.key]);
     }
   }
   return next;
@@ -762,7 +623,12 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     ? storedUiState.sortField as string | null
     : getDefaultSortFieldForType(storedActiveType);
   const storedSortDirection = isSortDirection(storedUiState.sortDirection) ? storedUiState.sortDirection : 'desc';
-  const storedSelectedIndustries = normalizeIndustryArray(storedUiState.selectedIndustries);
+  const storedSelectedIndustries = Array.isArray(storedUiState.selectedIndustries)
+    ? storedUiState.selectedIndustries.filter((industry): industry is string => typeof industry === 'string' && industry.trim().length > 0)
+    : [];
+  const storedIndustrySelectionMode = isIndustrySelectionMode(storedUiState.industrySelectionMode)
+    ? storedUiState.industrySelectionMode
+    : storedSelectedIndustries.length > 0 ? 'custom' : 'all';
 
   const [typeConfigs, setTypeConfigs] = useState<CalendarTypeConfig[]>(FALLBACK_TYPES);
   const [events, setEvents] = useState<CalendarRow[]>([]);
@@ -773,16 +639,12 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState(typeof storedUiState.searchQuery === 'string' ? storedUiState.searchQuery : '');
   const [industrySearchQuery, setIndustrySearchQuery] = useState('');
-  const [industryPresetName, setIndustryPresetName] = useState('');
-  const [industryPresetError, setIndustryPresetError] = useState<string | null>(null);
-  const [industryFilterPresets, setIndustryFilterPresets] = useState<IndustryFilterPreset[]>(() => readStoredIndustryFilterPresets());
   const [dateFrom, setDateFrom] = useState(typeof storedUiState.dateFrom === 'string' ? storedUiState.dateFrom : '');
   const [dateTo, setDateTo] = useState(typeof storedUiState.dateTo === 'string' ? storedUiState.dateTo : '');
   const [selectedDatePreset, setSelectedDatePreset] = useState<DatePresetKey | null>(storedSelectedDatePreset);
   const [sortField, setSortField] = useState<string | null>(storedSortField);
   const [sortDirection, setSortDirection] = useState<SortDirection>(storedSortDirection);
   const [columnStates, setColumnStates] = useState<Record<string, ColumnConfig[]>>(() => restoreColumnStates(storedUiState.columnStates, FALLBACK_TYPES));
-  const [expandedCuratedPeerRows, setExpandedCuratedPeerRows] = useState<Set<string>>(() => new Set());
   const [showColumnMenu, setShowColumnMenu] = useState(false);
   const [showWatchlistMenu, setShowWatchlistMenu] = useState(false);
   const [showIndustryMenu, setShowIndustryMenu] = useState(false);
@@ -810,6 +672,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const [confirmedFilter, setConfirmedFilter] = useState<boolean | null>(typeof storedUiState.confirmedFilter === 'boolean' || storedUiState.confirmedFilter === null ? storedUiState.confirmedFilter : null);
   const [selectedWatchlistId, setSelectedWatchlistId] = useState<string>(typeof storedUiState.selectedWatchlistId === 'string' && storedUiState.selectedWatchlistId ? storedUiState.selectedWatchlistId : 'all');
   const [selectedIndustries, setSelectedIndustries] = useState<string[]>(storedSelectedIndustries);
+  const [industrySelectionMode, setIndustrySelectionMode] = useState<IndustrySelectionMode>(storedIndustrySelectionMode);
   const [ipoSecurityTypeFilter, setIpoSecurityTypeFilter] = useState(typeof storedUiState.ipoSecurityTypeFilter === 'string' && storedUiState.ipoSecurityTypeFilter ? storedUiState.ipoSecurityTypeFilter : 'all');
   const [tickerContextMenu, setTickerContextMenu] = useState<{
     x: number;
@@ -838,19 +701,16 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const selectedWatchlistLabel = selectedWatchlistId === 'all'
     ? 'All Watchlists'
     : watchlists.find((watchlist) => watchlist.id === selectedWatchlistId)?.name ?? 'Watch Lists';
-  const isAllIndustrySelection = selectedIndustries.length === 0 || (industryOptions.length > 0 && selectedIndustries.length >= industryOptions.length);
+  const isAllIndustrySelection = industrySelectionMode === 'all' || (industrySelectionMode === 'custom' && industryOptions.length > 0 && selectedIndustries.length >= industryOptions.length);
+  const isNoIndustrySelection = industrySelectionMode === 'none';
   const activeIndustryFilters = useMemo(
-    () => isAllIndustrySelection ? [] : selectedIndustries,
-    [isAllIndustrySelection, selectedIndustries],
+    () => industrySelectionMode === 'custom' && !isAllIndustrySelection ? selectedIndustries : [],
+    [industrySelectionMode, isAllIndustrySelection, selectedIndustries],
   );
   const selectedIndustrySet = useMemo(() => new Set(activeIndustryFilters), [activeIndustryFilters]);
-  const selectedIndustryLabel = formatIndustryButtonLabel(selectedIndustries, industryOptions.length);
-  const selectedIndustryStatusLabel = formatIndustryStatusLabel(selectedIndustries, industryOptions.length);
-  const hasIndustryFilter = activeIndustryFilters.length > 0;
-  const activeIndustryPreset = useMemo(() => {
-    const selectedPresetIndustries = isAllIndustrySelection ? [] : selectedIndustries;
-    return industryFilterPresets.find((preset) => areIndustrySelectionsEqual(preset.industries, selectedPresetIndustries)) ?? null;
-  }, [industryFilterPresets, isAllIndustrySelection, selectedIndustries]);
+  const selectedIndustryLabel = isNoIndustrySelection ? 'No Industries' : formatIndustryButtonLabel(isAllIndustrySelection ? [] : selectedIndustries, industryOptions.length);
+  const selectedIndustryStatusLabel = isNoIndustrySelection ? 'No industries selected' : formatIndustryStatusLabel(isAllIndustrySelection ? [] : selectedIndustries, industryOptions.length);
+  const hasIndustryFilter = isNoIndustrySelection || activeIndustryFilters.length > 0;
   const filteredIndustryOptions = useMemo(() => {
     const query = industrySearchQuery.trim().toLowerCase();
     if (!query) return industryOptions;
@@ -881,6 +741,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
         confirmedFilter,
         selectedWatchlistId,
         selectedIndustries,
+        industrySelectionMode,
         ipoSecurityTypeFilter,
       }));
     } catch {
@@ -894,6 +755,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     dateTo,
     floatPctMax,
     floatPctMin,
+    industrySelectionMode,
     institutionalPctMax,
     institutionalPctMin,
     ipoSecurityTypeFilter,
@@ -907,70 +769,55 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     sortField,
   ]);
 
-  useEffect(() => {
-    writeStoredIndustryFilterPresets(industryFilterPresets);
-  }, [industryFilterPresets]);
-
-  const saveIndustryFilterPreset = () => {
-    const name = industryPresetName.trim();
-    if (!name) {
-      setIndustryPresetError('Preset name is required');
-      return;
-    }
-
-    const now = new Date().toISOString();
-    const industries = isAllIndustrySelection ? [] : orderIndustriesForOptions(selectedIndustries, industryOptions);
-    setIndustryFilterPresets((previous) => {
-      const existing = previous.find((preset) => preset.name.toLowerCase() === name.toLowerCase());
-      if (existing) {
-        return previous
-          .map((preset) => preset.id === existing.id ? { ...preset, name, industries, updatedAt: now } : preset)
-          .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-      }
-      return [{ id: createClientId('industry-preset'), name, industries, createdAt: now, updatedAt: now }, ...previous];
-    });
-    setIndustryPresetName('');
-    setIndustryPresetError(null);
-  };
-
-  const applyIndustryFilterPreset = (preset: IndustryFilterPreset) => {
-    setSelectedIndustries(orderIndustriesForOptions(preset.industries, industryOptions));
-    setIndustrySearchQuery('');
-    setIndustryPresetError(null);
-    setIndustryInstructionMenu(null);
-    setShowIndustryMenu(false);
-  };
-
-  const deleteIndustryFilterPreset = (presetId: string) => {
-    setIndustryFilterPresets((previous) => previous.filter((preset) => preset.id !== presetId));
-    setIndustryPresetError(null);
-  };
-
   const toggleSelectedIndustry = (industry: string) => {
     const trimmed = industry.trim();
     if (!trimmed) return;
-    setSelectedIndustries((previous) => {
-      if (industryOptions.length === 0) {
-        if (previous.includes(trimmed)) {
-          return previous.filter((item) => item !== trimmed);
-        }
-        return [...previous, trimmed].sort((left, right) => left.localeCompare(right));
-      }
+    if (industryOptions.length === 0) {
+      const next = selectedIndustries.includes(trimmed)
+        ? selectedIndustries.filter((item) => item !== trimmed)
+        : [...selectedIndustries, trimmed].sort((left, right) => left.localeCompare(right));
+      setSelectedIndustries(next);
+      setIndustrySelectionMode(next.length > 0 ? 'custom' : 'none');
+      return;
+    }
 
-      const wasAllSelected = previous.length === 0 || previous.length >= industryOptions.length;
-      if (wasAllSelected) {
-        return industryOptions.filter((item) => item !== trimmed);
-      }
+    if (isAllIndustrySelection) {
+      const next = industryOptions.filter((item) => item !== trimmed);
+      setSelectedIndustries(next);
+      setIndustrySelectionMode(next.length > 0 ? 'custom' : 'none');
+      return;
+    }
 
-      const nextSet = new Set(previous);
-      if (nextSet.has(trimmed)) {
-        nextSet.delete(trimmed);
-      } else {
-        nextSet.add(trimmed);
-      }
-      const next = industryOptions.filter((item) => nextSet.has(item));
-      return next.length >= industryOptions.length ? [] : next;
-    });
+    if (isNoIndustrySelection) {
+      setSelectedIndustries([trimmed]);
+      setIndustrySelectionMode('custom');
+      return;
+    }
+
+    const nextSet = new Set(selectedIndustries);
+    if (nextSet.has(trimmed)) {
+      nextSet.delete(trimmed);
+    } else {
+      nextSet.add(trimmed);
+    }
+    const next = industryOptions.filter((item) => nextSet.has(item));
+    if (next.length === 0) {
+      setSelectedIndustries([]);
+      setIndustrySelectionMode('none');
+      return;
+    }
+    if (next.length >= industryOptions.length) {
+      setSelectedIndustries([]);
+      setIndustrySelectionMode('all');
+      return;
+    }
+    setSelectedIndustries(next);
+    setIndustrySelectionMode('custom');
+  };
+
+  const toggleAllIndustries = (checked: boolean) => {
+    setSelectedIndustries([]);
+    setIndustrySelectionMode(checked ? 'all' : 'none');
   };
 
   const openIndustryInstructionMenu = (event: React.MouseEvent, industry: string) => {
@@ -1420,6 +1267,10 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   }, [tabFilteredEvents]);
 
   const baseFilteredEvents = useMemo(() => {
+    if (supportsIndustryFilter && isNoIndustrySelection) {
+      return [];
+    }
+
     let filtered = [...tabFilteredEvents];
 
     if (searchQuery.trim()) {
@@ -1457,6 +1308,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     activeType,
     ipoSecurityTypeFilter,
     hasIndustryFilter,
+    isNoIndustrySelection,
     selectedIndustrySet,
     supportsIndustryFilter,
     marketCapMin,
@@ -1543,6 +1395,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     setConfirmedFilter(null);
     setSelectedWatchlistId('all');
     setSelectedIndustries([]);
+    setIndustrySelectionMode('all');
     setIpoSecurityTypeFilter('all');
     setMarketCapMin('');
     setMarketCapMax('');
@@ -1655,25 +1508,6 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     });
   };
 
-  const handleFmpPeersUpdate = async () => {
-    if (activeCalendarTickers.length === 0) {
-      setActionError('FMP peers update requires loaded calendar rows with tickers.');
-      return;
-    }
-
-    await startCalendarJob({
-      url: '/api/company-profiles/pull-fmp-peers',
-      label: `FMP peers update (${activeCalendarTickers.length} tickers)`,
-      failureMessage: 'FMP peers update failed',
-      requestBody: {
-        tickers: activeCalendarTickers,
-        concurrency: DEFAULT_FMP_PEERS_CONCURRENCY,
-        requestIntervalMs: DEFAULT_FMP_PEERS_INTERVAL_MS,
-        skipExisting: true,
-      },
-    });
-  };
-
   const cancelJob = async () => {
     if (!jobId || !jobStatus || jobStatus.status !== 'running') {
       return;
@@ -1709,19 +1543,6 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
       return value ? 'Yes' : 'No';
     }
     return String(value);
-  };
-
-  const toggleCuratedPeerRow = (row: CalendarRow) => {
-    const rowKey = getCuratedPeerRowKey(row);
-    setExpandedCuratedPeerRows((previous) => {
-      const next = new Set(previous);
-      if (next.has(rowKey)) {
-        next.delete(rowKey);
-      } else {
-        next.add(rowKey);
-      }
-      return next;
-    });
   };
 
   const renderCell = (row: CalendarRow, column: ColumnConfig) => {
@@ -1777,62 +1598,6 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
         <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200">
           {formatValue(row, column.key)}
         </span>
-      );
-    }
-
-    if (column.key === 'peers') {
-      const peers = Array.isArray(value)
-        ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-        : [];
-      if (peers.length === 0) {
-        return <span>-</span>;
-      }
-      return (
-        <div className="flex max-h-12 flex-wrap gap-1 overflow-hidden" title={peers.join(', ')} style={{ maxWidth: column.width }}>
-          {peers.map((peer) => (
-            <span key={peer} className="inline-flex items-center rounded border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[11px] font-medium text-violet-700 dark:border-violet-700/60 dark:bg-violet-900/30 dark:text-violet-200">
-              {peer}
-            </span>
-          ))}
-        </div>
-      );
-    }
-
-    if (column.key === 'curated_peers') {
-      const peers = Array.isArray(value)
-        ? value.filter(isCalendarPeerEdge).filter((peer) => String(peer.grade ?? '').toUpperCase() !== 'EXCLUDE')
-        : [];
-      if (peers.length === 0) {
-        return <span>-</span>;
-      }
-      const rowKey = getCuratedPeerRowKey(row);
-      const expanded = expandedCuratedPeerRows.has(rowKey);
-      const visiblePeers = expanded ? peers : peers.slice(0, 12);
-      return (
-        <button
-          type="button"
-          aria-expanded={expanded}
-          aria-label={`${expanded ? 'Collapse' : 'Expand'} curated peers for ${row.ticker ?? row.title ?? row.id}`}
-          className={`flex w-full flex-wrap gap-1 text-left ${expanded ? 'max-h-none overflow-visible' : 'max-h-16 overflow-hidden'} rounded-sm focus:outline-none focus:ring-1 focus:ring-blue-400`}
-          title={peers.map(formatCuratedPeerTitle).join('\n')}
-          style={{ maxWidth: column.width }}
-          onClick={() => toggleCuratedPeerRow(row)}
-        >
-          {visiblePeers.map((peer) => {
-            const grade = String(peer.grade ?? '').trim().toUpperCase() || '?';
-            return (
-              <span key={`${grade}-${peer.ticker}-${peer.relation_type ?? ''}`} className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] font-medium ${getCuratedPeerChipClass(grade)}`}>
-                <span className="text-[10px] font-semibold">{grade}</span>
-                <span>{peer.ticker}</span>
-              </span>
-            );
-          })}
-          {!expanded && peers.length > visiblePeers.length && (
-            <span className="inline-flex items-center rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300">
-              +{peers.length - visiblePeers.length}
-            </span>
-          )}
-        </button>
       );
     }
 
@@ -2035,7 +1800,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                   setShowFmpSettingsMenu(false);
                 }}
                 className={`flex max-w-[190px] items-center gap-1 px-3 py-2 text-sm border rounded hover:bg-gray-50 dark:hover:bg-gray-600 ${hasIndustryFilter ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600'}`}
-                title={hasIndustryFilter ? selectedIndustries.join(', ') : 'All industries selected'}
+                title={isNoIndustrySelection ? 'No industries selected' : hasIndustryFilter ? selectedIndustries.join(', ') : 'All industries selected'}
               >
                 <span className="truncate">{selectedIndustryLabel}</span>
                 <ChevronDown className="h-4 w-4 shrink-0" />
@@ -2047,8 +1812,8 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                     className="fixed inset-0 z-10"
                     onClick={() => { setShowIndustryMenu(false); setIndustryInstructionMenu(null); }}
                   />
-                  <div className="absolute right-0 top-full mt-1 max-h-96 w-[360px] overflow-auto rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg z-20 p-2">
-                    <div className="sticky top-0 z-10 space-y-2 bg-white pb-2 dark:bg-gray-800">
+                  <div className="absolute right-0 top-full mt-1 max-h-80 w-72 overflow-auto rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg z-20 p-2">
+                    <div className="sticky top-0 z-10 bg-white pb-1 dark:bg-gray-800">
                       <div className="relative">
                         <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
                         <input
@@ -2069,92 +1834,18 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                           </button>
                         )}
                       </div>
-                      <div className="rounded border border-gray-200 bg-gray-50 p-2 dark:border-gray-700 dark:bg-gray-900/70">
-                        <div className="flex items-center gap-1.5">
-                          <input
-                            type="text"
-                            value={industryPresetName}
-                            onChange={(event) => {
-                              setIndustryPresetName(event.target.value);
-                              setIndustryPresetError(null);
-                            }}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter') {
-                                event.preventDefault();
-                                saveIndustryFilterPreset();
-                              }
-                            }}
-                            placeholder="Preset name"
-                            className="min-w-0 flex-1 rounded border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-800 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
-                          />
-                          <button
-                            type="button"
-                            onClick={saveIndustryFilterPreset}
-                            disabled={!industryPresetName.trim()}
-                            className="inline-flex h-8 items-center gap-1 rounded border border-blue-200 bg-blue-50 px-2 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400 dark:border-blue-800 dark:bg-blue-900/30 dark:text-blue-200 dark:hover:bg-blue-900/50 dark:disabled:border-gray-700 dark:disabled:bg-gray-800 dark:disabled:text-gray-500"
-                            title="Save checked industries"
-                          >
-                            <Save className="h-3.5 w-3.5" />
-                            Save
-                          </button>
-                        </div>
-                        <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-gray-500 dark:text-gray-400">
-                          <span className="truncate">{selectedIndustryStatusLabel}</span>
-                          {activeIndustryPreset && (
-                            <span className="max-w-[140px] truncate text-blue-600 dark:text-blue-300" title={activeIndustryPreset.name}>{activeIndustryPreset.name}</span>
-                          )}
-                        </div>
-                        {industryPresetError && (
-                          <div className="mt-1 text-[10px] text-red-600 dark:text-red-400">{industryPresetError}</div>
-                        )}
-                        <div className="mt-2 max-h-28 space-y-1 overflow-auto pr-1">
-                          {industryFilterPresets.length === 0 ? (
-                            <div className="rounded bg-white px-2 py-1.5 text-[11px] text-gray-500 dark:bg-gray-800 dark:text-gray-400">No saved filters</div>
-                          ) : industryFilterPresets.map((preset) => {
-                            const isActivePreset = activeIndustryPreset?.id === preset.id;
-                            return (
-                              <div key={preset.id} className={`flex items-center gap-1 rounded border px-1.5 py-1 ${isActivePreset ? 'border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/30' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'}`}>
-                                <button
-                                  type="button"
-                                  onClick={() => applyIndustryFilterPreset(preset)}
-                                  className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-xs text-gray-700 hover:text-blue-700 dark:text-gray-200 dark:hover:text-blue-300"
-                                  title={`Apply ${preset.name}`}
-                                >
-                                  <Check className={`h-3.5 w-3.5 shrink-0 ${isActivePreset ? 'text-blue-600 dark:text-blue-300' : 'text-gray-400'}`} />
-                                  <span className="min-w-0 flex-1">
-                                    <span className="block truncate font-medium">{preset.name}</span>
-                                    <span className="block truncate text-[10px] text-gray-500 dark:text-gray-400">{formatIndustryStatusLabel(preset.industries, industryOptions.length)}</span>
-                                  </span>
-                                  <span className="shrink-0 text-[10px] font-medium uppercase text-blue-600 dark:text-blue-300">Apply</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    deleteIndustryFilterPreset(preset.id);
-                                  }}
-                                  className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-300"
-                                  title={`Delete ${preset.name}`}
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
                     </div>
                     <label className={`flex w-full cursor-pointer items-center gap-2 rounded px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 ${isAllIndustrySelection ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : ''}`}>
                       <input
                         type="checkbox"
                         checked={isAllIndustrySelection}
-                        onChange={() => setSelectedIndustries([])}
+                        onChange={(event) => toggleAllIndustries(event.target.checked)}
                         className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                       />
                       <span className="truncate">All Industries</span>
                     </label>
                     {filteredIndustryOptions.map((industry) => {
-                      const checked = isAllIndustrySelection || selectedIndustrySet.has(industry);
+                      const checked = isAllIndustrySelection || (!isNoIndustrySelection && selectedIndustrySet.has(industry));
                       return (
                         <label
                           key={industry}
@@ -2347,26 +2038,15 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
           )}
 
           {activeType !== 'economics' && (
-            <>
-              <button
-                onClick={handleYahooDescriptionUpdate}
-                disabled={updatePending || activeCalendarTickers.length === 0}
-                title={activeCalendarTickers.length > 0 ? `Fetch Yahoo descriptions for ${activeCalendarTickers.length} loaded tickers` : 'No loaded tickers'}
-                className={`flex items-center gap-2 px-3 py-2 text-sm rounded text-white ${(updatePending || activeCalendarTickers.length === 0) ? 'bg-sky-400 cursor-not-allowed' : 'bg-sky-600 hover:bg-sky-700'}`}
-              >
-                <RefreshCw className={`w-4 h-4 ${updatePending ? 'animate-spin' : ''}`} />
-                Update Yahoo Desc
-              </button>
-              <button
-                onClick={handleFmpPeersUpdate}
-                disabled={updatePending || activeCalendarTickers.length === 0}
-                title={activeCalendarTickers.length > 0 ? `Fetch missing FMP peers for ${activeCalendarTickers.length} loaded tickers` : 'No loaded tickers'}
-                className={`flex items-center gap-2 px-3 py-2 text-sm rounded text-white ${(updatePending || activeCalendarTickers.length === 0) ? 'bg-violet-400 cursor-not-allowed' : 'bg-violet-600 hover:bg-violet-700'}`}
-              >
-                <RefreshCw className={`w-4 h-4 ${updatePending ? 'animate-spin' : ''}`} />
-                Update FMP Peers
-              </button>
-            </>
+            <button
+              onClick={handleYahooDescriptionUpdate}
+              disabled={updatePending || activeCalendarTickers.length === 0}
+              title={activeCalendarTickers.length > 0 ? `Fetch Yahoo descriptions for ${activeCalendarTickers.length} loaded tickers` : 'No loaded tickers'}
+              className={`flex items-center gap-2 px-3 py-2 text-sm rounded text-white ${(updatePending || activeCalendarTickers.length === 0) ? 'bg-sky-400 cursor-not-allowed' : 'bg-sky-600 hover:bg-sky-700'}`}
+            >
+              <RefreshCw className={`w-4 h-4 ${updatePending ? 'animate-spin' : ''}`} />
+              Update Yahoo Desc
+            </button>
           )}
 
           {hasActiveFilters && (
@@ -2552,6 +2232,16 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
         )}
       </div>
 
+      {activeType === 'earnings' && dateFrom && dateFrom < '2023-05-17' && (
+        <div className="flex items-start gap-2 px-4 py-2 text-xs text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-900">
+          <CircleHelp className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+          <span>
+            Earnings dated before May 17, 2023 are backfilled from Yahoo Finance. Some tickers or
+            pre/after-market (session) timing may be missing, and revenue estimates are unavailable for this period.
+          </span>
+        </div>
+      )}
+
       <div className="flex-1 overflow-auto">
         {!hasRequiredDateRange ? (
           <div className="flex items-center justify-center h-40 px-6 text-sm text-gray-500 text-center">
@@ -2576,13 +2266,13 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                     onDragEnd={handleColumnDragEnd}
                     className={`relative px-3 py-2 text-xs font-medium border-b border-gray-300 dark:border-gray-700 ${column.align === 'right' ? 'text-right' : column.align === 'center' ? 'text-center' : 'text-left'} ${draggedColumnKey === column.key ? 'opacity-50' : ''}`}
                   >
-                    <div className={`inline-flex w-full min-w-0 items-center gap-1 overflow-hidden ${column.align === 'right' ? 'justify-end' : column.align === 'center' ? 'justify-center' : 'justify-start'}`}>
+                    <div className={`inline-flex w-full items-center gap-1 ${column.align === 'right' ? 'justify-end' : column.align === 'center' ? 'justify-center' : 'justify-start'}`}>
                       <GripVertical className="h-3 w-3 shrink-0 text-gray-400" />
                       <button
                         onClick={() => handleSort(column.key)}
-                        className="inline-flex min-w-0 items-center gap-1 hover:text-blue-600 dark:hover:text-blue-400"
+                        className="inline-flex items-center gap-1 hover:text-blue-600 dark:hover:text-blue-400"
                       >
-                        <span className="truncate">{column.label}</span>
+                        {column.label}
                         {sortField === column.key && sortDirection === 'asc' && <ChevronUp className="w-3 h-3" />}
                         {sortField === column.key && sortDirection === 'desc' && <ChevronDown className="w-3 h-3" />}
                       </button>

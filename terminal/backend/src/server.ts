@@ -117,6 +117,7 @@ import {
   fetchFmpIpoCalendarChunk,
   fetchFmpIpoDisclosureChunk,
   fetchFmpIpoProspectusChunk,
+  type FmpIpoCalendarItem,
   type FmpIpoDisclosureItem,
   type FmpIpoProspectusItem,
 } from "./services/fmpIpoCalendarProvider.js";
@@ -168,6 +169,7 @@ const DEFAULT_FMP_CALENDAR_CHUNK_DAYS = 30;
 const DEFAULT_FMP_EARNINGS_CALENDAR_CHUNK_DAYS = 14;
 const DEFAULT_FMP_FINANCIAL_EARNINGS_BACKFILL_DAYS = 730;
 const DEFAULT_FMP_CALENDAR_REQUEST_INTERVAL_MS = 250;
+const DEFAULT_FMP_IPO_PRICING_PROSPECTUS_LOOKBACK_DAYS = 14;
 const FMP_EARNINGS_CALENDAR_CAP_WARNING_ROWS = 4000;
 
 function buildBatchLevels(requestedConcurrency: number): number[] {
@@ -330,6 +332,8 @@ type TickerListRow = {
   industry: string | null;
   addedAt: string | null;
   ipoDate: string | null;
+  ipoOfferPrice: number | null;
+  ipoPriceRange: string | null;
   marketCap: number | null;
   floatPct: number | null;
   institutionalPct: number | null;
@@ -516,6 +520,116 @@ function normalizeUpperTicker(value: string | null | undefined): string | null {
   }
   const trimmed = value.trim().toUpperCase();
   return trimmed ? trimmed : null;
+}
+
+type IpoPricingTarget = {
+  securityId: number;
+  ticker: string;
+  ipoDate: string | null;
+};
+
+async function getIpoPricingTargetsForTickers(tickers: string[]): Promise<IpoPricingTarget[]> {
+  const normalizedTickers = [...new Set(tickers.map((ticker) => normalizeUpperTicker(ticker)).filter((ticker): ticker is string => Boolean(ticker)))];
+  const rows: IpoPricingTarget[] = [];
+
+  for (let offset = 0; offset < normalizedTickers.length; offset += 500) {
+    const batch = normalizedTickers.slice(offset, offset + 500);
+    if (batch.length === 0) {
+      continue;
+    }
+    const placeholders = batch.map(() => "?").join(", ");
+    const batchRows = await getDb().all<Array<{
+      security_id: number;
+      ticker: string;
+      ipo_date: string | null;
+    }>>(
+      `SELECT s.id AS security_id,
+              UPPER(s.ticker) AS ticker,
+              (
+                SELECT cp.ipo_date
+                FROM company_profiles cp
+                WHERE cp.security_id = s.id AND cp.ipo_date IS NOT NULL AND TRIM(cp.ipo_date) != ''
+                ORDER BY cp.fetched_at DESC, cp.id DESC
+                LIMIT 1
+              ) AS ipo_date
+       FROM securities s
+       JOIN (
+         SELECT UPPER(ticker) AS ticker_key, MIN(id) AS id
+         FROM securities
+         WHERE UPPER(ticker) IN (${placeholders})
+         GROUP BY UPPER(ticker)
+       ) picked ON picked.id = s.id
+       ORDER BY s.ticker`,
+      batch,
+    );
+    rows.push(...batchRows.map((row) => ({
+      securityId: row.security_id,
+      ticker: row.ticker,
+      ipoDate: normalizeCalendarDateOnly(row.ipo_date ?? "") ?? null,
+    })));
+  }
+
+  return rows;
+}
+
+function buildIpoPricingDateChunks(ipoDates: string[]): Array<{ from: string; to: string }> {
+  const validDates = [...new Set(ipoDates.filter((date) => ISO_DATE_RE.test(date)))].sort();
+  if (validDates.length === 0) {
+    return [];
+  }
+
+  const chunks: Array<{ from: string; to: string }> = [];
+  let chunkFrom = validDates[0];
+  let chunkTo = shiftIsoDate(chunkFrom, DEFAULT_FMP_CALENDAR_CHUNK_DAYS - 1);
+
+  for (const date of validDates) {
+    if (date <= chunkTo) {
+      continue;
+    }
+    chunks.push({ from: chunkFrom, to: chunkTo });
+    chunkFrom = date;
+    chunkTo = shiftIsoDate(chunkFrom, DEFAULT_FMP_CALENDAR_CHUNK_DAYS - 1);
+  }
+
+  chunks.push({ from: chunkFrom, to: chunkTo });
+  return chunks;
+}
+
+function buildIpoPricingLookbackDateChunks(ipoDates: string[], lookbackDays: number): Array<{ from: string; to: string }> {
+  const ranges = [...new Set(ipoDates.filter((date) => ISO_DATE_RE.test(date)))]
+    .map((date) => ({ from: shiftIsoDate(date, -lookbackDays), to: date }))
+    .sort((a, b) => a.from.localeCompare(b.from));
+  if (ranges.length === 0) {
+    return [];
+  }
+
+  const merged: Array<{ from: string; to: string }> = [];
+  for (const range of ranges) {
+    const previous = merged[merged.length - 1];
+    if (!previous || range.from > shiftIsoDate(previous.to, 1)) {
+      merged.push({ ...range });
+      continue;
+    }
+    if (range.to > previous.to) {
+      previous.to = range.to;
+    }
+  }
+
+  return merged.flatMap((range) => buildCalendarDateChunks(range.from, range.to, DEFAULT_FMP_CALENDAR_CHUNK_DAYS));
+}
+
+function pickBestIpoCalendarItem(items: FmpIpoCalendarItem[], ipoDate: string | null): FmpIpoCalendarItem | undefined {
+  if (ipoDate) {
+    const exactWithPrice = items.find((item) => normalizeCalendarDateOnly(item.date) === ipoDate && item.priceRange);
+    if (exactWithPrice) {
+      return exactWithPrice;
+    }
+    const exact = items.find((item) => normalizeCalendarDateOnly(item.date) === ipoDate);
+    if (exact) {
+      return exact;
+    }
+  }
+  return items.find((item) => item.priceRange) ?? items[0];
 }
 
 type FmpEarningsCalendarSyncResult = {
@@ -1511,6 +1625,8 @@ function mapCsvTickerRowsToListRows(rows: Array<{ ticker: string; name: string |
     industry: row.industry,
     addedAt: null,
     ipoDate: null,
+    ipoOfferPrice: null,
+    ipoPriceRange: null,
     marketCap: null,
     floatPct: null,
     institutionalPct: null,
@@ -1644,6 +1760,8 @@ async function getDefaultUniverseRows(): Promise<TickerListRow[]> {
         float_pct: number | null;
         institutional_pct: number | null;
         insider_pct: number | null;
+        ipo_offer_price: number | null;
+        ipo_price_range: string | null;
         market_cap_source: string | null;
         float_source: string | null;
         institutional_source: string | null;
@@ -1658,6 +1776,20 @@ async function getDefaultUniverseRows(): Promise<TickerListRow[]> {
                   ORDER BY cp.fetched_at DESC
                   LIMIT 1
                 ) AS ipo_date,
+                (
+                  SELECT cp.ipo_offer_price
+                  FROM company_profiles cp
+                  WHERE cp.security_id = s.id AND cp.ipo_offer_price IS NOT NULL
+                  ORDER BY cp.fetched_at DESC
+                  LIMIT 1
+                ) AS ipo_offer_price,
+                (
+                  SELECT cp.ipo_price_range
+                  FROM company_profiles cp
+                  WHERE cp.security_id = s.id AND cp.ipo_price_range IS NOT NULL AND cp.ipo_price_range != ''
+                  ORDER BY cp.fetched_at DESC
+                  LIMIT 1
+                ) AS ipo_price_range,
                 (
                   SELECT cp.market_cap
                   FROM company_profiles cp
@@ -1729,6 +1861,8 @@ async function getDefaultUniverseRows(): Promise<TickerListRow[]> {
           industry: row.industry ?? null,
           addedAt: row.added_at ?? null,
           ipoDate: row.ipo_date ?? null,
+          ipoOfferPrice: row.ipo_offer_price ?? null,
+          ipoPriceRange: row.ipo_price_range ?? null,
           marketCap: row.market_cap ?? null,
           floatPct: row.float_pct ?? null,
           institutionalPct: row.institutional_pct ?? null,
@@ -1756,6 +1890,8 @@ async function getDefaultUniverseRows(): Promise<TickerListRow[]> {
       industry: null,
       addedAt: null,
       ipoDate: null,
+      ipoOfferPrice: null,
+      ipoPriceRange: null,
       marketCap: null,
       floatPct: null,
       institutionalPct: null,
@@ -6848,7 +6984,7 @@ app.get("/api/universes/:id/items", async (req, res) => {
 import { fetchFmpProfile, fetchFmpProfilesBatch, clampFmpConcurrency, clampFmpIntervalMs, getFmpDefaults } from "./services/fmpCompanyProfileProvider.js";
 import { fetchFinnhubProfilesBatch } from "./services/finnhubProfile2Provider.js";
 import { fetchYahooProfilesBatch, clampYahooConcurrency, clampYahooIntervalMs, getYahooDefaults } from "./services/yahooCompanyProfileProvider.js";
-import { upsertCompanyProfile, getCompanyProfileByTicker, countCompanyProfiles, upsertPeers, getPeersByTicker, getTickersWithFmpProfile, getTickersWithYahooProfile, getTickersWithExistingPeers, getTickersWithAnyExistingPeers, getTickersWithExistingIpoDate } from "./services/companyProfileRepository.js";
+import { upsertCompanyProfile, getCompanyProfileByTicker, countCompanyProfiles, upsertPeers, getPeersByTicker, getTickersWithFmpProfile, getTickersWithYahooProfile, getTickersWithExistingPeers, getTickersWithAnyExistingPeers, getTickersWithExistingIpoDate, getTickersWithCompleteIpoPricing, upsertIpoPricing } from "./services/companyProfileRepository.js";
 import { getCompanyProfileEnrichmentByTicker } from "./services/companyProfileEnrichmentRepository.js";
 import { getCompanyPeerEdgesByTicker } from "./services/companyPeerRepository.js";
 import { fetchFinnhubPeersBatch } from "./services/finnhubPeersProvider.js";
@@ -7879,6 +8015,221 @@ app.post("/api/company-profiles/pull-ipo-date", async (req, res) => {
   }
 });
 
+// ── Pull FMP IPO Pricing ───────────────────────────────────────────────────
+app.post("/api/company-profiles/pull-ipo-pricing", async (req, res) => {
+  try {
+    if (!config.fmpApiKey) {
+      res.status(400).json({ error: "FMP_API_KEY not configured" });
+      return;
+    }
+
+    const body = req.body as {
+      tickers?: string[];
+      maxTickers?: number;
+      requestIntervalMs?: number;
+      skipExisting?: boolean;
+    };
+    let tickers = body.tickers;
+    if (!tickers || tickers.length === 0) {
+      tickers = await getDefaultUniverseTickers();
+    }
+
+    const max = body.maxTickers ?? tickers.length;
+    let target = tickers.slice(0, max);
+    const skipExisting = body.skipExisting !== false;
+    const requestIntervalMs = clampFmpIntervalMs(body.requestIntervalMs);
+
+    let skippedExisting = 0;
+    if (skipExisting) {
+      const existingSet = await getTickersWithCompleteIpoPricing();
+      const before = target.length;
+      target = target.filter((ticker) => !existingSet.has(ticker.toUpperCase()));
+      skippedExisting = before - target.length;
+    }
+
+    const targetRows = await getIpoPricingTargetsForTickers(target);
+    const targetByTicker = new Map(targetRows.map((row) => [row.ticker, row]));
+    const missingSecurity = target.filter((ticker) => !targetByTicker.has(ticker.toUpperCase())).length;
+    const rowsWithIpoDate = targetRows.filter((row) => row.ipoDate);
+    const skippedNoIpoDate = targetRows.length - rowsWithIpoDate.length;
+    const ipoDates = rowsWithIpoDate.map((row) => row.ipoDate as string);
+    const calendarDateChunks = buildIpoPricingDateChunks(ipoDates);
+    const prospectusDateChunks = buildIpoPricingLookbackDateChunks(ipoDates, DEFAULT_FMP_IPO_PRICING_PROSPECTUS_LOOKBACK_DAYS);
+    const progressTotal = Math.max(1, calendarDateChunks.length + prospectusDateChunks.length + rowsWithIpoDate.length);
+    const jobId = createJob(progressTotal, {
+      category: "other",
+      label: "FMP IPO Pricing Update",
+    });
+    appendLog(
+      jobId,
+      `Starting FMP IPO pricing update: requested=${target.length}, withIpoDate=${rowsWithIpoDate.length}, skippedExisting=${skippedExisting}, skippedNoIpoDate=${skippedNoIpoDate}, missingSecurity=${missingSecurity}, calendarChunks=${calendarDateChunks.length}, prospectusChunks=${prospectusDateChunks.length}, prospectusLookbackDays=${DEFAULT_FMP_IPO_PRICING_PROSPECTUS_LOOKBACK_DAYS}, requestIntervalMs=${requestIntervalMs}`,
+    );
+    res.json({ jobId });
+
+    void (async () => {
+      try {
+        if (rowsWithIpoDate.length === 0) {
+          appendLog(jobId, "No tickers with IPO date found — nothing to fetch");
+          await setLastSuccess("company_profiles_ipo_pricing", new Date().toISOString(), {
+            requested: target.length,
+            updated: 0,
+            skippedExisting,
+            skippedNoIpoDate,
+            missingSecurity,
+            source: "fmp-ipo-calendar-prospectus",
+          });
+          completeJob(jobId, {
+            requested: target.length,
+            updated: 0,
+            total: 0,
+            skippedExisting,
+            skippedNoIpoDate,
+            missingSecurity,
+            missingPricing: 0,
+            errors: 0,
+          });
+          return;
+        }
+
+        const calendarMap = new Map<string, FmpIpoCalendarItem[]>();
+        const prospectusMap = new Map<string, FmpIpoProspectusItem[]>();
+        let fetchedCalendarRows = 0;
+        let fetchedProspectusRows = 0;
+        let completedUnits = 0;
+
+        for (let index = 0; index < calendarDateChunks.length; index++) {
+          if (isJobCancelled(jobId)) {
+            appendLog(jobId, "Cancelled by user");
+            return;
+          }
+
+          const chunk = calendarDateChunks[index];
+          const items = await fetchFmpIpoCalendarChunk({
+            from: chunk.from,
+            to: chunk.to,
+            requestIntervalMs,
+          });
+          fetchedCalendarRows += items.length;
+          for (const item of items) {
+            const ticker = normalizeUpperTicker(item.symbol);
+            if (!ticker) {
+              continue;
+            }
+            const bucket = calendarMap.get(ticker) ?? [];
+            bucket.push(item);
+            calendarMap.set(ticker, bucket);
+          }
+          completedUnits++;
+          updateProgress(jobId, completedUnits, progressTotal);
+          appendLog(jobId, `[calendar ${index + 1}/${calendarDateChunks.length}] ${chunk.from}~${chunk.to}: fetched=${items.length}`);
+        }
+
+        for (let index = 0; index < prospectusDateChunks.length; index++) {
+          if (isJobCancelled(jobId)) {
+            appendLog(jobId, "Cancelled by user");
+            return;
+          }
+
+          const chunk = prospectusDateChunks[index];
+          const items = await fetchFmpIpoProspectusChunk({
+            from: chunk.from,
+            to: chunk.to,
+            requestIntervalMs,
+          });
+          fetchedProspectusRows += items.length;
+          for (const item of items) {
+            const ticker = normalizeUpperTicker(item.symbol);
+            if (!ticker) {
+              continue;
+            }
+            const bucket = prospectusMap.get(ticker) ?? [];
+            bucket.push(item);
+            prospectusMap.set(ticker, bucket);
+          }
+          completedUnits++;
+          updateProgress(jobId, completedUnits, progressTotal);
+          appendLog(jobId, `[prospectus ${index + 1}/${prospectusDateChunks.length}] ${chunk.from}~${chunk.to}: fetched=${items.length}`);
+        }
+
+        let updated = 0;
+        let missingPricing = 0;
+        for (const row of rowsWithIpoDate) {
+          if (isJobCancelled(jobId)) {
+            appendLog(jobId, "Cancelled by user");
+            return;
+          }
+
+          const calendarItem = pickBestIpoCalendarItem(calendarMap.get(row.ticker) ?? [], row.ipoDate);
+          const prospectusItem = pickBestIpoProspectus(prospectusMap.get(row.ticker) ?? [], row.ipoDate);
+          const ipoPriceRange = calendarItem?.priceRange ?? null;
+          const ipoOfferPrice = prospectusItem?.pricePublicPerShare ?? null;
+
+          if (ipoPriceRange == null && ipoOfferPrice == null) {
+            missingPricing++;
+            appendLog(jobId, `${row.ticker}: IPO pricing missing`);
+          } else {
+            const didUpdate = await upsertIpoPricing(
+              row.securityId,
+              "fmp_ipo",
+              ipoOfferPrice,
+              ipoPriceRange,
+              JSON.stringify({
+                ipoDate: row.ipoDate,
+                calendar: calendarItem?.raw ?? null,
+                prospectus: prospectusItem?.raw ?? null,
+              }),
+            );
+            if (didUpdate) {
+              updated++;
+            }
+            appendLog(jobId, `${row.ticker}: offerPrice=${ipoOfferPrice ?? "missing"}, priceRange=${ipoPriceRange ?? "missing"}`);
+          }
+
+          completedUnits++;
+          updateProgress(jobId, completedUnits, progressTotal);
+        }
+
+        await setLastSuccess("company_profiles_ipo_pricing", new Date().toISOString(), {
+          requested: target.length,
+          targetsWithIpoDate: rowsWithIpoDate.length,
+          calendarChunks: calendarDateChunks.length,
+          prospectusChunks: prospectusDateChunks.length,
+          prospectusLookbackDays: DEFAULT_FMP_IPO_PRICING_PROSPECTUS_LOOKBACK_DAYS,
+          fetchedCalendarRows,
+          fetchedProspectusRows,
+          updated,
+          missingPricing,
+          skippedExisting,
+          skippedNoIpoDate,
+          missingSecurity,
+          source: "fmp-ipo-calendar-prospectus",
+        });
+
+        completeJob(jobId, {
+          requested: target.length,
+          total: rowsWithIpoDate.length,
+          calendarChunks: calendarDateChunks.length,
+          prospectusChunks: prospectusDateChunks.length,
+          prospectusLookbackDays: DEFAULT_FMP_IPO_PRICING_PROSPECTUS_LOOKBACK_DAYS,
+          fetchedCalendarRows,
+          fetchedProspectusRows,
+          updated,
+          missingPricing,
+          skippedExisting,
+          skippedNoIpoDate,
+          missingSecurity,
+          errors: 0,
+          source: "fmp-ipo-calendar-prospectus",
+        });
+      } catch (error) {
+        failJob(jobId, error instanceof Error ? error.message : String(error));
+      }
+    })();
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Unknown error" });
+  }
+});
+
 // ── App DB Inspection ────────────────────────────────────────────────────────
 const TABLE_UI_USAGE: Record<string, string[]> = {
   securities: [
@@ -7891,6 +8242,7 @@ const TABLE_UI_USAGE: Record<string, string[]> = {
     "POST /api/company-profiles/pull-peers (Finnhub peers 수집)",
     "POST /api/company-profiles/pull-market-cap (Finnhub market cap 수집)",
     "POST /api/company-profiles/pull-ipo-date (Finnhub IPO date 수집)",
+    "POST /api/company-profiles/pull-ipo-pricing (FMP IPO price range / confirmed offer price 수집)",
     "GET /api/company-profiles/:ticker",
   ],
   ticker_universes: [

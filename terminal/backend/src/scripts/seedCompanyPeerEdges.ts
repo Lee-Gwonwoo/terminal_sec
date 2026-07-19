@@ -536,7 +536,8 @@ function usesCuratedGroupsAsSourceOfTruth(row: DefaultUniversePeerRow): boolean 
   return hasTag(row, "industry_override_needed")
     || hasTag(row, "full_peer_curation_batch_002")
     || hasTag(row, "full_peer_curation_batch_003")
-    || hasTag(row, "full_peer_curation_batch_004");
+    || hasTag(row, "full_peer_curation_batch_004")
+    || hasTag(row, "full_peer_curation_batch_005");
 }
 
 function parsePeerGroups(raw: string | null): ParsedPeerGroup[] {
