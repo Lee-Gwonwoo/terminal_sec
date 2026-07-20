@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { Search, Filter, ChevronDown, ArrowUp, ArrowDown, GripVertical, FileText, AlignLeft, RotateCw, Download, Columns3, Eye, X, Calendar, Plus, Square } from 'lucide-react';
+import { Search, Filter, ChevronDown, ArrowUp, ArrowDown, GripVertical, FileText, AlignLeft, RotateCw, Download, Columns3, Eye, X, Calendar, Plus, Square, FolderOpen, Settings2 } from 'lucide-react';
 import { VariableSizeList as List } from 'react-window';
 import { BookmarkManager } from './BookmarkManager';
 
@@ -201,9 +201,22 @@ export function InvestingNewsWindow({
     return '';
   });
   const [bookmarkFolders, setBookmarkFolders] = useState<BookmarkFolder[]>([]);
-  const [selectedBookmarkFolderId, setSelectedBookmarkFolderId] = useState<string>('');
+  const [selectedBookmarkFolderId, setSelectedBookmarkFolderId] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('investing-news-ui-state');
+      if (saved) { const p = JSON.parse(saved); if (typeof p.selectedBookmarkFolderId === 'string') return p.selectedBookmarkFolderId; }
+    } catch { /* ignore */ }
+    return '';
+  });
   const [showBookmarkMenu, setShowBookmarkMenu] = useState(false);
   const [showBookmarkManager, setShowBookmarkManager] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [showNewFolderInput, setShowNewFolderInput] = useState(false);
+  const [editingBookmarkFolderId, setEditingBookmarkFolderId] = useState<string | null>(null);
+  const [editingBookmarkFolderName, setEditingBookmarkFolderName] = useState('');
+  const [bookmarkFolderCtxMenu, setBookmarkFolderCtxMenu] = useState<null | { x: number; y: number; folderId: string }>(null);
+  const bookmarkMenuRef = useRef<HTMLDivElement>(null);
+  const bookmarkFolderCtxMenuRef = useRef<HTMLDivElement>(null);
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [listHeight, setListHeight] = useState(500);
   const [stickyDate, setStickyDate] = useState('');
@@ -385,10 +398,11 @@ export function InvestingNewsWindow({
       const state = {
         fromDate, toDate, displayMode, categoryFilter,
         visibleCols: Array.from(visibleCols),
+        selectedBookmarkFolderId,
       };
       localStorage.setItem('investing-news-ui-state', JSON.stringify(state));
     } catch { /* ignore */ }
-  }, [fromDate, toDate, displayMode, categoryFilter, visibleCols]);
+  }, [fromDate, toDate, displayMode, categoryFilter, visibleCols, selectedBookmarkFolderId]);
 
   // ─── Container height tracking ───
   useEffect(() => {
@@ -411,6 +425,8 @@ export function InvestingNewsWindow({
       if (!res.ok) return;
       const folders: BookmarkFolder[] = Array.isArray(data) ? data : Array.isArray(data.folders) ? data.folders : [];
       setBookmarkFolders(folders);
+      // fallback: if restored selectedBookmarkFolderId no longer exists, reset
+      setSelectedBookmarkFolderId(prev => (prev && folders.length > 0 && !folders.some(f => f.id === prev) ? '' : prev));
     } catch { /* ignore */ }
   }, []);
 
@@ -425,6 +441,50 @@ export function InvestingNewsWindow({
       setRowCtxMenu(null);
     }
   }, []);
+
+  const handleCreateFolder = useCallback(async (name: string) => {
+    if (!name.trim()) return;
+    await fetch(`${API_BASE}/api/bookmarks/folders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name.trim() }),
+    });
+    setNewFolderName('');
+    setShowNewFolderInput(false);
+    fetchBookmarkFolders();
+  }, [fetchBookmarkFolders]);
+
+  const handleRenameBookmarkFolder = useCallback(async (folderId: string, name: string) => {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setEditingBookmarkFolderId(null);
+      setEditingBookmarkFolderName('');
+      return;
+    }
+    await fetch(`${API_BASE}/api/bookmarks/folders/${folderId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: trimmedName }),
+    });
+    setEditingBookmarkFolderId(null);
+    setEditingBookmarkFolderName('');
+    setBookmarkFolderCtxMenu(null);
+    fetchBookmarkFolders();
+  }, [fetchBookmarkFolders]);
+
+  const startRenameBookmarkFolder = useCallback((folder: BookmarkFolder) => {
+    setEditingBookmarkFolderId(folder.id);
+    setEditingBookmarkFolderName(folder.name);
+    setBookmarkFolderCtxMenu(null);
+    setShowBookmarkMenu(true);
+  }, []);
+
+  const handleCopyBookmarkFolderName = useCallback(async (folderId: string) => {
+    const folder = bookmarkFolders.find((item) => item.id === folderId);
+    if (!folder) return;
+    await copyToClipboard(folder.name);
+    setBookmarkFolderCtxMenu(null);
+  }, [bookmarkFolders, copyToClipboard]);
 
   // ─── Fetch news from backend ───
   const fetchNews = useCallback(async (keyword?: string) => {
@@ -873,6 +933,38 @@ export function InvestingNewsWindow({
   }, [showFilterMenu]);
 
   useEffect(() => {
+    if (!showBookmarkMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (bookmarkMenuRef.current && !bookmarkMenuRef.current.contains(e.target as Node)) {
+        setShowBookmarkMenu(false);
+        setShowNewFolderInput(false);
+        setNewFolderName('');
+        setEditingBookmarkFolderId(null);
+        setEditingBookmarkFolderName('');
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showBookmarkMenu]);
+
+  useEffect(() => {
+    if (!bookmarkFolderCtxMenu) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (bookmarkFolderCtxMenuRef.current && bookmarkFolderCtxMenuRef.current.contains(e.target as Node)) return;
+      setBookmarkFolderCtxMenu(null);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setBookmarkFolderCtxMenu(null);
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [bookmarkFolderCtxMenu]);
+
+  useEffect(() => {
     if (!showColumnMenu) return;
     const handler = (e: MouseEvent) => {
       if (columnMenuRef.current && !columnMenuRef.current.contains(e.target as Node)) setShowColumnMenu(false);
@@ -1059,6 +1151,136 @@ export function InvestingNewsWindow({
                   </button>
                 ))}
               </div>
+            </div>
+          )}
+        </div>
+
+        {/* Bookmark view */}
+        <div className="relative" ref={bookmarkMenuRef}>
+          <button
+            onClick={() => setShowBookmarkMenu(prev => !prev)}
+            className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-white dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5 text-xs bg-white dark:bg-gray-900"
+            title="Bookmark view"
+          >
+            <FolderOpen className="w-3.5 h-3.5" />
+            <span>
+              {selectedBookmarkFolderId
+                ? (bookmarkFolders.find((folder) => folder.id === selectedBookmarkFolderId)?.name ?? 'Bookmark view')
+                : 'Bookmark view'}
+            </span>
+            <ChevronDown className="w-3 h-3" />
+          </button>
+          {showBookmarkMenu && (
+            <div className="absolute top-full left-0 mt-1 w-56 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg z-50 overflow-hidden">
+              <button
+                onClick={() => {
+                  setSelectedBookmarkFolderId('');
+                  setShowBookmarkMenu(false);
+                }}
+                className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800 ${selectedBookmarkFolderId === '' ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
+              >
+                All news
+              </button>
+              {bookmarkFolders.map((folder) => (
+                <div key={folder.id} className="relative">
+                  {editingBookmarkFolderId === folder.id ? (
+                    <form
+                      className="px-2 py-1.5"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        handleRenameBookmarkFolder(folder.id, editingBookmarkFolderName);
+                      }}
+                    >
+                      <input
+                        autoFocus
+                        value={editingBookmarkFolderName}
+                        onChange={(e) => setEditingBookmarkFolderName(e.target.value)}
+                        onBlur={() => handleRenameBookmarkFolder(folder.id, editingBookmarkFolderName)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') {
+                            setEditingBookmarkFolderId(null);
+                            setEditingBookmarkFolderName('');
+                          }
+                        }}
+                        className="w-full px-2 py-1 text-xs border border-blue-400 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                    </form>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setSelectedBookmarkFolderId(folder.id);
+                        setShowBookmarkMenu(false);
+                      }}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setBookmarkFolderCtxMenu({ x: e.clientX, y: e.clientY, folderId: folder.id });
+                      }}
+                      className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800 ${selectedBookmarkFolderId === folder.id ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
+                    >
+                      {folder.name}
+                    </button>
+                  )}
+                </div>
+              ))}
+              <div className="border-t border-gray-200 dark:border-gray-700" />
+              {showNewFolderInput ? (
+                <form
+                  className="flex items-center gap-1 px-2 py-1.5"
+                  onSubmit={(e) => { e.preventDefault(); handleCreateFolder(newFolderName); }}
+                >
+                  <input
+                    autoFocus
+                    value={newFolderName}
+                    onChange={(e) => setNewFolderName(e.target.value)}
+                    placeholder="Folder name"
+                    className="flex-1 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    onKeyDown={(e) => { if (e.key === 'Escape') { setShowNewFolderInput(false); setNewFolderName(''); } }}
+                  />
+                  <button type="submit" className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600">OK</button>
+                </form>
+              ) : (
+                <button
+                  onClick={() => setShowNewFolderInput(true)}
+                  className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-1.5 text-blue-600 dark:text-blue-400"
+                >
+                  <Plus className="w-3 h-3" /> New folder
+                </button>
+              )}
+              <button
+                onClick={() => { setShowBookmarkMenu(false); setShowBookmarkManager(true); }}
+                className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-1.5 text-gray-600 dark:text-gray-400"
+              >
+                <Settings2 className="w-3 h-3" /> Bookmark Manager
+              </button>
+            </div>
+          )}
+          {showBookmarkMenu && bookmarkFolderCtxMenu && (
+            <div
+              ref={bookmarkFolderCtxMenuRef}
+              className="fixed z-[60] min-w-[140px] overflow-hidden rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg"
+              style={{
+                left: Math.min(bookmarkFolderCtxMenu.x, typeof window !== 'undefined' ? window.innerWidth - 160 : bookmarkFolderCtxMenu.x),
+                top: Math.min(bookmarkFolderCtxMenu.y, typeof window !== 'undefined' ? window.innerHeight - 116 : bookmarkFolderCtxMenu.y),
+              }}
+            >
+              <button
+                onClick={() => {
+                  void handleCopyBookmarkFolderName(bookmarkFolderCtxMenu.folderId);
+                }}
+                className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800"
+              >
+                Copy bookmark name
+              </button>
+              <button
+                onClick={() => {
+                  const folder = bookmarkFolders.find((item) => item.id === bookmarkFolderCtxMenu.folderId);
+                  if (folder) startRenameBookmarkFolder(folder);
+                }}
+                className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-800"
+              >
+                Rename
+              </button>
             </div>
           )}
         </div>
@@ -1521,20 +1743,20 @@ export function InvestingNewsWindow({
             >
               <FileText className="w-3 h-3" /> View Full Text
             </button>
-            {bookmarkFolders.length > 0 && (
-              <>
-                <div className="border-t border-gray-200 dark:border-gray-700 my-0.5" />
-                <div className="px-3 py-1 text-[9px] text-gray-400 uppercase">Add to bookmark</div>
-                {bookmarkFolders.map(f => (
-                  <button
-                    key={f.id}
-                    onClick={() => handleAddBookmark(f.id, rowCtxMenu.newsId)}
-                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
-                  >
-                    {f.name}
-                  </button>
-                ))}
-              </>
+            <div className="border-t border-gray-200 dark:border-gray-700 my-0.5" />
+            <div className="px-3 py-1 text-[9px] text-gray-400 uppercase">Add to bookmark</div>
+            {bookmarkFolders.length === 0 ? (
+              <div className="px-3 py-1.5 text-xs text-gray-500">No bookmark folders</div>
+            ) : (
+              bookmarkFolders.map(f => (
+                <button
+                  key={f.id}
+                  onClick={() => handleAddBookmark(f.id, rowCtxMenu.newsId)}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
+                >
+                  {f.name}
+                </button>
+              ))
             )}
           </div>
         </div>
