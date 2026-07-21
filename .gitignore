@@ -50,6 +50,9 @@ ai_agent_plan/**/google_api_key/**
 # Known local runtime DB in this repo
 terminal/backend/backend/data/app.db
 
+# Headed-Chrome scraper profile (runtime state — cookies/cache, not source)
+terminal/backend/backend/data/investing-browser-profile/
+
 # Local ad-hoc maintenance scripts
 terminal/backend/test_*.mjs
 

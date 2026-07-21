@@ -693,7 +693,9 @@ export function InvestingNewsWindow({
       mode,
       category,
       maxPages: mode === 'custom' ? 600 : 5,
-      requestIntervalMs: mode === 'custom' ? 2000 : 1000,
+      // Custom pulls walk many pages, so go slow to stay under Cloudflare's rate
+      // limit; the backend also slows down further automatically if blocks appear.
+      requestIntervalMs: mode === 'custom' ? 5000 : 1000,
       fulltextConcurrency: 10,
     };
     if (from) body.from = from;

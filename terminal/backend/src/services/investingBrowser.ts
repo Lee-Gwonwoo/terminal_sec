@@ -109,14 +109,38 @@ async function launchContext(): Promise<BrowserContext> {
     // which Cloudflare scores as a bot signal.
     ignoreDefaultArgs: ["--enable-automation"],
   };
+  let context: BrowserContext;
   try {
-    return await chromium.launchPersistentContext(profileDir(), { ...options, channel: "chrome" });
+    context = await chromium.launchPersistentContext(profileDir(), { ...options, channel: "chrome" });
   } catch {
     try {
-      return await chromium.launchPersistentContext(profileDir(), { ...options, channel: "msedge" });
+      context = await chromium.launchPersistentContext(profileDir(), { ...options, channel: "msedge" });
     } catch {
-      return chromium.launchPersistentContext(profileDir(), options);
+      context = await chromium.launchPersistentContext(profileDir(), options);
     }
+  }
+  await warmUpSession(context);
+  return context;
+}
+
+/**
+ * Session warm-up: before hitting listing pages, load the homepage first so the
+ * browser behaves like a human arriving at the site — it solves the managed
+ * challenge once and banks the cf_clearance cookie, so the subsequent listing
+ * requests reuse it instead of each tripping a fresh challenge. Best-effort: a
+ * blocked warm-up doesn't fail the launch (the caller's own checks handle it).
+ */
+async function warmUpSession(context: BrowserContext): Promise<void> {
+  const page = await context.newPage().catch(() => null);
+  if (!page) return;
+  try {
+    await page.goto("https://www.investing.com/", { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await waitForChallengeClear(page);
+    await page.waitForTimeout(1500).catch(() => undefined);
+  } catch {
+    // best-effort — proceed even if the homepage was blocked
+  } finally {
+    await page.close().catch(() => undefined);
   }
 }
 
