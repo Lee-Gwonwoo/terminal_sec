@@ -7,6 +7,7 @@
 
 import { getFmpSecFulltextBackfillRows, getRtprBodyBackfillRows, getUnextractedNewsIds, getUnextractedNewsRowsByIds, insertFulltext, upsertProvidedFulltext, type UnextractedNewsRow } from "./fulltextRepository.js";
 import { extractByDomain, htmlToPlainText } from "./fulltextExtractors.js";
+import { extractInvestingTickers } from "./investingNewsProvider.js";
 import { resolveFinnhubNewsOriginUrl } from "./finnhubRedirectResolver.js";
 import { updateProgress, appendLog, completeJob, failJob, isJobCancelled } from "./jobManager.js";
 import { getDb } from "../db.js";
@@ -66,6 +67,32 @@ async function runSqliteBusyRetry<T>(action: () => Promise<T>): Promise<T> {
   throw lastError;
 }
 
+/**
+ * Investing articles mention US-listed companies inline ("(NASDAQ:AAPL)").
+ * After a successful full-text extraction, merge any tickers found in the
+ * article body into news_items.tickers_csv.
+ */
+async function mergeInvestingTickersFromText(newsId: string, fullText: string): Promise<void> {
+  const found = extractInvestingTickers(fullText);
+  if (found.length === 0) return;
+  const row = await getDb().get<{ tickers_csv: string | null }>(
+    `SELECT tickers_csv FROM news_items WHERE id = ?`,
+    [newsId],
+  );
+  const existing = (row?.tickers_csv ?? "")
+    .split(",")
+    .map((ticker) => ticker.trim())
+    .filter(Boolean);
+  const merged = Array.from(new Set([...existing, ...found]));
+  if (merged.length === existing.length) return;
+  await runSqliteBusyRetry(() =>
+    getDb().run(
+      `UPDATE news_items SET tickers_csv = ? WHERE id = ?`,
+      [`,${merged.join(",")},`, newsId],
+    ),
+  );
+}
+
 export async function extractAndPersistFulltext(
   item: UnextractedNewsRow,
 ): Promise<{ extractionStatus: "success" | "failed" | "skipped" | "unavailable"; summaryUpdated: boolean }> {
@@ -122,6 +149,10 @@ export async function extractAndPersistFulltext(
         extractionNote: result.extractionNote,
         wordCount: result.wordCount,
       });
+    }
+
+    if (result.extractionStatus === "success" && item.source_type?.startsWith("investing_")) {
+      await mergeInvestingTickersFromText(item.id, result.fullText);
     }
 
     let summaryUpdated = false;

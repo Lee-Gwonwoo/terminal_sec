@@ -6,9 +6,8 @@
  */
 
 import * as cheerio from "cheerio";
-import fs from "node:fs";
-import { chromium, type Browser } from "playwright";
 import type { FinnhubMappedItem } from "./finnhubNewsProvider.js";
+import { getInvestingBrowserContext, isCloudflareChallengeText, resetInvestingBrowserProfile, waitForChallengeClear } from "./investingBrowser.js";
 import { toEtNaiveIso } from "./timeUtils.js";
 
 const MAX_RETRIES = 10;
@@ -18,13 +17,6 @@ const BROWSER_TIMEOUT_MS = 15_000;
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0";
 
-const BROWSER_CANDIDATE_PATHS = [
-  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-  "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-  "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
-  "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
-];
-
 export type InvestingCategory = "stock-market-news" | "cryptocurrency-news";
 
 export interface InvestingFetchOptions {
@@ -32,9 +24,10 @@ export interface InvestingFetchOptions {
   requestIntervalMs?: number;
   fromDate?: string;
   toDate?: string;
+  onLog?: (message: string) => void;
+  shouldCancel?: () => boolean;
 }
 
-let sharedBrowserPromise: Promise<Browser> | null = null;
 let investingHtmlLoaderForTests: ((url: string) => Promise<string>) | null = null;
 
 function sleep(ms: number): Promise<void> {
@@ -80,43 +73,33 @@ export function investingCategoryToSourceType(
     : "investing_cryptocurrency_news";
 }
 
-function findBrowserExecutable(): string | undefined {
-  return BROWSER_CANDIDATE_PATHS.find((candidate) => fs.existsSync(candidate));
+// Investing articles reference US-listed companies as "(NASDAQ:AAPL)" / "(NYSE:BRK.A)".
+const INVESTING_TICKER_EXCHANGES = new Set([
+  "NYSE",
+  "NASDAQ",
+  "AMEX",
+  "NYSEAMERICAN",
+  "BATS",
+  "CBOE",
+]);
+const INVESTING_TICKER_PATTERN = /\(\s*([A-Z]{2,13})\s*:\s*([A-Z][A-Z0-9.\-]{0,9})\s*\)/g;
+
+/**
+ * Extract US-exchange ticker symbols mentioned in Investing article text
+ * (title, listing snippet, or extracted full text).
+ */
+export function extractInvestingTickers(text: string | null | undefined): string[] {
+  if (!text) return [];
+  const tickers = new Set<string>();
+  for (const match of text.matchAll(INVESTING_TICKER_PATTERN)) {
+    if (!INVESTING_TICKER_EXCHANGES.has(match[1])) continue;
+    tickers.add(match[2]);
+  }
+  return Array.from(tickers);
 }
 
 function isCloudflareChallengeHtml(html: string): boolean {
-  const markers = [
-    "Enable JavaScript and cookies to continue",
-    "challenge-error-text",
-    "cf_chl_opt",
-    "cdn-cgi/challenge-platform",
-    "Just a moment...",
-  ];
-  return markers.some((marker) => html.includes(marker));
-}
-
-async function getBrowser(): Promise<Browser> {
-  if (!sharedBrowserPromise) {
-    sharedBrowserPromise = (async () => {
-      const executablePath = findBrowserExecutable();
-      if (executablePath) {
-        return chromium.launch({
-          executablePath,
-          headless: true,
-        });
-      }
-      try {
-        return await chromium.launch({ channel: "chrome", headless: true });
-      } catch {
-        try {
-          return await chromium.launch({ channel: "msedge", headless: true });
-        } catch {
-          return chromium.launch({ headless: true });
-        }
-      }
-    })();
-  }
-  return sharedBrowserPromise;
+  return isCloudflareChallengeText(html);
 }
 
 async function loadPageHtmlInBrowser(url: string): Promise<string> {
@@ -127,26 +110,120 @@ async function loadPageHtmlInBrowser(url: string): Promise<string> {
   throw new Error("loadPageHtmlInBrowser should only be used with test loader");
 }
 
+/** Thrown when Cloudflare serves a bare 403 hard block (poisoned cf_clearance). */
+class CloudflareHardBlockError extends Error {
+  constructor() {
+    super("Cloudflare hard block (HTTP 403) — poisoned clearance cookie");
+    this.name = "CloudflareHardBlockError";
+  }
+}
+
+/** Thrown when a managed challenge is shown but did not clear within the wait. */
+class CloudflareChallengeError extends Error {
+  constructor() {
+    super("Cloudflare challenge did not clear within the wait window");
+    this.name = "CloudflareChallengeError";
+  }
+}
+
+/** Thrown when repeated blocks make clear the IP itself is flagged. */
+class InvestingIpFlaggedError extends Error {
+  constructor(resets: number) {
+    super(
+      `Investing.com is repeatedly challenging this connection (${resets} profile resets) — ` +
+        `the IP appears rate-limited/flagged by Cloudflare. Stop for a while (or switch network) and retry later.`,
+    );
+    this.name = "InvestingIpFlaggedError";
+  }
+}
+
+const BLOCK_RETRY_MAX = 6;
+const BLOCK_RETRY_BASE_MS = 3_000;
+// When blocks persist (rate-limiting, not a one-off poisoned cookie), backing
+// off gives Cloudflare's rate window time to recover. Resetting the profile
+// instead just fires MORE requests (a fresh challenge solve), which digs the
+// hole deeper — so after the first reset we back off with growing delays.
+const BLOCK_BACKOFF_STEP_MS = 20_000;
+const BLOCK_BACKOFF_MAX_MS = 90_000;
+// Each block also permanently slows the rest of the pull: the IP is getting
+// sensitive, so widen the gap between page requests to stay under the limit.
+const ADAPTIVE_SLOWDOWN_STEP_MS = 3_000;
+const ADAPTIVE_SLOWDOWN_MAX_MS = 20_000;
+
+/** Shared across one fetchInvestingCategory call: adaptive pacing + flag detection. */
+interface BlockState {
+  resets: number;
+  maxResets: number;
+  /** Extra delay added to every inter-page request after blocks appear. */
+  extraDelayMs: number;
+}
+
 async function loadPageItemsInBrowser(
   category: InvestingCategory,
   url: string,
+  blockState: BlockState,
+  onLog?: (message: string) => void,
 ): Promise<FinnhubMappedItem[]> {
-  const browser = await getBrowser();
-  const page = await browser.newPage({
-    userAgent: `${UA} Safari/537.36`,
-    locale: "en-US",
-  });
+  // Cloudflare serves either a bare 403 (poisoned cf_clearance cookie) or a
+  // managed challenge that didn't auto-solve. Recovery escalates: one fresh
+  // profile (fixes a poisoned cookie); if the block PERSISTS it's rate-limiting,
+  // so we stop resetting and back off with growing delays to let the IP cool.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await loadPageItemsInBrowserOnce(category, url);
+    } catch (err) {
+      const isBlock = err instanceof CloudflareHardBlockError || err instanceof CloudflareChallengeError;
+      if (!isBlock || attempt >= BLOCK_RETRY_MAX) {
+        throw err;
+      }
+      const kind = err instanceof CloudflareHardBlockError ? "Cloudflare 403" : "Cloudflare challenge";
+      // Every block permanently slows the remaining walk.
+      blockState.extraDelayMs = Math.min(blockState.extraDelayMs + ADAPTIVE_SLOWDOWN_STEP_MS, ADAPTIVE_SLOWDOWN_MAX_MS);
+
+      // Attempt 1: a fresh profile in case the cookie is merely poisoned.
+      // Attempt 2+: the block is persisting → rate-limit → back off, no reset.
+      const shouldReset = attempt === 1;
+      if (shouldReset) {
+        blockState.resets += 1;
+        if (blockState.resets > blockState.maxResets) {
+          throw new InvestingIpFlaggedError(blockState.resets);
+        }
+        onLog?.(`${kind} on ${url} — resetting profile (attempt ${attempt}/${BLOCK_RETRY_MAX})`);
+        await resetInvestingBrowserProfile();
+        await sleep(BLOCK_RETRY_BASE_MS);
+        continue;
+      }
+
+      const backoff = Math.min(BLOCK_BACKOFF_STEP_MS * (attempt - 1), BLOCK_BACKOFF_MAX_MS);
+      onLog?.(`${kind} persists on ${url} — backing off ${Math.round(backoff / 1000)}s to let the IP cool (attempt ${attempt}/${BLOCK_RETRY_MAX})`);
+      await sleep(backoff);
+      continue;
+    }
+  }
+}
+
+async function loadPageItemsInBrowserOnce(
+  category: InvestingCategory,
+  url: string,
+): Promise<FinnhubMappedItem[]> {
+  const context = await getInvestingBrowserContext();
+  const page = await context.newPage();
 
   const sourceType = investingCategoryToSourceType(category);
 
   try {
-    await page.goto(url, {
+    const response = await page.goto(url, {
       waitUntil: "domcontentloaded",
       timeout: BROWSER_TIMEOUT_MS,
     });
-    await page.waitForURL((currentUrl) => !currentUrl.toString().includes("__cf_chl"), {
-      timeout: 15_000,
-    }).catch(() => undefined);
+    await waitForChallengeClear(page);
+    if (response && response.status() === 403) {
+      const html = await page.content().catch(() => "");
+      // Cloudflare hard block serves a bare "403" body with no challenge to solve.
+      if (html.length < 1000) {
+        throw new CloudflareHardBlockError();
+      }
+    }
     await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => undefined);
     await page.waitForSelector('a[data-test="article-title-link"], article[data-test="article-item"], ul[data-test="news-list"]', {
       timeout: 15_000,
@@ -189,8 +266,9 @@ async function loadPageItemsInBrowser(
 
     if (items.length === 0) {
       const bodyText = await page.locator("body").innerText().catch(() => "");
-      if (isCloudflareChallengeHtml(bodyText)) {
-        throw new Error("Cloudflare challenge page returned even after browser fallback");
+      const pageTitle = await page.title().catch(() => "");
+      if (isCloudflareChallengeText(`${pageTitle}\n${bodyText}`)) {
+        throw new CloudflareChallengeError();
       }
     }
 
@@ -354,123 +432,262 @@ function normalizeInvestingDate(raw: string): string {
   return toEtNaiveIso(new Date());
 }
 
+// Date-jump search bounds: probing is only used to locate the page where the
+// requested range STARTS; collection always walks pages sequentially from
+// slightly before that page, so no article inside the range can be skipped.
+const START_PAGE_SAFETY_MARGIN = 2;
+const MAX_PROBE_PAGE = 5000;
+
+/**
+ * Locate the first listing page that reaches into the requested range
+ * (i.e. contains an article dated <= toDate) using exponential probing
+ * followed by a binary search. Listing pages are ordered newest-first, so
+ * page dates decrease as the page number grows.
+ *
+ * Returns the page to START the sequential walk from (with a safety margin
+ * subtracted). Falls back to page 1 on any probe failure.
+ */
+async function findRangeStartPage(
+  loadPage: (page: number) => Promise<FinnhubMappedItem[]>,
+  toDate: string,
+  onLog?: (message: string) => void,
+): Promise<number> {
+  const pageOldestDate = async (page: number): Promise<string | null> => {
+    const items = await loadPage(page);
+    if (items.length === 0) return null; // beyond the end of the listing
+    let oldest = "";
+    for (const item of items) {
+      const date = item.publishedAt.slice(0, 10);
+      if (date && (!oldest || date < oldest)) oldest = date;
+    }
+    return oldest || null;
+  };
+
+  try {
+    let oldest = await pageOldestDate(1);
+    if (oldest === null || oldest <= toDate) {
+      return 1;
+    }
+
+    // Exponential probing: 1 → 2 → 4 → 8 → ... until a page reaches the range.
+    let lo = 1; // known: page lo is entirely newer than the range
+    let hi = 2;
+    for (;;) {
+      oldest = await pageOldestDate(hi);
+      onLog?.(`probe page ${hi}: oldest=${oldest ?? "empty"}`);
+      if (oldest === null || oldest <= toDate) break;
+      if (hi >= MAX_PROBE_PAGE) {
+        onLog?.(`range start is deeper than page ${MAX_PROBE_PAGE}; walking from there`);
+        return MAX_PROBE_PAGE;
+      }
+      lo = hi;
+      hi = Math.min(hi * 2, MAX_PROBE_PAGE);
+    }
+
+    // Binary search the smallest page in (lo, hi] that reaches the range.
+    while (lo + 1 < hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      oldest = await pageOldestDate(mid);
+      onLog?.(`probe page ${mid}: oldest=${oldest ?? "empty"}`);
+      if (oldest === null || oldest <= toDate) hi = mid;
+      else lo = mid;
+    }
+
+    return Math.max(1, hi - START_PAGE_SAFETY_MARGIN);
+  } catch (err: any) {
+    if (err instanceof InvestingIpFlaggedError) throw err;
+    onLog?.(`page probing failed (${err?.message ?? "unknown"}); falling back to sequential walk from page 1`);
+    return 1;
+  }
+}
+
 /**
  * Fetch articles from an Investing.com category across multiple pages.
+ *
+ * When a toDate is given, first locates the page where the range starts via
+ * date-jump probing, then walks pages one by one (no skipping) until the
+ * range is exhausted, so deep historical ranges are reachable without
+ * fetching every page in between.
  */
 export async function fetchInvestingCategory(
   category: InvestingCategory,
   options: InvestingFetchOptions = {},
 ): Promise<FinnhubMappedItem[]> {
-  const maxPages = Math.max(1, Math.min(Math.floor(options.maxPages ?? 5), 50));
+  const maxPages = Math.max(1, Math.min(Math.floor(options.maxPages ?? 5), 1000));
   const requestIntervalMs = Math.max(
     0,
     Math.min(Math.floor(options.requestIntervalMs ?? 1000), 10_000),
   );
   const fromDate = options.fromDate?.trim() || "";
   const toDate = options.toDate?.trim() || "";
+  const onLog = options.onLog;
+  const shouldCancel = options.shouldCancel ?? (() => false);
 
-  const allItems: FinnhubMappedItem[] = [];
-  const seenUrls = new Set<string>();
-  let consecutiveEmptyPages = 0;
-  let reachedOlderThanFrom = false;
+  const pageCache = new Map<number, FinnhubMappedItem[]>();
   let useBrowser = false;
+  let requestCount = 0;
+  const blockState: BlockState = { resets: 0, maxResets: 6, extraDelayMs: 0 };
 
-  for (let page = 1; page <= maxPages; page++) {
+  const loadPage = async (page: number): Promise<FinnhubMappedItem[]> => {
+    const cached = pageCache.get(page);
+    if (cached) return cached;
+
+    if (requestCount > 0) {
+      // Base interval + adaptive slowdown that grows as blocks appear, plus
+      // jitter (perfectly regular timing is itself a bot signal). Slowing down
+      // is what keeps a long custom pull under Cloudflare's rate limit.
+      const base = requestIntervalMs + blockState.extraDelayMs;
+      if (base > 0) {
+        await sleep(base + Math.floor(Math.random() * requestIntervalMs * 0.5));
+      }
+    }
+    requestCount++;
+
     const pageUrl =
       page === 1
         ? `https://www.investing.com/news/${category}`
         : `https://www.investing.com/news/${category}/${page}`;
 
-    if (page > 1 && requestIntervalMs > 0) {
-      await sleep(requestIntervalMs);
-    }
+    let html = "";
+    let pageItems: FinnhubMappedItem[] = [];
+    if (useBrowser) {
+      if (investingHtmlLoaderForTests) {
+        html = await loadPageHtmlInBrowser(pageUrl);
+        pageItems = parseListingPage(html, category);
+      } else {
+        pageItems = await loadPageItemsInBrowser(category, pageUrl, blockState, onLog);
+      }
+    } else {
+      const res = await fetchWithRetry(pageUrl, {
+        headers: {
+          "User-Agent": UA,
+          Accept:
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.5",
+        },
+      });
 
-    try {
-      let html = "";
-      let pageItems: FinnhubMappedItem[] = [];
-      if (useBrowser) {
+      if (!res.ok && res.status !== 403 && res.status !== 503) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      const candidateHtml = await res.text();
+      if (!res.ok || isCloudflareChallengeHtml(candidateHtml)) {
+        useBrowser = true;
         if (investingHtmlLoaderForTests) {
           html = await loadPageHtmlInBrowser(pageUrl);
           pageItems = parseListingPage(html, category);
         } else {
-          pageItems = await loadPageItemsInBrowser(category, pageUrl);
+          pageItems = await loadPageItemsInBrowser(category, pageUrl, blockState, onLog);
         }
       } else {
-        const res = await fetchWithRetry(pageUrl, {
-          headers: {
-            "User-Agent": UA,
-            Accept:
-              "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5",
-          },
-        });
-
-        if (!res.ok && res.status !== 403 && res.status !== 503) {
-          console.error(
-            `[investing] ${category} page ${page}: HTTP ${res.status}`,
-          );
-          break;
-        }
-
-        const candidateHtml = await res.text();
-        if (!res.ok || isCloudflareChallengeHtml(candidateHtml)) {
-          useBrowser = true;
-          if (investingHtmlLoaderForTests) {
-            html = await loadPageHtmlInBrowser(pageUrl);
-            pageItems = parseListingPage(html, category);
-          } else {
-            pageItems = await loadPageItemsInBrowser(category, pageUrl);
-          }
-        } else {
-          html = candidateHtml;
-          pageItems = parseListingPage(html, category);
-        }
+        html = candidateHtml;
+        pageItems = parseListingPage(html, category);
       }
+    }
 
-      if (html && isCloudflareChallengeHtml(html)) {
-        throw new Error("Cloudflare challenge page returned even after browser fallback");
+    if (html && isCloudflareChallengeHtml(html)) {
+      throw new Error("Cloudflare challenge page returned even after browser fallback");
+    }
+
+    pageCache.set(page, pageItems);
+    return pageItems;
+  };
+
+  const allItems: FinnhubMappedItem[] = [];
+  const seenUrls = new Set<string>();
+  let consecutiveEmptyPages = 0;
+  let reachedOlderThanFrom = false;
+
+  let startPage = 1;
+  if (toDate) {
+    if (shouldCancel()) return allItems;
+    try {
+      startPage = await findRangeStartPage(loadPage, toDate, onLog);
+    } catch (err: any) {
+      // Flagged IP during date-jump probing — keep whatever we already have.
+      if (err instanceof InvestingIpFlaggedError) {
+        onLog?.(`${err.message} (stopped during probing with ${allItems.length} items)`);
+        return allItems;
       }
-      const filteredPageItems: FinnhubMappedItem[] = [];
+      throw err;
+    }
+    if (startPage > 1) {
+      onLog?.(`date-jump: starting walk at page ${startPage} for to=${toDate}`);
+    }
+  }
 
-      for (const item of pageItems) {
-        const publishedDate = item.publishedAt.slice(0, 10);
-        if (!publishedDate) {
-          continue;
-        }
-        if (fromDate && publishedDate < fromDate) {
-          reachedOlderThanFrom = true;
-          continue;
-        }
-        if (toDate && publishedDate > toDate) {
-          continue;
-        }
-        filteredPageItems.push(item);
-      }
+  for (let offset = 0; offset < maxPages; offset++) {
+    if (shouldCancel()) {
+      onLog?.("cancelled — stopping page walk");
+      break;
+    }
+    const page = startPage + offset;
 
-      if (filteredPageItems.length === 0) {
-        consecutiveEmptyPages++;
-        if (reachedOlderThanFrom || consecutiveEmptyPages >= 2) {
-          break; // stop after 2 consecutive empty pages
-        }
-        continue;
-      }
-
-      consecutiveEmptyPages = 0;
-
-      for (const item of filteredPageItems) {
-        if (!seenUrls.has(item.url)) {
-          seenUrls.add(item.url);
-          allItems.push(item);
-        }
-      }
-
-      if (reachedOlderThanFrom) {
+    let pageItems: FinnhubMappedItem[];
+    try {
+      pageItems = await loadPage(page);
+    } catch (err: any) {
+      // A flagged IP won't recover within this run — stop, but KEEP what we
+      // already collected (don't fail the whole job) and log the reason so the
+      // user knows to switch network / retry later.
+      if (err instanceof InvestingIpFlaggedError) {
+        onLog?.(`${err.message} (kept ${allItems.length} items collected before stopping)`);
         break;
       }
-    } catch (err: any) {
       console.error(
         `[investing] ${category} page ${page}: ${err.message}`,
       );
+      break;
+    }
+
+    const filteredPageItems: FinnhubMappedItem[] = [];
+    let newerThanRangeCount = 0;
+
+    for (const item of pageItems) {
+      const publishedDate = item.publishedAt.slice(0, 10);
+      if (!publishedDate) {
+        continue;
+      }
+      if (fromDate && publishedDate < fromDate) {
+        reachedOlderThanFrom = true;
+        continue;
+      }
+      if (toDate && publishedDate > toDate) {
+        newerThanRangeCount++;
+        continue;
+      }
+      filteredPageItems.push(item);
+    }
+
+    if (filteredPageItems.length === 0) {
+      if (reachedOlderThanFrom) {
+        break;
+      }
+      if (newerThanRangeCount > 0) {
+        // Page only holds articles newer than the requested range — keep
+        // paging deeper until we reach the range instead of treating this
+        // as an empty page (fixes custom updates for past date ranges).
+        consecutiveEmptyPages = 0;
+        continue;
+      }
+      consecutiveEmptyPages++;
+      if (consecutiveEmptyPages >= 2) {
+        break; // stop after 2 consecutive empty pages
+      }
+      continue;
+    }
+
+    consecutiveEmptyPages = 0;
+
+    for (const item of filteredPageItems) {
+      if (!seenUrls.has(item.url)) {
+        seenUrls.add(item.url);
+        allItems.push(item);
+      }
+    }
+
+    if (reachedOlderThanFrom) {
       break;
     }
   }

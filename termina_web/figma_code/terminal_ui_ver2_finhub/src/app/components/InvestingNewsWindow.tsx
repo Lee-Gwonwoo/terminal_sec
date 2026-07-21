@@ -2,6 +2,7 @@ import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { Search, Filter, ChevronDown, ArrowUp, ArrowDown, GripVertical, FileText, AlignLeft, RotateCw, Download, Columns3, Eye, X, Calendar, Plus, Square, FolderOpen, Settings2 } from 'lucide-react';
 import { VariableSizeList as List } from 'react-window';
 import { BookmarkManager } from './BookmarkManager';
+import { getCompanyTickerDataAttrs } from '../companyDescription';
 
 const API_BASE = "";
 const ET_TIME_ZONE = 'America/New_York';
@@ -19,7 +20,7 @@ const NEWS_PAGE_SIZE = 200;
 type DisplayMode = 'title-only' | 'title-abstract';
 
 // ─── Column definition ───
-type ColumnId = 'date' | 'time' | 'title' | 'category' | 'fulltext';
+type ColumnId = 'date' | 'time' | 'title' | 'tickers' | 'category' | 'fulltext';
 
 interface ColumnDef {
   id: ColumnId;
@@ -33,6 +34,7 @@ const DEFAULT_COLUMNS: ColumnDef[] = [
   { id: 'date',     label: 'Date',     defaultWidth: 72,  minWidth: 50 },
   { id: 'time',     label: 'Time ET',  defaultWidth: 64,  minWidth: 52 },
   { id: 'title',    label: 'Title',    defaultWidth: 400, minWidth: 100, flex: true },
+  { id: 'tickers',  label: 'Tickers',  defaultWidth: 100, minWidth: 60 },
   { id: 'category', label: 'Category', defaultWidth: 120, minWidth: 70 },
   { id: 'fulltext', label: 'Full Text', defaultWidth: 60, minWidth: 40 },
 ];
@@ -94,6 +96,7 @@ interface DisplayItem {
   sourceType: string;
   publisher: string;
   hasFulltext: boolean;
+  tickers: string[];
 }
 
 function hasExplicitTimeZone(value: string): boolean {
@@ -163,6 +166,7 @@ function mapBackendItem(item: BackendNewsItem): DisplayItem {
     sourceType: item.source_type ?? '',
     publisher: item.publisher ?? 'INVESTING',
     hasFulltext: !!item.has_fulltext,
+    tickers: Array.isArray(item.tickers) ? item.tickers : [],
   };
 }
 
@@ -688,8 +692,8 @@ export function InvestingNewsWindow({
     const body: Record<string, unknown> = {
       mode,
       category,
-      maxPages: mode === 'custom' ? 50 : 5,
-      requestIntervalMs: 1000,
+      maxPages: mode === 'custom' ? 600 : 5,
+      requestIntervalMs: mode === 'custom' ? 2000 : 1000,
       fulltextConcurrency: 10,
     };
     if (from) body.from = from;
@@ -724,8 +728,8 @@ export function InvestingNewsWindow({
         const preflightBody: Record<string, unknown> = {
           mode,
           category,
-          maxPages: 50,
-          requestIntervalMs: 1000,
+          maxPages: 600,
+          requestIntervalMs: 2000,
           fulltextConcurrency: 10,
           from,
           to,
@@ -846,6 +850,8 @@ export function InvestingNewsWindow({
           cmp = a.publishedAt.localeCompare(b.publishedAt);
         } else if (col === 'title') {
           cmp = a.title.localeCompare(b.title);
+        } else if (col === 'tickers') {
+          cmp = (a.tickers[0] ?? '').localeCompare(b.tickers[0] ?? '');
         } else if (col === 'category') {
           cmp = a.sourceType.localeCompare(b.sourceType);
         }
@@ -1068,6 +1074,22 @@ export function InvestingNewsWindow({
               </div>
             );
           }
+          if (col.id === 'tickers') {
+            return (
+              <div key={col.id} style={cellStyle} className="px-2 py-2 flex flex-wrap gap-1 content-start overflow-hidden">
+                {item.tickers.map((ticker) => (
+                  <span
+                    key={ticker}
+                    className="inline-block px-1.5 py-0.5 text-[10px] font-medium bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900/60"
+                    onClick={(e) => { e.stopPropagation(); onTickerClick?.(ticker); }}
+                    {...getCompanyTickerDataAttrs(ticker)}
+                  >
+                    {ticker}
+                  </span>
+                ))}
+              </div>
+            );
+          }
           if (col.id === 'category') {
             return (
               <div key={col.id} style={cellStyle} className="px-2 py-2">
@@ -1094,7 +1116,7 @@ export function InvestingNewsWindow({
         })}
       </div>
     );
-  }, [sortedAndGrouped, activeColumns, activeColWidths, displayMode, expandedItems, titleFontSize, summaryFontSize, openExternalUrl]);
+  }, [sortedAndGrouped, activeColumns, activeColWidths, displayMode, expandedItems, titleFontSize, summaryFontSize, openExternalUrl, onTickerClick]);
 
   // ═══════════════════════════════════════════════
   // ─── JSX ───
@@ -1544,6 +1566,19 @@ export function InvestingNewsWindow({
               }`}>
                 {selectedJobStatus.status} {selectedJobStatus.status === 'running' ? `${selectedJobStatus.progress.pct}%` : ''}
               </span>
+              {selectedJobStatus.status === 'running' && selectedJobId && (
+                <button
+                  onClick={async () => {
+                    try {
+                      await fetch(`${API_BASE}/api/jobs/${selectedJobId}/cancel`, { method: 'POST' });
+                    } catch { /* ignore */ }
+                  }}
+                  className="p-1 rounded hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors"
+                  title="Stop job"
+                >
+                  <Square className="w-3 h-3 text-red-500" />
+                </button>
+              )}
               <button onClick={() => setShowLogPanel(false)} className="text-gray-400 hover:text-gray-600"><X className="w-3 h-3" /></button>
             </div>
           </div>

@@ -10,6 +10,7 @@ import * as cheerio from "cheerio";
 import { chromium, type Browser } from "playwright";
 import { canonicalizePublisherLabel, derivePublisher } from "./finnhubNewsProvider.js";
 import { isFinnhubNewsRedirectUrl, resolveFinnhubNewsOriginUrl } from "./finnhubRedirectResolver.js";
+import { getInvestingBrowserContext, isCloudflareChallengeText, waitForChallengeClear } from "./investingBrowser.js";
 
 const MAX_RETRIES = 10;
 const BASE_DELAY_MS = 500;
@@ -369,11 +370,8 @@ async function extractInvestingViaBrowser(url: string, body: string | null): Pro
   }
 
   try {
-    const browser = await getBrowser();
-    const page = await browser.newPage({
-      userAgent: `${UA} Safari/537.36`,
-      locale: "en-US",
-    });
+    const context = await getInvestingBrowserContext();
+    const page = await context.newPage();
 
     try {
       try {
@@ -386,9 +384,7 @@ async function extractInvestingViaBrowser(url: string, body: string | null): Pro
           throw error;
         }
       }
-      await page.waitForURL((currentUrl) => !currentUrl.toString().includes("__cf_chl"), {
-        timeout: 20_000,
-      }).catch(() => undefined);
+      await waitForChallengeClear(page);
       await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => undefined);
       await page.waitForSelector('[data-test="article-body"], .articlePage, article, main, body', {
         timeout: 20_000,
@@ -461,6 +457,10 @@ async function extractInvestingViaBrowser(url: string, body: string | null): Pro
         "Market Movers",
         "Investing Challenges",
       ]);
+
+      if (isCloudflareChallengeText(`${extracted.headline}\n${candidateText}`)) {
+        return fallbackOrUnavailable(body, "investing-cloudflare-challenge", false);
+      }
 
       if (!clipped) {
         return fallbackOrUnavailable(body, "investing-no-body", false);

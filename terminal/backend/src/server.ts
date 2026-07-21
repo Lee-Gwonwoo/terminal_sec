@@ -129,6 +129,7 @@ import {
   fetchInvestingCategory,
   fetchAllInvestingCategories,
   investingCategoryToSourceType,
+  extractInvestingTickers,
   type InvestingCategory,
 } from "./services/investingNewsProvider.js";
 import {
@@ -4064,7 +4065,7 @@ const pullInvestingSchema = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   category: z.enum(["all", "stock-market-news", "cryptocurrency-news"]).optional().default("all"),
-  maxPages: z.number().int().min(1).max(50).optional().default(5),
+  maxPages: z.number().int().min(1).max(1000).optional().default(5),
   requestIntervalMs: z.number().int().min(0).max(10_000).optional().default(1000),
   fulltextConcurrency: z.number().int().min(1).max(200).optional().default(10),
 });
@@ -4211,6 +4212,8 @@ app.post("/api/news/pull-investing", async (req, res, next) => {
             requestIntervalMs: input.requestIntervalMs,
             fromDate: effectiveFrom,
             toDate: effectiveTo,
+            onLog: (message) => appendLog(jobId, `  [${category}] ${message}`),
+            shouldCancel: () => isJobCancelled(jobId),
           });
 
           appendLog(jobId, `  ${category}: ${items.length} articles found`);
@@ -4227,7 +4230,9 @@ app.post("/api/news/pull-investing", async (req, res, next) => {
               title: rawItem.title,
               body: rawItem.body,
               url: rawItem.url,
-              tickers: rawItem.providerTickers,
+              tickers: rawItem.providerTickers.length > 0
+                ? rawItem.providerTickers
+                : extractInvestingTickers(`${rawItem.title}\n${rawItem.body ?? ""}`),
               tags: rawItem.tags,
               publisher: rawItem.publisher,
             });
@@ -4256,6 +4261,12 @@ app.post("/api/news/pull-investing", async (req, res, next) => {
         }
 
         appendLog(jobId, `Total: inserted=${counters.totalInserted}, skipped=${counters.totalSkipped}`);
+
+        if (isJobCancelled(jobId)) {
+          appendLog(jobId, `🛑 Cancelled — inserted ${counters.totalInserted} before stopping (full text extraction skipped)`);
+          activePullJobs.delete(jobKey);
+          return;
+        }
 
         const fulltextResult = await runInlineFulltextExtraction(
           jobId,
