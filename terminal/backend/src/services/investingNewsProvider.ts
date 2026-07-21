@@ -224,11 +224,13 @@ async function loadPageItemsInBrowserOnce(
         throw new CloudflareHardBlockError();
       }
     }
-    await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => undefined);
+    // Wait only for the article anchors themselves — no networkidle (investing
+    // streams background requests for minutes) and only a short settle after,
+    // which is the biggest per-page speedup.
     await page.waitForSelector('a[data-test="article-title-link"], article[data-test="article-item"], ul[data-test="news-list"]', {
       timeout: 15_000,
     }).catch(() => undefined);
-    await page.waitForTimeout(1500).catch(() => undefined);
+    await page.waitForTimeout(300).catch(() => undefined);
 
     const items = await page.evaluate(({ currentCategory, currentSourceType }) => {
       const anchors = Array.from(document.querySelectorAll(`a[data-test="article-title-link"][href*="/news/${currentCategory}/"]`));
@@ -686,6 +688,11 @@ export async function fetchInvestingCategory(
         allItems.push(item);
       }
     }
+
+    // Progress log so a long walk is observable (successful pages are otherwise
+    // silent until the whole category finishes).
+    const oldestOnPage = filteredPageItems[filteredPageItems.length - 1]?.publishedAt.slice(0, 10) ?? "";
+    onLog?.(`page ${page}: +${filteredPageItems.length} in range (down to ${oldestOnPage}), ${allItems.length} total`);
 
     if (reachedOlderThanFrom) {
       break;

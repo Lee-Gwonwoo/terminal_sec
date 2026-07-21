@@ -140,8 +140,10 @@ async function warmUpSession(context: BrowserContext): Promise<void> {
   if (!page) return;
   try {
     await page.goto("https://www.investing.com/", { waitUntil: "domcontentloaded", timeout: 30_000 });
-    await waitForChallengeClear(page);
-    await page.waitForTimeout(1500).catch(() => undefined);
+    // Best-effort trust-building — don't burn the full challenge budget here;
+    // the listing fetch has its own (longer) wait if a challenge persists.
+    await waitForChallengeClear(page, 25_000);
+    await page.waitForTimeout(1000).catch(() => undefined);
   } catch {
     // best-effort — proceed even if the homepage was blocked
   } finally {
@@ -231,8 +233,8 @@ export async function getInvestingBrowserContext(): Promise<BrowserContext> {
  * Returns without throwing on timeout — callers' content checks surface
  * the block explicitly.
  */
-export async function waitForChallengeClear(page: Page): Promise<void> {
-  const deadline = Date.now() + CHALLENGE_CLEAR_TIMEOUT_MS;
+export async function waitForChallengeClear(page: Page, timeoutMs: number = CHALLENGE_CLEAR_TIMEOUT_MS): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
   for (;;) {
     const title = await page.title().catch(() => "");
     const blocked = CHALLENGE_TITLE_PATTERN.test(title) || page.url().includes("__cf_chl");
