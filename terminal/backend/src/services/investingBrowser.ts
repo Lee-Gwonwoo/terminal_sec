@@ -14,7 +14,12 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { chromium, type BrowserContext, type Page } from "playwright";
+// Patchright is a drop-in Playwright replacement that patches the CDP-level
+// automation leaks (Runtime.enable, console.context, navigator.webdriver) that
+// vanilla Playwright exposes and that Cloudflare fingerprints — the reason
+// listing pulls kept getting 403'd regardless of IP. API-compatible with
+// playwright, so only the import changes.
+import { chromium, type BrowserContext, type Page } from "patchright";
 import { config } from "../config.js";
 
 const PROFILE_DIR_NAME = "investing-browser-profile";
@@ -98,6 +103,9 @@ function killStrayProfileProcesses(): void {
 async function launchContext(): Promise<BrowserContext> {
   killStrayProfileProcesses();
   clearStaleProfileLocks();
+  // Patchright manages the stealth/automation flags itself — the docs warn
+  // against tampering with args, custom UA, or a fixed viewport, all of which
+  // re-expose automation. Keep only the off-screen/window placement.
   const options = {
     headless: false,
     viewport: null,
@@ -105,9 +113,6 @@ async function launchContext(): Promise<BrowserContext> {
     args: BROWSER_VISIBLE
       ? ["--window-position=60,60", "--window-size=1280,900"]
       : ["--window-position=-32000,-32000"],
-    // Chrome exposes navigator.webdriver=true under --enable-automation,
-    // which Cloudflare scores as a bot signal.
-    ignoreDefaultArgs: ["--enable-automation"],
   };
   let context: BrowserContext;
   try {
