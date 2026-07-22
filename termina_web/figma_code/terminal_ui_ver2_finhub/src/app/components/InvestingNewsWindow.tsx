@@ -177,6 +177,47 @@ interface BookmarkFolder {
   item_count?: number;
 }
 
+// ─── Last-view cache (survives tab switches, which unmount the window) ───
+const VIEW_CACHE_KEY = 'investing-news-view-cache';
+// Cap what we persist so localStorage (~5MB) can't be blown out by a long walk.
+const VIEW_CACHE_MAX_ITEMS = 300;
+
+interface InvestingCache {
+  items: DisplayItem[];
+  nextCursor: string | null;
+  searchQuery: string;
+  sort: SortState;
+}
+
+const EMPTY_CACHE: InvestingCache = { items: [], nextCursor: null, searchQuery: '', sort: { column: null, dir: null } };
+
+function readCachedView(): InvestingCache {
+  try {
+    const raw = localStorage.getItem(VIEW_CACHE_KEY);
+    if (!raw) return EMPTY_CACHE;
+    const parsed = JSON.parse(raw);
+    return {
+      items: Array.isArray(parsed.items) ? (parsed.items as DisplayItem[]) : [],
+      nextCursor: typeof parsed.nextCursor === 'string' ? parsed.nextCursor : null,
+      searchQuery: typeof parsed.searchQuery === 'string' ? parsed.searchQuery : '',
+      sort: parsed.sort && typeof parsed.sort === 'object' ? (parsed.sort as SortState) : { column: null, dir: null },
+    };
+  } catch {
+    return EMPTY_CACHE;
+  }
+}
+
+function writeCachedView(cache: InvestingCache): void {
+  try {
+    localStorage.setItem(
+      VIEW_CACHE_KEY,
+      JSON.stringify({ ...cache, items: cache.items.slice(0, VIEW_CACHE_MAX_ITEMS) }),
+    );
+  } catch {
+    // quota exceeded or storage unavailable — the view just won't be restored
+  }
+}
+
 // ═══════════════════════════════════════════════
 interface InvestingNewsWindowProps {
   onTickerClick?: (ticker: string) => void;
@@ -189,7 +230,15 @@ export function InvestingNewsWindow({
   titleFontSize = 12,
   summaryFontSize = 11,
 }: InvestingNewsWindowProps) {
-  const [searchQuery, setSearchQuery] = useState('');
+  // The window unmounts when you switch to another tab, so the loaded article
+  // list would be lost and refetched from page 1 (dropping any "Load More"
+  // pages). Restore the last view from localStorage so coming back shows
+  // exactly what you left. Read once, on first render only.
+  const cacheRef = useRef<InvestingCache | null>(null);
+  if (cacheRef.current === null) cacheRef.current = readCachedView();
+  const cached = cacheRef.current;
+
+  const [searchQuery, setSearchQuery] = useState(cached.searchQuery);
   const [fromDate, setFromDate] = useState(() => {
     try {
       const saved = localStorage.getItem('investing-news-ui-state');
@@ -298,7 +347,7 @@ export function InvestingNewsWindow({
   }, []);
 
   // Sort
-  const [sort, setSort] = useState<SortState>({ column: null, dir: null });
+  const [sort, setSort] = useState<SortState>(cached.sort);
 
   // Category filter
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>(() => {
@@ -315,10 +364,10 @@ export function InvestingNewsWindow({
   });
 
   // Backend data
-  const [newsData, setNewsData] = useState<DisplayItem[]>([]);
+  const [newsData, setNewsData] = useState<DisplayItem[]>(cached.items);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(cached.nextCursor);
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -407,6 +456,11 @@ export function InvestingNewsWindow({
       localStorage.setItem('investing-news-ui-state', JSON.stringify(state));
     } catch { /* ignore */ }
   }, [fromDate, toDate, displayMode, categoryFilter, visibleCols, selectedBookmarkFolderId]);
+
+  // ─── Persist the loaded list so a tab switch doesn't lose it ───
+  useEffect(() => {
+    writeCachedView({ items: newsData, nextCursor, searchQuery, sort });
+  }, [newsData, nextCursor, searchQuery, sort]);
 
   // ─── Container height tracking ───
   useEffect(() => {
@@ -565,8 +619,15 @@ export function InvestingNewsWindow({
 
   useEffect(() => { fetchBookmarkFolders(); }, [fetchBookmarkFolders]);
 
-  // Auto-reload when filters change
+  // Auto-reload when filters change — but on the very first render after a tab
+  // switch, keep the restored list instead of refetching it away (a refetch
+  // would reset to page 1 and drop any "Load More" pages).
+  const skipInitialFetchRef = useRef(cached.items.length > 0);
   useEffect(() => {
+    if (skipInitialFetchRef.current) {
+      skipInitialFetchRef.current = false;
+      return;
+    }
     fetchNews(searchQueryRef.current || undefined);
   }, [fetchNews]);
 
