@@ -4206,12 +4206,34 @@ app.post("/api/news/pull-investing", async (req, res, next) => {
         for (const category of categories) {
           if (isJobCancelled(jobId)) break;
 
-          appendLog(jobId, `Fetching ${category}...`);
+          // Recent (incremental) pulls stop once they reach the newest article
+          // already stored for this category, so a daily run only fetches what
+          // appeared since last time (no fixed page cap truncating a busy day,
+          // and no re-walking older pages). Custom pulls pass no watermark so
+          // they cover the whole requested range and fill interior gaps.
+          let sinceTimestamp: string | undefined;
+          if (!isCustom) {
+            const watermarkRow = await getDb().get<{ max_published: string | null }>(
+              `SELECT MAX(published_at) AS max_published
+               FROM news_items
+               WHERE source = 'INVESTING' AND source_type = ?`,
+              [investingCategoryToSourceType(category)],
+            );
+            sinceTimestamp = watermarkRow?.max_published ?? undefined;
+          }
+
+          appendLog(
+            jobId,
+            sinceTimestamp
+              ? `Fetching ${category}... (incremental since ${sinceTimestamp})`
+              : `Fetching ${category}...`,
+          );
           const items = await fetchInvestingCategory(category, {
             maxPages: input.maxPages,
             requestIntervalMs: input.requestIntervalMs,
             fromDate: effectiveFrom,
             toDate: effectiveTo,
+            sinceTimestamp,
             onLog: (message) => appendLog(jobId, `  [${category}] ${message}`),
             shouldCancel: () => isJobCancelled(jobId),
           });

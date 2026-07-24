@@ -192,6 +192,86 @@ describe("investingNewsProvider", () => {
     }
   });
 
+  it("should stop an incremental (recent) walk once it reaches the stored watermark", async () => {
+    // One article per page, newest-first. UTC datetimes convert to ET (EDT, -4h):
+    //   page 1 → 2026-07-23T14:00:00 ET   (newest)
+    //   page 2 → 2026-07-23T12:00:00 ET   (== watermark boundary)
+    //   page 3 → 2026-07-22T16:00:00 ET   (older than watermark → stop here)
+    //   page 4 → 2026-07-22T14:00:00 ET   (must never be fetched)
+    const dateByPage: Record<string, string> = {
+      "1": "2026-07-23T18:00:00Z",
+      "2": "2026-07-23T16:00:00Z",
+      "3": "2026-07-22T20:00:00Z",
+      "4": "2026-07-22T18:00:00Z",
+    };
+    const fetchedPages: number[] = [];
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      const page = Number(/\/(\d+)$/.exec(String(url))?.[1] ?? "1");
+      fetchedPages.push(page);
+      const date = dateByPage[String(page)] ?? "2026-07-01T12:00:00Z";
+      return {
+        ok: true,
+        status: 200,
+        text: async () => `
+          <html>
+            <body>
+              <article data-test="article-item">
+                <a data-test="article-title-link" href="/news/stock-market-news/story-page-${page}">Story Page ${page}</a>
+                <time datetime="${date}"></time>
+                <p data-test="article-description">Summary ${page}</p>
+              </article>
+            </body>
+          </html>
+        `,
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const items = await fetchInvestingCategory("stock-market-news", {
+      maxPages: 60,
+      requestIntervalMs: 0,
+      fromDate: "2026-07-16",
+      toDate: "2026-07-23",
+      sinceTimestamp: "2026-07-23T12:00:00",
+    });
+
+    // Newer-than-watermark plus the boundary article (== watermark) are returned;
+    // URL dedup at insert time drops the boundary one we already have. Older
+    // articles (page 3+) are left alone — the walk stops after reaching them.
+    expect(items.map((item) => item.title)).toEqual(["Story Page 1", "Story Page 2"]);
+    // Page 4 is never fetched: the walk stopped once page 3 crossed the watermark.
+    expect(fetchedPages).not.toContain(4);
+  });
+
+  it("should fetch nothing when the incremental watermark is already newer than the listing", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => `
+        <html>
+          <body>
+            <article data-test="article-item">
+              <a data-test="article-title-link" href="/news/stock-market-news/already-have">Already Stored</a>
+              <time datetime="2026-07-23T18:00:00Z"></time>
+              <p data-test="article-description">Summary</p>
+            </article>
+          </body>
+        </html>
+      `,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const items = await fetchInvestingCategory("stock-market-news", {
+      maxPages: 60,
+      requestIntervalMs: 0,
+      fromDate: "2026-07-16",
+      toDate: "2026-07-23",
+      sinceTimestamp: "2026-07-23T23:00:00",
+    });
+
+    expect(items).toHaveLength(0);
+  });
+
   it("should extract US-exchange tickers from Investing article text", () => {
     const text = [
       "Apple Inc (NASDAQ:AAPL) rose while Berkshire (NYSE:BRK.A) held steady.",

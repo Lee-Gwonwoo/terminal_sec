@@ -24,6 +24,17 @@ export interface InvestingFetchOptions {
   requestIntervalMs?: number;
   fromDate?: string;
   toDate?: string;
+  /**
+   * Incremental "recent" watermark (ET-naive ISO, e.g. "2026-07-23T15:00:00").
+   * When set, the walk stops as soon as it reaches an article strictly older
+   * than this timestamp — i.e. the newest article already stored in the DB —
+   * so a daily recent pull only fetches what appeared since the last run.
+   * Articles at or newer than the watermark are still collected (URL dedup at
+   * insert time drops the boundary article we already have). Leave unset for
+   * custom pulls, which must cover the whole requested date range regardless
+   * of what is already stored (so interior gaps get filled).
+   */
+  sinceTimestamp?: string;
   onLog?: (message: string) => void;
   shouldCancel?: () => boolean;
 }
@@ -522,6 +533,7 @@ export async function fetchInvestingCategory(
   );
   const fromDate = options.fromDate?.trim() || "";
   const toDate = options.toDate?.trim() || "";
+  const sinceTimestamp = options.sinceTimestamp?.trim() || "";
   const onLog = options.onLog;
   const shouldCancel = options.shouldCancel ?? (() => false);
 
@@ -600,6 +612,7 @@ export async function fetchInvestingCategory(
   const seenUrls = new Set<string>();
   let consecutiveEmptyPages = 0;
   let reachedOlderThanFrom = false;
+  let reachedWatermark = false;
 
   let startPage = 1;
   if (toDate) {
@@ -659,10 +672,21 @@ export async function fetchInvestingCategory(
         newerThanRangeCount++;
         continue;
       }
+      if (sinceTimestamp && item.publishedAt < sinceTimestamp) {
+        // Incremental (recent) stop: this article is older than the newest one
+        // already stored, so everything below it is already in the DB. Collect
+        // the newer items on this page, then stop the walk after the page.
+        reachedWatermark = true;
+        continue;
+      }
       filteredPageItems.push(item);
     }
 
     if (filteredPageItems.length === 0) {
+      if (reachedWatermark) {
+        onLog?.(`already up to date — reached stored articles (<= ${sinceTimestamp})`);
+        break;
+      }
       if (reachedOlderThanFrom) {
         break;
       }
@@ -694,6 +718,10 @@ export async function fetchInvestingCategory(
     const oldestOnPage = filteredPageItems[filteredPageItems.length - 1]?.publishedAt.slice(0, 10) ?? "";
     onLog?.(`page ${page}: +${filteredPageItems.length} in range (down to ${oldestOnPage}), ${allItems.length} total`);
 
+    if (reachedWatermark) {
+      onLog?.(`reached stored articles (<= ${sinceTimestamp}) — stopping incremental walk`);
+      break;
+    }
     if (reachedOlderThanFrom) {
       break;
     }

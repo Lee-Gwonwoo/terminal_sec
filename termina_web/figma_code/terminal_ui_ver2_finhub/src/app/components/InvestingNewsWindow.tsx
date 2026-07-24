@@ -752,8 +752,11 @@ export function InvestingNewsWindow({
   ) => {
     const body: Record<string, unknown> = {
       mode,
+      // Recent pulls are incremental: the backend stops once it reaches the
+      // newest article already stored, so this is just a safety ceiling for a
+      // cold start (empty DB) — normal daily runs fetch only a page or two.
+      maxPages: mode === 'custom' ? 600 : 60,
       category,
-      maxPages: mode === 'custom' ? 600 : 5,
       // Custom pulls walk many pages, so go slow to stay under Cloudflare's rate
       // limit; the backend also slows down further automatically if blocks appear.
       requestIntervalMs: mode === 'custom' ? 5000 : 1000,
