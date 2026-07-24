@@ -402,7 +402,8 @@ export async function getNews(query: NewsQuery): Promise<{ items: NewsItem[]; ne
               ${securityIndustrySql} AS security_industry,
               ${floatPctSql} AS float_pct,
               ${institutionalPctSql} AS institutional_pct,
-              ${insiderPctSql} AS insider_pct
+              ${insiderPctSql} AS insider_pct,
+              (SELECT GROUP_CONCAT(bmi.folder_id) FROM bookmark_items bmi WHERE bmi.news_id = ni.id) AS bookmark_folder_ids
           FROM candidate_news cn
           JOIN news_items ni ON ni.id = cn.id
     LEFT JOIN sec_filings sf ON sf.news_id = ni.id
@@ -1055,6 +1056,10 @@ function mapNewsRow(
     peers: (primaryTicker && peersMap ? peersMap.get(primaryTicker) : undefined) ?? [],
     // Company description
     companyDescription: (primaryTicker && descMap ? descMap.get(primaryTicker) : undefined) ?? null,
+    // Bookmark folder membership (present only when the query selects it)
+    bookmarkFolderIds: row.bookmark_folder_ids
+      ? String(row.bookmark_folder_ids).split(",").filter(Boolean)
+      : [],
   };
 }
 

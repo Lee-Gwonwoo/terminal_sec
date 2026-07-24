@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { Search, Filter, ChevronDown, ArrowUp, ArrowDown, GripVertical, FileText, AlignLeft, RotateCw, Download, Columns3, Eye, X, Calendar, Plus, Square, FolderOpen, Settings2 } from 'lucide-react';
+import { Search, Filter, ChevronDown, ArrowUp, ArrowDown, GripVertical, FileText, AlignLeft, RotateCw, Download, Columns3, Eye, X, Calendar, Plus, Square, FolderOpen, Settings2, Bookmark, Check } from 'lucide-react';
 import { VariableSizeList as List } from 'react-window';
 import { BookmarkManager } from './BookmarkManager';
 import { getCompanyTickerDataAttrs } from '../companyDescription';
@@ -20,7 +20,7 @@ const NEWS_PAGE_SIZE = 200;
 type DisplayMode = 'title-only' | 'title-abstract';
 
 // ─── Column definition ───
-type ColumnId = 'date' | 'time' | 'title' | 'tickers' | 'category' | 'fulltext';
+type ColumnId = 'bookmark' | 'date' | 'time' | 'title' | 'tickers' | 'category' | 'fulltext';
 
 interface ColumnDef {
   id: ColumnId;
@@ -31,6 +31,7 @@ interface ColumnDef {
 }
 
 const DEFAULT_COLUMNS: ColumnDef[] = [
+  { id: 'bookmark', label: 'Bookmark', defaultWidth: 88,  minWidth: 48 },
   { id: 'date',     label: 'Date',     defaultWidth: 72,  minWidth: 50 },
   { id: 'time',     label: 'Time ET',  defaultWidth: 64,  minWidth: 52 },
   { id: 'title',    label: 'Title',    defaultWidth: 400, minWidth: 100, flex: true },
@@ -83,6 +84,7 @@ interface BackendNewsItem {
   tags?: string[];
   publisher?: string;
   has_fulltext?: boolean;
+  bookmarkFolderIds?: string[];
 }
 
 interface DisplayItem {
@@ -97,6 +99,7 @@ interface DisplayItem {
   publisher: string;
   hasFulltext: boolean;
   tickers: string[];
+  bookmarkFolderIds: string[];
 }
 
 function hasExplicitTimeZone(value: string): boolean {
@@ -167,6 +170,7 @@ function mapBackendItem(item: BackendNewsItem): DisplayItem {
     publisher: item.publisher ?? 'INVESTING',
     hasFulltext: !!item.has_fulltext,
     tickers: Array.isArray(item.tickers) ? item.tickers : [],
+    bookmarkFolderIds: Array.isArray(item.bookmarkFolderIds) ? item.bookmarkFolderIds : [],
   };
 }
 
@@ -270,6 +274,12 @@ export function InvestingNewsWindow({
   const [bookmarkFolderCtxMenu, setBookmarkFolderCtxMenu] = useState<null | { x: number; y: number; folderId: string }>(null);
   const bookmarkMenuRef = useRef<HTMLDivElement>(null);
   const bookmarkFolderCtxMenuRef = useRef<HTMLDivElement>(null);
+  // Bookmark column: optimistic per-item folder membership overrides (so a
+  // toggle reflects instantly without refetching), plus the folder-picker popup
+  // that opens from a row's bookmark cell.
+  const [bookmarkOverrides, setBookmarkOverrides] = useState<Map<string, string[]>>(new Map());
+  const [bookmarkCellMenu, setBookmarkCellMenu] = useState<null | { x: number; y: number; newsId: string }>(null);
+  const bookmarkCellMenuRef = useRef<HTMLDivElement>(null);
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [listHeight, setListHeight] = useState(500);
   const [stickyDate, setStickyDate] = useState('');
@@ -320,7 +330,23 @@ export function InvestingNewsWindow({
 
   // Column ordering + visibility
   const [columns, setColumns] = useState<ColumnDef[]>(DEFAULT_COLUMNS);
-  const [visibleCols, setVisibleCols] = useState<Set<ColumnId>>(DEFAULT_VISIBLE);
+  // Persist column visibility as the *hidden* set so a newly-added column
+  // (e.g. bookmark) defaults to visible for existing users, and deselecting a
+  // column survives the unmount/remount that happens on every tab switch.
+  const [visibleCols, setVisibleCols] = useState<Set<ColumnId>>(() => {
+    try {
+      const saved = localStorage.getItem('investing-news-ui-state');
+      if (saved) {
+        const p = JSON.parse(saved);
+        if (Array.isArray(p.hiddenCols)) {
+          const hidden = new Set(p.hiddenCols as ColumnId[]);
+          const visible = new Set(DEFAULT_COLUMNS.map(c => c.id).filter(id => !hidden.has(id)));
+          if (visible.size > 0) return visible;
+        }
+      }
+    } catch { /* ignore */ }
+    return new Set(DEFAULT_VISIBLE);
+  });
   const [showColumnMenu, setShowColumnMenu] = useState(false);
   const [dragColIdx, setDragColIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
@@ -345,6 +371,12 @@ export function InvestingNewsWindow({
       return next;
     });
   }, []);
+
+  // Effective bookmark folder membership for an item: optimistic override wins
+  // over the server-provided value so toggles show up immediately.
+  const getItemFolderIds = useCallback((item: DisplayItem): string[] => {
+    return bookmarkOverrides.get(item.id) ?? item.bookmarkFolderIds;
+  }, [bookmarkOverrides]);
 
   // Sort
   const [sort, setSort] = useState<SortState>(cached.sort);
@@ -450,7 +482,7 @@ export function InvestingNewsWindow({
     try {
       const state = {
         fromDate, toDate, displayMode, categoryFilter,
-        visibleCols: Array.from(visibleCols),
+        hiddenCols: DEFAULT_COLUMNS.map(c => c.id).filter(id => !visibleCols.has(id)),
         selectedBookmarkFolderId,
       };
       localStorage.setItem('investing-news-ui-state', JSON.stringify(state));
@@ -486,18 +518,6 @@ export function InvestingNewsWindow({
       // fallback: if restored selectedBookmarkFolderId no longer exists, reset
       setSelectedBookmarkFolderId(prev => (prev && folders.length > 0 && !folders.some(f => f.id === prev) ? '' : prev));
     } catch { /* ignore */ }
-  }, []);
-
-  const handleAddBookmark = useCallback(async (folderId: string, newsId: string) => {
-    try {
-      await fetch(`${API_BASE}/api/bookmarks/items`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ folderId, newsId }),
-      });
-    } finally {
-      setRowCtxMenu(null);
-    }
   }, []);
 
   const handleCreateFolder = useCallback(async (name: string) => {
@@ -581,6 +601,7 @@ export function InvestingNewsWindow({
       }
       const items: BackendNewsItem[] = data.items ?? [];
       setNewsData(items.map(mapBackendItem));
+      setBookmarkOverrides(new Map());
       setNextCursor(data.nextCursor ?? null);
     } catch (err: any) {
       if (err.name === 'AbortError') return;
@@ -616,6 +637,33 @@ export function InvestingNewsWindow({
     } catch { /* silent */ }
     finally { setLoadingMore(false); }
   }, [nextCursor, loadingMore, selectedBookmarkFolderId, categoryFilter, fromDate, toDate]);
+
+  // ─── Toggle a news item in/out of a bookmark folder ───
+  const toggleBookmarkFolder = useCallback(async (folderId: string, newsId: string, currentFolderIds: string[]) => {
+    const isMember = currentFolderIds.includes(folderId);
+    const nextIds = isMember
+      ? currentFolderIds.filter(id => id !== folderId)
+      : [...currentFolderIds, folderId];
+    // Optimistic: reflect the change in the bookmark column immediately.
+    setBookmarkOverrides(prev => { const next = new Map(prev); next.set(newsId, nextIds); return next; });
+    try {
+      const res = await fetch(`${API_BASE}/api/bookmarks/items`, {
+        method: isMember ? 'DELETE' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folderId, newsId }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      fetchBookmarkFolders(); // refresh folder item counts
+      // When the current view is filtered to this folder, re-run the query so a
+      // removed item drops out (or an added one appears) in the list.
+      if (selectedBookmarkFolderId && folderId === selectedBookmarkFolderId) {
+        fetchNews(searchQueryRef.current || undefined);
+      }
+    } catch {
+      // Revert the optimistic change if the request failed.
+      setBookmarkOverrides(prev => { const next = new Map(prev); next.set(newsId, currentFolderIds); return next; });
+    }
+  }, [fetchBookmarkFolders, fetchNews, selectedBookmarkFolderId]);
 
   useEffect(() => { fetchBookmarkFolders(); }, [fetchBookmarkFolders]);
 
@@ -920,6 +968,8 @@ export function InvestingNewsWindow({
           cmp = (a.tickers[0] ?? '').localeCompare(b.tickers[0] ?? '');
         } else if (col === 'category') {
           cmp = a.sourceType.localeCompare(b.sourceType);
+        } else if (col === 'bookmark') {
+          cmp = (getItemFolderIds(a).length > 0 ? 1 : 0) - (getItemFolderIds(b).length > 0 ? 1 : 0);
         }
         return sort.dir === 'desc' ? -cmp : cmp;
       });
@@ -935,7 +985,7 @@ export function InvestingNewsWindow({
       rows.push({ type: 'news', item });
     }
     return rows;
-  }, [newsData, sort]);
+  }, [newsData, sort, getItemFolderIds]);
 
   // ─── Row height ───
   const getItemSize = useCallback((index: number): number => {
@@ -994,6 +1044,21 @@ export function InvestingNewsWindow({
     document.addEventListener('mousedown', onMouseDown);
     return () => document.removeEventListener('mousedown', onMouseDown);
   }, [rowCtxMenu]);
+
+  useEffect(() => {
+    if (!bookmarkCellMenu) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (bookmarkCellMenuRef.current?.contains(e.target as Node)) return;
+      setBookmarkCellMenu(null);
+    };
+    const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') setBookmarkCellMenu(null); };
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [bookmarkCellMenu]);
 
   useEffect(() => {
     if (!showFilterMenu) return;
@@ -1105,6 +1170,23 @@ export function InvestingNewsWindow({
           const w = activeColWidths[colIdx];
           const cellStyle: React.CSSProperties = { width: w, minWidth: w, maxWidth: col.flex ? undefined : w };
 
+          if (col.id === 'bookmark') {
+            const isBookmarked = getItemFolderIds(item).length > 0;
+            return (
+              <div key={col.id} style={cellStyle} className="px-2 py-2 flex items-start">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setBookmarkCellMenu({ x: e.clientX, y: e.clientY, newsId: item.id });
+                  }}
+                  className={`p-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ${isBookmarked ? 'text-amber-500' : 'text-gray-300 dark:text-gray-600 hover:text-gray-400 dark:hover:text-gray-500'}`}
+                  title={isBookmarked ? 'Bookmarked — click to edit folders' : 'Add bookmark'}
+                >
+                  <Bookmark className="w-3.5 h-3.5" fill={isBookmarked ? 'currentColor' : 'none'} />
+                </button>
+              </div>
+            );
+          }
           if (col.id === 'date') {
             return (
               <div key={col.id} style={cellStyle} className="px-2 py-2 text-xs text-gray-500 dark:text-gray-400 truncate">
@@ -1182,7 +1264,7 @@ export function InvestingNewsWindow({
         })}
       </div>
     );
-  }, [sortedAndGrouped, activeColumns, activeColWidths, displayMode, expandedItems, titleFontSize, summaryFontSize, openExternalUrl, onTickerClick]);
+  }, [sortedAndGrouped, activeColumns, activeColWidths, displayMode, expandedItems, titleFontSize, summaryFontSize, openExternalUrl, onTickerClick, getItemFolderIds]);
 
   // ═══════════════════════════════════════════════
   // ─── JSX ───
@@ -1845,23 +1927,70 @@ export function InvestingNewsWindow({
               <FileText className="w-3 h-3" /> View Full Text
             </button>
             <div className="border-t border-gray-200 dark:border-gray-700 my-0.5" />
-            <div className="px-3 py-1 text-[9px] text-gray-400 uppercase">Add to bookmark</div>
+            <div className="px-3 py-1 text-[9px] text-gray-400 uppercase">Bookmark folders</div>
             {bookmarkFolders.length === 0 ? (
               <div className="px-3 py-1.5 text-xs text-gray-500">No bookmark folders</div>
-            ) : (
-              bookmarkFolders.map(f => (
-                <button
-                  key={f.id}
-                  onClick={() => handleAddBookmark(f.id, rowCtxMenu.newsId)}
-                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
-                >
-                  {f.name}
-                </button>
-              ))
-            )}
+            ) : (() => {
+              const ctxItem = newsData.find(i => i.id === rowCtxMenu.newsId);
+              const ctxFolderIds = ctxItem ? getItemFolderIds(ctxItem) : [];
+              return bookmarkFolders.map(f => {
+                const member = ctxFolderIds.includes(f.id);
+                return (
+                  <button
+                    key={f.id}
+                    onClick={() => toggleBookmarkFolder(f.id, rowCtxMenu.newsId, ctxFolderIds)}
+                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2"
+                  >
+                    <span className="w-3.5 h-3.5 flex items-center justify-center shrink-0">
+                      {member && <Check className="w-3 h-3 text-blue-500" />}
+                    </span>
+                    <span className="flex-1 truncate">{f.name}</span>
+                  </button>
+                );
+              });
+            })()}
           </div>
         </div>
       )}
+
+      {/* ── Bookmark folder picker (from a row's bookmark cell) ── */}
+      {bookmarkCellMenu && (() => {
+        const cellItem = newsData.find(i => i.id === bookmarkCellMenu.newsId);
+        const cellFolderIds = cellItem ? getItemFolderIds(cellItem) : [];
+        return (
+          <div
+            ref={bookmarkCellMenuRef}
+            className="fixed z-[60] min-w-[180px] max-w-[260px] overflow-hidden rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg"
+            style={{
+              left: Math.min(bookmarkCellMenu.x, typeof window !== 'undefined' ? window.innerWidth - 200 : bookmarkCellMenu.x),
+              top: Math.min(bookmarkCellMenu.y, typeof window !== 'undefined' ? window.innerHeight - 220 : bookmarkCellMenu.y),
+            }}
+          >
+            <div className="px-3 py-1.5 text-[9px] text-gray-400 uppercase border-b border-gray-100 dark:border-gray-700">Bookmark folders</div>
+            <div className="p-1 max-h-[240px] overflow-y-auto">
+              {bookmarkFolders.length === 0 ? (
+                <div className="px-3 py-1.5 text-xs text-gray-500">No folders — create one in Bookmark view</div>
+              ) : (
+                bookmarkFolders.map(f => {
+                  const member = cellFolderIds.includes(f.id);
+                  return (
+                    <button
+                      key={f.id}
+                      onClick={() => toggleBookmarkFolder(f.id, bookmarkCellMenu.newsId, cellFolderIds)}
+                      className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2"
+                    >
+                      <span className="w-3.5 h-3.5 flex items-center justify-center shrink-0">
+                        {member && <Check className="w-3 h-3 text-blue-500" />}
+                      </span>
+                      <span className="flex-1 truncate">{f.name}</span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Bookmark manager ── */}
       {showBookmarkManager && (

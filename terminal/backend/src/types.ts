@@ -96,6 +96,8 @@ export type NewsItem = {
   peers?: string[];
   // ver3: company description (Step 8)
   companyDescription?: string | null;
+  // ver3: bookmark folder membership (folder ids this news is bookmarked in)
+  bookmarkFolderIds?: string[];
 };
 
 export type Model1NewsItem = Omit<
