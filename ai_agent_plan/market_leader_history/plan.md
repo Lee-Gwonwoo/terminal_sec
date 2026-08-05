@@ -102,6 +102,18 @@ for 종목, for 시작일 s (모든 거래일):
 
 ---
 
+### 3-5. 보조 스크린 — 4주 순수 대상승 (z 무관)
+
+z-리더는 "**당시 변동성 대비**" 주도를 잡으므로, TSLA처럼 상시 변동성이 큰 종목의 절대적 대상승은 놓친다(예: TSLA 2020 여름 2주 +47%인데 σ_d 4.2%라 z=2.9, 탈락). 이를 보완하는 **별도 스크린**:
+
+```
+4주(20거래일) 누적 등락률 ≥ +60%   (z 무관, 순수 등락률)
+AND 창 내 모든 일봉 turnover ≥ $30M · mcap ≥ 300M · 창 시작일 ≥ 2015
+정리: 티커·월당 최대 4주 상승 → market_leader_bigmovers_4w.csv (924행)
+```
+- z_4w는 **참고 컬럼**으로만 저장(필터 아님). TSLA 2020-01/03/04/06/08, 2023-01, 2024-10 등 포착.
+- **두 스크린은 상호보완**: z-리더=상대적 이례성, 대상승=절대적 크기.
+
 ## 4. 공통 필터 / 분류축
 
 - 시총 ≥ $300M, 윈도우 내 **모든 일봉** turnover ≥ $30M, σ_d 유효표본(60개) 확보, σ_d 하한(분모 폭발 방지).
@@ -141,13 +153,14 @@ for 종목, for 시작일 s (모든 거래일):
 ### B3. 가격 데이터 ~2.5개월 낡음
 OHLC 종료 2026-05-05, 오늘 2026-07-27. 최근 리더십(진행 중 포함)을 잡으려면 OHLC 갱신 권고. 미완결 윈도우는 **행 제외**(0으로 채우지 않음).
 
-### B5. **OHLC 과거 절단 — 메가캡 대부분 pre-2021 데이터 없음 (심각, 2026-07-27 발견)**
-TSLA가 2019/2020 리더로 안 잡힌 것을 계기로 발견: **951개 종목이 전부 2021-12-02에 일제히 시작**한다(AAPL·MSFT·NVDA·TSLA·AMZN·GOOGL·META·AMD·NFLX 등 메가캡 전부, 각 1109 bars 동일). 명백한 대량 절단.
-- **2015~2021 리더보드는 오늘의 최대 주도주들이 통째로 빠진 반쪽 표본.** "예전엔 리더 적음/중형주 위주" 결론은 상당 부분 이 데이터 부재 착시.
-- 앞서 "유니버스 2020→2021 2배(987→2017)"도 IPO 붐이 아니라 이 절단 종목이 나타난 것.
-- **거래대금 스케일 조정(코호트 앵커)으로 못 고침** — 없는 데이터는 문턱 낮춰도 안 생김. 스케일 재실행은 이 이슈 해결 후로 보류.
-- 추가 절단 파도: ~737종목 2024 시작, SHOP 2025-12-02(80 bars). 진짜 2010 풀히스토리는 658종목뿐. 상세 [[ohlc-db-history-truncation]].
-- **선택지:** (a) 절단 종목 풀히스토리 백필(EODHD, `OHLC_data/test_download_eodhd_1d_watchlist_to_single_sqlite_full.py`) 후 재산출 / (b) 연구를 **2022+로 한정** / (c) 캐비엇 명시하고 pre-2021은 참고용. **→ 결정 필요.**
+### B5. OHLC 과거 절단 → **해결 (Yahoo 백필, 2026-07-27)**
+발견: default ≥300M 티커 1,762개 중 **714개(41%)가 pre-2021 데이터 없음** — 630개는 2021-12-02에 일제 절단(AAPL·NVDA·TSLA·MSFT·AMZN·GOOGL·META·AMD 등 메가캡), 84개는 OHLC 아예 없음. "예전엔 리더 적음/중형주 위주"는 이 데이터 부재 착시였다(유니버스 2020→2021 급증도 절단 종목이 나타난 것). 상세 [[ohlc-db-history-truncation]].
+- **해결: Yahoo(yfinance) 무료 백필.** 조정기준이 우리 DB와 정확히 일치(TSLA/AAPL/NVDA 접합비율 1.000, NVDA 2024 스플릿 후에도) → 이어붙이기 안전.
+- `scripts/backfill_yahoo.py` → `raw_data/ohlc_backfill.sqlite`: **531종목 972,415행(2009~)** 채움. 대상은 default ≥300M 중 2015+ 시작/데이터없음 **1,016개** — 나머지는 ALAB류 진짜 신규상장이라 무보완이 정상, 11종목은 스플릿 접합비율 자동보정(수익률 불변).
+- `extract_leaders.py`가 백필 DB를 **UNION**(비파괴, 프로덕션 DB 불변). main 4.92M + backfill 0.97M = 5.89M행.
+- **효과:** TSLA 2020-01(z4.5) 등장, 리더(원안 고정 $30M) 494→**555건**, 2020년 47→66건. AAPL·MSFT는 여전히 안 잡힘(2주 +25% 급등을 안 함 — z-리더십의 정당한 성질).
+- 중간시작(2015~2021)까지 추가 백필했으나 리더 변화 미미 → **실질 공백은 메가캡 절단이 전부였고 결과 수렴 확인.** 잔여: 상장폐지 과거 주도주는 여전히 부재(생존편향, 현 유니버스 밖).
+- **거래대금 문턱 = 원안 고정 $30M/일 확정** (사용자: 원래 계획대로). 코호트 연도스케일은 `TURN_SCALE=True` 옵션(적용 시 893건).
 
 ### B4. 창 크기 민감도
 W=10 고정 vs "≥10 가변 지속" 은 결과 성격을 바꾼다. 짧은 W는 이벤트에 가깝고, 긴 W는 진짜 추세 리더를 잡는다. §미결정 Q1.
@@ -161,9 +174,23 @@ ai_agent_plan/market_leader_history/
 ├── plan.md                      (이 문서)
 ├── zscore_criteria.md           (§3 결정 기록 — 확정 후)
 ├── scripts/
-│   └── extract_leaders.py       (윈도우 z 스캔 + 월별 그룹핑, 재실행 가능)
+│   ├── extract_leaders.py       (윈도우 z 스캔 + 월별 그룹핑 + [6/6] 4주 대상승, 재실행 가능)
+│   ├── backfill_yahoo.py        (Yahoo pre-2021 백필 → ohlc_backfill.sqlite)
+│   ├── enrich_ownership.py      (Yahoo inst%/float% 수집 → ownership_yahoo.csv, 캐시)
+│   ├── combine_screens.py       (cohort 2주+4주 결합, 월×티커 dedup, inst<90)
+│   └── cohort_scale_table.py    (연도별 거래대금 스케일 raw)
 ├── raw_data/
-│   └── market_leader_monthly.csv    (1행 = 월 × 티커, 그 달 최고 z_win)
+│   ├── market_leader_monthly.csv            (확정본, 2주 z≥4, 원안 고정 $30M, 555행)
+│   ├── market_leader_monthly_cohortscaled.csv (2주 z≥4, 코호트 스케일, 893행)
+│   ├── market_leader_bigmovers_4w.csv       (4주 순수 +60%, z무관, 고정 $30M, 924행)
+│   ├── market_leader_bigmovers_4w_cohortscaled.csv (4주 +60%, 코호트 스케일, 1,471행)
+│   ├── market_leader_cohort_combined.csv    (코호트 2주+4주 결합, screens 플래그, 2,086행)
+│   ├── market_leader_cohort_combined_inst_lt90.csv (위 + inst≥90 제외, 1,320행)
+│   ├── ownership_yahoo.csv                  (639티커 inst%/float%/insider%, 현재 스냅샷)
+│   ├── cohort_turnover_scale.csv            (연도별 코호트 거래대금·문턱)
+│   └── ohlc_backfill.sqlite                 (Yahoo 백필 531종목)
+│
+│  ※ 세 리더 CSV에 `inst_pct`·`float_pct` 컬럼 포함(Yahoo 현재 스냅샷 → 과거행엔 look-ahead)
 └── charts/  (선택: 월별 리더 수, z 분포, 지속기간 분포)
 ```
 

@@ -690,6 +690,8 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const [financialSyncConcurrency, setFinancialSyncConcurrency] = useState(() =>
     readStoredNumberInRange('calendar-fmp-financial-concurrency', DEFAULT_FINANCIAL_SYNC_CONCURRENCY, 1, 20)
   );
+  // 업데이트 버튼들은 이름이 길고 개수가 많아 기본으로 접어 둔다.
+  const [showUpdateTools, setShowUpdateTools] = useState(() => readStoredBoolean('calendar-show-update-tools', false));
 
   const currentTypeConfig = typeConfigs.find((item) => item.key === activeType) ?? FALLBACK_TYPES[0];
   const currentColumns = columnStates[activeType] ?? buildColumns(activeType, currentTypeConfig?.columns ?? []);
@@ -1462,6 +1464,43 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     });
   };
 
+  // ─── Earning Calendar ver2 (Yahoo) ───
+  // date-fix       = quote() 배치. 날짜 + 확정/추정 플래그만. 전 유니버스 약 35~55초.
+  // precise-update = quoteSummary() 종목별. EPS/매출 컨센 + 애널리스트 수까지. 범위에 드는 종목만.
+  const toggleUpdateTools = () => {
+    setShowUpdateTools((value) => {
+      const next = !value;
+      try {
+        localStorage.setItem('calendar-show-update-tools', String(next));
+      } catch {
+        // ignore storage failures
+      }
+      return next;
+    });
+  };
+
+  const startYahooEarningsJob = async (
+    tier: 'date-fix' | 'precise-update',
+    scope: 'next3m' | 'custom',
+  ) => {
+    if (scope === 'custom' && (!dateFrom || !dateTo)) {
+      setActionError('Custom scope requires both From and To dates in the filter above.');
+      return;
+    }
+
+    const tierLabel = tier === 'date-fix' ? 'Yahoo Just Earning Date Fix' : 'Yahoo Earning Precise Update';
+    const scopeLabel = scope === 'next3m' ? 'Next 3 Months' : `${dateFrom} ~ ${dateTo}`;
+
+    await startCalendarJob({
+      url: `/api/yahoo/calendar/earnings/${tier}`,
+      label: `${tierLabel} (${scopeLabel})`,
+      failureMessage: `${tierLabel} failed`,
+      requestBody: scope === 'custom'
+        ? { scope, from: dateFrom, to: dateTo, concurrency: earningsUpdateConcurrency }
+        : { scope, concurrency: earningsUpdateConcurrency },
+    });
+  };
+
   const handleIpoUpdate = async () => {
     await startCalendarJob({
       url: '/api/fmp/calendar/ipos/update',
@@ -1935,8 +1974,56 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
             )}
           </div>
 
-          {activeType === 'earnings' && (
+          {activeType !== 'economics' && (
+          <button
+            onClick={toggleUpdateTools}
+            title={showUpdateTools ? 'Hide data update buttons' : 'Show data update buttons'}
+            className={`flex items-center gap-1 px-3 py-2 text-sm rounded border ${showUpdateTools ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'}`}
+          >
+            <RefreshCw className={`w-4 h-4 ${updatePending ? 'animate-spin' : ''}`} />
+            Update Tools
+            {showUpdateTools ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
+          )}
+
+          {showUpdateTools && activeType === 'earnings' && (
             <>
+              <button
+                onClick={() => void startYahooEarningsJob('date-fix', 'next3m')}
+                disabled={updatePending}
+                title="quote() 배치로 default universe 전 종목의 다음 실적일 + 확정/추정 플래그만 갱신 (약 35~55초)"
+                className={`flex items-center gap-2 px-3 py-2 text-sm rounded text-white ${updatePending ? 'bg-teal-400 cursor-wait' : 'bg-teal-600 hover:bg-teal-700'}`}
+              >
+                <RefreshCw className={`w-4 h-4 ${updatePending ? 'animate-spin' : ''}`} />
+                Yahoo Date Fix · Next 3M
+              </button>
+              <button
+                onClick={() => void startYahooEarningsJob('date-fix', 'custom')}
+                disabled={updatePending || !hasRequiredDateRange}
+                title={hasRequiredDateRange ? `날짜만 갱신 · 위 필터 범위 ${dateFrom} ~ ${dateTo}` : 'From/To 날짜를 먼저 지정하세요'}
+                className={`flex items-center gap-2 px-3 py-2 text-sm rounded text-white ${(updatePending || !hasRequiredDateRange) ? 'bg-teal-400 cursor-not-allowed' : 'bg-teal-700 hover:bg-teal-800'}`}
+              >
+                <RefreshCw className={`w-4 h-4 ${updatePending ? 'animate-spin' : ''}`} />
+                Yahoo Date Fix · Custom
+              </button>
+              <button
+                onClick={() => void startYahooEarningsJob('precise-update', 'next3m')}
+                disabled={updatePending}
+                title="날짜 + EPS/매출 컨센서스 + 애널리스트 수까지. 앞으로 90일 내 발표 종목만 (약 9분)"
+                className={`flex items-center gap-2 px-3 py-2 text-sm rounded text-white ${updatePending ? 'bg-violet-400 cursor-wait' : 'bg-violet-600 hover:bg-violet-700'}`}
+              >
+                <RefreshCw className={`w-4 h-4 ${updatePending ? 'animate-spin' : ''}`} />
+                Yahoo Precise · Next 3M
+              </button>
+              <button
+                onClick={() => void startYahooEarningsJob('precise-update', 'custom')}
+                disabled={updatePending || !hasRequiredDateRange}
+                title={hasRequiredDateRange ? `추정치까지 갱신 · 위 필터 범위 ${dateFrom} ~ ${dateTo}` : 'From/To 날짜를 먼저 지정하세요'}
+                className={`flex items-center gap-2 px-3 py-2 text-sm rounded text-white ${(updatePending || !hasRequiredDateRange) ? 'bg-violet-400 cursor-not-allowed' : 'bg-violet-700 hover:bg-violet-800'}`}
+              >
+                <RefreshCw className={`w-4 h-4 ${updatePending ? 'animate-spin' : ''}`} />
+                Yahoo Precise · Custom
+              </button>
               <button
                 onClick={handleEarningsUpdate}
                 disabled={updatePending}
@@ -2016,7 +2103,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
             </>
           )}
 
-          {activeType === 'ipos' && (
+          {showUpdateTools && activeType === 'ipos' && (
             <>
               <button
                 onClick={handleIpoUpdate}
@@ -2037,7 +2124,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
             </>
           )}
 
-          {activeType !== 'economics' && (
+          {showUpdateTools && activeType !== 'economics' && (
             <button
               onClick={handleYahooDescriptionUpdate}
               disabled={updatePending || activeCalendarTickers.length === 0}

@@ -32,6 +32,10 @@ interface DataControlWindowProps {
   onNewsTitleFontSizeChange?: (n: number) => void;
   newsSummaryFontSize?: number;
   onNewsSummaryFontSizeChange?: (n: number) => void;
+  investingTitleFontSize?: number;
+  onInvestingTitleFontSizeChange?: (n: number) => void;
+  investingSummaryFontSize?: number;
+  onInvestingSummaryFontSizeChange?: (n: number) => void;
 }
 
 interface DbColumn { cid: number; name: string; type: string; notnull: number; dflt_value: string | null; pk: number; }
@@ -46,6 +50,10 @@ export function DataControlWindow({
   onNewsTitleFontSizeChange,
   newsSummaryFontSize = 11,
   onNewsSummaryFontSizeChange,
+  investingTitleFontSize = 12,
+  onInvestingTitleFontSizeChange,
+  investingSummaryFontSize = 11,
+  onInvestingSummaryFontSizeChange,
 }: DataControlWindowProps) {
   // ─── Status state ───
   const [statuses, setStatuses] = useState<Record<string, UpdateStatusItem | null>>({});
@@ -999,6 +1007,85 @@ export function DataControlWindow({
                     step={1}
                     value={newsSummaryFontSize}
                     onChange={e => onNewsSummaryFontSizeChange?.(parseInt(e.target.value, 10))}
+                    className="flex-1 accent-blue-500"
+                  />
+                  <span className="text-[11px] text-gray-500 w-5 text-right">A</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-850">
+            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">Investing News Typography</h3>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-4">
+              Investing 창의 기사 제목과 summary 본문 크기입니다. 위의 News Feed Typography와 별개로 따로 움직입니다.
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-medium text-gray-700 dark:text-gray-200">Article Title</span>
+                  <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300">{investingTitleFontSize}px</span>
+                </div>
+                <div className="flex gap-2 mb-2 flex-wrap">
+                  {[11, 12, 14, 16].map(size => (
+                    <button
+                      key={`investing-title-${size}`}
+                      onClick={() => onInvestingTitleFontSizeChange?.(size)}
+                      className={`px-3 py-1 rounded border text-xs font-medium transition-colors ${
+                        investingTitleFontSize === size
+                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+                          : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200'
+                      }`}
+                    >
+                      {size}px
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-[11px] text-gray-500 w-5">A</span>
+                  <input
+                    type="range"
+                    min={10}
+                    max={20}
+                    step={1}
+                    value={investingTitleFontSize}
+                    onChange={e => onInvestingTitleFontSizeChange?.(parseInt(e.target.value, 10))}
+                    className="flex-1 accent-blue-500"
+                  />
+                  <span className="text-[11px] text-gray-500 w-5 text-right">A</span>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-medium text-gray-700 dark:text-gray-200">Summary Text</span>
+                  <span className="text-xs tabular-nums text-gray-600 dark:text-gray-300">{investingSummaryFontSize}px</span>
+                </div>
+                <div className="flex gap-2 mb-2 flex-wrap">
+                  {[10, 11, 12, 14].map(size => (
+                    <button
+                      key={`investing-summary-${size}`}
+                      onClick={() => onInvestingSummaryFontSizeChange?.(size)}
+                      className={`px-3 py-1 rounded border text-xs font-medium transition-colors ${
+                        investingSummaryFontSize === size
+                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
+                          : 'border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200'
+                      }`}
+                    >
+                      {size}px
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-[11px] text-gray-500 w-5">A</span>
+                  <input
+                    type="range"
+                    min={9}
+                    max={18}
+                    step={1}
+                    value={investingSummaryFontSize}
+                    onChange={e => onInvestingSummaryFontSizeChange?.(parseInt(e.target.value, 10))}
                     className="flex-1 accent-blue-500"
                   />
                   <span className="text-[11px] text-gray-500 w-5 text-right">A</span>

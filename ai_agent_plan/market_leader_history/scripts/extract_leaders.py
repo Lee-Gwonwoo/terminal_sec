@@ -20,22 +20,33 @@ OHLC = r"C:\github_coding\terminal_sec\OHLC_data\ohlc_1d_watchlist.sqlite"
 APP  = r"C:\github_coding\terminal_sec\terminal\backend\backend\data\app.db"
 MCAP_CSV = r"C:\github_coding\terminal_sec\watch lists2_2026-05-11_914fc.csv"
 OUT  = r"C:\github_coding\terminal_sec\ai_agent_plan\market_leader_history\raw_data"
+BACKFILL = r"C:\github_coding\terminal_sec\ai_agent_plan\market_leader_history\raw_data\ohlc_backfill.sqlite"
 
 W          = 10        # 윈도우 거래일 (2주)
 LOOKBACK   = 60        # sigma 기준선
 SD_MIN     = 0.005     # 일간 로그수익률 sigma 하한 (분모 폭발 방지)
-TURN_MIN   = 30e6      # 창 내 모든 일봉 최소 거래대금
+TURN_MIN   = 30e6      # 거래대금 문턱 (원래 계획: 전 기간 고정 $30M/일)
+# 기본 False = 원안 고정 $30M → market_leader_monthly.csv
+# 환경변수 MLH_TURN_SCALE=1 이면 코호트 연도스케일 → market_leader_monthly_cohortscaled.csv
+TURN_SCALE = os.environ.get("MLH_TURN_SCALE", "0") == "1"
 MCAP_MIN   = 300e6
 Z_MIN      = 4.0
 RET_MIN    = 25.0      # 절대하한: 2주 누적 등락률 (조용한 대형주 배제)
 DATE_MIN   = "2015-01-01"   # 창 시작일 하한
+BIG_W      = 20        # 대상승 스크린 창 (4주 = 20거래일)
+BIG_RET    = 60.0      # 대상승 스크린: 4주 누적 등락률 하한 (z 무관, 순수 등락률)
 
 # ---------------------------------------------------------------- OHLC + cleaning (R0~R4)
-print("[1/5] OHLC load + cleaning")
+print("[1/5] OHLC load + cleaning (+ Yahoo 백필 UNION)")
 df = pd.read_sql("SELECT Symbol,Datetime,Open,High,Low,Close,Volume FROM ohlc_1d",
                  sqlite3.connect(f"file:{OHLC}?mode=ro", uri=True))
 n0 = len(df)
-df = df.drop_duplicates(subset=["Symbol", "Datetime"])                       # R0
+if os.path.exists(BACKFILL):
+    bf = pd.read_sql("SELECT Symbol,Datetime,Open,High,Low,Close,Volume FROM ohlc_1d",
+                     sqlite3.connect(f"file:{BACKFILL}?mode=ro", uri=True))
+    print(f"  main {len(df):,} + backfill {len(bf):,} ({bf.Symbol.nunique()}종목)")
+    df = pd.concat([df, bf], ignore_index=True)                              # main 우선
+df = df.drop_duplicates(subset=["Symbol", "Datetime"], keep="first")         # R0 (+접합 중복 제거)
 df = df.sort_values(["Symbol", "Datetime"]).reset_index(drop=True)
 
 oc = ["Open", "High", "Low", "Close"]
@@ -73,6 +84,20 @@ r = np.log(df.Close.values / df.prev_close.values)
 r[corrupt] = np.nan
 df["r"] = r
 
+# ---------------------------------------------------------------- 연도별 거래대금 문턱 (코호트 스케일, 2026=TURN_MIN 앵커)
+df["year"] = df.Datetime.str[:4]
+if TURN_SCALE:
+    _sy = df.groupby(["Symbol", "year"])["turnover"].median().reset_index()
+    _cnt = df.groupby(["Symbol", "year"]).size().unstack(fill_value=0)
+    _coh = _cnt.index[(_cnt.get("2015", 0) >= 150) & (_cnt.get("2025", 0) >= 150)]
+    _ref = _sy[(_sy.year == "2026") & (_sy.Symbol.isin(_coh))].turnover.median()
+    thresh_by_year = {y: TURN_MIN * (_sy[(_sy.year == y) & (_sy.Symbol.isin(_coh))].turnover.median() / _ref)
+                      for y in [str(x) for x in range(2015, 2027)]}
+    print(f"  코호트 {len(_coh)}종목 | 연도별 문턱$M:",
+          {y: round(v/1e6, 1) for y, v in thresh_by_year.items()})
+else:
+    thresh_by_year = {str(y): TURN_MIN for y in range(2015, 2027)}
+
 # ---------------------------------------------------------------- rolling window features (at end-row e; window_start s=e-9)
 print("[2/5] rolling window z / turnover / shape")
 gb = df.groupby("Symbol", sort=False)["r"]
@@ -91,6 +116,7 @@ df["sd_prewin"]   = gS["sd60"].shift(W)          # sigma of 60 returns ending at
 df["c_start"]     = gS["Close"].shift(W - 1)     # C[s] = C[e-9]
 df["c_prevstart"] = gS["Close"].shift(W)         # C[s-1] = C[e-10]
 df["date_start"]  = gS["Datetime"].shift(W - 1)  # date[s]
+df["turn_thresh"] = df.date_start.str[:4].map(thresh_by_year)  # 창 시작연도의 거래대금 문턱
 
 # z_win (aligned at end-row e; belongs to window_start s=e-9)
 sd = df.sd_prewin.values.copy()
@@ -110,14 +136,23 @@ df["mcap_at_start"] = df.impl_shares * df.c_start                        # 이�
 df["mcap_now"] = df.Symbol.map(mc_now)
 print(f"  CSV tickers w/ mcap: {len(shares):,}")
 
+# 소유구조 (Yahoo 스냅샷, enrich_ownership.py 산출) — 현재값이므로 과거 이벤트엔 look-ahead
+_own_path = os.path.join(OUT, "ownership_yahoo.csv")
+inst_map, float_map = {}, {}
+if os.path.exists(_own_path):
+    _own = pd.read_csv(_own_path)
+    inst_map = dict(zip(_own.ticker, _own.inst_pct))
+    float_map = dict(zip(_own.ticker, _own.float_pct))
+    print(f"  ownership 로드: {len(_own)}티커 (inst/float, 현재 스냅샷)")
+
 # ---------------------------------------------------------------- qualify + monthly grouping
-print("[4/5] qualify (z>=%.1f, ret_2w>=%.0f%%, turn_min>=%.0fM, mcap>=%.0fM, start>=%s) + monthly leaderboard"
-      % (Z_MIN, RET_MIN, TURN_MIN/1e6, MCAP_MIN/1e6, DATE_MIN))
+print("[4/5] qualify (z>=%.1f, ret_2w>=%.0f%%, turn_min>=문턱(연도스케일=%s), mcap>=%.0fM, start>=%s) + monthly leaderboard"
+      % (Z_MIN, RET_MIN, TURN_SCALE, MCAP_MIN/1e6, DATE_MIN))
 ret2w = (np.exp(df.rw10.values) - 1) * 100
 q = ((df.z_win >= Z_MIN) & df.rw10.notna() & df.sd_prewin.notna()
      & (ret2w >= RET_MIN)
      & (df.date_start >= DATE_MIN)
-     & (df.turn_min10 >= TURN_MIN) & (df.mcap_at_start >= MCAP_MIN))
+     & (df.turn_min10 >= df.turn_thresh) & (df.mcap_at_start >= MCAP_MIN))
 d = df[q].copy()
 print(f"  day-level hits (창 시작일 단위): {len(d):,}")
 
@@ -152,18 +187,21 @@ def bucket(v):
 lead["mcap_bucket"] = lead.mcap_at_start.map(bucket)
 
 cols = ["month","Symbol","window_start","window_end","z_win","ret_2w_pct",
-        "mcap_at_start","turn_min10","turn_med10","sigma_d_pct","end_vs_high",
+        "mcap_at_start","turn_min10","turn_med10","turn_thresh","sigma_d_pct","end_vs_high",
         "up_day_ratio","max_day_contrib","run_days","sector","industry","mcap_bucket","mcap_now"]
 out = (lead[cols].rename(columns={"Symbol":"ticker","turn_min10":"turnover_min",
-        "turn_med10":"turnover_median","mcap_now":"market_cap_now"})
+        "turn_med10":"turnover_median","turn_thresh":"turnover_thresh","mcap_now":"market_cap_now"})
        .sort_values(["month","z_win"], ascending=[False, False]).reset_index(drop=True))
+out["inst_pct"] = out.ticker.map(inst_map)
+out["float_pct"] = out.ticker.map(float_map)
 for c in ["z_win","ret_2w_pct","sigma_d_pct","end_vs_high","up_day_ratio","max_day_contrib"]:
     out[c] = out[c].round(3)
-for c in ["mcap_at_start","turnover_min","turnover_median","market_cap_now"]:
+for c in ["mcap_at_start","turnover_min","turnover_median","turnover_thresh","market_cap_now"]:
     out[c] = out[c].round(0)
 
 os.makedirs(OUT, exist_ok=True)
-path = os.path.join(OUT, "market_leader_monthly.csv")
+path = os.path.join(OUT, "market_leader_monthly_cohortscaled.csv" if TURN_SCALE
+                         else "market_leader_monthly.csv")
 out.to_csv(path, index=False, encoding="utf-8-sig")
 print(f"  wrote {path}  ({len(out):,} rows = 티커x월)")
 
@@ -193,3 +231,60 @@ else:
     if len(raw):
         b = raw.loc[raw.z_win.idxmax()] if raw.z_win.notna().any() else raw.iloc[-1]
         print(f"  MXL 2026-04 최고 z_win={b.z_win:.2f} (start {str(b.date_start)[:10]}, turn_min={b.turn_min10/1e6 if pd.notna(b.turn_min10) else float('nan'):.0f}M, mcap={b.mcap_at_start/1e9 if pd.notna(b.mcap_at_start) else float('nan'):.2f}B)")
+
+# ==================================================================
+# 별도 스크린: 4주(20거래일) 순수 등락률 대상승 (z 무관)
+#   자기 변동성과 무관하게 "절대적으로 크게 오른 것" — TSLA 여름2020 류.
+# ==================================================================
+print("\n[6/6] 대상승 스크린 (4주 %.0f%%+, z 무관)" % BIG_RET)
+gB = df.groupby("Symbol", sort=False)
+df["rw20"]       = gB["r"].rolling(BIG_W, min_periods=BIG_W).sum().reset_index(level=0, drop=True)
+df["turn_min20"] = gB["turnover"].rolling(BIG_W, min_periods=BIG_W).min().reset_index(level=0, drop=True)
+df["up20"]       = (df.r > 0).groupby(df.Symbol, sort=False).rolling(BIG_W, min_periods=BIG_W).sum().reset_index(level=0, drop=True)
+df["high_max20"] = gB["High"].rolling(BIG_W, min_periods=BIG_W).max().reset_index(level=0, drop=True)
+gB2 = df.groupby("Symbol", sort=False)
+df["c_start20"]    = gB2["Close"].shift(BIG_W - 1)
+df["date_start20"] = gB2["Datetime"].shift(BIG_W - 1)
+df["sd_prewin20"]  = gB2["sd60"].shift(BIG_W)
+df["mcap_start20"] = df.impl_shares * df.c_start20
+ret4w = (np.exp(df.rw20.values) - 1) * 100
+sd20 = df.sd_prewin20.values.copy(); sd20[sd20 < SD_MIN] = np.nan
+df["z_4w"] = df.rw20.values / (sd20 * np.sqrt(BIG_W))       # 참고용 (필터 아님)
+df["turn_thresh20"] = df.date_start20.str[:4].map(thresh_by_year)   # 4주 창도 동일 문턱(고정 or 코호트)
+
+qb = ((ret4w >= BIG_RET) & df.rw20.notna()
+      & (df.date_start20 >= DATE_MIN)
+      & (df.turn_min20 >= df.turn_thresh20) & (df.mcap_start20 >= MCAP_MIN))
+b = df[qb].copy()
+b["month"] = b.date_start20.str[:7]
+bi = b.groupby(["Symbol", "month"])["rw20"].idxmax()          # 티커·월당 최대 4주 상승
+bl = b.loc[bi].copy()
+bl["window_start"] = bl.date_start20.str[:10]
+bl["window_end"]   = bl.Datetime.str[:10]
+bl["ret_4w_pct"]   = (np.exp(bl.rw20) - 1) * 100
+bl["z_4w_ref"]     = bl.z_4w
+bl["sigma_d_pct"]  = bl.sd_prewin20 * 100
+bl["up_day_ratio"] = bl.up20 / BIG_W
+bl["end_vs_high"]  = bl.Close / bl.high_max20
+bl["sector"] = bl.Symbol.map(sec); bl["industry"] = bl.Symbol.map(ind)
+bl["mcap_bucket"] = bl.mcap_start20.map(bucket)
+bcols = ["month","Symbol","window_start","window_end","ret_4w_pct","z_4w_ref","sigma_d_pct",
+         "mcap_start20","turn_min20","up_day_ratio","end_vs_high","sector","industry","mcap_bucket","mcap_now"]
+bout = (bl[bcols].rename(columns={"Symbol":"ticker","mcap_start20":"mcap_at_start",
+        "turn_min20":"turnover_min","mcap_now":"market_cap_now"})
+        .sort_values(["month","ret_4w_pct"], ascending=[False, False]).reset_index(drop=True))
+bout["inst_pct"] = bout.ticker.map(inst_map)
+bout["float_pct"] = bout.ticker.map(float_map)
+for c in ["ret_4w_pct","z_4w_ref","sigma_d_pct","up_day_ratio","end_vs_high"]:
+    bout[c] = bout[c].round(3)
+for c in ["mcap_at_start","turnover_min","market_cap_now"]:
+    bout[c] = bout[c].round(0)
+bpath = os.path.join(OUT, "market_leader_bigmovers_4w_cohortscaled.csv" if TURN_SCALE
+                          else "market_leader_bigmovers_4w.csv")
+bout.to_csv(bpath, index=False, encoding="utf-8-sig")
+print(f"  wrote {bpath}  ({len(bout):,} rows = 티커x월) | 유니크 {bout.ticker.nunique()} | {bout.month.min()}~{bout.month.max()}")
+byr = bout.assign(y=bout.month.str[:4]).groupby("y").size()
+print("  연도별:", byr.to_dict())
+tb = bout[bout.ticker == "TSLA"]
+if len(tb):
+    print("  TSLA:", ", ".join(f"{m}(+{r:.0f}%)" for m, r in zip(tb.month, tb.ret_4w_pct)))

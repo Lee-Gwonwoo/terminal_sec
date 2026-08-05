@@ -82,6 +82,8 @@ export default function App() {
   const [fontScale, setFontScale] = useState(1);
   const [newsTitleFontSize, setNewsTitleFontSize] = useState(12);
   const [newsSummaryFontSize, setNewsSummaryFontSize] = useState(11);
+  const [investingTitleFontSize, setInvestingTitleFontSize] = useState(12);
+  const [investingSummaryFontSize, setInvestingSummaryFontSize] = useState(11);
   const [dragTabId, setDragTabId] = useState<string | null>(null);
   const [dragOverTabId, setDragOverTabId] = useState<string | null>(null);
   const [workspaceHydrated, setWorkspaceHydrated] = useState(false);
@@ -344,6 +346,8 @@ export default function App() {
       if (typeof p.fontScale === 'number') setFontScale(p.fontScale);
       setNewsTitleFontSize(clampNumber(p.newsTitleFontSize, 12, 10, 20));
       setNewsSummaryFontSize(clampNumber(p.newsSummaryFontSize, 11, 9, 18));
+      setInvestingTitleFontSize(clampNumber(p.investingTitleFontSize, 12, 10, 20));
+      setInvestingSummaryFontSize(clampNumber(p.investingSummaryFontSize, 11, 9, 18));
     } catch { /* corrupted — use defaults */ }
     finally {
       setWorkspaceHydrated(true);
@@ -367,13 +371,15 @@ export default function App() {
           fontScale,
           newsTitleFontSize,
           newsSummaryFontSize,
+          investingTitleFontSize,
+          investingSummaryFontSize,
           linkedTicker,
           tabs: tabs.map(t => ({ id: t.id, name: t.name, windows: t.windows })),
         }));
       } catch { /* quota */ }
     }, 200);
     return () => globalThis.clearTimeout(timer);
-  }, [workspaceHydrated, tabs, activeTabId, isDarkMode, fontScale, newsTitleFontSize, newsSummaryFontSize, linkedTicker]);
+  }, [workspaceHydrated, tabs, activeTabId, isDarkMode, fontScale, newsTitleFontSize, newsSummaryFontSize, investingTitleFontSize, investingSummaryFontSize, linkedTicker]);
 
   useEffect(() => {
     // Apply dark mode class to document
@@ -794,6 +800,10 @@ export default function App() {
             onNewsTitleFontSizeChange={setNewsTitleFontSize}
             newsSummaryFontSize={newsSummaryFontSize}
             onNewsSummaryFontSizeChange={setNewsSummaryFontSize}
+            investingTitleFontSize={investingTitleFontSize}
+            onInvestingTitleFontSizeChange={setInvestingTitleFontSize}
+            investingSummaryFontSize={investingSummaryFontSize}
+            onInvestingSummaryFontSizeChange={setInvestingSummaryFontSize}
             onPositionChange={handlePositionChange}
           />
         ))}

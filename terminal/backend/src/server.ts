@@ -111,6 +111,13 @@ import { fetchFmpStockNewsByTicker } from "./services/fmpStockNewsProvider.js";
 import { fetchFmpSecFilings } from "./services/fmpSecFilingProvider.js";
 import { fetchFmpEarningsCalendarChunk } from "./services/fmpEarningsCalendarProvider.js";
 import { fetchFmpFinancialSeries } from "./services/fmpFinancialSeriesProvider.js";
+import {
+  fetchYahooEarningsDates,
+  fetchYahooEarningsEstimates,
+  clampPreciseConcurrency,
+} from "./services/yahooEarningsProvider.js";
+import { reconcileYahooEarnings, reconcileNasdaqEarnings } from "./services/yahooEarningsReconciler.js";
+import { sweepNasdaqEarningsRange } from "./services/nasdaqEarningsCalendarProvider.js";
 import { createFmpRequestScheduler } from "./services/fmpRequestScheduler.js";
 import { getStoredCalendarFinancialSeries, replaceCalendarFinancialSeriesSnapshot } from "./services/calendarFinancialRepository.js";
 import {
@@ -5651,6 +5658,314 @@ app.post("/api/fmp/calendar/earnings/update", async (req, res, next) => {
           concurrency: workerCount,
           requestIntervalMs,
           ...earningsResult,
+        });
+      } catch (error) {
+        failJob(jobId, error instanceof Error ? error.message : String(error));
+      }
+    })();
+  } catch (error) {
+    next(error);
+  }
+});
+
+/* ── Earning Calendar ver2 — Yahoo ─────────────────────────────────────
+ * plan: ai_agent_plan/earning_calendar_ver2/plan.md
+ *   date-fix       = quote() 배치. 날짜 + 확정/추정 플래그만. 전 유니버스 ~35-55초.
+ *   precise-update = quoteSummary() 종목별. EPS/매출 컨센 + 애널리스트 수까지.
+ * 두 라우트 모두 scope=next3m | custom 을 받는다.
+ */
+/**
+ * 지정 기간의 "모든" 실적 이벤트를 Nasdaq 일자별 스윕으로 채운다.
+ *
+ * Yahoo는 티커당 다음/직전 각 1건만 주므로 기간 열거가 불가능하다 (2026-08-05 실측:
+ * Yahoo 날짜범위 API는 2026-08-04에 23건·전부 해외종목, 같은 날 Nasdaq은 355개사).
+ * 따라서 기간 열거는 Nasdaq이 담당하고, Yahoo는 다음 실적일의 확정여부/컨센서스를 얹는다.
+ */
+async function runNasdaqRangeSweep(params: {
+  jobId: string;
+  from: string;
+  to: string;
+  universe: string[];
+  progressWeight: { offset: number; span: number; total: number };
+}): Promise<void> {
+  const { jobId, from, to } = params;
+  const universeSet = new Set(params.universe.map((t) => t.toUpperCase()));
+  appendLog(jobId, `[range] Nasdaq 일자별 스윕 시작 ${from} ~ ${to} (주말 제외)`);
+
+  const sweep = await sweepNasdaqEarningsRange({
+    from,
+    to,
+    universe: universeSet,
+    options: {
+      onProgress: (done, total) =>
+        updateProgress(
+          jobId,
+          params.progressWeight.offset + Math.floor((done / Math.max(total, 1)) * params.progressWeight.span),
+          params.progressWeight.total,
+        ),
+      onLog: (message) => appendLog(jobId, message),
+      shouldCancel: () => isJobCancelled(jobId),
+    },
+  });
+
+  appendLog(
+    jobId,
+    `[range] ${sweep.scannedDays}일 스캔, 전체 ${sweep.totalRowsSeen}건 중 유니버스 매칭 ${sweep.rows.length}건${sweep.failedDays.length ? `, 실패한 날 ${sweep.failedDays.length}일` : ""}`,
+  );
+
+  if (sweep.rows.length === 0) {
+    return;
+  }
+
+  const nasdaqSummary = await reconcileNasdaqEarnings({
+    rows: sweep.rows,
+    onLog: (message) => appendLog(jobId, message),
+  });
+  appendLog(
+    jobId,
+    `[range] 반영: 신규 ${nasdaqSummary.inserted} / 갱신 ${nasdaqSummary.updated} / 실적숫자 채움 ${nasdaqSummary.actualsFilled} / 세션 채움 ${nasdaqSummary.sessionFilled}${nasdaqSummary.errors ? ` / 실패 ${nasdaqSummary.errors}` : ""}`,
+  );
+}
+
+function resolveYahooEarningsScope(body: any): { scope: "next3m" | "custom"; from: string; to: string } | { error: string } {
+  const today = new Date().toISOString().slice(0, 10);
+  const scope = body?.scope === "custom" ? "custom" : "next3m";
+
+  if (scope === "next3m") {
+    return { scope, from: today, to: shiftIsoDate(today, 90) };
+  }
+
+  const from = typeof body?.from === "string" ? body.from.trim() : "";
+  const to = typeof body?.to === "string" ? body.to.trim() : "";
+  if (!ISO_DATE_RE.test(from) || !ISO_DATE_RE.test(to)) {
+    return { error: "custom scope requires from/to in YYYY-MM-DD" };
+  }
+  if (to < from) {
+    return { error: "to must be greater than or equal to from" };
+  }
+  return { scope, from, to };
+}
+
+app.post("/api/yahoo/calendar/earnings/date-fix", async (req, res, next) => {
+  try {
+    const resolved = resolveYahooEarningsScope(req.body);
+    if ("error" in resolved) {
+      res.status(400).json({ error: resolved.error });
+      return;
+    }
+    const { scope, from, to } = resolved;
+    const tickers = await getDefaultUniverseTickers();
+
+    const jobId = createJob(tickers.length, {
+      category: "other",
+      label: `Yahoo Earning Date Fix (${scope})`,
+    });
+    appendLog(jobId, `Yahoo Just Earning Date Fix — scope=${scope}, range=${from}~${to}`);
+    appendLog(jobId, `대상 default universe ${tickers.length} 종목, quote() 배치 50종목/요청`);
+    res.json({ jobId, scope, range: { from, to }, targetTickers: tickers.length });
+
+    void (async () => {
+      try {
+        // 1단계 — 지정 기간의 모든 실적을 Nasdaq으로 열거한다 (Yahoo는 기간 열거 불가).
+        await runNasdaqRangeSweep({
+          jobId, from, to, universe: tickers,
+          progressWeight: { offset: 0, span: Math.floor(tickers.length * 0.4), total: tickers.length },
+        });
+        if (isJobCancelled(jobId)) {
+          appendLog(jobId, "🛑 Cancelled by user");
+          return;
+        }
+
+        // 2단계 — Yahoo로 다음 실적일의 확정여부/세션을 얹는다.
+        const fetched = await fetchYahooEarningsDates(tickers, {
+          onProgress: (done, total) =>
+            updateProgress(jobId, Math.floor(tickers.length * 0.4 + (done / Math.max(total, 1)) * tickers.length * 0.6), total),
+          onLog: (message) => appendLog(jobId, message),
+          shouldCancel: () => isJobCancelled(jobId),
+        });
+
+        if (isJobCancelled(jobId)) {
+          appendLog(jobId, "🛑 Cancelled by user");
+          return;
+        }
+
+        appendLog(
+          jobId,
+          `조회 완료: 총 ${fetched.results.length}건 (다음 예정 ${fetched.results.length - fetched.pastEvents} + 발표완료 ${fetched.pastEvents}), 실패 ${fetched.failed.length}건`,
+        );
+
+        const inScope = fetched.results.filter((r) => r.reportDate >= from && r.reportDate <= to);
+        appendLog(jobId, `범위(${from}~${to}) 내 ${inScope.length}건을 reconcile`);
+
+        const summary = await reconcileYahooEarnings({
+          dates: inScope,
+          scopeFrom: from,
+          scopeTo: to,
+          onLog: (message) => appendLog(jobId, message),
+        });
+
+        appendLog(
+          jobId,
+          `반영: 신규 ${summary.inserted} / 갱신 ${summary.updated} / 날짜이동 ${summary.moved} / 발표완료 신규 ${summary.pastInserted} / 발표완료 갱신 ${summary.pastUpdated} / 중복정리 ${summary.mergedDuplicates} / 추정날짜스킵 ${summary.skippedEstimate} / stale표시 ${summary.staleFlagged}`,
+        );
+        for (const move of summary.moves.slice(0, 30)) {
+          appendLog(jobId, `  이동: ${move.ticker} ${move.from} → ${move.to}`);
+        }
+        for (const merge of summary.merged.slice(0, 30)) {
+          appendLog(jobId, `  중복정리: ${merge.ticker} ${merge.removedDate} 삭제, ${merge.keptDate} 유지`);
+        }
+        if (summary.errors > 0) {
+          appendLog(jobId, `⚠ 처리 실패 ${summary.errors}건 (나머지는 정상 반영됨)`);
+          for (const sample of summary.errorSamples) {
+            appendLog(jobId, `  실패: ${sample.ticker} — ${sample.message}`);
+          }
+        }
+
+        await setLastSuccess("yahoo_calendar_earnings_datefix", new Date().toISOString(), {
+          scope,
+          from,
+          to,
+          fetched: fetched.results.length,
+          ...summary,
+        });
+
+        completeJob(jobId, {
+          source: "YAHOO",
+          tier: "date-fix",
+          scope,
+          from,
+          to,
+          targetTickers: tickers.length,
+          fetchedFuture: fetched.results.length,
+          pastEvents: fetched.pastEvents,
+          failedTickers: fetched.failed.length,
+          inScope: inScope.length,
+          ...summary,
+        });
+      } catch (error) {
+        failJob(jobId, error instanceof Error ? error.message : String(error));
+      }
+    })();
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/yahoo/calendar/earnings/precise-update", async (req, res, next) => {
+  try {
+    const resolved = resolveYahooEarningsScope(req.body);
+    if ("error" in resolved) {
+      res.status(400).json({ error: resolved.error });
+      return;
+    }
+    const { scope, from, to } = resolved;
+    const concurrency = clampPreciseConcurrency(Number(req.body?.concurrency));
+    const tickers = await getDefaultUniverseTickers();
+
+    const jobId = createJob(tickers.length, {
+      category: "other",
+      label: `Yahoo Earning Precise Update (${scope})`,
+    });
+    appendLog(jobId, `Yahoo Earning Precise Update — scope=${scope}, range=${from}~${to}, concurrency=${concurrency}`);
+    appendLog(jobId, `1단계: quote() 배치로 ${tickers.length} 종목의 다음 실적일 확정`);
+    res.json({ jobId, scope, range: { from, to }, targetTickers: tickers.length });
+
+    void (async () => {
+      try {
+        // 0단계 — 지정 기간의 모든 실적을 Nasdaq으로 열거한다 (Yahoo는 기간 열거 불가).
+        await runNasdaqRangeSweep({
+          jobId, from, to, universe: tickers,
+          progressWeight: { offset: 0, span: Math.floor(tickers.length * 0.12), total: tickers.length },
+        });
+        if (isJobCancelled(jobId)) {
+          appendLog(jobId, "🛑 Cancelled by user");
+          return;
+        }
+
+        // 1단계 — 어느 종목이 범위 안에 드는지부터 싸게 확정한다.
+        const dateResult = await fetchYahooEarningsDates(tickers, {
+          onProgress: (done, total) => updateProgress(jobId, Math.floor(tickers.length * 0.12 + done * 0.08), total),
+          onLog: (message) => appendLog(jobId, message),
+          shouldCancel: () => isJobCancelled(jobId),
+        });
+        if (isJobCancelled(jobId)) {
+          appendLog(jobId, "🛑 Cancelled by user");
+          return;
+        }
+
+        const inScope = dateResult.results.filter((r) => r.reportDate >= from && r.reportDate <= to);
+        const targets = inScope.map((r) => r.ticker);
+        appendLog(
+          jobId,
+          `1단계 완료: 미래 ${dateResult.results.length}건 중 범위 내 ${targets.length} 종목 → 2단계 quoteSummary 대상`,
+        );
+        appendLog(jobId, `2단계: 추정치 수집 (예상 ${Math.round((targets.length * 326) / 1000 / 60 * 10) / 10}분)`);
+
+        const precise = await fetchYahooEarningsEstimates(targets, {
+          concurrency,
+          onProgress: (done, total) =>
+            updateProgress(jobId, Math.floor(tickers.length * 0.2 + (done / Math.max(total, 1)) * tickers.length * 0.8), tickers.length),
+          onLog: (message) => appendLog(jobId, message),
+          shouldCancel: () => isJobCancelled(jobId),
+        });
+        if (isJobCancelled(jobId)) {
+          appendLog(jobId, "🛑 Cancelled by user");
+          return;
+        }
+
+        appendLog(
+          jobId,
+          `2단계 완료: 추정치 ${precise.results.size}건, 실패 ${precise.failed.length}건`,
+        );
+
+        // quoteSummary가 더 최신 날짜를 준 경우 그것을 우선한다.
+        const mergedDates = inScope.map((entry) => precise.dates.get(entry.ticker) ?? entry);
+
+        const summary = await reconcileYahooEarnings({
+          dates: mergedDates,
+          estimates: precise.results,
+          scopeFrom: from,
+          scopeTo: to,
+          onLog: (message) => appendLog(jobId, message),
+        });
+
+        appendLog(
+          jobId,
+          `반영: 신규 ${summary.inserted} / 갱신 ${summary.updated} / 날짜이동 ${summary.moved} / 발표완료 신규 ${summary.pastInserted} / 발표완료 갱신 ${summary.pastUpdated} / 중복정리 ${summary.mergedDuplicates} / 추정치적용 ${summary.estimatesApplied} / stale표시 ${summary.staleFlagged}`,
+        );
+        for (const move of summary.moves.slice(0, 30)) {
+          appendLog(jobId, `  이동: ${move.ticker} ${move.from} → ${move.to}`);
+        }
+        for (const merge of summary.merged.slice(0, 30)) {
+          appendLog(jobId, `  중복정리: ${merge.ticker} ${merge.removedDate} 삭제, ${merge.keptDate} 유지`);
+        }
+        if (summary.errors > 0) {
+          appendLog(jobId, `⚠ 처리 실패 ${summary.errors}건 (나머지는 정상 반영됨)`);
+          for (const sample of summary.errorSamples) {
+            appendLog(jobId, `  실패: ${sample.ticker} — ${sample.message}`);
+          }
+        }
+
+        await setLastSuccess("yahoo_calendar_earnings_precise", new Date().toISOString(), {
+          scope,
+          from,
+          to,
+          targets: targets.length,
+          ...summary,
+        });
+
+        completeJob(jobId, {
+          source: "YAHOO",
+          tier: "precise-update",
+          scope,
+          from,
+          to,
+          targetTickers: tickers.length,
+          inScope: targets.length,
+          estimatesFetched: precise.results.size,
+          failedTickers: precise.failed.length,
+          pastEvents: dateResult.pastEvents,
+          ...summary,
         });
       } catch (error) {
         failJob(jobId, error instanceof Error ? error.message : String(error));

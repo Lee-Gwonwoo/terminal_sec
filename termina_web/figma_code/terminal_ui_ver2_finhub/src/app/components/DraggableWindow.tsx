@@ -31,6 +31,10 @@ interface DraggableWindowProps {
   onNewsTitleFontSizeChange?: (n: number) => void;
   newsSummaryFontSize?: number;
   onNewsSummaryFontSizeChange?: (n: number) => void;
+  investingTitleFontSize?: number;
+  onInvestingTitleFontSizeChange?: (n: number) => void;
+  investingSummaryFontSize?: number;
+  onInvestingSummaryFontSizeChange?: (n: number) => void;
   onPositionChange?: (id: string, pos: { top: number; left: number; width: number; height: number }) => void;
 }
 
@@ -48,6 +52,10 @@ export function DraggableWindow({
   onNewsTitleFontSizeChange,
   newsSummaryFontSize,
   onNewsSummaryFontSizeChange,
+  investingTitleFontSize,
+  onInvestingTitleFontSizeChange,
+  investingSummaryFontSize,
+  onInvestingSummaryFontSizeChange,
   onPositionChange,
 }: DraggableWindowProps) {
   const [isMaximized, setIsMaximized] = useState(false);
@@ -144,6 +152,10 @@ export function DraggableWindow({
             onNewsTitleFontSizeChange={onNewsTitleFontSizeChange}
             newsSummaryFontSize={newsSummaryFontSize}
             onNewsSummaryFontSizeChange={onNewsSummaryFontSizeChange}
+            investingTitleFontSize={investingTitleFontSize}
+            onInvestingTitleFontSizeChange={onInvestingTitleFontSizeChange}
+            investingSummaryFontSize={investingSummaryFontSize}
+            onInvestingSummaryFontSizeChange={onInvestingSummaryFontSizeChange}
           />
         );
       case 'case-research':
@@ -160,8 +172,8 @@ export function DraggableWindow({
         return (
           <InvestingNewsWindow
             onTickerClick={onTickerClick}
-            titleFontSize={newsTitleFontSize}
-            summaryFontSize={newsSummaryFontSize}
+            titleFontSize={investingTitleFontSize}
+            summaryFontSize={investingSummaryFontSize}
           />
         );
       default:

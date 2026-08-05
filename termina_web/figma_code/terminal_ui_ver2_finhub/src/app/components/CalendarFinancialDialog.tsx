@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { BarChart3, Landmark, TrendingUp } from 'lucide-react';
-import { Bar, CartesianGrid, ComposedChart, Line, LineChart, XAxis, YAxis } from 'recharts';
+import { Bar, Brush, CartesianGrid, ComposedChart, Line, LineChart, XAxis, YAxis } from 'recharts';
 import {
   ChartContainer,
   ChartLegend,
@@ -156,6 +156,102 @@ function ChartPanel({
   );
 }
 
+/** 추정치 막대 색 — 실적 막대와 확실히 구분되도록 회색 고정. */
+const ESTIMATE_BAR_COLOR = '#94a3b8';
+
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 8;
+
+/**
+ * Y축 확대 배율에 맞춘 domain을 만든다.
+ * 막대는 0에서 출발하므로 0을 항상 포함시키고, 배율로 범위를 좁혀 작은 값의 차이를 키운다.
+ */
+function computeZoomDomain(
+  series: FinancialSeriesPoint[],
+  keys: Array<keyof FinancialSeriesPoint>,
+  zoom: number,
+): [number, number] | undefined {
+  let low = 0;
+  let high = 0;
+  let found = false;
+
+  for (const point of series) {
+    for (const key of keys) {
+      const value = point[key];
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        low = Math.min(low, value);
+        high = Math.max(high, value);
+        found = true;
+      }
+    }
+  }
+
+  if (!found || (low === 0 && high === 0)) {
+    return undefined;
+  }
+
+  const span = high - low;
+  const pad = span > 0 ? span * 0.08 : Math.abs(high || low) * 0.08;
+  return [(low - pad) / zoom, (high + pad) / zoom];
+}
+
+/** 차트 오른쪽에 붙는 세로 Y축 확대/축소 바. */
+function VerticalZoomBar({
+  value,
+  onChange,
+  accentClassName,
+}: {
+  value: number;
+  onChange: (next: number) => void;
+  accentClassName: string;
+}) {
+  return (
+    <div className="flex shrink-0 flex-col items-center gap-1.5 pb-8 pt-1">
+      <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">Y</span>
+      <input
+        type="range"
+        min={MIN_ZOOM}
+        max={MAX_ZOOM}
+        step={0.1}
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+        aria-label="Y-axis zoom"
+        title="Y-axis zoom — drag up to magnify small differences"
+        className={`h-[150px] w-4 cursor-pointer ${accentClassName}`}
+        style={{ writingMode: 'vertical-lr', direction: 'rtl', WebkitAppearance: 'slider-vertical' } as React.CSSProperties}
+      />
+      <button
+        type="button"
+        onClick={() => onChange(MIN_ZOOM)}
+        title="Reset zoom"
+        className="rounded px-1 text-[10px] tabular-nums text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+      >
+        {value.toFixed(1)}x
+      </button>
+    </div>
+  );
+}
+
+/** 차트 + 세로 확대바를 한 줄로 묶는다. */
+function ZoomableChartFrame({
+  zoom,
+  onZoomChange,
+  accentClassName,
+  children,
+}: {
+  zoom: number;
+  onZoomChange: (next: number) => void;
+  accentClassName: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-stretch gap-1">
+      <div className="min-w-0 flex-1">{children}</div>
+      <VerticalZoomBar value={zoom} onChange={onZoomChange} accentClassName={accentClassName} />
+    </div>
+  );
+}
+
 function EmptyChartState({ message }: { message: string }) {
   return (
     <div className="flex h-[260px] items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
@@ -198,6 +294,9 @@ export function CalendarFinancialDialog({
   const [cache, setCache] = useState<Record<string, FinancialSeriesResponse>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [revenueZoom, setRevenueZoom] = useState(MIN_ZOOM);
+  const [earningsZoom, setEarningsZoom] = useState(MIN_ZOOM);
+  const [valuationZoom, setValuationZoom] = useState(MIN_ZOOM);
 
   const cachedResponse = ticker ? cache[ticker] ?? null : null;
 
@@ -287,6 +386,34 @@ export function CalendarFinancialDialog({
     hasSeriesValue(activeSeries, 'epsEstimate');
   const valuationHasData = hasSeriesValue(activeSeries, 'peRatio') || hasSeriesValue(activeSeries, 'psRatio');
 
+  // 기간을 바꾸면 확대 배율을 초기화한다 (스케일이 완전히 달라지므로).
+  useEffect(() => {
+    setRevenueZoom(MIN_ZOOM);
+    setEarningsZoom(MIN_ZOOM);
+    setValuationZoom(MIN_ZOOM);
+  }, [periodMode, ticker]);
+
+  const revenueDomain = computeZoomDomain(activeSeries, ['revenue', 'revenueEstimate'], revenueZoom);
+  const incomeDomain = computeZoomDomain(activeSeries, ['netIncome', 'netIncomeEstimate'], earningsZoom);
+  const epsDomain = computeZoomDomain(activeSeries, ['eps', 'epsEstimate'], earningsZoom);
+  const valuationDomain = computeZoomDomain(activeSeries, ['peRatio', 'psRatio'], valuationZoom);
+
+  // 가로 스크롤(Brush) 초기 구간 — 기본은 최근 구간을 보여주고, 끌어서 과거로 이동한다.
+  const brushWindow = periodMode === 'annual' ? 10 : 12;
+  const brushStartIndex = Math.max(0, activeSeries.length - brushWindow);
+  const brushKey = `${ticker ?? ''}-${periodMode}-${activeSeries.length}`;
+  const brushProps = {
+    dataKey: 'label' as const,
+    height: 22,
+    travellerWidth: 10,
+    startIndex: brushStartIndex,
+    endIndex: Math.max(brushStartIndex, activeSeries.length - 1),
+    stroke: '#94a3b8',
+    fill: 'transparent',
+  };
+  const chartMargin = { left: 8, right: 8, top: 8, bottom: 4 };
+  const estimateBarSize = periodMode === 'annual' ? 18 : 12;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto border-slate-200 p-0 sm:max-w-6xl dark:border-slate-700">
@@ -360,26 +487,37 @@ export function CalendarFinancialDialog({
                   title="Revenue"
                   subtitle={`Historical ${periodMode === 'annual' ? 'annual' : 'quarterly'} revenue`}
                   icon={<Landmark className="h-4 w-4 text-teal-500" />}
-                  note="Solid bar = actual revenue, dashed line = analyst revenue estimate when available."
+                  note="Gray bar (left) = analyst estimate, teal bar (right) = reported actual. Use the vertical bar on the right to zoom the Y axis, and the horizontal bar under the chart to scroll back through past periods."
                 >
                   {revenueHasData ? (
-                    <ChartContainer
-                      className="h-[260px] w-full aspect-auto"
-                      config={{
-                        revenue: { label: 'Revenue', color: '#14b8a6' },
-                        revenueEstimate: { label: 'Revenue Estimate', color: '#0f766e' },
-                      }}
-                    >
-                      <ComposedChart data={activeSeries} margin={{ left: 8, right: 8, top: 8, bottom: 0 }}>
-                        <CartesianGrid vertical={false} />
-                        <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={22} />
-                        <YAxis tickFormatter={formatAxisCompact} width={78} tickLine={false} axisLine={false} />
-                        <ChartTooltip content={<ChartTooltipContent />} />
-                        <ChartLegend content={<ChartLegendContent />} />
-                        <Bar dataKey="revenue" fill="var(--color-revenue)" radius={[8, 8, 0, 0]} barSize={periodMode === 'annual' ? 42 : 28} />
-                        <Line type="monotone" dataKey="revenueEstimate" stroke="var(--color-revenueEstimate)" strokeWidth={2.25} strokeDasharray="6 4" dot={{ r: 2.5 }} activeDot={{ r: 4 }} />
-                      </ComposedChart>
-                    </ChartContainer>
+                    <ZoomableChartFrame zoom={revenueZoom} onZoomChange={setRevenueZoom} accentClassName="accent-teal-500">
+                      <ChartContainer
+                        className="h-[300px] w-full aspect-auto"
+                        config={{
+                          revenueEstimate: { label: 'Revenue Estimate', color: ESTIMATE_BAR_COLOR },
+                          revenue: { label: 'Revenue', color: '#14b8a6' },
+                        }}
+                      >
+                        <ComposedChart key={brushKey} data={activeSeries} margin={chartMargin}>
+                          <CartesianGrid vertical={false} />
+                          <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={22} />
+                          <YAxis
+                            tickFormatter={formatAxisCompact}
+                            width={78}
+                            tickLine={false}
+                            axisLine={false}
+                            domain={revenueDomain ?? ['auto', 'auto']}
+                            allowDataOverflow={revenueDomain != null}
+                          />
+                          <ChartTooltip content={<ChartTooltipContent />} />
+                          <ChartLegend content={<ChartLegendContent />} />
+                          {/* 추정치를 먼저 선언해야 실적 막대 왼쪽에 놓인다. */}
+                          <Bar dataKey="revenueEstimate" fill={ESTIMATE_BAR_COLOR} radius={[6, 6, 0, 0]} barSize={estimateBarSize} />
+                          <Bar dataKey="revenue" fill="var(--color-revenue)" radius={[6, 6, 0, 0]} barSize={periodMode === 'annual' ? 26 : 18} />
+                          <Brush {...brushProps} />
+                        </ComposedChart>
+                      </ChartContainer>
+                    </ZoomableChartFrame>
                   ) : (
                     <EmptyChartState message="Revenue series is unavailable for this ticker." />
                   )}
@@ -389,31 +527,52 @@ export function CalendarFinancialDialog({
                   title="Earnings"
                   subtitle="Net income and EPS trend"
                   icon={<BarChart3 className="h-4 w-4 text-amber-500" />}
-                  note="Actual values are solid. Estimate lines come from FMP analyst-estimates when available."
+                  note="Gray bar (left) = net income estimate, pink bar (right) = reported actual. EPS stays on the right axis as a line (dashed = estimate)."
                 >
                   {earningsHasData ? (
-                    <ChartContainer
-                      className="h-[260px] w-full aspect-auto"
-                      config={{
-                        netIncome: { label: 'Net Income', color: '#fb7185' },
-                        netIncomeEstimate: { label: 'Net Income Estimate', color: '#be185d' },
-                        eps: { label: 'EPS', color: '#f59e0b' },
-                        epsEstimate: { label: 'EPS Estimate', color: '#b45309' },
-                      }}
-                    >
-                      <ComposedChart data={activeSeries} margin={{ left: 8, right: 8, top: 8, bottom: 0 }}>
-                        <CartesianGrid vertical={false} />
-                        <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={22} />
-                        <YAxis yAxisId="income" tickFormatter={formatAxisCompact} width={78} tickLine={false} axisLine={false} />
-                        <YAxis yAxisId="eps" orientation="right" tickFormatter={(value) => formatPlainNumber(value)} width={52} tickLine={false} axisLine={false} />
-                        <ChartTooltip content={<ChartTooltipContent />} />
-                        <ChartLegend content={<ChartLegendContent />} />
-                        <Bar yAxisId="income" dataKey="netIncome" fill="var(--color-netIncome)" radius={[8, 8, 0, 0]} barSize={periodMode === 'annual' ? 34 : 22} />
-                        <Line yAxisId="income" type="monotone" dataKey="netIncomeEstimate" stroke="var(--color-netIncomeEstimate)" strokeWidth={2} strokeDasharray="6 4" dot={{ r: 2.5 }} activeDot={{ r: 4 }} />
-                        <Line yAxisId="eps" type="monotone" dataKey="eps" stroke="var(--color-eps)" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-                        <Line yAxisId="eps" type="monotone" dataKey="epsEstimate" stroke="var(--color-epsEstimate)" strokeWidth={2} strokeDasharray="6 4" dot={{ r: 2.5 }} activeDot={{ r: 4 }} />
-                      </ComposedChart>
-                    </ChartContainer>
+                    <ZoomableChartFrame zoom={earningsZoom} onZoomChange={setEarningsZoom} accentClassName="accent-rose-500">
+                      <ChartContainer
+                        className="h-[300px] w-full aspect-auto"
+                        config={{
+                          netIncomeEstimate: { label: 'Net Income Estimate', color: ESTIMATE_BAR_COLOR },
+                          netIncome: { label: 'Net Income', color: '#fb7185' },
+                          eps: { label: 'EPS', color: '#f59e0b' },
+                          epsEstimate: { label: 'EPS Estimate', color: '#b45309' },
+                        }}
+                      >
+                        <ComposedChart key={brushKey} data={activeSeries} margin={chartMargin}>
+                          <CartesianGrid vertical={false} />
+                          <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={22} />
+                          <YAxis
+                            yAxisId="income"
+                            tickFormatter={formatAxisCompact}
+                            width={78}
+                            tickLine={false}
+                            axisLine={false}
+                            domain={incomeDomain ?? ['auto', 'auto']}
+                            allowDataOverflow={incomeDomain != null}
+                          />
+                          <YAxis
+                            yAxisId="eps"
+                            orientation="right"
+                            tickFormatter={(value) => formatPlainNumber(value)}
+                            width={52}
+                            tickLine={false}
+                            axisLine={false}
+                            domain={epsDomain ?? ['auto', 'auto']}
+                            allowDataOverflow={epsDomain != null}
+                          />
+                          <ChartTooltip content={<ChartTooltipContent />} />
+                          <ChartLegend content={<ChartLegendContent />} />
+                          {/* 추정치를 먼저 선언해야 실적 막대 왼쪽에 놓인다. */}
+                          <Bar yAxisId="income" dataKey="netIncomeEstimate" fill={ESTIMATE_BAR_COLOR} radius={[6, 6, 0, 0]} barSize={estimateBarSize} />
+                          <Bar yAxisId="income" dataKey="netIncome" fill="var(--color-netIncome)" radius={[6, 6, 0, 0]} barSize={periodMode === 'annual' ? 22 : 15} />
+                          <Line yAxisId="eps" type="monotone" dataKey="eps" stroke="var(--color-eps)" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                          <Line yAxisId="eps" type="monotone" dataKey="epsEstimate" stroke="var(--color-epsEstimate)" strokeWidth={2} strokeDasharray="6 4" dot={{ r: 2.5 }} activeDot={{ r: 4 }} />
+                          <Brush {...brushProps} />
+                        </ComposedChart>
+                      </ChartContainer>
+                    </ZoomableChartFrame>
                   ) : (
                     <EmptyChartState message="Net income or EPS series is unavailable for this ticker." />
                   )}
@@ -427,23 +586,33 @@ export function CalendarFinancialDialog({
                     note="FMP ratio fields are used first. Missing valuation points fall back to market cap divided by net income or revenue when available."
                   >
                     {valuationHasData ? (
-                      <ChartContainer
-                        className="h-[280px] w-full aspect-auto"
-                        config={{
-                          peRatio: { label: 'P/E', color: '#3b82f6' },
-                          psRatio: { label: 'P/S', color: '#f97316' },
-                        }}
-                      >
-                        <LineChart data={activeSeries} margin={{ left: 8, right: 8, top: 8, bottom: 0 }}>
-                          <CartesianGrid vertical={false} />
-                          <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={22} />
-                          <YAxis tickFormatter={formatAxisRatio} width={68} tickLine={false} axisLine={false} />
-                          <ChartTooltip content={<ChartTooltipContent />} />
-                          <ChartLegend content={<ChartLegendContent />} />
-                          <Line type="monotone" dataKey="peRatio" stroke="var(--color-peRatio)" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-                          <Line type="monotone" dataKey="psRatio" stroke="var(--color-psRatio)" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-                        </LineChart>
-                      </ChartContainer>
+                      <ZoomableChartFrame zoom={valuationZoom} onZoomChange={setValuationZoom} accentClassName="accent-sky-500">
+                        <ChartContainer
+                          className="h-[300px] w-full aspect-auto"
+                          config={{
+                            peRatio: { label: 'P/E', color: '#3b82f6' },
+                            psRatio: { label: 'P/S', color: '#f97316' },
+                          }}
+                        >
+                          <LineChart key={brushKey} data={activeSeries} margin={chartMargin}>
+                            <CartesianGrid vertical={false} />
+                            <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={22} />
+                            <YAxis
+                              tickFormatter={formatAxisRatio}
+                              width={68}
+                              tickLine={false}
+                              axisLine={false}
+                              domain={valuationDomain ?? ['auto', 'auto']}
+                              allowDataOverflow={valuationDomain != null}
+                            />
+                            <ChartTooltip content={<ChartTooltipContent />} />
+                            <ChartLegend content={<ChartLegendContent />} />
+                            <Line type="monotone" dataKey="peRatio" stroke="var(--color-peRatio)" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                            <Line type="monotone" dataKey="psRatio" stroke="var(--color-psRatio)" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                            <Brush {...brushProps} />
+                          </LineChart>
+                        </ChartContainer>
+                      </ZoomableChartFrame>
                     ) : (
                       <EmptyChartState message="Valuation history is unavailable for this ticker." />
                     )}
