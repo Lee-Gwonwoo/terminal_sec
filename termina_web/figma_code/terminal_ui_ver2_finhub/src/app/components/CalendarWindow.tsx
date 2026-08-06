@@ -1,13 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Calendar as CalendarIcon,
+  Check,
   ChevronDown,
   ChevronUp,
   Eye,
   GripVertical,
+  Plus,
   RefreshCw,
   Search,
   Settings2,
+  Trash2,
   X,
   CircleHelp,
 } from 'lucide-react';
@@ -166,11 +169,20 @@ interface ColumnConfig {
   align?: 'left' | 'center' | 'right';
 }
 
+type NumericFilterKey = 'market_cap' | 'float_pct' | 'institutional_pct' | 'insider_pct';
+
 interface NumericFilterConfig {
-  key: 'market_cap' | 'float_pct' | 'institutional_pct';
+  key: NumericFilterKey;
   label: string;
   unitLabel: string;
   multiplier?: number;
+}
+
+// 산업 선택 프리셋 — 자주 쓰는 industry 조합을 이름으로 저장/불러오기/삭제한다.
+interface IndustryPreset {
+  id: string;
+  name: string;
+  industries: string[];
 }
 
 type DatePresetKey = 'this_week' | 'next_5_days' | 'next_2_weeks' | 'this_month' | 'next_month';
@@ -251,8 +263,12 @@ const COLUMN_DEFINITIONS: Record<string, Omit<ColumnConfig, 'visible'>> = {
 const NUMERIC_FILTERS_BY_TYPE: Record<string, NumericFilterConfig[]> = {
   earnings: [
     { key: 'institutional_pct', label: 'Inst %', unitLabel: '%' },
+    { key: 'insider_pct', label: 'Insider %', unitLabel: '%' },
     { key: 'float_pct', label: 'Float %', unitLabel: '%' },
     { key: 'market_cap', label: 'Market Cap', unitLabel: 'B$', multiplier: 1_000_000_000 },
+  ],
+  ipos: [
+    { key: 'insider_pct', label: 'Insider %', unitLabel: '%' },
   ],
   dividends: [
     { key: 'market_cap', label: 'Market Cap', unitLabel: 'B$', multiplier: 1_000_000_000 },
@@ -268,6 +284,7 @@ const DEFAULT_FINANCIAL_SYNC_CONCURRENCY = 1;
 const DEFAULT_YAHOO_DESCRIPTION_CONCURRENCY = 5;
 const DEFAULT_YAHOO_DESCRIPTION_INTERVAL_MS = 200;
 const CALENDAR_UI_STATE_STORAGE_KEY = 'calendar-window-ui-state';
+const INDUSTRY_PRESET_STORAGE_KEY = 'calendar-industry-presets';
 const MIN_COLUMN_WIDTH_PX = 64;
 const MAX_COLUMN_WIDTH_PX = 720;
 const DATE_PRESET_OPTIONS: Array<{ key: DatePresetKey; label: string }> = [
@@ -314,6 +331,49 @@ function readStoredObject(key: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+function readIndustryPresets(): IndustryPreset[] {
+  try {
+    const raw = localStorage.getItem(INDUSTRY_PRESET_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((item, index) => {
+      if (!item || typeof item !== 'object') return [];
+      const row = item as Record<string, unknown>;
+      const name = typeof row.name === 'string' ? row.name.trim() : '';
+      const industries = Array.isArray(row.industries)
+        ? Array.from(new Set(row.industries.filter((industry): industry is string => typeof industry === 'string' && industry.trim().length > 0)))
+        : [];
+      if (!name || industries.length === 0) return [];
+      return [{
+        id: typeof row.id === 'string' && row.id ? row.id : `industry-preset-${index}`,
+        name,
+        industries,
+      } satisfies IndustryPreset];
+    });
+  } catch {
+    return [];
+  }
+}
+
+function writeIndustryPresets(presets: IndustryPreset[]): void {
+  try {
+    localStorage.setItem(INDUSTRY_PRESET_STORAGE_KEY, JSON.stringify(presets));
+  } catch {
+    // LocalStorage can be blocked in private or embedded contexts.
+  }
+}
+
+function createIndustryPresetId(): string {
+  return `industry-preset-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function isSameIndustrySelection(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) return false;
+  const rightSet = new Set(right);
+  return left.every((industry) => rightSet.has(industry));
 }
 
 function isDatePresetKey(value: unknown): value is DatePresetKey {
@@ -669,10 +729,15 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const [floatPctMax, setFloatPctMax] = useState(typeof storedUiState.floatPctMax === 'string' ? storedUiState.floatPctMax : '');
   const [institutionalPctMin, setInstitutionalPctMin] = useState(typeof storedUiState.institutionalPctMin === 'string' ? storedUiState.institutionalPctMin : '');
   const [institutionalPctMax, setInstitutionalPctMax] = useState(typeof storedUiState.institutionalPctMax === 'string' ? storedUiState.institutionalPctMax : '');
+  const [insiderPctMin, setInsiderPctMin] = useState(typeof storedUiState.insiderPctMin === 'string' ? storedUiState.insiderPctMin : '');
+  const [insiderPctMax, setInsiderPctMax] = useState(typeof storedUiState.insiderPctMax === 'string' ? storedUiState.insiderPctMax : '');
   const [confirmedFilter, setConfirmedFilter] = useState<boolean | null>(typeof storedUiState.confirmedFilter === 'boolean' || storedUiState.confirmedFilter === null ? storedUiState.confirmedFilter : null);
   const [selectedWatchlistId, setSelectedWatchlistId] = useState<string>(typeof storedUiState.selectedWatchlistId === 'string' && storedUiState.selectedWatchlistId ? storedUiState.selectedWatchlistId : 'all');
   const [selectedIndustries, setSelectedIndustries] = useState<string[]>(storedSelectedIndustries);
   const [industrySelectionMode, setIndustrySelectionMode] = useState<IndustrySelectionMode>(storedIndustrySelectionMode);
+  const [industryPresets, setIndustryPresets] = useState<IndustryPreset[]>(() => readIndustryPresets());
+  const [isSavingIndustryPreset, setIsSavingIndustryPreset] = useState(false);
+  const [industryPresetName, setIndustryPresetName] = useState('');
   const [ipoSecurityTypeFilter, setIpoSecurityTypeFilter] = useState(typeof storedUiState.ipoSecurityTypeFilter === 'string' && storedUiState.ipoSecurityTypeFilter ? storedUiState.ipoSecurityTypeFilter : 'all');
   const [tickerContextMenu, setTickerContextMenu] = useState<{
     x: number;
@@ -697,6 +762,17 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const currentColumns = columnStates[activeType] ?? buildColumns(activeType, currentTypeConfig?.columns ?? []);
   const visibleColumns = currentColumns.filter((column) => column.visible);
   const numericFilters = NUMERIC_FILTERS_BY_TYPE[activeType] ?? [];
+  const numericFilterBindings: Record<NumericFilterKey, {
+    min: string;
+    max: string;
+    setMin: (value: string) => void;
+    setMax: (value: string) => void;
+  }> = {
+    market_cap: { min: marketCapMin, max: marketCapMax, setMin: setMarketCapMin, setMax: setMarketCapMax },
+    float_pct: { min: floatPctMin, max: floatPctMax, setMin: setFloatPctMin, setMax: setFloatPctMax },
+    institutional_pct: { min: institutionalPctMin, max: institutionalPctMax, setMin: setInstitutionalPctMin, setMax: setInstitutionalPctMax },
+    insider_pct: { min: insiderPctMin, max: insiderPctMax, setMin: setInsiderPctMin, setMax: setInsiderPctMax },
+  };
   const hasRequiredDateRange = Boolean(dateFrom && dateTo);
   const supportsWatchlistFilter = activeType !== 'economics';
   const supportsIndustryFilter = activeType !== 'economics';
@@ -710,7 +786,17 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     [industrySelectionMode, isAllIndustrySelection, selectedIndustries],
   );
   const selectedIndustrySet = useMemo(() => new Set(activeIndustryFilters), [activeIndustryFilters]);
-  const selectedIndustryLabel = isNoIndustrySelection ? 'No Industries' : formatIndustryButtonLabel(isAllIndustrySelection ? [] : selectedIndustries, industryOptions.length);
+  const activeIndustryPreset = useMemo(
+    () => activeIndustryFilters.length > 0
+      ? industryPresets.find((preset) => isSameIndustrySelection(preset.industries, activeIndustryFilters)) ?? null
+      : null,
+    [activeIndustryFilters, industryPresets],
+  );
+  const selectedIndustryLabel = isNoIndustrySelection
+    ? 'No Industries'
+    : activeIndustryPreset
+      ? activeIndustryPreset.name
+      : formatIndustryButtonLabel(isAllIndustrySelection ? [] : selectedIndustries, industryOptions.length);
   const selectedIndustryStatusLabel = isNoIndustrySelection ? 'No industries selected' : formatIndustryStatusLabel(isAllIndustrySelection ? [] : selectedIndustries, industryOptions.length);
   const hasIndustryFilter = isNoIndustrySelection || activeIndustryFilters.length > 0;
   const filteredIndustryOptions = useMemo(() => {
@@ -740,6 +826,8 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
         floatPctMax,
         institutionalPctMin,
         institutionalPctMax,
+        insiderPctMin,
+        insiderPctMax,
         confirmedFilter,
         selectedWatchlistId,
         selectedIndustries,
@@ -758,6 +846,8 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     floatPctMax,
     floatPctMin,
     industrySelectionMode,
+    insiderPctMax,
+    insiderPctMin,
     institutionalPctMax,
     institutionalPctMin,
     ipoSecurityTypeFilter,
@@ -820,6 +910,53 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const toggleAllIndustries = (checked: boolean) => {
     setSelectedIndustries([]);
     setIndustrySelectionMode(checked ? 'all' : 'none');
+  };
+
+  const applyIndustryPreset = (preset: IndustryPreset) => {
+    setSelectedIndustries([...preset.industries].sort((left, right) => left.localeCompare(right)));
+    setIndustrySelectionMode('custom');
+    setShowIndustryMenu(false);
+    setIndustryInstructionMenu(null);
+  };
+
+  const saveCurrentIndustryPreset = () => {
+    const name = industryPresetName.trim();
+    if (!name) {
+      return;
+    }
+    if (activeIndustryFilters.length === 0) {
+      setActionError('Select specific industries before saving a preset.');
+      return;
+    }
+
+    const existing = industryPresets.find((preset) => preset.name.toLowerCase() === name.toLowerCase());
+    if (existing && !window.confirm(`Industry preset "${existing.name}" already exists. Overwrite it?`)) {
+      return;
+    }
+
+    const industries = [...activeIndustryFilters];
+    const next = existing
+      ? industryPresets.map((preset) => (preset.id === existing.id ? { ...preset, name, industries } : preset))
+      : [...industryPresets, { id: createIndustryPresetId(), name, industries }];
+
+    setIndustryPresets(next);
+    writeIndustryPresets(next);
+    setIsSavingIndustryPreset(false);
+    setIndustryPresetName('');
+  };
+
+  const deleteIndustryPreset = (preset: IndustryPreset) => {
+    if (!window.confirm(`Delete industry preset "${preset.name}"?`)) {
+      return;
+    }
+    const next = industryPresets.filter((item) => item.id !== preset.id);
+    setIndustryPresets(next);
+    writeIndustryPresets(next);
+  };
+
+  const cancelIndustryPresetSave = () => {
+    setIsSavingIndustryPreset(false);
+    setIndustryPresetName('');
   };
 
   const openIndustryInstructionMenu = (event: React.MouseEvent, industry: string) => {
@@ -1300,7 +1437,8 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     filtered = filtered.filter((event) =>
       matchesNumericRange(event.market_cap, marketCapMin, marketCapMax, 1_000_000_000) &&
       matchesNumericRange(event.float_pct, floatPctMin, floatPctMax) &&
-      matchesNumericRange(event.institutional_pct, institutionalPctMin, institutionalPctMax),
+      matchesNumericRange(event.institutional_pct, institutionalPctMin, institutionalPctMax) &&
+      matchesNumericRange(event.insider_pct, insiderPctMin, insiderPctMax),
     );
 
     return filtered;
@@ -1319,6 +1457,8 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     floatPctMax,
     institutionalPctMin,
     institutionalPctMax,
+    insiderPctMin,
+    insiderPctMax,
   ]);
 
   const filteredAndSortedEvents = useMemo(() => {
@@ -1386,7 +1526,9 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     floatPctMin ||
     floatPctMax ||
     institutionalPctMin ||
-    institutionalPctMax,
+    institutionalPctMax ||
+    insiderPctMin ||
+    insiderPctMax,
   );
 
   const clearAllFilters = () => {
@@ -1405,6 +1547,8 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     setFloatPctMax('');
     setInstitutionalPctMin('');
     setInstitutionalPctMax('');
+    setInsiderPctMin('');
+    setInsiderPctMax('');
     setSortField(getDefaultSortFieldForType(activeType));
     setSortDirection('desc');
   };
@@ -2183,6 +2327,90 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
           )}
         </div>
 
+        {supportsIndustryFilter && (
+          <div className="flex flex-wrap items-center gap-2 mb-3">
+            <span className="text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Industry Presets</span>
+            {industryPresets.map((preset) => {
+              const isActivePreset = activeIndustryPreset?.id === preset.id;
+              return (
+                <span
+                  key={preset.id}
+                  className={`inline-flex items-center rounded-full border text-xs font-medium transition-colors ${isActivePreset ? 'border-blue-600 bg-blue-600 text-white dark:border-blue-400 dark:bg-blue-500' : 'border-gray-300 bg-white text-gray-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200'}`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => applyIndustryPreset(preset)}
+                    title={preset.industries.join(', ')}
+                    className={`rounded-l-full py-1 pl-3 pr-1.5 ${isActivePreset ? '' : 'hover:bg-gray-50 dark:hover:bg-gray-700'}`}
+                  >
+                    {preset.name}
+                    <span className={`ml-1 ${isActivePreset ? 'text-blue-100' : 'text-gray-400 dark:text-gray-500'}`}>{preset.industries.length}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteIndustryPreset(preset)}
+                    title={`Delete preset "${preset.name}"`}
+                    className={`rounded-r-full py-1 pl-1 pr-2.5 ${isActivePreset ? 'text-blue-100 hover:text-white' : 'text-gray-400 hover:text-red-600 dark:hover:text-red-400'}`}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </span>
+              );
+            })}
+            {industryPresets.length === 0 && !isSavingIndustryPreset && (
+              <span className="text-xs text-gray-400 dark:text-gray-500">No saved industry selections yet</span>
+            )}
+            {isSavingIndustryPreset ? (
+              <div className="flex items-center gap-1">
+                <input
+                  autoFocus
+                  type="text"
+                  value={industryPresetName}
+                  onChange={(event) => setIndustryPresetName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') saveCurrentIndustryPreset();
+                    if (event.key === 'Escape') cancelIndustryPresetSave();
+                  }}
+                  placeholder="Preset name..."
+                  className="w-40 rounded-full border border-blue-400 bg-white px-3 py-1 text-xs text-gray-800 outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
+                />
+                <button
+                  type="button"
+                  onClick={saveCurrentIndustryPreset}
+                  title={`Save ${activeIndustryFilters.length} selected industries`}
+                  className="rounded p-1 text-green-600 hover:text-green-700"
+                >
+                  <Check className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={cancelIndustryPresetSave}
+                  title="Cancel"
+                  className="rounded p-1 text-red-500 hover:text-red-600"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setIndustryPresetName(activeIndustryPreset?.name ?? '');
+                  setIsSavingIndustryPreset(true);
+                }}
+                disabled={activeIndustryFilters.length === 0}
+                title={activeIndustryFilters.length > 0
+                  ? `Save the current ${activeIndustryFilters.length} selected industries as a preset`
+                  : 'Select specific industries first'}
+                className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium ${activeIndustryFilters.length === 0 ? 'cursor-not-allowed border-gray-200 bg-gray-50 text-gray-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-600' : 'border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50'}`}
+              >
+                <Plus className="h-3 w-3" />
+                Save Current
+              </button>
+            )}
+          </div>
+        )}
+
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <span className="text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Quick Range</span>
           {DATE_PRESET_OPTIONS.map((preset) => (
@@ -2199,26 +2427,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
         {numericFilters.length > 0 && (
           <div className="flex flex-wrap items-end gap-3 mb-3 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2">
             {numericFilters.map((filterConfig) => {
-              const minValue = filterConfig.key === 'market_cap'
-                ? marketCapMin
-                : filterConfig.key === 'float_pct'
-                  ? floatPctMin
-                  : institutionalPctMin;
-              const maxValue = filterConfig.key === 'market_cap'
-                ? marketCapMax
-                : filterConfig.key === 'float_pct'
-                  ? floatPctMax
-                  : institutionalPctMax;
-              const setMinValue = filterConfig.key === 'market_cap'
-                ? setMarketCapMin
-                : filterConfig.key === 'float_pct'
-                  ? setFloatPctMin
-                  : setInstitutionalPctMin;
-              const setMaxValue = filterConfig.key === 'market_cap'
-                ? setMarketCapMax
-                : filterConfig.key === 'float_pct'
-                  ? setFloatPctMax
-                  : setInstitutionalPctMax;
+              const { min: minValue, max: maxValue, setMin: setMinValue, setMax: setMaxValue } = numericFilterBindings[filterConfig.key];
 
               return (
                 <div key={filterConfig.key} className="flex items-end gap-2">
