@@ -119,6 +119,7 @@ import {
 import { reconcileYahooEarnings, reconcileNasdaqEarnings, reconcileInvestingEarnings } from "./services/yahooEarningsReconciler.js";
 import { sweepNasdaqEarningsRange } from "./services/nasdaqEarningsCalendarProvider.js";
 import { sweepInvestingEarningsRange, clampInvestingIntervalMs } from "./services/investingEarningsProvider.js";
+import { sweepFinnhubIpoCalendar } from "./services/finnhubIpoCalendarProvider.js";
 import { createFmpRequestScheduler } from "./services/fmpRequestScheduler.js";
 import { getStoredCalendarFinancialSeries, replaceCalendarFinancialSeriesSnapshot } from "./services/calendarFinancialRepository.js";
 import {
@@ -1716,6 +1717,94 @@ async function getDefaultUniverseTickersAddedFrom(tickerAddedFrom: string, maxTi
       selectedTickersSample: limitedRows.slice(0, 50).map((row) => ({ ticker: row.ticker, addedAt: row.addedAt ?? null })),
     },
   };
+}
+
+export type AddedRangeSelection = {
+  tickers: string[];
+  /** added 범위가 실제로 적용됐는지. false면 유니버스 전체가 대상이다. */
+  filtered: boolean;
+  addedFrom: string | null;
+  addedTo: string | null;
+  totalUniverse: number;
+};
+
+/**
+ * default universe에서 `ticker_universe_items.created_at`(= added date)이 지정 범위에 드는
+ * 티커만 고른다. from/to 둘 다 없으면 전체를 반환한다.
+ *
+ * DefaultTickerWindow의 모든 다운로드 버튼이 이 규칙을 공유한다 —
+ * 범위를 지정하면 그 기간에 추가된 티커만, 지정하지 않으면 전체.
+ */
+async function resolveUniverseByAddedRange(input: {
+  addedFrom?: unknown;
+  addedTo?: unknown;
+}): Promise<AddedRangeSelection> {
+  const addedFrom = typeof input.addedFrom === "string" && ISO_DATE_RE.test(input.addedFrom.trim())
+    ? input.addedFrom.trim()
+    : null;
+  const addedTo = typeof input.addedTo === "string" && ISO_DATE_RE.test(input.addedTo.trim())
+    ? input.addedTo.trim()
+    : null;
+
+  const all = await getDefaultUniverseTickers();
+  if (!addedFrom && !addedTo) {
+    return { tickers: all, filtered: false, addedFrom: null, addedTo: null, totalUniverse: all.length };
+  }
+
+  const universes = await listUniverses();
+  const def = universes.find((u) => u.name === "default");
+  if (!def) {
+    return { tickers: all, filtered: false, addedFrom, addedTo, totalUniverse: all.length };
+  }
+
+  const where: string[] = ["ui.universe_id = ?"];
+  const params: unknown[] = [def.id];
+  if (addedFrom) {
+    where.push("date(ui.created_at) >= date(?)");
+    params.push(addedFrom);
+  }
+  if (addedTo) {
+    where.push("date(ui.created_at) <= date(?)");
+    params.push(addedTo);
+  }
+
+  const rows = await getDb().all<Array<{ ticker: string }>>(
+    `SELECT s.ticker
+       FROM ticker_universe_items ui
+       JOIN securities s ON s.id = ui.security_id
+      WHERE ${where.join(" AND ")}
+      ORDER BY ui.created_at DESC, ui.sort_order, s.ticker`,
+    params,
+  );
+
+  return {
+    tickers: rows.map((r) => r.ticker.toUpperCase()),
+    filtered: true,
+    addedFrom,
+    addedTo,
+    totalUniverse: all.length,
+  };
+}
+
+/** 명시적 tickers가 오면 그것을 쓰고, 아니면 added 범위 규칙을 적용한다. */
+async function resolveProfileTargets(body: {
+  tickers?: string[];
+  addedFrom?: unknown;
+  addedTo?: unknown;
+}): Promise<AddedRangeSelection> {
+  if (Array.isArray(body?.tickers) && body.tickers.length > 0) {
+    const tickers = body.tickers.map((t) => String(t).toUpperCase());
+    return { tickers, filtered: false, addedFrom: null, addedTo: null, totalUniverse: tickers.length };
+  }
+  return resolveUniverseByAddedRange(body ?? {});
+}
+
+function describeAddedSelection(selection: AddedRangeSelection): string {
+  if (!selection.filtered) {
+    return `대상 ${selection.tickers.length} 종목 (added 범위 미지정 → 유니버스 전체)`;
+  }
+  const range = `${selection.addedFrom ?? "처음"} ~ ${selection.addedTo ?? "지금"}`;
+  return `대상 ${selection.tickers.length} 종목 (added ${range}, 전체 ${selection.totalUniverse} 중)`;
 }
 
 async function getNewsPullTickerSelection(input: { csvPath: string; maxTickers: number; tickerAddedFrom?: string }): Promise<{
@@ -5774,7 +5863,9 @@ app.post("/api/investing/calendar/earnings/update", async (req, res, next) => {
     }
     const { scope, from, to } = resolved;
     const requestIntervalMs = clampInvestingIntervalMs(Number(req.body?.requestIntervalMs));
-    const tickers = await getDefaultUniverseTickers();
+    // DefaultTickerWindow에서 호출하면 added 범위로 대상을 좁힌다.
+    const addedSelection = await resolveProfileTargets(req.body ?? {});
+    const tickers = addedSelection.tickers;
     const universeSet = new Set(tickers.map((t) => t.toUpperCase()));
 
     const businessDays = countBusinessDays(from, to);
@@ -5784,7 +5875,7 @@ app.post("/api/investing/calendar/earnings/update", async (req, res, next) => {
     });
     appendLog(jobId, `Investing Earnings Update — scope=${scope}, range=${from}~${to}`);
     appendLog(jobId, `영업일 ${businessDays}일 × 순차 요청, 간격 ${requestIntervalMs}ms + 지터 (병렬 없음)`);
-    appendLog(jobId, `대상 default universe ${tickers.length} 종목`);
+    appendLog(jobId, describeAddedSelection(addedSelection));
     appendLog(jobId, `실적/예상은 Investing 값으로 덮어씀. surprise는 GAAP/adjusted 혼재 위험이 있어 계산하지 않음`);
     res.json({ jobId, scope, range: { from, to }, businessDays, targetTickers: tickers.length });
 
@@ -7479,11 +7570,8 @@ app.post("/api/company-profiles/pull-fmp", async (req, res) => {
       requestIntervalMs?: number;
       skipExisting?: boolean;
     };
-    let tickers = body.tickers;
-
-    if (!tickers || tickers.length === 0) {
-      tickers = await getDefaultUniverseTickers();
-    }
+    const addedSelection = await resolveProfileTargets(body as any);
+    let tickers = addedSelection.tickers;
     const max = body.maxTickers ?? tickers.length;
     let target = tickers.slice(0, max);
 
@@ -7500,6 +7588,7 @@ app.post("/api/company-profiles/pull-fmp", async (req, res) => {
     }
 
     const jobId = createJob(target.length);
+    appendLog(jobId, describeAddedSelection(addedSelection));
     appendLog(jobId, `Starting FMP company description update for ${target.length} tickers (concurrency=${concurrency}, interval=${requestIntervalMs}ms, skipExisting=${skipExisting}, skipped=${skippedCount})`);
     res.json({ jobId });
 
@@ -7611,13 +7700,117 @@ app.post("/api/company-profiles/pull-fmp", async (req, res) => {
 });
 
 // ── Pull Yahoo Holders (institutional + insider) ───────────────────────────
+/**
+ * Industry/Sector 전용 pull.
+ *
+ * FMP company profile의 sector/industry만 `securities`에 반영한다.
+ * pull-fmp는 description·CEO·시총까지 전부 덮어쓰지만, 이 버튼은 산업 분류만 채운다.
+ * skipExisting(기본 true)이면 industry가 이미 있는 티커는 건너뛴다.
+ */
+app.post("/api/company-profiles/pull-industry", async (req, res) => {
+  try {
+    const body = req.body as {
+      tickers?: string[];
+      addedFrom?: string;
+      addedTo?: string;
+      concurrency?: number;
+      requestIntervalMs?: number;
+      skipExisting?: boolean;
+    };
+
+    if (!config.fmpApiKey) {
+      res.status(400).json({ error: "FMP_API_KEY not configured" });
+      return;
+    }
+
+    const addedSelection = await resolveProfileTargets(body as any);
+    let target = addedSelection.tickers;
+    const concurrency = clampFmpConcurrency(body?.concurrency);
+    const requestIntervalMs = clampFmpIntervalMs(body?.requestIntervalMs);
+    const skipExisting = body?.skipExisting !== false;
+
+    let skippedCount = 0;
+    if (skipExisting) {
+      const rows = await getDb().all<Array<{ ticker: string }>>(
+        `SELECT ticker FROM securities WHERE industry IS NOT NULL AND TRIM(industry) <> ''`,
+      );
+      const have = new Set(rows.map((r) => r.ticker.toUpperCase()));
+      const before = target.length;
+      target = target.filter((t) => !have.has(t.toUpperCase()));
+      skippedCount = before - target.length;
+    }
+
+    const jobId = createJob(target.length, { category: "other", label: "Industry Update (FMP)" });
+    appendLog(jobId, describeAddedSelection(addedSelection));
+    appendLog(
+      jobId,
+      `Starting industry/sector update for ${target.length} tickers (concurrency=${concurrency}, interval=${requestIntervalMs}ms, skipExisting=${skipExisting}, skipped=${skippedCount})`,
+    );
+    res.json({ jobId, targetTickers: target.length, skipped: skippedCount, addedSelection });
+
+    void (async () => {
+      try {
+        if (target.length === 0) {
+          appendLog(jobId, "채울 대상이 없습니다 (모두 industry 보유 또는 범위 내 티커 없음)");
+          completeJob(jobId, { requested: 0, updated: 0, failed: 0, skipped: skippedCount });
+          return;
+        }
+
+        const { results, errors } = await fetchFmpProfilesBatch(target, {
+          concurrency,
+          requestIntervalMs,
+          onProgress: (done, total) => updateProgress(jobId, done, total),
+          shouldCancel: () => isJobCancelled(jobId),
+        });
+
+        if (isJobCancelled(jobId)) {
+          appendLog(jobId, "🛑 Cancelled by user");
+          return;
+        }
+
+        let updated = 0;
+        let missingIndustry = 0;
+        for (const [symbol, profile] of results) {
+          const industry = profile.industry?.trim() || null;
+          const sector = profile.sector?.trim() || null;
+          if (!industry && !sector) {
+            missingIndustry++;
+            continue;
+          }
+          await upsertSecurity(profile.symbol || symbol, null, profile.companyName || null, sector, industry);
+          updated++;
+        }
+
+        appendLog(jobId, `반영: ${updated}건 갱신 / 산업정보 없음 ${missingIndustry}건 / 조회실패 ${errors.size}건`);
+        await setLastSuccess("company_profiles_industry", new Date().toISOString(), {
+          requested: target.length,
+          updated,
+          missingIndustry,
+          errors: errors.size,
+          addedFrom: addedSelection.addedFrom,
+          addedTo: addedSelection.addedTo,
+        });
+        completeJob(jobId, {
+          requested: target.length,
+          updated,
+          missingIndustry,
+          failed: errors.size,
+          skipped: skippedCount,
+        });
+      } catch (error) {
+        failJob(jobId, error instanceof Error ? error.message : String(error));
+      }
+    })();
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
 app.post("/api/company-profiles/pull-holders-yahoo", async (req, res) => {
   try {
     const body = req.body as { tickers?: string[]; maxTickers?: number; tickerConcurrency?: number; skipExisting?: boolean };
-    let tickers = body.tickers;
-    if (!tickers || tickers.length === 0) {
-      tickers = await getDefaultUniverseTickers();
-    }
+    const addedSelection = await resolveProfileTargets(body as any);
+    let tickers = addedSelection.tickers;
     const max = body.maxTickers ?? tickers.length;
     let target = tickers.slice(0, max);
     // Use Yahoo-specific concurrency (default to 50 as requested)
@@ -7634,6 +7827,7 @@ app.post("/api/company-profiles/pull-holders-yahoo", async (req, res) => {
     }
 
     const jobId = createJob(target.length);
+    appendLog(jobId, describeAddedSelection(addedSelection));
     appendLog(jobId, `Starting Yahoo holders update: ${target.length} tickers (concurrency=${tickerConcurrency}, skipExisting=${skipExisting}, skipped=${skippedCount})`);
     res.json({ jobId });
 
@@ -7823,11 +8017,8 @@ app.post("/api/company-profiles/pull-yahoo", async (req, res) => {
       requestIntervalMs?: number;
       skipExisting?: boolean;
     };
-    let tickers = body.tickers;
-
-    if (!tickers || tickers.length === 0) {
-      tickers = await getDefaultUniverseTickers();
-    }
+    const addedSelection = await resolveProfileTargets(body as any);
+    let tickers = addedSelection.tickers;
     const max = body.maxTickers ?? tickers.length;
     let target = tickers.slice(0, max);
 
@@ -7844,6 +8035,7 @@ app.post("/api/company-profiles/pull-yahoo", async (req, res) => {
     }
 
     const jobId = createJob(target.length);
+    appendLog(jobId, describeAddedSelection(addedSelection));
     appendLog(jobId, `Starting Yahoo company description update for ${target.length} tickers (concurrency=${concurrency}, interval=${requestIntervalMs}ms, skipExisting=${skipExisting}, skipped=${skippedCount})`);
     res.json({ jobId });
 
@@ -7961,10 +8153,8 @@ app.post("/api/company-profiles/pull-peers", async (req, res) => {
       tickerConcurrency?: number;
       skipExisting?: boolean;
     };
-    let tickers = body.tickers;
-    if (!tickers || tickers.length === 0) {
-      tickers = await getDefaultUniverseTickers();
-    }
+    const addedSelection = await resolveProfileTargets(body as any);
+    let tickers = addedSelection.tickers;
     const max = body.maxTickers ?? tickers.length;
     let target = tickers.slice(0, max);
     const tickerConcurrency = clampFinnhubCompanyDataConcurrency(body.tickerConcurrency);
@@ -8062,10 +8252,8 @@ app.post("/api/company-profiles/pull-fmp-peers", async (req, res) => {
       requestIntervalMs?: number;
       skipExisting?: boolean;
     };
-    let tickers = body.tickers;
-    if (!tickers || tickers.length === 0) {
-      tickers = await getDefaultUniverseTickers();
-    }
+    const addedSelection = await resolveProfileTargets(body as any);
+    let tickers = addedSelection.tickers;
 
     const max = body.maxTickers ?? tickers.length;
     let target = Array.from(new Set(
@@ -8086,6 +8274,7 @@ app.post("/api/company-profiles/pull-fmp-peers", async (req, res) => {
     }
 
     const jobId = createJob(target.length);
+    appendLog(jobId, describeAddedSelection(addedSelection));
     appendLog(jobId, `Starting FMP peers update for ${target.length} tickers (concurrency=${concurrency}, intervalMs=${requestIntervalMs}, skipExisting=${skipExisting}, skipped=${skippedCount})`);
     res.json({ jobId });
 
@@ -8165,10 +8354,8 @@ app.post("/api/company-profiles/pull-market-cap", async (req, res) => {
       maxTickers?: number;
       tickerConcurrency?: number;
     };
-    let tickers = body.tickers;
-    if (!tickers || tickers.length === 0) {
-      tickers = await getDefaultUniverseTickers();
-    }
+    const addedSelection = await resolveProfileTargets(body as any);
+    let tickers = addedSelection.tickers;
     const max = body.maxTickers ?? tickers.length;
     const target = tickers.slice(0, max);
     const tickerConcurrency = clampFmpConcurrency(body.tickerConcurrency);
@@ -8274,10 +8461,8 @@ app.post("/api/company-profiles/pull-market-cap", async (req, res) => {
 app.post("/api/company-profiles/pull-float", async (req, res) => {
   try {
     const body = req.body as { tickers?: string[]; maxTickers?: number };
-    let tickers = body.tickers;
-    if (!tickers || tickers.length === 0) {
-      tickers = await getDefaultUniverseTickers();
-    }
+    const addedSelection = await resolveProfileTargets(body as any);
+    let tickers = addedSelection.tickers;
     const max = body.maxTickers ?? tickers.length;
     const target = tickers.slice(0, max);
 
@@ -8287,6 +8472,7 @@ app.post("/api/company-profiles/pull-float", async (req, res) => {
     const skippedCount = target.length - filtered.length;
 
     const jobId = createJob(filtered.length);
+    appendLog(jobId, describeAddedSelection(addedSelection));
     appendLog(jobId, `Starting FMP float update: ${filtered.length} tickers to fetch (${skippedCount} skipped)`);
     res.json({ jobId });
 
@@ -8343,10 +8529,8 @@ app.post("/api/company-profiles/pull-ipo-date", async (req, res) => {
       tickerConcurrency?: number;
       skipExisting?: boolean;
     };
-    let tickers = body.tickers;
-    if (!tickers || tickers.length === 0) {
-      tickers = await getDefaultUniverseTickers();
-    }
+    const addedSelection = await resolveProfileTargets(body as any);
+    let tickers = addedSelection.tickers;
     const max = body.maxTickers ?? tickers.length;
     let target = tickers.slice(0, max);
     const tickerConcurrency = clampFinnhubCompanyDataConcurrency(body.tickerConcurrency);
@@ -8468,7 +8652,158 @@ app.post("/api/company-profiles/pull-ipo-date", async (req, res) => {
 });
 
 // ── Pull FMP IPO Pricing ───────────────────────────────────────────────────
+/**
+ * IPO 공모가 수집 — Finnhub `/calendar/ipo` 기반.
+ *
+ * 기존 FMP `ipos-calendar` 경로는 2026-08-05 기준 **HTTP 402 Restricted Endpoint**로 죽었다.
+ * Finnhub은 무료 티어에서 과거까지 열리고(2022 Q1 163건 확인), price를
+ * 확정가("18.00")와 예상 범위("15.00-17.00")로 구분해 준다.
+ *
+ * 티커별 개별 호출이 아니라 **날짜 범위를 90일씩 훑어 심볼 맵을 만든 뒤** 매칭한다.
+ * 대상 티커의 저장된 ipo_date에서 스윕 범위를 자동으로 잡는다.
+ */
 app.post("/api/company-profiles/pull-ipo-pricing", async (req, res) => {
+  try {
+    const body = req.body as {
+      tickers?: string[];
+      addedFrom?: string;
+      addedTo?: string;
+      from?: string;
+      to?: string;
+      skipExisting?: boolean;
+      requestIntervalMs?: number;
+    };
+
+    const addedSelection = await resolveProfileTargets(body as any);
+    let target = addedSelection.tickers;
+    const skipExisting = body?.skipExisting !== false;
+
+    let skippedExisting = 0;
+    if (skipExisting) {
+      const existingSet = await getTickersWithCompleteIpoPricing();
+      const before = target.length;
+      target = target.filter((ticker) => !existingSet.has(ticker.toUpperCase()));
+      skippedExisting = before - target.length;
+    }
+
+    const targetRows = await getIpoPricingTargetsForTickers(target);
+    const targetSet = new Set(target.map((t) => t.toUpperCase()));
+
+    // 스윕 범위: 대상 티커의 저장된 ipo_date 최소값 ~ 오늘.
+    // 단 하한은 2010-01-01로 막는다 — Finnhub IPO 이력이 그 언저리까지만 있고(2010 Q1 72건 확인),
+    // 데이터에 1915 같은 이상치 ipo_date가 섞여 있어 그대로 두면 수백 청크를 헛돈다.
+    const IPO_SWEEP_FLOOR = "2010-01-01";
+    const today = new Date().toISOString().slice(0, 10);
+    const knownIpoDates = targetRows
+      .map((row) => (typeof (row as any).ipoDate === "string" ? (row as any).ipoDate.slice(0, 10) : ""))
+      .filter((d) => ISO_DATE_RE.test(d))
+      .sort();
+    const autoFrom = knownIpoDates[0] && knownIpoDates[0] > IPO_SWEEP_FLOOR ? knownIpoDates[0] : IPO_SWEEP_FLOOR;
+    const from = ISO_DATE_RE.test(String(body?.from)) ? String(body?.from) : autoFrom;
+    const to = ISO_DATE_RE.test(String(body?.to)) ? String(body?.to) : today;
+
+    const jobId = createJob(0, { category: "other", label: "IPO Pricing Update (Finnhub)" });
+    appendLog(jobId, describeAddedSelection(addedSelection));
+    appendLog(
+      jobId,
+      `IPO 공모가 수집 — 대상 ${target.length} 종목 (이미 보유해 건너뜀 ${skippedExisting}), 스윕 범위 ${from}~${to}`,
+    );
+    appendLog(jobId, `source=Finnhub /calendar/ipo (FMP ipos-calendar는 402 Restricted로 사용 불가)`);
+    res.json({ jobId, targetTickers: target.length, skipped: skippedExisting, sweepRange: { from, to } });
+
+    void (async () => {
+      try {
+        if (target.length === 0) {
+          appendLog(jobId, "채울 대상이 없습니다");
+          completeJob(jobId, { requested: 0, updated: 0, skipped: skippedExisting });
+          return;
+        }
+
+        const sweep = await sweepFinnhubIpoCalendar({
+          from,
+          to,
+          options: {
+            requestIntervalMs: body?.requestIntervalMs,
+            onProgress: (done, total) => updateProgress(jobId, done, total),
+            onLog: (message) => appendLog(jobId, message),
+            shouldCancel: () => isJobCancelled(jobId),
+          },
+        });
+
+        if (isJobCancelled(jobId)) {
+          appendLog(jobId, "🛑 Cancelled by user");
+          return;
+        }
+
+        appendLog(
+          jobId,
+          `스윕 완료: ${sweep.chunks}청크, 전체 ${sweep.totalRows}건 → 고유 티커 ${sweep.byTicker.size}개` +
+            `${sweep.failedChunks.length ? `, 실패 청크 ${sweep.failedChunks.length}` : ""}`,
+        );
+
+        let updated = 0;
+        let pricedCount = 0;
+        let rangeOnly = 0;
+        let notFound = 0;
+
+        for (const ticker of target) {
+          if (isJobCancelled(jobId)) break;
+          const upper = ticker.toUpperCase();
+          const deal = sweep.byTicker.get(upper);
+          if (!deal || (deal.offerPrice == null && !deal.priceRange)) {
+            notFound++;
+            continue;
+          }
+
+          const securityId = await upsertSecurity(upper, deal.exchange, deal.companyName, null, null);
+          const changed = await upsertIpoPricing(
+            securityId,
+            "finnhub",
+            deal.offerPrice,
+            deal.priceRange,
+            JSON.stringify(deal.raw),
+          );
+          if (changed) {
+            updated++;
+            if (deal.offerPrice != null) pricedCount++;
+            else rangeOnly++;
+          }
+        }
+
+        appendLog(
+          jobId,
+          `반영: ${updated}건 (확정 공모가 ${pricedCount} / 범위만 ${rangeOnly}) · Finnhub에 없음 ${notFound}건`,
+        );
+        await setLastSuccess("company_profiles_ipo_pricing", new Date().toISOString(), {
+          source: "finnhub",
+          requested: target.length,
+          updated,
+          pricedCount,
+          rangeOnly,
+          notFound,
+          sweepRange: { from, to },
+        });
+        completeJob(jobId, {
+          source: "finnhub",
+          requested: target.length,
+          updated,
+          pricedCount,
+          rangeOnly,
+          notFound,
+          skipped: skippedExisting,
+          sweepRange: { from, to },
+          uniqueDeals: sweep.byTicker.size,
+        });
+      } catch (error) {
+        failJob(jobId, error instanceof Error ? error.message : String(error));
+      }
+    })();
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.post("/api/company-profiles/pull-ipo-pricing-fmp-legacy", async (req, res) => {
   try {
     if (!config.fmpApiKey) {
       res.status(400).json({ error: "FMP_API_KEY not configured" });
@@ -8481,10 +8816,8 @@ app.post("/api/company-profiles/pull-ipo-pricing", async (req, res) => {
       requestIntervalMs?: number;
       skipExisting?: boolean;
     };
-    let tickers = body.tickers;
-    if (!tickers || tickers.length === 0) {
-      tickers = await getDefaultUniverseTickers();
-    }
+    const addedSelection = await resolveProfileTargets(body as any);
+    let tickers = addedSelection.tickers;
 
     const max = body.maxTickers ?? tickers.length;
     let target = tickers.slice(0, max);

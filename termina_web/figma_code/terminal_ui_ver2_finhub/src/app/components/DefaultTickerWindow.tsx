@@ -150,6 +150,9 @@ function normalizeRows(data: any): TickerRow[] {
   return fallbackRowsFromTickers(data?.tickers);
 }
 
+/** DefaultTickerWindow에서 공용 러너로 도는 다운로드 종류. */
+type ExtraJobKind = "industry" | "earnings" | "description";
+
 async function readJsonResponse(response: Response): Promise<any> {
   const text = await response.text();
   if (!text.trim()) return {};
@@ -392,6 +395,16 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
   const [yahooJobId, setYahooJobId] = useState<string | null>(null);
   const [yahooJob, setYahooJob] = useState<JobStatus | null>(null);
   const [showYahooLog, setShowYahooLog] = useState(false);
+  // added date 범위 — 지정하면 그 기간에 추가된 티커만, 비우면 유니버스 전체가 대상.
+  const [addedFrom, setAddedFrom] = useState("");
+  const [addedTo, setAddedTo] = useState("");
+  // 과거 어닝 수집 기간 (Investing 스윕에 넘길 발표일 범위)
+  const [earningsFrom, setEarningsFrom] = useState("");
+  const [earningsTo, setEarningsTo] = useState(() => new Date().toISOString().slice(0, 10));
+  // Industry / Past Earnings / Description 3종은 같은 러너를 공유한다.
+  const [extraJob, setExtraJob] = useState<{ kind: ExtraJobKind; id: string; label: string } | null>(null);
+  const [extraJobStatus, setExtraJobStatus] = useState<JobStatus | null>(null);
+  const [showExtraLog, setShowExtraLog] = useState(false);
   const [filterText, setFilterText] = useState("");
   const [tickerFilterText, setTickerFilterText] = useState("");
   const [sortState, setSortState] = useState<SortState>({ key: null, direction: null });
@@ -554,6 +567,73 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
     }
   };
 
+  /**
+   * added date 범위를 요청 body에 담는다.
+   * 둘 다 비어 있으면 아무 것도 넣지 않고, 백엔드가 유니버스 전체를 대상으로 삼는다.
+   */
+  const addedRangeBody = (): Record<string, string> => {
+    const body: Record<string, string> = {};
+    if (addedFrom) body.addedFrom = addedFrom;
+    if (addedTo) body.addedTo = addedTo;
+    return body;
+  };
+
+  const addedRangeLabel = addedFrom || addedTo
+    ? `added ${addedFrom || "처음"} ~ ${addedTo || "지금"}`
+    : "유니버스 전체";
+
+  /** Industry / Past Earnings / Description 공용 실행기. */
+  const startExtraJob = async (
+    kind: ExtraJobKind,
+    url: string,
+    body: Record<string, unknown>,
+    label: string,
+  ) => {
+    if (!isDefaultPath || extraJob) return;
+    setError(null);
+    setNotice(null);
+    setExtraJobStatus(null);
+    try {
+      const res = await fetch(`${API_BASE}${url}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...addedRangeBody(), ...body }),
+      });
+      const data = await readJsonResponse(res);
+      if (!res.ok) {
+        setError(data.error || `HTTP ${res.status}`);
+        return;
+      }
+      if (!data.jobId) {
+        setError(`${label}: 서버가 jobId를 반환하지 않았습니다`);
+        return;
+      }
+      setExtraJob({ kind, id: data.jobId, label });
+    } catch (err: any) {
+      setError(err.message || `${label} 시작 실패`);
+    }
+  };
+
+  const handleIndustryUpdate = () =>
+    void startExtraJob("industry", "/api/company-profiles/pull-industry", {}, "Industry");
+
+  const handleDescriptionUpdate = () =>
+    void startExtraJob("description", "/api/company-profiles/pull-yahoo", { skipExisting: true }, "Description");
+
+  /** CalendarWindow의 Investing 버튼과 같은 엔드포인트. 대상만 added 범위로 좁힌다. */
+  const handlePastEarningsUpdate = (scope: "custom" | "next3m") => {
+    if (scope === "custom" && (!earningsFrom || !earningsTo)) {
+      setError("과거 어닝 범위(From/To)를 먼저 지정하세요");
+      return;
+    }
+    void startExtraJob(
+      "earnings",
+      "/api/investing/calendar/earnings/update",
+      scope === "custom" ? { scope, from: earningsFrom, to: earningsTo } : { scope },
+      scope === "custom" ? `Past Earnings ${earningsFrom}~${earningsTo}` : "Earnings Next 3M",
+    );
+  };
+
   const handleMarketCapUpdate = async () => {
     if (!isDefaultPath || marketCapUpdating) return;
     setMarketCapUpdating(true);
@@ -564,6 +644,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
       const res = await fetch(`${API_BASE}/api/company-profiles/pull-market-cap`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(addedRangeBody()),
       });
       const data = await readJsonResponse(res);
       if (!res.ok) {
@@ -588,6 +669,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
       const res = await fetch(`${API_BASE}/api/company-profiles/pull-ipo-pricing`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(addedRangeBody()),
       });
       const data = await readJsonResponse(res);
       if (!res.ok) {
@@ -612,6 +694,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
       const res = await fetch(`${API_BASE}/api/company-profiles/pull-float`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(addedRangeBody()),
       });
       const data = await readJsonResponse(res);
       if (!res.ok) {
@@ -636,6 +719,7 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
       const res = await fetch(`${API_BASE}/api/company-profiles/pull-holders-yahoo`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(addedRangeBody()),
       });
       const data = await readJsonResponse(res);
       if (!res.ok) {
@@ -821,6 +905,52 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
     };
   }, [handleLostJob, yahooJobId, loadTickers]);
 
+  // Industry / Past Earnings / Description 공용 폴링.
+  useEffect(() => {
+    if (!extraJob) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/jobs/${extraJob.id}`);
+        if (res.status === 404) {
+          await handleLostJob(extraJob.label, () => {
+            setExtraJob(null);
+            setExtraJobStatus(null);
+          });
+          return;
+        }
+        if (!res.ok) return;
+        const data = await readJsonResponse(res);
+        if (cancelled) return;
+        setExtraJobStatus(data);
+        if (data.status === "done") {
+          const result = data.result ?? {};
+          const detail = extraJob.kind === "industry"
+            ? `${result.updated ?? 0}개 종목 industry 갱신`
+            : extraJob.kind === "earnings"
+              ? `신규 ${result.inserted ?? 0} / 갱신 ${result.updated ?? 0}`
+              : `${result.tickersUpdated ?? result.updated ?? 0}개 종목 description 갱신`;
+          setNotice(`${extraJob.label} 완료 — ${detail}`);
+          setExtraJob(null);
+          await loadTickers();
+        } else if (data.status === "failed") {
+          setError(data.error || `${extraJob.label} 실패`);
+          setExtraJob(null);
+        } else if (data.status === "cancelled") {
+          setExtraJob(null);
+        }
+      } catch {
+        // ignore transient polling errors
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => { void poll(); }, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [extraJob, handleLostJob, loadTickers]);
+
   useEffect(() => {
     const container = listContainerRef.current;
     if (!container) return;
@@ -987,6 +1117,24 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
               <RefreshCw className={`w-3 h-3 ${yahooUpdating ? "animate-spin" : ""}`} />
               {yahooUpdating ? "Yahoo..." : "Yahoo Holders"}
             </button>
+            <button
+              onClick={handleIndustryUpdate}
+              disabled={!!extraJob || loading}
+              className="px-2 py-1 text-xs bg-teal-600 text-white rounded hover:bg-teal-700 disabled:opacity-50 flex items-center gap-1"
+              title={`FMP 프로필에서 sector/industry만 채운다. 이미 industry가 있는 종목은 건너뜀. 대상: ${addedRangeLabel}`}
+            >
+              <RefreshCw className={`w-3 h-3 ${extraJob?.kind === "industry" ? "animate-spin" : ""}`} />
+              {extraJob?.kind === "industry" ? "Industry..." : "Industry"}
+            </button>
+            <button
+              onClick={handleDescriptionUpdate}
+              disabled={!!extraJob || loading}
+              className="px-2 py-1 text-xs bg-sky-600 text-white rounded hover:bg-sky-700 disabled:opacity-50 flex items-center gap-1"
+              title={`티커를 눌렀을 때 나오는 회사 description(Yahoo)을 받는다. 이미 있는 종목은 건너뜀. 대상: ${addedRangeLabel}`}
+            >
+              <RefreshCw className={`w-3 h-3 ${extraJob?.kind === "description" ? "animate-spin" : ""}`} />
+              {extraJob?.kind === "description" ? "Desc..." : "Description"}
+            </button>
           </>
         )}
         {!isDefaultPath && (
@@ -1000,6 +1148,113 @@ export function DefaultTickerWindow({ onTickerClick }: DefaultTickerWindowProps)
           </button>
         )}
       </div>
+
+      {isDefaultPath && (
+        <div className="mb-3 rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 px-3 py-2">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              Added Date
+            </span>
+            <input
+              type="date"
+              value={addedFrom}
+              onChange={(e) => setAddedFrom(e.target.value)}
+              className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800"
+              title="이 날짜 이후에 추가된 티커만 대상으로 삼는다"
+            />
+            <span className="text-xs text-gray-400">to</span>
+            <input
+              type="date"
+              value={addedTo}
+              onChange={(e) => setAddedTo(e.target.value)}
+              className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800"
+              title="이 날짜 이전에 추가된 티커만 대상으로 삼는다"
+            />
+            {(addedFrom || addedTo) && (
+              <button
+                onClick={() => { setAddedFrom(""); setAddedTo(""); }}
+                className="px-1.5 py-0.5 text-[11px] rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                title="범위를 지우면 유니버스 전체가 대상이 된다"
+              >
+                Clear
+              </button>
+            )}
+            <span className={`text-[11px] ${addedFrom || addedTo ? "text-blue-600 dark:text-blue-400" : "text-gray-500 dark:text-gray-400"}`}>
+              위 다운로드 버튼 전체의 대상: <b>{addedRangeLabel}</b>
+            </span>
+          </div>
+
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-gray-200 dark:border-gray-700 pt-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              Past Earnings
+            </span>
+            <input
+              type="date"
+              value={earningsFrom}
+              onChange={(e) => setEarningsFrom(e.target.value)}
+              className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800"
+              title="수집할 실적 발표일 시작"
+            />
+            <span className="text-xs text-gray-400">to</span>
+            <input
+              type="date"
+              value={earningsTo}
+              onChange={(e) => setEarningsTo(e.target.value)}
+              className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800"
+              title="수집할 실적 발표일 종료"
+            />
+            <button
+              onClick={() => handlePastEarningsUpdate("custom")}
+              disabled={!!extraJob || loading || !earningsFrom || !earningsTo}
+              className="px-2 py-1 text-xs bg-amber-700 text-white rounded hover:bg-amber-800 disabled:opacity-50 flex items-center gap-1"
+              title={`Investing.com 일자별 스윕으로 과거 어닝(실적·매출·세션)을 받는다. 대상: ${addedRangeLabel}`}
+            >
+              <RefreshCw className={`w-3 h-3 ${extraJob?.kind === "earnings" ? "animate-spin" : ""}`} />
+              {extraJob?.kind === "earnings" ? "Earnings..." : "Investing · Custom"}
+            </button>
+            <button
+              onClick={() => handlePastEarningsUpdate("next3m")}
+              disabled={!!extraJob || loading}
+              className="px-2 py-1 text-xs bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50 flex items-center gap-1"
+              title={`앞으로 90일 어닝 일정을 Investing에서 받는다. 대상: ${addedRangeLabel}`}
+            >
+              <RefreshCw className={`w-3 h-3 ${extraJob?.kind === "earnings" ? "animate-spin" : ""}`} />
+              Investing · Next 3M
+            </button>
+            <span className="text-[11px] text-gray-500 dark:text-gray-400">
+              순차 요청이라 영업일 1일당 약 1.2초
+            </span>
+          </div>
+
+          {extraJob && (
+            <div className="mt-2 border-t border-gray-200 dark:border-gray-700 pt-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-gray-600 dark:text-gray-300">
+                  {extraJob.label}: {extraJobStatus?.progress?.completed ?? 0}/{extraJobStatus?.progress?.total ?? 0}
+                  {typeof extraJobStatus?.progress?.pct === "number" ? ` (${extraJobStatus.progress.pct}%)` : ""}
+                </span>
+                <button
+                  onClick={() => setShowExtraLog((v) => !v)}
+                  className="px-1.5 py-0.5 text-[11px] rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                >
+                  {showExtraLog ? "Hide Log" : "View Log"}
+                </button>
+                <button
+                  onClick={() => void fetch(`${API_BASE}/api/jobs/${extraJob.id}/cancel`, { method: "POST" })}
+                  className="px-1.5 py-0.5 text-[11px] rounded border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30"
+                >
+                  Cancel
+                </button>
+              </div>
+              {showExtraLog && (
+                <pre className="mt-2 max-h-40 overflow-auto rounded bg-gray-900 p-2 text-[10px] leading-4 text-gray-200">
+                  {(extraJobStatus?.logs ?? []).join("\n") || "..."}
+                </pre>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="flex items-center gap-2 mb-3">
         <label className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">DB Path:</label>
