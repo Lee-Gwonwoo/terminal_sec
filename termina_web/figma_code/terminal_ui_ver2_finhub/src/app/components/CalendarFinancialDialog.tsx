@@ -380,10 +380,7 @@ export function CalendarFinancialDialog({
   const summaryPoint = [...activeSeries].reverse().find(hasActualFinancialValue) ?? latestPoint;
   const revenueHasData = hasSeriesValue(activeSeries, 'revenue') || hasSeriesValue(activeSeries, 'revenueEstimate');
   const earningsHasData =
-    hasSeriesValue(activeSeries, 'netIncome') ||
-    hasSeriesValue(activeSeries, 'netIncomeEstimate') ||
-    hasSeriesValue(activeSeries, 'eps') ||
-    hasSeriesValue(activeSeries, 'epsEstimate');
+    hasSeriesValue(activeSeries, 'eps') || hasSeriesValue(activeSeries, 'epsEstimate');
   const valuationHasData = hasSeriesValue(activeSeries, 'peRatio') || hasSeriesValue(activeSeries, 'psRatio');
 
   // 기간을 바꾸면 확대 배율을 초기화한다 (스케일이 완전히 달라지므로).
@@ -394,7 +391,6 @@ export function CalendarFinancialDialog({
   }, [periodMode, ticker]);
 
   const revenueDomain = computeZoomDomain(activeSeries, ['revenue', 'revenueEstimate'], revenueZoom);
-  const incomeDomain = computeZoomDomain(activeSeries, ['netIncome', 'netIncomeEstimate'], earningsZoom);
   const epsDomain = computeZoomDomain(activeSeries, ['eps', 'epsEstimate'], earningsZoom);
   const valuationDomain = computeZoomDomain(activeSeries, ['peRatio', 'psRatio'], valuationZoom);
 
@@ -525,38 +521,25 @@ export function CalendarFinancialDialog({
 
                 <ChartPanel
                   title="Earnings"
-                  subtitle="Net income and EPS trend"
+                  subtitle="EPS actual vs analyst estimate"
                   icon={<BarChart3 className="h-4 w-4 text-amber-500" />}
-                  note="Gray bar (left) = net income estimate, pink bar (right) = reported actual. EPS stays on the right axis as a line (dashed = estimate)."
+                  note="Gray bar (left) = EPS estimate, amber bar (right) = reported EPS. Net income is intentionally left off this chart — see the stat card above and the table below."
                 >
                   {earningsHasData ? (
-                    <ZoomableChartFrame zoom={earningsZoom} onZoomChange={setEarningsZoom} accentClassName="accent-rose-500">
+                    <ZoomableChartFrame zoom={earningsZoom} onZoomChange={setEarningsZoom} accentClassName="accent-amber-500">
                       <ChartContainer
                         className="h-[300px] w-full aspect-auto"
                         config={{
-                          netIncomeEstimate: { label: 'Net Income Estimate', color: ESTIMATE_BAR_COLOR },
-                          netIncome: { label: 'Net Income', color: '#fb7185' },
+                          epsEstimate: { label: 'EPS Estimate', color: ESTIMATE_BAR_COLOR },
                           eps: { label: 'EPS', color: '#f59e0b' },
-                          epsEstimate: { label: 'EPS Estimate', color: '#b45309' },
                         }}
                       >
                         <ComposedChart key={brushKey} data={activeSeries} margin={chartMargin}>
                           <CartesianGrid vertical={false} />
                           <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={22} />
                           <YAxis
-                            yAxisId="income"
-                            tickFormatter={formatAxisCompact}
-                            width={78}
-                            tickLine={false}
-                            axisLine={false}
-                            domain={incomeDomain ?? ['auto', 'auto']}
-                            allowDataOverflow={incomeDomain != null}
-                          />
-                          <YAxis
-                            yAxisId="eps"
-                            orientation="right"
                             tickFormatter={(value) => formatPlainNumber(value)}
-                            width={52}
+                            width={64}
                             tickLine={false}
                             axisLine={false}
                             domain={epsDomain ?? ['auto', 'auto']}
@@ -565,16 +548,14 @@ export function CalendarFinancialDialog({
                           <ChartTooltip content={<ChartTooltipContent />} />
                           <ChartLegend content={<ChartLegendContent />} />
                           {/* 추정치를 먼저 선언해야 실적 막대 왼쪽에 놓인다. */}
-                          <Bar yAxisId="income" dataKey="netIncomeEstimate" fill={ESTIMATE_BAR_COLOR} radius={[6, 6, 0, 0]} barSize={estimateBarSize} />
-                          <Bar yAxisId="income" dataKey="netIncome" fill="var(--color-netIncome)" radius={[6, 6, 0, 0]} barSize={periodMode === 'annual' ? 22 : 15} />
-                          <Line yAxisId="eps" type="monotone" dataKey="eps" stroke="var(--color-eps)" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-                          <Line yAxisId="eps" type="monotone" dataKey="epsEstimate" stroke="var(--color-epsEstimate)" strokeWidth={2} strokeDasharray="6 4" dot={{ r: 2.5 }} activeDot={{ r: 4 }} />
+                          <Bar dataKey="epsEstimate" fill={ESTIMATE_BAR_COLOR} radius={[6, 6, 0, 0]} barSize={estimateBarSize} />
+                          <Bar dataKey="eps" fill="var(--color-eps)" radius={[6, 6, 0, 0]} barSize={periodMode === 'annual' ? 26 : 18} />
                           <Brush {...brushProps} />
                         </ComposedChart>
                       </ChartContainer>
                     </ZoomableChartFrame>
                   ) : (
-                    <EmptyChartState message="Net income or EPS series is unavailable for this ticker." />
+                    <EmptyChartState message="EPS series is unavailable for this ticker." />
                   )}
                 </ChartPanel>
 

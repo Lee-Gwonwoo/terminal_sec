@@ -116,8 +116,9 @@ import {
   fetchYahooEarningsEstimates,
   clampPreciseConcurrency,
 } from "./services/yahooEarningsProvider.js";
-import { reconcileYahooEarnings, reconcileNasdaqEarnings } from "./services/yahooEarningsReconciler.js";
+import { reconcileYahooEarnings, reconcileNasdaqEarnings, reconcileInvestingEarnings } from "./services/yahooEarningsReconciler.js";
 import { sweepNasdaqEarningsRange } from "./services/nasdaqEarningsCalendarProvider.js";
+import { sweepInvestingEarningsRange, clampInvestingIntervalMs } from "./services/investingEarningsProvider.js";
 import { createFmpRequestScheduler } from "./services/fmpRequestScheduler.js";
 import { getStoredCalendarFinancialSeries, replaceCalendarFinancialSeriesSnapshot } from "./services/calendarFinancialRepository.js";
 import {
@@ -5727,6 +5728,18 @@ async function runNasdaqRangeSweep(params: {
   );
 }
 
+function countBusinessDays(from: string, to: string): number {
+  let cursor = Date.parse(`${from}T00:00:00Z`);
+  const end = Date.parse(`${to}T00:00:00Z`);
+  let count = 0;
+  while (Number.isFinite(cursor) && Number.isFinite(end) && cursor <= end) {
+    const weekday = new Date(cursor).getUTCDay();
+    if (weekday !== 0 && weekday !== 6) count++;
+    cursor += 86_400_000;
+  }
+  return count;
+}
+
 function resolveYahooEarningsScope(body: any): { scope: "next3m" | "custom"; from: string; to: string } | { error: string } {
   const today = new Date().toISOString().slice(0, 10);
   const scope = body?.scope === "custom" ? "custom" : "next3m";
@@ -5745,6 +5758,97 @@ function resolveYahooEarningsScope(body: any): { scope: "next3m" | "custom"; fro
   }
   return { scope, from, to };
 }
+
+/**
+ * Investing.com 실적 스윕.
+ * 사용자 결정(2026-08-05): 실적 데이터는 Investing 기준으로 통일한다.
+ * 과거 날짜의 매출 실적과 세션을 주는 유일한 기간형 소스 (plan §1-6).
+ * 넓은 범위 일괄 요청은 403이 되므로 일자별 순차 + 간격으로만 돈다.
+ */
+app.post("/api/investing/calendar/earnings/update", async (req, res, next) => {
+  try {
+    const resolved = resolveYahooEarningsScope(req.body);
+    if ("error" in resolved) {
+      res.status(400).json({ error: resolved.error });
+      return;
+    }
+    const { scope, from, to } = resolved;
+    const requestIntervalMs = clampInvestingIntervalMs(Number(req.body?.requestIntervalMs));
+    const tickers = await getDefaultUniverseTickers();
+    const universeSet = new Set(tickers.map((t) => t.toUpperCase()));
+
+    const businessDays = countBusinessDays(from, to);
+    const jobId = createJob(businessDays, {
+      category: "other",
+      label: `Investing Earnings Update (${scope})`,
+    });
+    appendLog(jobId, `Investing Earnings Update — scope=${scope}, range=${from}~${to}`);
+    appendLog(jobId, `영업일 ${businessDays}일 × 순차 요청, 간격 ${requestIntervalMs}ms + 지터 (병렬 없음)`);
+    appendLog(jobId, `대상 default universe ${tickers.length} 종목`);
+    appendLog(jobId, `실적/예상은 Investing 값으로 덮어씀. surprise는 GAAP/adjusted 혼재 위험이 있어 계산하지 않음`);
+    res.json({ jobId, scope, range: { from, to }, businessDays, targetTickers: tickers.length });
+
+    void (async () => {
+      try {
+        const sweep = await sweepInvestingEarningsRange({
+          from,
+          to,
+          universe: universeSet,
+          options: {
+            requestIntervalMs,
+            onProgress: (done, total) => updateProgress(jobId, done, total),
+            onLog: (message) => appendLog(jobId, message),
+            shouldCancel: () => isJobCancelled(jobId),
+          },
+        });
+
+        if (isJobCancelled(jobId)) {
+          appendLog(jobId, "🛑 Cancelled by user");
+          return;
+        }
+
+        appendLog(
+          jobId,
+          `스윕 완료: ${sweep.scannedDays}일, 전체 ${sweep.totalRowsSeen}건 중 유니버스 매칭 ${sweep.rows.length}건` +
+            `${sweep.failedDays.length ? `, 실패한 날 ${sweep.failedDays.length}일` : ""}` +
+            `${sweep.usedBrowser ? " (브라우저 폴백 사용됨)" : ""}`,
+        );
+
+        const summary = await reconcileInvestingEarnings({
+          rows: sweep.rows,
+          onLog: (message) => appendLog(jobId, message),
+        });
+
+        appendLog(
+          jobId,
+          `반영: 신규 ${summary.inserted} / 갱신 ${summary.updated} / EPS실적 ${summary.epsActualFilled} / 매출실적 ${summary.revenueActualFilled} / 세션 ${summary.sessionFilled}` +
+            `${summary.errors ? ` / 실패 ${summary.errors}` : ""}`,
+        );
+
+        await setLastSuccess("investing_calendar_earnings", new Date().toISOString(), {
+          scope, from, to, scannedDays: sweep.scannedDays, matched: sweep.rows.length, ...summary,
+        });
+
+        completeJob(jobId, {
+          source: "INVESTING",
+          scope,
+          from,
+          to,
+          scannedDays: sweep.scannedDays,
+          failedDays: sweep.failedDays.length,
+          totalRowsSeen: sweep.totalRowsSeen,
+          matchedRows: sweep.rows.length,
+          usedBrowser: sweep.usedBrowser,
+          ...summary,
+        });
+      } catch (error) {
+        failJob(jobId, error instanceof Error ? error.message : String(error));
+      }
+    })();
+  } catch (error) {
+    next(error);
+  }
+});
 
 app.post("/api/yahoo/calendar/earnings/date-fix", async (req, res, next) => {
   try {

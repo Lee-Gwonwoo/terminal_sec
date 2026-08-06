@@ -1501,6 +1501,24 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     });
   };
 
+  // Investing.com 실적 스윕 — 과거 매출 실적/세션을 주는 유일한 기간형 소스.
+  // 넓은 범위 일괄 요청은 403이 되므로 백엔드가 일자별 순차 + 간격으로 돈다.
+  const startInvestingEarningsJob = async (scope: 'next3m' | 'custom') => {
+    if (scope === 'custom' && (!dateFrom || !dateTo)) {
+      setActionError('Custom scope requires both From and To dates in the filter above.');
+      return;
+    }
+    const scopeLabel = scope === 'next3m' ? 'Next 3 Months' : `${dateFrom} ~ ${dateTo}`;
+    await startCalendarJob({
+      url: '/api/investing/calendar/earnings/update',
+      label: `Investing Earnings Update (${scopeLabel})`,
+      failureMessage: 'Investing earnings update failed',
+      requestBody: scope === 'custom'
+        ? { scope, from: dateFrom, to: dateTo }
+        : { scope },
+    });
+  };
+
   const handleIpoUpdate = async () => {
     await startCalendarJob({
       url: '/api/fmp/calendar/ipos/update',
@@ -2023,6 +2041,24 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
               >
                 <RefreshCw className={`w-4 h-4 ${updatePending ? 'animate-spin' : ''}`} />
                 Yahoo Precise · Custom
+              </button>
+              <button
+                onClick={() => void startInvestingEarningsJob('next3m')}
+                disabled={updatePending}
+                title="Investing.com 일자별 스윕 — 앞으로 90일. 실적/예상은 Investing 기준으로 통일. 순차 요청이라 오래 걸림"
+                className={`flex items-center gap-2 px-3 py-2 text-sm rounded text-white ${updatePending ? 'bg-amber-400 cursor-wait' : 'bg-amber-600 hover:bg-amber-700'}`}
+              >
+                <RefreshCw className={`w-4 h-4 ${updatePending ? 'animate-spin' : ''}`} />
+                Investing · Next 3M
+              </button>
+              <button
+                onClick={() => void startInvestingEarningsJob('custom')}
+                disabled={updatePending || !hasRequiredDateRange}
+                title={hasRequiredDateRange ? `Investing 일자별 스윕 · ${dateFrom} ~ ${dateTo} (과거 매출 실적·세션 포함)` : 'From/To 날짜를 먼저 지정하세요'}
+                className={`flex items-center gap-2 px-3 py-2 text-sm rounded text-white ${(updatePending || !hasRequiredDateRange) ? 'bg-amber-400 cursor-not-allowed' : 'bg-amber-700 hover:bg-amber-800'}`}
+              >
+                <RefreshCw className={`w-4 h-4 ${updatePending ? 'animate-spin' : ''}`} />
+                Investing · Custom
               </button>
               <button
                 onClick={handleEarningsUpdate}

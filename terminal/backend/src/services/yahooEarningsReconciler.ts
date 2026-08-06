@@ -17,6 +17,7 @@ import { getDb } from "../db.js";
 import { getEtDateString } from "./timeUtils.js";
 import type { YahooEarningsDate, YahooEarningsEstimate } from "./yahooEarningsProvider.js";
 import type { NasdaqEarningsRow } from "./nasdaqEarningsCalendarProvider.js";
+import type { InvestingEarningsRow } from "./investingEarningsProvider.js";
 
 /** 같은 분기의 날짜 이동으로 인정할 최대 간격(일). plan §1-3 실측: 이동 47쌍 전부 ≤45일, 정상 분기쌍 6건 전부 >45일. */
 const MOVE_WINDOW_DAYS = 45;
@@ -278,6 +279,138 @@ export async function reconcileNasdaqEarnings(params: {
         const message = error instanceof Error ? error.message : String(error);
         if (summary.errorSamples.length < 20) summary.errorSamples.push({ ticker: row.ticker, message });
         params.onLog?.(`[nasdaq-reconcile] ${row.ticker} ${row.reportDate} 실패: ${message}`);
+      }
+    }
+    await db.run("COMMIT");
+  } catch (error) {
+    await db.run("ROLLBACK");
+    throw error;
+  }
+
+  return summary;
+}
+
+export interface InvestingReconcileSummary {
+  inserted: number;
+  updated: number;
+  epsActualFilled: number;
+  revenueActualFilled: number;
+  sessionFilled: number;
+  errors: number;
+  errorSamples: Array<{ ticker: string; message: string }>;
+}
+
+/**
+ * Investing.com 스윕 결과를 반영한다.
+ *
+ * 사용자 결정(2026-08-05): **실적 데이터는 Investing 기준으로 통일한다.**
+ * 따라서 Nasdaq/Yahoo 경로와 달리 실적 필드(eps_actual / revenue_actual /
+ * eps_est / revenue_est)를 **덮어쓴다**. 기준이 섞이는 것보다 한 소스로
+ * 통일되는 편이 서프라이즈 계산에 일관되기 때문이다.
+ *
+ * 단 `surprise_pct`는 **계산하지 않는다.** Investing은 한 행 안에서 실적을 GAAP,
+ * 예상을 non-GAAP로 붙이는 경우가 있어(ZETA 2026-08-04: 실적 0.03 / 예상 0.1995)
+ * 그대로 나누면 엉터리 값이 나온다. 표시에 필요하면 UI에서 두 값을 나란히 보여줄 것.
+ *
+ * 날짜는 이미 확정된 사실이므로 MOVE 판정도, 삭제도 하지 않는다.
+ */
+export async function reconcileInvestingEarnings(params: {
+  rows: InvestingEarningsRow[];
+  onLog?: (message: string) => void;
+}): Promise<InvestingReconcileSummary> {
+  const summary: InvestingReconcileSummary = {
+    inserted: 0, updated: 0, epsActualFilled: 0, revenueActualFilled: 0,
+    sessionFilled: 0, errors: 0, errorSamples: [],
+  };
+  const db = getDb();
+  if (params.rows.length === 0) return summary;
+
+  const nowIso = new Date().toISOString();
+  const existing = new Map<string, StoredRow>();
+  const tickers = Array.from(new Set(params.rows.map((r) => r.ticker)));
+  const CHUNK = 400;
+  for (let index = 0; index < tickers.length; index += CHUNK) {
+    const chunk = tickers.slice(index, index + CHUNK);
+    const placeholders = chunk.map(() => "?").join(",");
+    const found = await db.all<StoredRow[]>(
+      `SELECT id, ticker, event_at, meta_json, source, unique_key
+         FROM calendar_events
+        WHERE event_type = 'earnings' AND ticker IN (${placeholders})`,
+      chunk,
+    );
+    for (const row of found) {
+      const key = `${row.ticker.toUpperCase()}|${row.event_at.slice(0, 10)}`;
+      if (!existing.has(key)) existing.set(key, row);
+    }
+  }
+
+  await db.run("BEGIN IMMEDIATE");
+  try {
+    for (const row of params.rows) {
+      try {
+        const key = `${row.ticker}|${row.reportDate}`;
+        const found = existing.get(key);
+        const meta: Record<string, unknown> = found ? parseMeta(found.meta_json) : { company_name: null };
+
+        if (row.companyName && meta.company_name == null) meta.company_name = row.companyName;
+        meta.report_date = row.reportDate;
+        meta.investing_checked_at = nowIso;
+
+        // 실적/예상은 Investing 기준으로 통일 → 덮어쓴다.
+        if (row.epsActual != null) {
+          if (meta.eps_actual == null) summary.epsActualFilled++;
+          meta.eps_actual = row.epsActual;
+          meta.confirmed = true;
+          meta.date_event_state = "reported";
+        }
+        if (row.revenueActual != null) {
+          if (meta.revenue_actual == null) summary.revenueActualFilled++;
+          meta.revenue_actual = row.revenueActual;
+        }
+        if (row.epsForecast != null) meta.eps_est = row.epsForecast;
+        if (row.revenueForecast != null) meta.revenue_est = row.revenueForecast;
+        if (row.epsActual != null || row.epsForecast != null) meta.estimate_source = "investing";
+
+        // 기준 혼재 가능성이 있으므로 서프라이즈는 저장하지 않고 지운다.
+        meta.surprise_pct = null;
+        meta.surprise_note = "investing: GAAP/adjusted 혼재 가능 — 계산하지 않음";
+
+        // 세션은 Investing이 과거 날짜에도 유지한다(98%). 비어 있을 때만 채운다.
+        if (row.timeOfDay && meta.time_of_day == null) {
+          meta.time_of_day = row.timeOfDay;
+          meta.session = deriveSession(row.timeOfDay);
+          meta.time_of_day_source = "investing";
+          summary.sessionFilled++;
+        }
+        if (row.marketCap != null && meta.market_cap == null) meta.market_cap = row.marketCap;
+
+        if (found) {
+          await db.run(`UPDATE calendar_events SET meta_json = ? WHERE id = ?`, [JSON.stringify(meta), found.id]);
+          summary.updated++;
+        } else {
+          meta.date_source = "investing";
+          await db.run(
+            `INSERT INTO calendar_events (id, event_type, ticker, title, event_at, meta_json, source, unique_key)
+             VALUES (?, 'earnings', ?, ?, ?, ?, 'INVESTING', ?)
+             ON CONFLICT(event_type, unique_key) DO UPDATE SET
+               event_at = excluded.event_at,
+               meta_json = excluded.meta_json`,
+            [
+              randomUUID(),
+              row.ticker,
+              `${row.ticker} earnings`,
+              `${row.reportDate}T12:00:00.000Z`,
+              JSON.stringify(meta),
+              `INVESTING:earnings:${row.ticker}:${row.reportDate}`,
+            ],
+          );
+          summary.inserted++;
+        }
+      } catch (error) {
+        summary.errors++;
+        const message = error instanceof Error ? error.message : String(error);
+        if (summary.errorSamples.length < 20) summary.errorSamples.push({ ticker: row.ticker, message });
+        params.onLog?.(`[investing-reconcile] ${row.ticker} ${row.reportDate} 실패: ${message}`);
       }
     }
     await db.run("COMMIT");
