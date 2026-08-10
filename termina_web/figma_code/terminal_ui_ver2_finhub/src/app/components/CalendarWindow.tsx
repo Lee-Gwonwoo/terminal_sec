@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Calendar as CalendarIcon,
   Check,
@@ -214,50 +214,52 @@ const VISIBLE_COLUMNS_BY_TYPE: Record<string, string[]> = {
   economics: ['event_date', 'title', 'source'],
 };
 
+// 폭은 실제 응답 데이터의 최장 값 + 헤더 라벨 폭으로 산정했다(셀 패딩 px-2 = 16px 포함).
+// 길게 늘어지는 텍스트 컬럼(name/industry/description 등)은 상한을 두고 말줄임에 맡긴다.
 const COLUMN_DEFINITIONS: Record<string, Omit<ColumnConfig, 'visible'>> = {
-  event_date: { key: 'event_date', label: 'Date', width: '110px' },
-  report_date: { key: 'report_date', label: 'Date', width: '110px' },
-  ipo_date: { key: 'ipo_date', label: 'IPO Date', width: '110px' },
-  ipo_security_type: { key: 'ipo_security_type', label: 'Security Type', width: '130px' },
-  ex_date: { key: 'ex_date', label: 'Ex Date', width: '110px' },
-  pay_date: { key: 'pay_date', label: 'Pay Date', width: '110px' },
-  split_date: { key: 'split_date', label: 'Split Date', width: '110px' },
-  ticker: { key: 'ticker', label: 'Symbol', width: '90px' },
-  name: { key: 'name', label: 'Name', width: '180px' },
-  company_name: { key: 'company_name', label: 'Company', width: '180px' },
-  company_description: { key: 'company_description', label: 'Description', width: '320px' },
-  title: { key: 'title', label: 'Title', width: '240px' },
-  source: { key: 'source', label: 'Source', width: '100px' },
-  industry: { key: 'industry', label: 'Industry', width: '180px' },
+  event_date: { key: 'event_date', label: 'Date', width: '94px' },
+  report_date: { key: 'report_date', label: 'Date', width: '94px' },
+  ipo_date: { key: 'ipo_date', label: 'IPO Date', width: '94px' },
+  ipo_security_type: { key: 'ipo_security_type', label: 'Security Type', width: '114px' },
+  ex_date: { key: 'ex_date', label: 'Ex Date', width: '94px' },
+  pay_date: { key: 'pay_date', label: 'Pay Date', width: '94px' },
+  split_date: { key: 'split_date', label: 'Split Date', width: '94px' },
+  ticker: { key: 'ticker', label: 'Symbol', width: '78px' },
+  name: { key: 'name', label: 'Name', width: '150px' },
+  company_name: { key: 'company_name', label: 'Company', width: '150px' },
+  company_description: { key: 'company_description', label: 'Description', width: '260px' },
+  title: { key: 'title', label: 'Title', width: '180px' },
+  source: { key: 'source', label: 'Source', width: '116px' },
+  industry: { key: 'industry', label: 'Industry', width: '150px' },
   exchange: { key: 'exchange', label: 'Exchange', width: '110px' },
-  sector: { key: 'sector', label: 'Sector', width: '140px' },
-  status: { key: 'status', label: 'Status', width: '100px', align: 'center' },
-  shares: { key: 'shares', label: 'Shares', width: '120px', align: 'right' },
-  price_range: { key: 'price_range', label: 'Price Range', width: '130px' },
-  offer_amount: { key: 'offer_amount', label: 'Offer Amount', width: '130px', align: 'right' },
-  daa: { key: 'daa', label: 'DAA', width: '90px' },
-  sec_form: { key: 'sec_form', label: 'SEC Form', width: '110px' },
-  sec_filing_date: { key: 'sec_filing_date', label: 'Filing Date', width: '110px' },
-  sec_accepted_date: { key: 'sec_accepted_date', label: 'Accepted', width: '110px' },
-  sec_owner_count: { key: 'sec_owner_count', label: 'SEC Owners', width: '95px', align: 'right' },
-  sec_max_owner_pct: { key: 'sec_max_owner_pct', label: 'SEC Max %', width: '95px', align: 'right' },
-  sec_total_owner_pct: { key: 'sec_total_owner_pct', label: 'SEC Total %', width: '95px', align: 'right' },
-  prospectus_url: { key: 'prospectus_url', label: 'Prospectus', width: '110px' },
-  disclosure_url: { key: 'disclosure_url', label: 'Disclosure', width: '110px' },
-  session: { key: 'session', label: 'Session', width: '110px' },
-  confirmed: { key: 'confirmed', label: 'Confirmed', width: '100px', align: 'center' },
-  eps_est: { key: 'eps_est', label: 'Est. EPS', width: '100px', align: 'right' },
-  eps_actual: { key: 'eps_actual', label: 'EPS', width: '90px', align: 'right' },
-  revenue_est: { key: 'revenue_est', label: 'Est. Revenue', width: '130px', align: 'right' },
-  revenue_actual: { key: 'revenue_actual', label: 'Revenue', width: '130px', align: 'right' },
-  surprise_pct: { key: 'surprise_pct', label: 'Surprise %', width: '110px', align: 'right' },
-  market_cap: { key: 'market_cap', label: 'Market Cap', width: '130px', align: 'right' },
-  float_pct: { key: 'float_pct', label: 'Float %', width: '90px', align: 'right' },
-  institutional_pct: { key: 'institutional_pct', label: 'Inst %', width: '90px', align: 'right' },
-  insider_pct: { key: 'insider_pct', label: 'Insider %', width: '90px', align: 'right' },
-  amount: { key: 'amount', label: 'Amount', width: '100px', align: 'right' },
-  yield: { key: 'yield', label: 'Yield', width: '90px', align: 'right' },
-  ratio: { key: 'ratio', label: 'Ratio', width: '100px' },
+  sector: { key: 'sector', label: 'Sector', width: '130px' },
+  status: { key: 'status', label: 'Status', width: '92px', align: 'center' },
+  shares: { key: 'shares', label: 'Shares', width: '96px', align: 'right' },
+  price_range: { key: 'price_range', label: 'Price Range', width: '112px' },
+  offer_amount: { key: 'offer_amount', label: 'Offer Amount', width: '102px', align: 'right' },
+  daa: { key: 'daa', label: 'DAA', width: '70px' },
+  sec_form: { key: 'sec_form', label: 'SEC Form', width: '82px' },
+  sec_filing_date: { key: 'sec_filing_date', label: 'Filing Date', width: '96px' },
+  sec_accepted_date: { key: 'sec_accepted_date', label: 'Accepted', width: '94px' },
+  sec_owner_count: { key: 'sec_owner_count', label: 'SEC Owners', width: '94px', align: 'right' },
+  sec_max_owner_pct: { key: 'sec_max_owner_pct', label: 'SEC Max %', width: '86px', align: 'right' },
+  sec_total_owner_pct: { key: 'sec_total_owner_pct', label: 'SEC Total %', width: '98px', align: 'right' },
+  prospectus_url: { key: 'prospectus_url', label: 'Prospectus', width: '90px' },
+  disclosure_url: { key: 'disclosure_url', label: 'Disclosure', width: '90px' },
+  session: { key: 'session', label: 'Session', width: '100px' },
+  confirmed: { key: 'confirmed', label: 'Confirmed', width: '88px', align: 'center' },
+  eps_est: { key: 'eps_est', label: 'Est. EPS', width: '78px', align: 'right' },
+  eps_actual: { key: 'eps_actual', label: 'EPS', width: '76px', align: 'right' },
+  revenue_est: { key: 'revenue_est', label: 'Est. Revenue', width: '98px', align: 'right' },
+  revenue_actual: { key: 'revenue_actual', label: 'Revenue', width: '88px', align: 'right' },
+  surprise_pct: { key: 'surprise_pct', label: 'Surprise %', width: '88px', align: 'right' },
+  market_cap: { key: 'market_cap', label: 'Market Cap', width: '90px', align: 'right' },
+  float_pct: { key: 'float_pct', label: 'Float %', width: '70px', align: 'right' },
+  institutional_pct: { key: 'institutional_pct', label: 'Inst %', width: '70px', align: 'right' },
+  insider_pct: { key: 'insider_pct', label: 'Insider %', width: '82px', align: 'right' },
+  amount: { key: 'amount', label: 'Amount', width: '74px', align: 'right' },
+  yield: { key: 'yield', label: 'Yield', width: '70px', align: 'right' },
+  ratio: { key: 'ratio', label: 'Ratio', width: '70px' },
 };
 
 const NUMERIC_FILTERS_BY_TYPE: Record<string, NumericFilterConfig[]> = {
@@ -285,6 +287,14 @@ const DEFAULT_YAHOO_DESCRIPTION_CONCURRENCY = 5;
 const DEFAULT_YAHOO_DESCRIPTION_INTERVAL_MS = 200;
 const CALENDAR_UI_STATE_STORAGE_KEY = 'calendar-window-ui-state';
 const INDUSTRY_PRESET_STORAGE_KEY = 'calendar-industry-presets';
+// 기본 컬럼 폭을 바꿀 때 올린다. 저장된 폭이 한 번 새 기본값으로 리셋된다.
+const COLUMN_LAYOUT_VERSION = 2;
+const CALENDAR_PAGE_SIZE = 500;
+const CALENDAR_MAX_PAGES = 10;
+// 행 높이는 셀을 1줄로 고정했기 때문에 균일하다. 첫 행을 실측해 보정한다.
+const DEFAULT_ROW_HEIGHT_PX = 37;
+const VIRTUALIZE_ROW_THRESHOLD = 80;
+const VIRTUAL_OVERSCAN_ROWS = 8;
 const MIN_COLUMN_WIDTH_PX = 64;
 const MAX_COLUMN_WIDTH_PX = 720;
 const DATE_PRESET_OPTIONS: Array<{ key: DatePresetKey; label: string }> = [
@@ -421,7 +431,7 @@ function getDefaultSortFieldForType(type: string): string {
   return 'event_date';
 }
 
-function mergeColumns(existing: ColumnConfig[] | undefined, next: ColumnConfig[]): ColumnConfig[] {
+function mergeColumns(existing: ColumnConfig[] | undefined, next: ColumnConfig[], keepWidths = true): ColumnConfig[] {
   if (!existing || existing.length === 0) {
     return next;
   }
@@ -431,7 +441,7 @@ function mergeColumns(existing: ColumnConfig[] | undefined, next: ColumnConfig[]
     .map((column) => ({
       ...nextByKey.get(column.key)!,
       visible: column.visible,
-      width: column.width,
+      ...(keepWidths ? { width: column.width } : {}),
     }));
   const preservedKeys = new Set(preserved.map((column) => column.key));
   const appended = next.filter((column) => !preservedKeys.has(column.key));
@@ -469,7 +479,9 @@ function normalizeStoredColumns(value: unknown): ColumnConfig[] | undefined {
   return columns.length > 0 ? columns : undefined;
 }
 
-function restoreColumnStates(value: unknown, typeConfigs: CalendarTypeConfig[]): Record<string, ColumnConfig[]> {
+// keepWidths=false면 저장된 표시 여부와 순서는 유지하되 폭만 새 기본값으로 되돌린다.
+// 기본 폭을 줄여도 기존 사용자의 저장된 넓은 폭이 계속 이기는 것을 막기 위한 마이그레이션 경로다.
+function restoreColumnStates(value: unknown, typeConfigs: CalendarTypeConfig[], keepWidths: boolean): Record<string, ColumnConfig[]> {
   const defaults = buildColumnStates(typeConfigs);
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return defaults;
@@ -479,7 +491,7 @@ function restoreColumnStates(value: unknown, typeConfigs: CalendarTypeConfig[]):
   for (const typeConfig of typeConfigs) {
     const storedColumns = normalizeStoredColumns(stored[typeConfig.key]);
     if (storedColumns) {
-      next[typeConfig.key] = mergeColumns(storedColumns, defaults[typeConfig.key]);
+      next[typeConfig.key] = mergeColumns(storedColumns, defaults[typeConfig.key], keepWidths);
     }
   }
   return next;
@@ -627,15 +639,22 @@ function matchesNumericRange(
   return true;
 }
 
-async function fetchCalendarEvents(type: string, from: string, to: string, watchlistId?: string, industries?: string[]): Promise<CalendarRow[]> {
+// truncated = 페이지 상한까지 받고도 커서가 남은 상태. 오래된 이벤트가 잘렸다는 뜻이다.
+async function fetchCalendarEvents(
+  type: string,
+  from: string,
+  to: string,
+  watchlistId?: string,
+  industries?: string[],
+): Promise<{ items: CalendarRow[]; truncated: boolean }> {
   const allItems: CalendarRow[] = [];
   let cursor: string | undefined;
 
-  for (let page = 0; page < 10; page++) {
+  for (let page = 0; page < CALENDAR_MAX_PAGES; page++) {
     const params = new URLSearchParams({
       type,
       sort: 'event_time:desc',
-      limit: '500',
+      limit: String(CALENDAR_PAGE_SIZE),
     });
     if (from) {
       params.set('from', from);
@@ -660,13 +679,13 @@ async function fetchCalendarEvents(type: string, from: string, to: string, watch
 
     const data = await response.json() as CalendarResponse;
     allItems.push(...data.items);
-    if (!data.nextCursor) {
+    cursor = data.nextCursor;
+    if (!cursor) {
       break;
     }
-    cursor = data.nextCursor;
   }
 
-  return allItems;
+  return { items: allItems, truncated: Boolean(cursor) };
 }
 
 export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
@@ -704,7 +723,11 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const [selectedDatePreset, setSelectedDatePreset] = useState<DatePresetKey | null>(storedSelectedDatePreset);
   const [sortField, setSortField] = useState<string | null>(storedSortField);
   const [sortDirection, setSortDirection] = useState<SortDirection>(storedSortDirection);
-  const [columnStates, setColumnStates] = useState<Record<string, ColumnConfig[]>>(() => restoreColumnStates(storedUiState.columnStates, FALLBACK_TYPES));
+  const [columnStates, setColumnStates] = useState<Record<string, ColumnConfig[]>>(() => restoreColumnStates(
+    storedUiState.columnStates,
+    FALLBACK_TYPES,
+    storedUiState.columnLayoutVersion === COLUMN_LAYOUT_VERSION,
+  ));
   const [showColumnMenu, setShowColumnMenu] = useState(false);
   const [showWatchlistMenu, setShowWatchlistMenu] = useState(false);
   const [showIndustryMenu, setShowIndustryMenu] = useState(false);
@@ -723,6 +746,16 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const [updatePending, setUpdatePending] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  // 표는 보이는 구간만 렌더한다. 나머지는 위아래 스페이서 행으로 높이만 채워 스크롤바를 전체 길이로 유지한다.
+  const tableScrollRef = useRef<HTMLDivElement | null>(null);
+  const tableHeadRef = useRef<HTMLTableSectionElement | null>(null);
+  const firstRowRef = useRef<HTMLTableRowElement | null>(null);
+  const [rowHeight, setRowHeight] = useState(DEFAULT_ROW_HEIGHT_PX);
+  const [headHeight, setHeadHeight] = useState(0);
+  const [viewport, setViewport] = useState({ scrollTop: 0, height: 0 });
+  // 무필터 조회가 페이지 상한에 걸린 scope. 이 scope에서만 industry를 서버로 넘겨 잘림을 피한다.
+  const [truncatedScopeKey, setTruncatedScopeKey] = useState<string | null>(null);
+  const [eventsTruncated, setEventsTruncated] = useState(false);
   const [marketCapMin, setMarketCapMin] = useState(typeof storedUiState.marketCapMin === 'string' ? storedUiState.marketCapMin : '');
   const [marketCapMax, setMarketCapMax] = useState(typeof storedUiState.marketCapMax === 'string' ? storedUiState.marketCapMax : '');
   const [floatPctMin, setFloatPctMin] = useState(typeof storedUiState.floatPctMin === 'string' ? storedUiState.floatPctMin : '');
@@ -759,8 +792,11 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
   const [showUpdateTools, setShowUpdateTools] = useState(() => readStoredBoolean('calendar-show-update-tools', false));
 
   const currentTypeConfig = typeConfigs.find((item) => item.key === activeType) ?? FALLBACK_TYPES[0];
-  const currentColumns = columnStates[activeType] ?? buildColumns(activeType, currentTypeConfig?.columns ?? []);
-  const visibleColumns = currentColumns.filter((column) => column.visible);
+  const currentColumns = useMemo(
+    () => columnStates[activeType] ?? buildColumns(activeType, currentTypeConfig?.columns ?? []),
+    [activeType, columnStates, currentTypeConfig],
+  );
+  const visibleColumns = useMemo(() => currentColumns.filter((column) => column.visible), [currentColumns]);
   const numericFilters = NUMERIC_FILTERS_BY_TYPE[activeType] ?? [];
   const numericFilterBindings: Record<NumericFilterKey, {
     min: string;
@@ -786,6 +822,25 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     [industrySelectionMode, isAllIndustrySelection, selectedIndustries],
   );
   const selectedIndustrySet = useMemo(() => new Set(activeIndustryFilters), [activeIndustryFilters]);
+  // 행 매칭은 서버 필터(LOWER(TRIM(industry)))와 같은 기준으로 비교해야 두 경로의 결과가 일치한다.
+  const selectedIndustryMatchSet = useMemo(
+    () => new Set(activeIndustryFilters.map((industry) => industry.trim().toLowerCase())),
+    [activeIndustryFilters],
+  );
+  // industry는 기본적으로 클라이언트에서만 거른다 — 체크 토글마다 재조회하지 않기 위해서.
+  // 단 무필터 결과가 페이지 상한에 걸려 잘린 scope에서는 서버로 넘겨야 오래된 이벤트를 잃지 않는다.
+  const activeWatchlistId = supportsWatchlistFilter && selectedWatchlistId !== 'all' ? selectedWatchlistId : '';
+  const eventsScopeKey = `${activeType}|${dateFrom}|${dateTo}|${activeWatchlistId}|${reloadToken}`;
+  const industryServerFallbackKey = supportsIndustryFilter && truncatedScopeKey === eventsScopeKey
+    ? activeIndustryFilters.join('\n')
+    : '';
+  const serverIndustryFilters = useMemo(
+    () => (industryServerFallbackKey ? industryServerFallbackKey.split('\n') : []),
+    [industryServerFallbackKey],
+  );
+  // 조회 이펙트가 industry 선택을 의존성으로 잡으면 안 되므로 ref로만 최신값을 읽는다.
+  const activeIndustryFiltersRef = useRef<string[]>(activeIndustryFilters);
+  activeIndustryFiltersRef.current = activeIndustryFilters;
   const activeIndustryPreset = useMemo(
     () => activeIndustryFilters.length > 0
       ? industryPresets.find((preset) => isSameIndustrySelection(preset.industries, activeIndustryFilters)) ?? null
@@ -820,6 +875,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
         sortField,
         sortDirection,
         columnStates,
+        columnLayoutVersion: COLUMN_LAYOUT_VERSION,
         marketCapMin,
         marketCapMax,
         floatPctMin,
@@ -1115,6 +1171,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
 
     if (!hasRequiredDateRange) {
       setEvents([]);
+      setEventsTruncated(false);
       setError(null);
       setLoading(false);
       return () => {
@@ -1126,22 +1183,34 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
       setLoading(true);
       setError(null);
       try {
-        const items = await fetchCalendarEvents(
+        const { items, truncated } = await fetchCalendarEvents(
           activeType,
           dateFrom,
           dateTo,
-          supportsWatchlistFilter && selectedWatchlistId !== 'all' ? selectedWatchlistId : undefined,
-          supportsIndustryFilter && activeIndustryFilters.length > 0 ? activeIndustryFilters : undefined,
+          activeWatchlistId || undefined,
+          serverIndustryFilters.length > 0 ? serverIndustryFilters : undefined,
         );
         if (cancelled) {
           return;
         }
         setEvents(items);
+        // 무필터 조회가 잘렸을 때만 이 scope를 서버 필터 모드로 승격한다.
+        // 서버 필터로 받은 결과로는 갱신하지 않으므로 두 모드를 오가는 루프가 생기지 않는다.
+        if (truncated && serverIndustryFilters.length === 0) {
+          setTruncatedScopeKey(eventsScopeKey);
+        }
+        // 폴백 재조회가 곧 뒤따르는 경우에는 잘림 안내를 띄우지 않는다.
+        const fallbackPending = truncated
+          && serverIndustryFilters.length === 0
+          && supportsIndustryFilter
+          && activeIndustryFiltersRef.current.length > 0;
+        setEventsTruncated(truncated && !fallbackPending);
       } catch (loadError) {
         if (cancelled) {
           return;
         }
         setEvents([]);
+        setEventsTruncated(false);
         setError(loadError instanceof Error ? loadError.message : 'Failed to load calendar events');
       } finally {
         if (!cancelled) {
@@ -1154,7 +1223,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     return () => {
       cancelled = true;
     };
-  }, [activeType, activeIndustryFilters, dateFrom, dateTo, hasRequiredDateRange, reloadToken, selectedWatchlistId, supportsIndustryFilter, supportsWatchlistFilter]);
+  }, [activeType, activeWatchlistId, dateFrom, dateTo, eventsScopeKey, hasRequiredDateRange, serverIndustryFilters, supportsIndustryFilter]);
 
   useEffect(() => {
     if (!jobId || (jobStatus && jobStatus.status !== 'running')) {
@@ -1431,7 +1500,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     }
 
     if (supportsIndustryFilter && hasIndustryFilter) {
-      filtered = filtered.filter((event) => selectedIndustrySet.has(String(event.industry ?? '')));
+      filtered = filtered.filter((event) => selectedIndustryMatchSet.has(String(event.industry ?? '').trim().toLowerCase()));
     }
 
     filtered = filtered.filter((event) =>
@@ -1449,7 +1518,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     ipoSecurityTypeFilter,
     hasIndustryFilter,
     isNoIndustrySelection,
-    selectedIndustrySet,
+    selectedIndustryMatchSet,
     supportsIndustryFilter,
     marketCapMin,
     marketCapMax,
@@ -1499,6 +1568,56 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
     sortField,
     sortDirection,
   ]);
+
+  // ─── 표 가상 스크롤 ───
+  // 데이터는 그대로 두고 그리는 행만 보이는 구간으로 제한한다. 필터·정렬·카운트는 전체 배열 기준.
+  const totalRowCount = filteredAndSortedEvents.length;
+  const shouldVirtualizeRows = totalRowCount > VIRTUALIZE_ROW_THRESHOLD && rowHeight > 0;
+  const rowsScrollTop = Math.max(0, viewport.scrollTop - headHeight);
+  const virtualStartIndex = shouldVirtualizeRows
+    ? Math.max(0, Math.floor(rowsScrollTop / rowHeight) - VIRTUAL_OVERSCAN_ROWS)
+    : 0;
+  const virtualEndIndex = shouldVirtualizeRows
+    ? Math.min(totalRowCount, Math.ceil((rowsScrollTop + Math.max(viewport.height, rowHeight)) / rowHeight) + VIRTUAL_OVERSCAN_ROWS)
+    : totalRowCount;
+  const visibleRows = useMemo(
+    () => filteredAndSortedEvents.slice(virtualStartIndex, virtualEndIndex),
+    [filteredAndSortedEvents, virtualStartIndex, virtualEndIndex],
+  );
+  const topSpacerHeight = virtualStartIndex * rowHeight;
+  const bottomSpacerHeight = Math.max(0, (totalRowCount - virtualEndIndex) * rowHeight);
+
+  useLayoutEffect(() => {
+    const element = tableScrollRef.current;
+    if (!element) {
+      return;
+    }
+    const syncViewport = () => {
+      setViewport((previous) =>
+        previous.scrollTop === element.scrollTop && previous.height === element.clientHeight
+          ? previous
+          : { scrollTop: element.scrollTop, height: element.clientHeight },
+      );
+    };
+    syncViewport();
+    element.addEventListener('scroll', syncViewport, { passive: true });
+    const observer = new ResizeObserver(syncViewport);
+    observer.observe(element);
+    return () => {
+      element.removeEventListener('scroll', syncViewport);
+      observer.disconnect();
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    const nextHeadHeight = tableHeadRef.current?.getBoundingClientRect().height ?? 0;
+    setHeadHeight((previous) => (Math.abs(previous - nextHeadHeight) > 0.5 ? nextHeadHeight : previous));
+
+    const measuredRowHeight = firstRowRef.current?.getBoundingClientRect().height ?? 0;
+    if (measuredRowHeight > 0) {
+      setRowHeight((previous) => (Math.abs(previous - measuredRowHeight) > 0.5 ? measuredRowHeight : previous));
+    }
+  }, [activeType, totalRowCount, visibleColumns]);
 
   const earningsStatusSummary = useMemo(() => {
     if (activeType !== 'earnings') {
@@ -2564,6 +2683,16 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
         )}
       </div>
 
+      {eventsTruncated && (
+        <div className="flex items-start gap-2 px-4 py-2 text-xs text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-900">
+          <CircleHelp className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+          <span>
+            Hit the {(CALENDAR_PAGE_SIZE * CALENDAR_MAX_PAGES).toLocaleString()} row load limit for this range, so the oldest events were cut off.
+            Narrow the date range for a complete list.
+          </span>
+        </div>
+      )}
+
       {activeType === 'earnings' && dateFrom && dateFrom < '2023-05-17' && (
         <div className="flex items-start gap-2 px-4 py-2 text-xs text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-900">
           <CircleHelp className="w-3.5 h-3.5 mt-0.5 shrink-0" />
@@ -2574,7 +2703,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
         </div>
       )}
 
-      <div className="flex-1 overflow-auto">
+      <div ref={tableScrollRef} className="flex-1 overflow-auto">
         {!hasRequiredDateRange ? (
           <div className="flex items-center justify-center h-40 px-6 text-sm text-gray-500 text-center">
             Select both start and end dates to load calendar events.
@@ -2585,7 +2714,7 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
           <div className="flex items-center justify-center h-40 text-red-600 dark:text-red-400">{error}</div>
         ) : (
           <table className="w-full table-fixed border-collapse" style={{ minWidth: `${visibleTableMinWidth}px` }}>
-            <thead className="sticky top-0 bg-gray-100 dark:bg-gray-800 z-10">
+            <thead ref={tableHeadRef} className="sticky top-0 bg-gray-100 dark:bg-gray-800 z-10">
               <tr>
                 {visibleColumns.map((column) => (
                   <th
@@ -2596,13 +2725,15 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
                     onDragOver={handleColumnDragOver}
                     onDrop={(event) => handleColumnDrop(event, column.key)}
                     onDragEnd={handleColumnDragEnd}
-                    className={`relative px-3 py-2 text-xs font-medium border-b border-gray-300 dark:border-gray-700 ${column.align === 'right' ? 'text-right' : column.align === 'center' ? 'text-center' : 'text-left'} ${draggedColumnKey === column.key ? 'opacity-50' : ''}`}
+                    className={`group relative px-2 py-2 text-xs font-medium border-b border-gray-300 dark:border-gray-700 ${column.align === 'right' ? 'text-right' : column.align === 'center' ? 'text-center' : 'text-left'} ${draggedColumnKey === column.key ? 'opacity-50' : ''}`}
                   >
-                    <div className={`inline-flex w-full items-center gap-1 ${column.align === 'right' ? 'justify-end' : column.align === 'center' ? 'justify-center' : 'justify-start'}`}>
-                      <GripVertical className="h-3 w-3 shrink-0 text-gray-400" />
+                    {/* 드래그 손잡이는 폭을 먹지 않도록 absolute로 띄우고 hover에서만 보인다. */}
+                    <GripVertical className="pointer-events-none absolute left-0 top-1/2 h-3 w-3 -translate-y-1/2 text-gray-400 opacity-0 transition-opacity group-hover:opacity-100" />
+                    <div className={`inline-flex w-full items-center ${column.align === 'right' ? 'justify-end' : column.align === 'center' ? 'justify-center' : 'justify-start'}`}>
                       <button
                         onClick={() => handleSort(column.key)}
-                        className="inline-flex items-center gap-1 hover:text-blue-600 dark:hover:text-blue-400"
+                        className="inline-flex min-w-0 items-center gap-1 truncate hover:text-blue-600 dark:hover:text-blue-400"
+                        title={column.label}
                       >
                         {column.label}
                         {sortField === column.key && sortDirection === 'asc' && <ChevronUp className="w-3 h-3" />}
@@ -2623,22 +2754,37 @@ export function CalendarWindow({ onTickerClick }: CalendarWindowProps) {
               </tr>
             </thead>
             <tbody>
-              {filteredAndSortedEvents.map((row) => (
+              {topSpacerHeight > 0 && (
+                <tr aria-hidden style={{ height: `${topSpacerHeight}px` }}>
+                  <td colSpan={visibleColumns.length} className="p-0 border-0" />
+                </tr>
+              )}
+              {visibleRows.map((row, rowIndex) => (
                 <tr
                   key={row.id}
+                  ref={rowIndex === 0 ? firstRowRef : undefined}
                   className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
                 >
-                  {visibleColumns.map((column) => (
-                    <td
-                      key={column.key}
-                      style={{ width: column.width, minWidth: column.width }}
-                      className={`px-3 py-2 text-sm ${column.align === 'right' ? 'text-right' : column.align === 'center' ? 'text-center' : 'text-left'}`}
-                    >
-                      {renderCell(row, column)}
-                    </td>
-                  ))}
+                  {visibleColumns.map((column) => {
+                    const rawValue = row[column.key];
+                    return (
+                      <td
+                        key={column.key}
+                        style={{ width: column.width, minWidth: column.width }}
+                        title={typeof rawValue === 'string' && rawValue ? rawValue : undefined}
+                        className={`px-2 py-2 text-sm truncate ${column.align === 'right' ? 'text-right' : column.align === 'center' ? 'text-center' : 'text-left'}`}
+                      >
+                        {renderCell(row, column)}
+                      </td>
+                    );
+                  })}
                 </tr>
               ))}
+              {bottomSpacerHeight > 0 && (
+                <tr aria-hidden style={{ height: `${bottomSpacerHeight}px` }}>
+                  <td colSpan={visibleColumns.length} className="p-0 border-0" />
+                </tr>
+              )}
             </tbody>
           </table>
         )}
