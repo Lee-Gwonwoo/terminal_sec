@@ -195,13 +195,20 @@ interface InvestingCache {
 
 const EMPTY_CACHE: InvestingCache = { items: [], nextCursor: null, searchQuery: '', sort: { column: null, dir: null } };
 
+// A list cached before the bookmark column existed has no bookmarkFolderIds, and
+// the bookmark cell reads `.length` off it — which would throw on the first row
+// and blank the whole window. Backfill the field on the way in.
+function normalizeCachedItem(item: DisplayItem): DisplayItem {
+  return Array.isArray(item?.bookmarkFolderIds) ? item : { ...item, bookmarkFolderIds: [] };
+}
+
 function readCachedView(): InvestingCache {
   try {
     const raw = localStorage.getItem(VIEW_CACHE_KEY);
     if (!raw) return EMPTY_CACHE;
     const parsed = JSON.parse(raw);
     return {
-      items: Array.isArray(parsed.items) ? (parsed.items as DisplayItem[]) : [],
+      items: Array.isArray(parsed.items) ? (parsed.items as DisplayItem[]).map(normalizeCachedItem) : [],
       nextCursor: typeof parsed.nextCursor === 'string' ? parsed.nextCursor : null,
       searchQuery: typeof parsed.searchQuery === 'string' ? parsed.searchQuery : '',
       sort: parsed.sort && typeof parsed.sort === 'object' ? (parsed.sort as SortState) : { column: null, dir: null },
@@ -375,7 +382,7 @@ export function InvestingNewsWindow({
   // Effective bookmark folder membership for an item: optimistic override wins
   // over the server-provided value so toggles show up immediately.
   const getItemFolderIds = useCallback((item: DisplayItem): string[] => {
-    return bookmarkOverrides.get(item.id) ?? item.bookmarkFolderIds;
+    return bookmarkOverrides.get(item.id) ?? item.bookmarkFolderIds ?? [];
   }, [bookmarkOverrides]);
 
   // Sort
@@ -491,8 +498,17 @@ export function InvestingNewsWindow({
 
   // ─── Persist the loaded list so a tab switch doesn't lose it ───
   useEffect(() => {
-    writeCachedView({ items: newsData, nextCursor, searchQuery, sort });
-  }, [newsData, nextCursor, searchQuery, sort]);
+    // Fold pending bookmark toggles into what we store — the override map lives
+    // in component state and dies with the unmount, so without this the restored
+    // rows would show the pre-toggle (empty) bookmark icon.
+    const items = bookmarkOverrides.size === 0
+      ? newsData
+      : newsData.map(item => {
+          const override = bookmarkOverrides.get(item.id);
+          return override ? { ...item, bookmarkFolderIds: override } : item;
+        });
+    writeCachedView({ items, nextCursor, searchQuery, sort });
+  }, [newsData, bookmarkOverrides, nextCursor, searchQuery, sort]);
 
   // ─── Container height tracking ───
   useEffect(() => {
@@ -969,7 +985,11 @@ export function InvestingNewsWindow({
         } else if (col === 'category') {
           cmp = a.sourceType.localeCompare(b.sourceType);
         } else if (col === 'bookmark') {
-          cmp = (getItemFolderIds(a).length > 0 ? 1 : 0) - (getItemFolderIds(b).length > 0 ? 1 : 0);
+          // Rank on the last fetched membership, not on the optimistic override:
+          // if a toggle fed back into the sort key, bookmarking a row would
+          // instantly move it to the far end of the list and out of view.
+          // The new position is picked up on the next fetch.
+          cmp = ((a.bookmarkFolderIds?.length ?? 0) > 0 ? 1 : 0) - ((b.bookmarkFolderIds?.length ?? 0) > 0 ? 1 : 0);
         }
         return sort.dir === 'desc' ? -cmp : cmp;
       });
@@ -985,7 +1005,7 @@ export function InvestingNewsWindow({
       rows.push({ type: 'news', item });
     }
     return rows;
-  }, [newsData, sort, getItemFolderIds]);
+  }, [newsData, sort]);
 
   // ─── Row height ───
   const getItemSize = useCallback((index: number): number => {
