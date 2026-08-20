@@ -588,7 +588,11 @@ export function InvestingNewsWindow({
 
     setLoading(true);
     setError(null);
-    setNextCursor(null);
+    // Don't clear the cursor up front: if this request fails or gets aborted we
+    // keep showing the old rows, so the old cursor still matches them. Clearing
+    // it here hid "Load More" for good — the null was then persisted to the view
+    // cache, and the restore path skips the initial refetch that would refill it.
+    // The success path below replaces it along with the rows.
     try {
       const params = new URLSearchParams();
       params.set('source_names', 'INVESTING');
@@ -686,7 +690,13 @@ export function InvestingNewsWindow({
   // Auto-reload when filters change — but on the very first render after a tab
   // switch, keep the restored list instead of refetching it away (a refetch
   // would reset to page 1 and drop any "Load More" pages).
-  const skipInitialFetchRef = useRef(cached.items.length > 0);
+  // A restored list with no cursor is only trustworthy when it is short enough
+  // to be a fully walked result set. A full page or more with the cursor missing
+  // is a cache poisoned by an older failed refresh — refetch it rather than
+  // restore a list that can never load another page.
+  const skipInitialFetchRef = useRef(
+    cached.items.length > 0 && (cached.nextCursor !== null || cached.items.length < NEWS_PAGE_SIZE),
+  );
   useEffect(() => {
     if (skipInitialFetchRef.current) {
       skipInitialFetchRef.current = false;
